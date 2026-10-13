@@ -3,6 +3,7 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Literal
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -47,6 +48,22 @@ class Settings(BaseSettings):
     scada_telemetry_path: str = "/telemetry"
     scada_api_token: str | None = None
     scada_timeout_seconds: float = 10.0
+
+    @field_validator("database_url", mode="before")
+    @classmethod
+    def _normalize_database_url(cls, value):
+        """Accept the URL exactly as Supabase shows it (postgresql:// or postgres://) and use the psycopg 3 driver.
+
+        Without this, a plain postgresql:// URL makes SQLAlchemy import psycopg2, which is not installed,
+        and the whole deployment exits at start-up. Surrounding spaces/quotes pasted into Render are removed too.
+        """
+        if not isinstance(value, str):
+            return value
+        value = value.strip().strip("\"'").strip()
+        for old, new in (("postgresql://", "postgresql+psycopg://"), ("postgres://", "postgresql+psycopg://")):
+            if value.startswith(old):
+                return new + value[len(old):]
+        return value
 
     @property
     def origins(self) -> list[str]:
