@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>SOLAR 91™ — O&amp;M Command Center</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cg fill='%23F2A100'%3E%3Cpath d='M32 1 L34.5 9.5 L32 11 L29.5 9.5 Z'/%3E%3Cpath d='M32 63 L34.5 54.5 L32 53 L29.5 54.5 Z'/%3E%3Cpath d='M1 32 L9.5 29.5 L11 32 L9.5 34.5 Z'/%3E%3Cpath d='M63 32 L54.5 29.5 L53 32 L54.5 34.5 Z'/%3E%3Cpath d='M9.5 9.5 L18 15 L16 18 L13 16 Z'/%3E%3Cpath d='M54.5 54.5 L46 49 L48 46 L51 48 Z'/%3E%3Cpath d='M54.5 9.5 L49 18 L46 16 L48 13 Z'/%3E%3Cpath d='M9.5 54.5 L15 46 L18 48 L16 51 Z'/%3E%3Cpath d='M20 4 L27 11 L25 14 L22 12 Z'/%3E%3Cpath d='M44 4 L37 11 L39 14 L42 12 Z'/%3E%3Cpath d='M20 60 L27 53 L25 50 L22 52 Z'/%3E%3Cpath d='M44 60 L37 53 L39 50 L42 52 Z'/%3E%3C/g%3E%3Ccircle cx='32' cy='32' r='23' fill='%234CAF50'/%3E%3Crect x='21' y='19' width='18' height='18' rx='2.5' fill='%23F2A100'/%3E%3Cpath d='M27 21 v14 M33 21 v14 M23 27 h14 M23 33 h14' stroke='%23fff' stroke-width='1.2' fill='none'/%3E%3Cpath d='M22 40 Q32 36 40 42 Q35 48 24 46 Q20 44 22 40 Z' fill='%23fff'/%3E%3C/svg%3E"/>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link rel="stylesheet" href="/static/css/base.css?v=20261013-stability-r2"/>
+<link rel="stylesheet" href="/static/css/polish.css?v=20261013-stability-r2"/>
+<link rel="stylesheet" href="/static/css/modern-2026.css?v=20261013-stability-r2"/>
+<link rel="stylesheet" href="/static/css/design-system.css?v=20261013-stability-r2"/>
+<link rel="stylesheet" href="/static/css/site-issues.css?v=20261013-stability-r2"/>
+<link rel="stylesheet" href="/static/css/pm-washing.css?v=20261013-stability-r2"/>
+<link rel="stylesheet" href="/static/css/pm-live-dashboard.css?v=20261013-stability-r2"/>
+<link rel="stylesheet" href="/static/css/washing-cycles.css?v=20261013-stability-r2"/>
+<link rel="stylesheet" href="/static/css/portal-layout.css?v=20261013-stability-r2"/>
+<link rel="stylesheet" href="/static/css/login.css?v=20261013-stability-r2"/>
+<link rel="stylesheet" href="/static/css/reference-workflows.css?v=20261013-stability-r2"/>
+<link rel="stylesheet" href="/static/css/31-section-only-redesign.css?v=20261013-stability-r2"/>
+<link rel="stylesheet" href="/static/css/32-solar91-operations-experience.css?v=20261013-stability-r2"/>
+
+<link rel="stylesheet" href="/static/css/33-command-intelligence.css?v=20261013-radar-v2"/>
+<link rel="stylesheet" href="/static/css/34-issue-admin.css?v=20261013-stability-r2"/>
+<link rel="stylesheet" href="/static/css/36-field-desk.css?v=20261013-radar-v2"/>
+<link rel="stylesheet" href="/static/css/37-work-radar.css?v=20261013-radar-v2"/>
+<link rel="manifest" href="/manifest.webmanifest"/>
+<meta name="theme-color" content="#005e09"/>
+<link rel="icon" type="image/png" sizes="32x32" href="/static/pwa/favicon-32.png"/>
+<link rel="apple-touch-icon" href="/static/pwa/apple-touch-icon.png"/>
+</head>
+<body>
+<div id="app"><div class="s91-boot" role="status" aria-live="polite"><div class="s91-boot-card cc-ops-overview"><img src="/static/brand/solar91-emblem.png?v=20261006-portal-v11" width="42" height="42" alt=""><div><b>Solar91 O&amp;M</b><span>Loading operations…</span><small>Waking up the server if it has been idle.</small></div></div><div class="s91-boot-lines"><i></i><i></i><i></i></div><div class="s91-boot-context"><span>Operations overview</span><span>Unplanned · Site Issues</span><span>Planned · Preventive Maintenance</span><span>Washing</span><label aria-label="Filter dashboard by equipment"></label><small>Sudden breakdowns and urgent requests remain in Site Issues.</small></div></div></div>
+<!-- PRODUCTION IDENTITY + ACCESS ENFORCEMENT -->
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.57.0/dist/umd/supabase.min.js"></script>
+<script id="s91-config" type="application/json">{{ {"authProvider": "supabase", "supabaseUrl": supabase_url, "supabaseAnonKey": supabase_anon_key} | tojson }}</script>
+<script>
+window.S91_CONFIG = JSON.parse(document.getElementById("s91-config").textContent);
+window.supabaseClient = null;
+if (window.S91_CONFIG.supabaseUrl && window.S91_CONFIG.supabaseAnonKey) {
+  if (window.supabase && typeof window.supabase.createClient === "function") {
+    window.supabaseClient = window.supabase.createClient(window.S91_CONFIG.supabaseUrl, window.S91_CONFIG.supabaseAnonKey, {
+      auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true }
+    });
+  } else {
+    console.error("Supabase Auth SDK failed to load.");
+  }
+}
+</script>
+<script src="/static/js/00-loop-guard.js?v=20261013-stability-r2"></script>
+<script defer src="/static/js/00-auth-data-and-imports.js?v=20261013-stability-r2"></script>
+<script defer src="/static/js/01-state-and-init.js?v=20261013-stability-r2"></script>
+<script defer src="/static/js/02-core-render-and-dashboard.js?v=20261013-stability-r2"></script>
+<script defer src="/static/js/03-analytics-and-handover.js?v=20261013-stability-r2"></script>
+<script defer src="/static/js/04-handover-and-maintenance-hub.js?v=20261013-stability-r2"></script>
+<script defer src="/static/js/05-preventive-maintenance-and-washing.js?v=20261013-stability-r2"></script>
+<script defer src="/static/js/06-issues-team-and-services.js?v=20261013-stability-r2"></script>
+<script defer src="/static/js/07-modal-renderers.js?v=20261013-stability-r2"></script>
+<script defer src="/static/js/08-actions-exports-and-submission.js?v=20261013-stability-r2"></script>
+<script defer src="/static/js/09-dashboard-evidence-enhancements.js?v=20261013-stability-r2"></script>
+<script defer src="/static/js/10-issue-register-and-workflow.js?v=20261013-stability-r2"></script>
+<script defer src="/static/js/11-alert-rings.js?v=20261013-stability-r2"></script>
+<script defer src="/static/js/12-topbar-ui-polish.js?v=20261013-stability-r2"></script>
+<script defer src="/static/js/13-search-autocomplete.js?v=20261013-stability-r2"></script>
+<script defer src="/static/js/14-topbar-role-picker.js?v=20261013-stability-r2"></script>
+<script defer src="/static/js/15-site-engineer-scope.js?v=20261013-stability-r2"></script>
+<script defer src="/static/js/16-site-ask-and-team-model.js?v=20261013-stability-r2"></script>
+<script defer src="/static/js/17-site-engineer-access-lock.js?v=20261013-stability-r2"></script>
+<script defer src="/static/js/18-role-and-maintenance-upgrades.js?v=20261013-stability-r2"></script>
+<script defer src="/static/js/19-production-identity-and-domain-bridge.js?v=20261013-stability-r2"></script>
+<script defer src="/static/js/20-modern-ui-2026.js?v=20261013-stability-r2"></script>
+<script defer src="/static/js/21-washing-portfolio.js?v=20261013-stability-r2"></script>
+<script defer src="/static/js/22-site-issues-redesign.js?v=20261013-stability-r2"></script>
+<script defer src="/static/js/23-import-upgrades.js?v=20261013-stability-r2"></script>
+<script defer src="/static/js/24-pm-plan.js?v=20261013-stability-r2"></script>
+<script defer src="/static/js/25-pm-schedule-edit.js?v=20261013-stability-r2"></script>
+<script defer src="/static/js/26-washing-cycles.js?v=20261013-stability-r2"></script>
+<script defer src="/static/js/27-workflow-hardening.js?v=20261013-stability-r2"></script>
+<script defer src="/static/js/28-washing-import.js?v=20261013-stability-r2"></script>
+<script defer src="/static/js/29-pm-live-dashboard.js?v=20261013-stability-r2"></script>
+<script defer src="/static/js/30-reference-workflows.js?v=20261013-stability-r2"></script>
+<script defer src="/static/js/32-operations-experience.js?v=20261013-stability-r2"></script>
+<button id="installApp" type="button">Install app</button>
+<dialog id="installHelp" aria-labelledby="installHelpTitle" aria-describedby="installHelpMessage">
+  <form method="dialog">
+    <h2 id="installHelpTitle">Install Solar91 O&amp;M</h2>
+    <p id="installHelpMessage">If the install prompt is unavailable, open this portal in your browser and use its install option:</p>
+    <ul>
+      <li><b>Android:</b> browser menu ⋮, then <b>Install app</b> or <b>Add to Home screen</b>.</li>
+      <li><b>iPhone or iPad:</b> in Safari, tap <b>Share</b>, then <b>Add to Home Screen</b>.</li>
+      <li><b>Windows:</b> in Edge or Chrome, use the install icon in the address bar or the browser menu.</li>
+    </ul>
+    <p>If you removed the installed app, open the portal in a regular browser tab to add it again.</p>
+    <button type="submit">Close</button>
+  </form>
+</dialog>
+<script defer src="/static/js/33-command-intelligence.js?v=20261013-radar-v2"></script>
+<script defer src="/static/js/34-issue-admin.js?v=20261013-stability-r2"></script>
+<script defer src="/static/js/pwa.js?v=20261013-stability-r2"></script>
+<script defer src="/static/js/34-live-refresh.js?v=20261013-stability-r2"></script>
+<script defer src="/static/js/35-navigation-recovery.js?v=20261013-stability-r2"></script>
+
+<script defer src="/static/js/36-field-desk.js?v=20261013-radar-v2"></script>
+<script defer src="/static/js/37-work-radar.js?v=20261013-radar-v2"></script>
+</body>
+</html>

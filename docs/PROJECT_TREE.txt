@@ -1,0 +1,8 @@
+app/          FastAPI backend code, one folder per feature
+frontend/     PWA/web interface, styles and Solar91 brand assets
+database/     Supabase PostgreSQL migration files
+scripts/      preflight, migration, seed, Storage and Render deployment helpers
+launchers/    local Windows/Mac/Linux start files
+tests/        automatic regression checks
+docs/         Render deployment, workflow, audit and quick-start notes
+Dockerfile    production container used automatically by Render

@@ -1,0 +1,47 @@
+services:
+  - type: web
+    name: solar91-om
+    runtime: docker
+    plan: free
+    region: singapore
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health/ready
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: DEBUG
+        value: "false"
+      - key: DATABASE_URL
+        sync: false
+      - key: SUPABASE_URL
+        value: https://bszyxstmdywwexelaxaq.supabase.co
+      - key: SUPABASE_ANON_KEY
+        value: sb_publishable_VURDMKM6jXV6axYyVT7jrg_58pTtGe5
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: SUPABASE_STORAGE_BUCKET
+        value: scheduled-om-evidence
+      - key: ALLOWED_ORIGINS
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false
+      - key: MAIL_FROM
+        sync: false
+      - key: APP_PUBLIC_URL
+        sync: false
+      - key: BOOTSTRAP_ADMIN_EMAILS
+        sync: false
+      - key: PM_DAILY_JOB
+        value: "0"
+      - key: MAX_UPLOAD_MB
+        value: "4"
+      - key: STATE_SYNC_ENABLED
+        value: "true"
+      - key: DB_POOL_SIZE
+        value: "5"
+      - key: DB_MAX_OVERFLOW
+        value: "2"
+      - key: DB_POOL_RECYCLE_SECONDS
+        value: "300"
+      - key: BOOTSTRAP_CLOSED_ISSUE_DAYS
+        value: "0"

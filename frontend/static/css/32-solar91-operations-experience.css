@@ -1,0 +1,136 @@
+/* Solar91 Command Centre visual refresh — application content only.
+   Navigation, header, authentication, REST actions and reports remain unchanged.
+   Palette: forest green and sun-gold brand accents, readable on field tablets. */
+:root {--s91-forest:#0c5e2a;--s91-deep:#083a20;--s91-leaf:#168342;--s91-sun:#f6b51f;--s91-ink:#15271d;--s91-light:#f5f8f5;--s91-elev:0 3px 10px rgba(13,49,28,.045),0 16px 36px rgba(13,49,28,.055);--s91-line:#dae6dd;}
+.content{background:radial-gradient(ellipse 100% 310px at 50% -100px,rgba(190,227,198,.26),transparent 85%),#f5f8f5;color:var(--s91-ink)}
+.content .portal-page-stack{gap:20px!important}
+.content h1,.content h2,.content h3{line-height:1.28;letter-spacing:-.025em;text-wrap:balance}
+.content h1{font-size:clamp(21px,2vw,30px)!important;font-weight:800!important;color:#122c1c}
+.content h2{font-size:clamp(15px,1.2vw,18px);font-weight:750}
+.content .panel,.content .m26-card,.content .wc-card,.content .pml-card,.content .metric,.content .cc26-card{
+ background:#fff;border:1px solid var(--s91-line);border-radius:17px;box-shadow:var(--s91-elev);}
+.content .panel:has(table){border-radius:17px}
+.content .panel>.row.between:first-child{gap:14px}
+.content .panel>h2:first-child,.content .panel>.row:first-child h2{color:#173b25}
+.content .panel:not(:has(table)):not(.cc-hero):hover,.content .metric:hover{border-color:#badbc6}
+.content .panel{transition:border-color .18s ease,box-shadow .18s ease}
+.content .panel h2+p,.content .panel h3+p{line-height:1.55;color:#64776c}
+.content .kpis8,.content .kpis4,.content .kgrid{gap:14px}
+.content .metric,.content .cc-kpi2,.content .wc-kpi,.content .pml-stat{
+ overflow:hidden;position:relative;border-left:3px solid rgba(22,131,66,.7);background:linear-gradient(155deg,#fff 42%,#f7fbf7 100%);}
+.content .metric::before,.content .cc-kpi2::before{content:"";position:absolute;width:82px;height:82px;border:14px solid rgba(28,145,71,.045);border-radius:50%;right:-26px;top:-32px;pointer-events:none}
+.content .metric .v,.content .kpi-value{font-weight:800;font-variant-numeric:tabular-nums;letter-spacing:-.035em}
+.content .metric .k,.content .kpi-label{font-weight:700;color:#607467;letter-spacing:.04em}
+.content .pill:not(.active),.content .badge{font-weight:700}
+.content .btn.p{background:linear-gradient(120deg,#0a602d,#158345);border-color:#0d6231;color:#fff;box-shadow:0 4px 12px rgba(12,94,42,.16)}
+.content .btn.p:hover{background:linear-gradient(120deg,#084d24,#0d6f36);box-shadow:0 7px 19px rgba(12,94,42,.24)}
+.content .btn.o:hover,.content .btn.g:hover{background:#e9f7ed;color:#0c5e2a;border-color:#add3b8}
+.content .inp:focus,.content .txt:focus,.content select:focus-visible{border-color:#18894b;box-shadow:0 0 0 3px rgba(22,131,66,.13)}
+.content .panel table th{background:#f0f6f2;color:#5b6d61;font-size:11px;font-weight:750;letter-spacing:.055em}
+.content .panel table td{font-size:12.5px;line-height:1.5;color:#223a29}
+.content .panel table tbody tr:hover td{background:#f2faf4}
+.content .panel table tbody tr:nth-child(even):not(:hover) td{background:#fbfcfb}
+.content .panel:has(table) td:last-child,.content .panel:has(table) th:last-child{box-shadow:none}
+.content .banner{line-height:1.55;border-radius:12px}
+.content .status-ring,.content .ring{filter:drop-shadow(0 4px 8px rgba(20,55,28,.09))}
+.content .empty-box{background:#f9fbfa;border:1px dashed #ccded1;border-radius:12px;padding:14px}
+/* Command Centre: operational hero, improved hierarchy and immediate workflow access. */
+.content .cc-hero{border-radius:20px;box-shadow:0 14px 35px rgba(4,37,18,.16);border:1px solid #286944;overflow:hidden;position:relative;background:linear-gradient(114deg,#07381d 0%,#0b5b30 65%,#1b7a40 100%)}
+.content .cc-hero:before{content:"";position:absolute;inset:0 0 0 35%;background:radial-gradient(ellipse at 78% 40%,rgba(255,197,64,.17),transparent 44%),repeating-linear-gradient(123deg,transparent 0 54px,rgba(255,255,255,.025) 55px 56px);pointer-events:none}
+.content .cc-hero>*{position:relative;z-index:1}
+.content .cc-hero-pill{border:1px solid rgba(255,255,255,.3);background:rgba(255,255,255,.12);backdrop-filter:blur(6px)}
+.content .cc-hero-stats{gap:0;border-top:1px solid rgba(255,255,255,.18)}
+.content .cc-hstat{border-right:1px solid rgba(255,255,255,.17)}
+.content .cc-hstat:last-child{border-right:0}
+.content .cc-work-overview>section{background:linear-gradient(158deg,#fff 50%,#f5f9f6 100%);border:1px solid #dce8df;border-radius:16px;box-shadow:0 5px 16px rgba(12,47,21,.055);transition:box-shadow .16s,border-color .16s}
+.content .cc-work-overview>section:hover{box-shadow:0 9px 25px rgba(12,47,21,.1);border-color:#b8d6c2}
+.content .cc-ops-overview{padding:19px!important}
+.content .cc-ops-overview h2{font-size:18px!important}
+.content .cc-dashboard-filters{border:1px solid #cfdfd3!important;background:linear-gradient(135deg,#fff,#f8fbf9)}
+.content .cc-ops-head{gap:10px}
+.content .cc-ops-title{font-size:13.5px;font-weight:800;color:#163e28}
+.content .cc-ops-sub{line-height:1.45}
+.content .cc-ops-foot{background:#f4f8f5;border-radius:0 0 14px 14px}
+.content .cc-work-overview .btn{white-space:normal;text-align:center}
+/* Quick entry strip complements, not replaces, the source-backed dashboard. */
+.s91-command-shortcuts{padding:20px 21px 22px;background:linear-gradient(135deg,#fff 60%,#f0f8f2);border:1px solid #d9e8dc;border-radius:19px;box-shadow:var(--s91-elev)}
+.s91-shortcuts-heading{display:flex;justify-content:space-between;gap:14px;align-items:center;margin-bottom:16px}
+.s91-shortcuts-heading h2{font-size:19px!important;margin:4px 0 3px!important;color:#163e28}
+.s91-shortcuts-heading p{font-size:12.5px;color:#62776a;margin:3px 0 0}
+.s91-eyebrow{font-size:10px;color:#18793f;font-weight:800;letter-spacing:.12em;text-transform:uppercase}
+.s91-shortcut-count{font-size:12px;font-weight:800;white-space:nowrap;padding:6px 12px;background:#fff4e6;color:#ac600d;border:1px solid #f3dfbc;border-radius:99px}
+.s91-shortcut-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px}
+.s91-shortcut{display:flex;min-width:0;gap:11px;align-items:center;padding:15px 12px;border-radius:13px;border:1px solid #e0eae2;background:#fff;text-align:left;color:#183927;cursor:pointer;transition:border-color .15s,transform .15s,box-shadow .15s}
+.s91-shortcut:hover,.s91-shortcut:focus-visible{transform:translateY(-2px);border-color:#8fcaa5;box-shadow:0 9px 24px rgba(14,78,39,.1)}
+.s91-shortcut-icon{display:grid;place-items:center;flex:0 0 38px;height:38px;border-radius:11px;color:#0b692f;background:#e7f5ec;font-size:21px;font-weight:800}
+.s91-icon-issue{background:#fff0e8;color:#cd5b29}.s91-icon-pm{background:#eaf3ff;color:#246fbb}.s91-icon-washing{background:#e1f5f7;color:#0d8a99}.s91-icon-reports{background:#fdf3e2;color:#b77913}
+.s91-shortcut-copy{display:flex;flex:1;min-width:0;flex-direction:column;gap:4px}
+.s91-shortcut-copy b{font-size:12.5px;font-weight:800;line-height:1.3;white-space:normal}
+.s91-shortcut-copy small{color:#6e7c73;font-size:10.5px;line-height:1.35}
+.s91-shortcut strong{font-size:20px;font-variant-numeric:tabular-nums;color:#176936}.s91-shortcut-arrow{color:#4a9361;font-size:20px}
+/* All three overlays: strong status hierarchy, readable facts and safe overflow. */
+.overlay .s91-reference-modal{width:min(780px,96vw)!important;max-width:min(780px,96vw)!important;border:1px solid #d0e1d5!important;border-radius:18px 0 0 18px!important;box-shadow:-22px 0 70px rgba(4,28,13,.23)!important;background:#fff;animation:none!important}
+.s91-reference-modal .modal-h{background:linear-gradient(120deg,#f6fbf7,#fff);padding:19px 23px;border-bottom:1px solid #dceadf}
+.s91-reference-modal .modal-h h3{font-size:19px!important;font-weight:800!important;letter-spacing:-.028em;color:#143c24;line-height:1.3}
+.s91-reference-modal .modal-h p{line-height:1.5!important;color:#677b6c!important}
+.s91-reference-modal .modal-b{padding:16px 22px 24px;background:#fcfdfc;scroll-padding-top:14px;min-height:0}
+.s91-reference-modal .modal-f{padding:12px 22px;background:#f3f8f4;border-top:1px solid #d5e4d9;box-shadow:0 -6px 14px rgba(16,56,32,.04)}
+.s91-reference-modal .modal-f .btn{min-height:37px}
+.s91-reference-modal .modal-b>.kgrid>div{background:white;border:1px solid #e1e9e3;border-radius:10px;padding:12px}
+.s91-reference-modal .modal-b .bn-info.banner,.s91-reference-modal .modal-b .bn-warn.banner{border-radius:11px}
+.s91-reference-modal .modal-b textarea,.s91-reference-modal .modal-b .inp{background:#fff;border-color:#d4e1d7}
+.s91-reference-modal .issue-updates,.s91-reference-modal .wc-sec,.s91-reference-modal .wc-cycles>*,.s91-reference-modal .task-evidence{border-radius:13px}
+.s91-reference-modal .issue-activity-item{background:#fff}
+.s91-reference-modal .issue-workflow{border:1px solid #dce6df;background:#fff;border-radius:13px;padding:13px 10px}
+.s91-reference-modal .issue-workflow-step.active span{box-shadow:0 0 0 4px rgba(22,163,74,.15)}
+.s91-reference-modal .s91-ref-tabs{display:flex;gap:6px;min-width:max-content}
+.s91-reference-modal .s91-ref-tab{padding:11px 15px!important;border-radius:10px 10px 0 0;background:transparent;font-size:12px!important;font-weight:700!important;position:relative}
+.s91-reference-modal .s91-ref-tab.active{background:#eaf6ed;border-bottom-color:#158449;color:#0c5e2a}
+.s91-reference-modal .s91-ref-tab:hover{background:#f0f8f2;color:#0c5e2a}
+.s91-reference-modal .s91-ref-calendar{background:#fff;box-shadow:0 2px 10px rgba(12,67,30,.045)}
+.s91-reference-modal .s91-cal-day{transition:transform .15s,box-shadow .15s}.s91-reference-modal .s91-cal-day:hover{transform:translateY(-2px);box-shadow:0 4px 10px rgba(12,67,30,.1)}
+.s91-overlay-summary{border:1px solid #d9e8dd;background:#fff;border-radius:15px;overflow:hidden;box-shadow:0 5px 17px rgba(16,67,31,.045);margin:0 0 18px}
+.s91-overlay-summary-top{padding:11px 15px;display:flex;align-items:center;justify-content:space-between;gap:12px;background:linear-gradient(100deg,#eef8f0,#f9fcf8);border-bottom:1px solid #e4eee5}
+.s91-overlay-status{padding:5px 11px;background:#e2f3e6;color:#125e30;border-radius:100px;white-space:normal;font-size:11px;font-weight:800}
+.s91-overlay-lead{display:flex;gap:13px;align-items:center;padding:15px 16px 14px}
+.s91-lead-symbol{display:grid;place-items:center;width:42px;height:42px;flex-shrink:0;background:#0f6934;color:white;border-radius:12px;font-size:22px;font-weight:800}
+.s91-overlay-lead b{display:block;font-size:14px;line-height:1.42;color:#173d25}
+.s91-overlay-lead p{font-size:11.5px;line-height:1.48;color:#6a7e70;margin:4px 0 0}
+.s91-overlay-facts{padding:0 15px 13px;display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px}
+.s91-overlay-facts>div{padding:10px 12px;background:#f7faf7;border:1px solid #e6ede7;border-radius:10px;min-width:0}
+.s91-overlay-facts small{display:block;color:#6a7b70;font-size:10.5px;margin-bottom:5px}.s91-overlay-facts strong{display:block;font-size:12.5px;overflow-wrap:anywhere;font-weight:750;color:#203b28}
+.s91-journey{display:flex;align-items:flex-start;gap:5px;margin:0 16px 12px;padding:12px 7px;background:#f6faf6;border-radius:10px;overflow-x:auto}
+.s91-journey-step{display:flex;flex:1 0 72px;min-width:68px;align-items:center;flex-direction:column;gap:5px;position:relative}
+.s91-journey-step:not(:last-child)::after{position:absolute;content:"";height:2px;width:calc(100% - 30px);left:calc(50% + 17px);top:11px;background:#d5e1d9}
+.s91-journey-step.is-done::after{background:#20a554}
+.s91-journey-dot{display:grid;place-items:center;width:24px;height:24px;background:#eef3ef;color:#6e7e72;border:1px solid #d9e5dd;border-radius:50%;font-size:11px;font-weight:800;z-index:1}
+.s91-journey-step.is-current .s91-journey-dot{background:#0c5e2a;border-color:#0c5e2a;color:#fff;box-shadow:0 0 0 3px rgba(18,129,56,.14)}
+.s91-journey-step.is-done .s91-journey-dot{background:#e7f6ec;color:#18834a;border-color:#7bc896}
+.s91-journey-step small{font-size:10px;color:#66786b;text-align:center;line-height:1.35}
+.s91-journey-step.is-current small{font-weight:800;color:#0c5e2a}
+/* Shared modules get consistent cards and visual rhythm without changing table data/actions. */
+.content .performance-panel,.content .status-circle-card{border:1px solid #dce7df;border-radius:14px;box-shadow:0 3px 12px rgba(10,56,27,.045)}
+.content .status-circle-card{background:linear-gradient(165deg,#fff,#f8fbf8)}
+.content .status-circle-top{color:#4e6455;font-weight:700}
+.content .wc-page .wc-head,.content .pml .pml-heading,.content .m26-issues.si .si-head{background:linear-gradient(115deg,#fff,#f1f9f3);border:1px solid #cbded0;border-radius:16px;box-shadow:0 4px 13px rgba(10,56,27,.04)}
+.content .wc-page .wc-toolbar,.content .pml .pml-filters,.content .m26-issues.si .si-bar{background:#fff;border:1px solid #dce8de;border-radius:14px}
+.content .pml .pml-stat,.content .wc-page .wc-kpi{box-shadow:0 5px 15px rgba(15,65,29,.055)}
+.content .m26-issues.si .si-head h1{color:#113e22}
+.content .pml .pml-heading h2,.content .wc-page .wc-head h2{color:#113e22}
+@media(max-width:980px){.content .cc-work-overview{grid-template-columns:repeat(auto-fit,minmax(240px,1fr))}}
+@media(max-width:720px){
+ .content{padding:14px 12px 85px}
+ .content .cc-hero{border-radius:16px}.content .cc-hstat{min-width:0}
+ .s91-command-shortcuts{padding:15px}.s91-shortcuts-heading{align-items:flex-start;flex-direction:column;gap:8px}
+ .s91-shortcut-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+ .s91-shortcut{padding:11px 10px;align-items:flex-start;flex-direction:column;gap:9px}.s91-shortcut-icon{height:33px;flex-basis:33px;width:33px}
+ .s91-shortcut strong,.s91-shortcut-arrow{margin-left:auto}
+ .overlay .s91-reference-modal{width:100vw!important;max-width:100vw!important;height:100dvh;max-height:100dvh;border-radius:0!important}
+ .s91-reference-modal .modal-h{padding:13px 15px}.s91-reference-modal .modal-b{padding:12px 13px 25px}.s91-reference-modal .modal-f{padding:12px 14px}
+ .s91-overlay-facts{grid-template-columns:repeat(2,minmax(0,1fr))}
+ .s91-reference-modal .modal-b>.kgrid{grid-template-columns:repeat(2,minmax(0,1fr))!important}
+}
+@media(max-width:360px){.s91-shortcut-grid{grid-template-columns:1fr}.s91-shortcut{flex-direction:row;align-items:center}}
+@media(prefers-reduced-motion:reduce){.s91-shortcut,.s91-cal-day{transition:none!important}}
+@media(prefers-color-scheme:dark){:root:not([data-theme='light']) .content{background:#111a15;color:#e8efe9}:root:not([data-theme='light']) .content .panel,:root:not([data-theme='light']) .s91-command-shortcuts,:root:not([data-theme='light']) .s91-shortcut,:root:not([data-theme='light']) .s91-overlay-summary{background:#1b2920;color:#e8efe9;border-color:#34473a}:root:not([data-theme='light']) .s91-reference-modal .modal-b{background:#121b15}}
+.s91-overlay-jump{display:flex;justify-content:flex-end;padding:0 15px 13px}.s91-overlay-link{border:0;border-radius:8px;background:transparent;color:#0c5e2a;cursor:pointer;font-size:11.5px;font-weight:800;padding:7px 9px}.s91-overlay-link:hover,.s91-overlay-link:focus-visible{background:#eaf6ed;text-decoration:underline}
