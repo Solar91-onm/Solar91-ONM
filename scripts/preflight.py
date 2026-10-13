@@ -74,6 +74,27 @@ def main() -> int:
         print("OK: Supabase PostgreSQL connection succeeded.")
     except Exception as exc:
         print(f"ERROR: Database connection failed ({type(exc).__name__}). Check DATABASE_URL and Supabase network access.")
+        try:
+            # Show WHY (never the password): the driver's own message plus the user/host/port that were used.
+            u = make_url(settings.database_url)
+            reason = str(getattr(exc, "orig", None) or exc).strip().splitlines()[0] if str(exc).strip() else type(exc).__name__
+            if u.password:
+                reason = reason.replace(u.password, "***")
+            print(f"REASON: {reason[:300]}")
+            print(f"USED: user={u.username} host={u.host} port={u.port} database={u.database}")
+            low = reason.lower()
+            if "tenant or user not found" in low:
+                print("HINT: wrong username or region host. The username must be postgres.<project-ref> and the host must be copied from Supabase > Connect > Session pooler.")
+            elif "password authentication failed" in low:
+                print("HINT: wrong database password. Reset it in Supabase > Project Settings > Database and update DATABASE_URL.")
+            elif "could not translate host" in low or "name or service not known" in low:
+                print("HINT: the host name is wrong. Copy it again from Supabase > Connect > Session pooler.")
+            elif "timeout" in low or "timed out" in low or "network is unreachable" in low:
+                print("HINT: cannot reach the host (a direct db.<ref>.supabase.co host is IPv6-only; use the Session pooler host) or the project is paused.")
+            elif "ssl" in low:
+                print("HINT: add ?sslmode=require to the end of DATABASE_URL.")
+        except Exception:
+            pass
         return 3
 
     print("OK: Supabase Auth public configuration is present.")
