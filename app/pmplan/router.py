@@ -26,6 +26,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.models import AuditLog, Equipment, OMTask, NotificationPreference, PMScopeConfig, PMTemplate, PMUnitConfig, Plant, User
 from app.core.security import equipment_scope_matches, get_current_user, require_csrf, user_scoped_plant_ids
+from app.plants.codes import find_plant_by_code
 from app.pmplan.alerts import PM_ALERT_EVENTS, PM_TEAM_RECIPIENT_MODES, default_pm_preferences, get_pm_preferences
 from app.pmplan.units import distribute, next_cycle_id, run_daily  # noqa: F401  (next_cycle_id re-exported for the scheduled router)
 from app.scheduled.schemas import ALLOWED_ASSETS, ALLOWED_FREQUENCIES
@@ -154,8 +155,9 @@ def _resolve_plants(db: Session, values: list[str]) -> list[Plant]:
         except Exception:
             plant = None
         if plant is None:
-            plant = db.scalar(select(Plant).where(
-                (func.lower(Plant.site_code) == v.casefold()) | (func.lower(Plant.plant_name) == v.casefold())))
+            plant = find_plant_by_code(db, v)
+        if plant is None:
+            plant = db.scalar(select(Plant).where(func.lower(Plant.plant_name) == v.casefold()))
         if plant is None:
             missing.append(v)
         else:

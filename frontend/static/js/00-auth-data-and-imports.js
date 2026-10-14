@@ -399,44 +399,44 @@ function badge(st){return '<span class="badge '+bg(st)+'">'+esc(st)+'</span>'}
 
 const EXCEL_META={};
 const EXCEL_PLANT_DATA=[
- {"siteCode":"KRN_01","plantName":"Kerli Nadi ","projectCompany":"Solar91 Project Nine Pvt. Ltd.","commissionedOn":"2024-10-18","capacitykW":3159.1,"capacitymW":3.159,"acCapacitykW":2520},
- {"siteCode":"ASA_01","plantName":"Asadi","projectCompany":"Solar91 Project Eight Pvt. Ltd.","commissionedOn":"2025-03-29","capacitykW":3412.41,"capacitymW":3.412,"acCapacitykW":2520},
- {"siteCode":"IND_01","plantName":"Indora","projectCompany":"Solar91 Project Six Pvt. Ltd.","commissionedOn":"2024-10-22","capacitykW":1663.2,"capacitymW":1.663,"acCapacitykW":1330},
- {"siteCode":"JOD_01","plantName":"Jodhyasi","projectCompany":"Solar91 Project Four Pvt. Ltd.","commissionedOn":"2024-12-06","capacitykW":3361.2,"capacitymW":3.361,"acCapacitykW":2680},
- {"siteCode":"KH0_01","plantName":"Khorandi","projectCompany":"Solar91 Project Three Pvt. Ltd.","commissionedOn":"2024-12-26","capacitykW":3357.2,"capacitymW":3.357,"acCapacitykW":2680},
- {"siteCode":"MUW_01","plantName":"Muwana","projectCompany":"Solar91 Project Five Pvt. Ltd.","commissionedOn":"2025-02-18","capacitykW":2371.6,"capacitymW":2.372,"acCapacitykW":1890},
- {"siteCode":"ALN_01","plantName":"Alaniyawas 01","projectCompany":"Solar91 Project Fourteen pvt. Ltd.","commissionedOn":"2025-04-25","capacitykW":3295.0,"capacitymW":3.295,"acCapacitykW":2630},
- {"siteCode":"ALN_02","plantName":"Alaniyawas 02","projectCompany":"Solar91 Project Sixteen pvt. Ltd.","commissionedOn":"2025-05-26","capacitykW":1971.2,"capacitymW":1.971,"acCapacitykW":1560},
- {"siteCode":"ALN_03","plantName":"Alaniyawas 03","projectCompany":"Solar91 Project Fourteen pvt. Ltd.","commissionedOn":"2025-04-25","capacitykW":3803.8,"capacitymW":3.804,"acCapacitykW":3040},
- {"siteCode":"KKN_01","plantName":"KANKARLANADA 01","projectCompany":"Solar91 Project Fifteen pvt. Ltd.","commissionedOn":"2025-05-12","capacitykW":3148.47,"capacitymW":3.148,"acCapacitykW":2520},
- {"siteCode":"KKN_03","plantName":"KANKARLANADA 03","projectCompany":"Solar91 Project Fifteen pvt. Ltd.","commissionedOn":"2025-05-12","capacitykW":3148.47,"capacitymW":3.148,"acCapacitykW":2520},
- {"siteCode":"PDA_01","plantName":"PADASALA 01","projectCompany":"Solar91 Project Twenty pvt. Ltd.","commissionedOn":"2025-05-22","capacitykW":3158.82,"capacitymW":3.159,"acCapacitykW":2520},
- {"siteCode":"PDA_03","plantName":"PADASALA 03","projectCompany":"Solar91 Project Twenty pvt. Ltd.","commissionedOn":"2025-05-22","capacitykW":3158.82,"capacitymW":3.159,"acCapacitykW":2520},
- {"siteCode":"JKD_01","plantName":"JAKHARO KI DHANI 01","projectCompany":"Solar91 Project Nineteen Pvt. Ltd.","commissionedOn":"2025-07-19","capacitykW":3158.82,"capacitymW":3.159,"acCapacitykW":2520},
- {"siteCode":"JKD_02","plantName":"JAKHARO KI DHANI 02","projectCompany":"Solar91 Project Nineteen Pvt. Ltd.","commissionedOn":"2025-07-19","capacitykW":3158.82,"capacitymW":3.159,"acCapacitykW":2520},
- {"siteCode":"IMS_01","plantName":"Ishru Mehteb Dhani 01","projectCompany":"Solar91 Project Twenty Six pvt. Ltd.","commissionedOn":"2025-08-06","capacitykW":3158.82,"capacitymW":3.159,"acCapacitykW":2520},
- {"siteCode":"IMS_02","plantName":"Ishru Mehteb Dhani 02","projectCompany":"Solar91 Project Twenty Six pvt. Ltd.","commissionedOn":"2025-08-23","capacitykW":3157.02,"capacitymW":3.157,"acCapacitykW":2520},
- {"siteCode":"DDS_01","plantName":"DewDawas 01","projectCompany":"Solar91 Project Thirty Seven pvt. Ltd.","commissionedOn":"2025-07-12","capacitykW":3433.5,"capacitymW":3.433,"acCapacitykW":2740},
- {"siteCode":"ABH_01","plantName":"ABHANERI 01","projectCompany":"Solar91 Project Thirty Five pvt. Ltd.","commissionedOn":"2025-06-25","capacitykW":5371.52,"capacitymW":5.372,"acCapacitykW":4300},
- {"siteCode":"MNP_01","plantName":"Meenapada 01","projectCompany":"Solar91 Project Thirty Five pvt. Ltd.","commissionedOn":"2025-06-26","capacitykW":1968.54,"capacitymW":1.969,"acCapacitykW":1570},
- {"siteCode":"GUL_01","plantName":"Gullana 01","projectCompany":"Solar91 Project Thirty Seven pvt. Ltd.","commissionedOn":"2025-07-26","capacitykW":1441.9,"capacitymW":1.442,"acCapacitykW":1160},
- {"siteCode":"LKT_01","plantName":"Lakheta 01","projectCompany":"Solar91 Project Twenty Five pvt. Ltd.","commissionedOn":"2025-09-13","capacitykW":3121.56,"capacitymW":3.122,"acCapacitykW":2520},
- {"siteCode":"JGM_01","plantName":"Jogi Magra 01","projectCompany":"Solar91 Project Twenty Eight pvt. Ltd.","commissionedOn":"2025-11-06","capacitykW":3129.36,"capacitymW":3.129,"acCapacitykW":2520},
- {"siteCode":"PAL_01","plantName":"Palli 01","projectCompany":"Solar91 Project Twenty Five pvt. Ltd.","commissionedOn":"2025-11-10","capacitykW":5000,"capacitymW":5.0,"acCapacitykW":4000},
- {"siteCode":"RAM_01","plantName":"Ram Nagar 01","projectCompany":"Solar91 Project Twenty Nine pvt. Ltd.","commissionedOn":"2025-11-14","capacitykW":3123.9,"capacitymW":3.124,"acCapacitykW":2520},
- {"siteCode":"BST_01","plantName":"Banasthali 01","projectCompany":"Solar91 Project Thirty Seven pvt. Ltd.","commissionedOn":"2025-11-14","capacitykW":1670.11,"capacitymW":1.67,"acCapacitykW":1340},
- {"siteCode":"AVK_01","plantName":"Avika Nagar 01","projectCompany":"Solar91 Project Thirty Seven pvt. Ltd.","commissionedOn":"2025-12-24","capacitykW":1871.48,"capacitymW":1.871,"acCapacitykW":1500},
- {"siteCode":"NSR_01","plantName":"Noser","projectCompany":"Solar91 Project Twenty Four Pvt. Ltd.","commissionedOn":"2026-01-10","capacitykW":4924.14,"capacitymW":4.924,"acCapacitykW":4000},
- {"siteCode":"DMS_01","plantName":"Dharam Sagar 01","projectCompany":"Solar91 Project Twenty Three Pvt. Ltd.","commissionedOn":"2026-01-11","capacitykW":3150.42,"capacitymW":3.15,"acCapacitykW":2520},
- {"siteCode":"DMS_02","plantName":"Dharam Sagar 02","projectCompany":"Solar91 Project Twenty Three Pvt. Ltd.","commissionedOn":"2026-01-25","capacitykW":3120,"capacitymW":3.12,"acCapacitykW":2520},
- {"siteCode":"CRI_01","plantName":"Chirai","projectCompany":"Solar91 Project Twenty One Pvt. Ltd.","commissionedOn":"2026-01-16","capacitykW":1687.4,"capacitymW":1.687,"acCapacitykW":2520},
- {"siteCode":"RNR_01","plantName":"Raneri Village","projectCompany":"Solar91 Project Twenty Nine Pvt. Ltd.","commissionedOn":"2026-02-01","capacitykW":3173.17,"capacitymW":3.173,"acCapacitykW":2520},
- {"siteCode":"NKD_01","plantName":"Nimeda Ki Dhani ","projectCompany":"Solar91 Project Seventeen Pvt. Ltd.","commissionedOn":"2026-03-16","capacitykW":1953.85,"capacitymW":1.954,"acCapacitykW":1560},
- {"siteCode":"RJV_01","plantName":"Rajveer Nagar","projectCompany":"Solar91 Project Twenty Nine Pvt. Ltd.","commissionedOn":"2026-03-28","capacitykW":5000.84,"capacitymW":5.001,"acCapacitykW":4000},
- {"siteCode":"RRP_01","plantName":"Ramnagar Rampuriya ","projectCompany":"Solar91 Project Thirty pvt. Ltd.","commissionedOn":"2026-04-08","capacitykW":3139.22,"capacitymW":3.139,"acCapacitykW":2520},
- {"siteCode":"HLM_01","plantName":"Halli Maysore","projectCompany":"Solar91 Project Fourty one pvt. Ltd.","commissionedOn":"2026-07-18","capacitykW":3555.58,"capacitymW":3.556,"acCapacitykW":3543},
- {"siteCode":"TNF_01","plantName":"Tinwri Fanta","projectCompany":"Solar91 Project Thirty pvt. Ltd.","commissionedOn":"2026-08-14","capacitykW":1466.4,"capacitymW":1.466,"acCapacitykW":2520},
- {"siteCode":"BHT_01","plantName":"Bohat","projectCompany":"Solar91 Project Thirty pvt. Ltd.","commissionedOn":"2026-08-27","capacitykW":null,"capacitymW":null,"acCapacitykW":2000}
+ {"siteCode":"KRN01","plantName":"Kerli Nadi ","projectCompany":"Solar91 Project Nine Pvt. Ltd.","commissionedOn":"2024-10-18","capacitykW":3159.1,"capacitymW":3.159,"acCapacitykW":2520},
+ {"siteCode":"ASA01","plantName":"Asadi","projectCompany":"Solar91 Project Eight Pvt. Ltd.","commissionedOn":"2025-03-29","capacitykW":3412.41,"capacitymW":3.412,"acCapacitykW":2520},
+ {"siteCode":"IND01","plantName":"Indora","projectCompany":"Solar91 Project Six Pvt. Ltd.","commissionedOn":"2024-10-22","capacitykW":1663.2,"capacitymW":1.663,"acCapacitykW":1330},
+ {"siteCode":"JOD01","plantName":"Jodhyasi","projectCompany":"Solar91 Project Four Pvt. Ltd.","commissionedOn":"2024-12-06","capacitykW":3361.2,"capacitymW":3.361,"acCapacitykW":2680},
+ {"siteCode":"KH001","plantName":"Khorandi","projectCompany":"Solar91 Project Three Pvt. Ltd.","commissionedOn":"2024-12-26","capacitykW":3357.2,"capacitymW":3.357,"acCapacitykW":2680},
+ {"siteCode":"MUW01","plantName":"Muwana","projectCompany":"Solar91 Project Five Pvt. Ltd.","commissionedOn":"2025-02-18","capacitykW":2371.6,"capacitymW":2.372,"acCapacitykW":1890},
+ {"siteCode":"ALN01","plantName":"Alaniyawas 01","projectCompany":"Solar91 Project Fourteen pvt. Ltd.","commissionedOn":"2025-04-25","capacitykW":3295.0,"capacitymW":3.295,"acCapacitykW":2630},
+ {"siteCode":"ALN02","plantName":"Alaniyawas 02","projectCompany":"Solar91 Project Sixteen pvt. Ltd.","commissionedOn":"2025-05-26","capacitykW":1971.2,"capacitymW":1.971,"acCapacitykW":1560},
+ {"siteCode":"ALN03","plantName":"Alaniyawas 03","projectCompany":"Solar91 Project Fourteen pvt. Ltd.","commissionedOn":"2025-04-25","capacitykW":3803.8,"capacitymW":3.804,"acCapacitykW":3040},
+ {"siteCode":"KKN01","plantName":"KANKARLANADA 01","projectCompany":"Solar91 Project Fifteen pvt. Ltd.","commissionedOn":"2025-05-12","capacitykW":3148.47,"capacitymW":3.148,"acCapacitykW":2520},
+ {"siteCode":"KKN03","plantName":"KANKARLANADA 03","projectCompany":"Solar91 Project Fifteen pvt. Ltd.","commissionedOn":"2025-05-12","capacitykW":3148.47,"capacitymW":3.148,"acCapacitykW":2520},
+ {"siteCode":"PDA01","plantName":"PADASALA 01","projectCompany":"Solar91 Project Twenty pvt. Ltd.","commissionedOn":"2025-05-22","capacitykW":3158.82,"capacitymW":3.159,"acCapacitykW":2520},
+ {"siteCode":"PDA03","plantName":"PADASALA 03","projectCompany":"Solar91 Project Twenty pvt. Ltd.","commissionedOn":"2025-05-22","capacitykW":3158.82,"capacitymW":3.159,"acCapacitykW":2520},
+ {"siteCode":"JKD01","plantName":"JAKHARO KI DHANI 01","projectCompany":"Solar91 Project Nineteen Pvt. Ltd.","commissionedOn":"2025-07-19","capacitykW":3158.82,"capacitymW":3.159,"acCapacitykW":2520},
+ {"siteCode":"JKD02","plantName":"JAKHARO KI DHANI 02","projectCompany":"Solar91 Project Nineteen Pvt. Ltd.","commissionedOn":"2025-07-19","capacitykW":3158.82,"capacitymW":3.159,"acCapacitykW":2520},
+ {"siteCode":"IMS01","plantName":"Ishru Mehteb Dhani 01","projectCompany":"Solar91 Project Twenty Six pvt. Ltd.","commissionedOn":"2025-08-06","capacitykW":3158.82,"capacitymW":3.159,"acCapacitykW":2520},
+ {"siteCode":"IMS02","plantName":"Ishru Mehteb Dhani 02","projectCompany":"Solar91 Project Twenty Six pvt. Ltd.","commissionedOn":"2025-08-23","capacitykW":3157.02,"capacitymW":3.157,"acCapacitykW":2520},
+ {"siteCode":"DDS01","plantName":"DewDawas 01","projectCompany":"Solar91 Project Thirty Seven pvt. Ltd.","commissionedOn":"2025-07-12","capacitykW":3433.5,"capacitymW":3.433,"acCapacitykW":2740},
+ {"siteCode":"ABH01","plantName":"ABHANERI 01","projectCompany":"Solar91 Project Thirty Five pvt. Ltd.","commissionedOn":"2025-06-25","capacitykW":5371.52,"capacitymW":5.372,"acCapacitykW":4300},
+ {"siteCode":"MNP01","plantName":"Meenapada 01","projectCompany":"Solar91 Project Thirty Five pvt. Ltd.","commissionedOn":"2025-06-26","capacitykW":1968.54,"capacitymW":1.969,"acCapacitykW":1570},
+ {"siteCode":"GUL01","plantName":"Gullana 01","projectCompany":"Solar91 Project Thirty Seven pvt. Ltd.","commissionedOn":"2025-07-26","capacitykW":1441.9,"capacitymW":1.442,"acCapacitykW":1160},
+ {"siteCode":"LKT01","plantName":"Lakheta 01","projectCompany":"Solar91 Project Twenty Five pvt. Ltd.","commissionedOn":"2025-09-13","capacitykW":3121.56,"capacitymW":3.122,"acCapacitykW":2520},
+ {"siteCode":"JGM01","plantName":"Jogi Magra 01","projectCompany":"Solar91 Project Twenty Eight pvt. Ltd.","commissionedOn":"2025-11-06","capacitykW":3129.36,"capacitymW":3.129,"acCapacitykW":2520},
+ {"siteCode":"PAL01","plantName":"Palli 01","projectCompany":"Solar91 Project Twenty Five pvt. Ltd.","commissionedOn":"2025-11-10","capacitykW":5000,"capacitymW":5.0,"acCapacitykW":4000},
+ {"siteCode":"RAM01","plantName":"Ram Nagar 01","projectCompany":"Solar91 Project Twenty Nine pvt. Ltd.","commissionedOn":"2025-11-14","capacitykW":3123.9,"capacitymW":3.124,"acCapacitykW":2520},
+ {"siteCode":"BST01","plantName":"Banasthali 01","projectCompany":"Solar91 Project Thirty Seven pvt. Ltd.","commissionedOn":"2025-11-14","capacitykW":1670.11,"capacitymW":1.67,"acCapacitykW":1340},
+ {"siteCode":"AVK01","plantName":"Avika Nagar 01","projectCompany":"Solar91 Project Thirty Seven pvt. Ltd.","commissionedOn":"2025-12-24","capacitykW":1871.48,"capacitymW":1.871,"acCapacitykW":1500},
+ {"siteCode":"NSR01","plantName":"Noser","projectCompany":"Solar91 Project Twenty Four Pvt. Ltd.","commissionedOn":"2026-01-10","capacitykW":4924.14,"capacitymW":4.924,"acCapacitykW":4000},
+ {"siteCode":"DMS01","plantName":"Dharam Sagar 01","projectCompany":"Solar91 Project Twenty Three Pvt. Ltd.","commissionedOn":"2026-01-11","capacitykW":3150.42,"capacitymW":3.15,"acCapacitykW":2520},
+ {"siteCode":"DMS02","plantName":"Dharam Sagar 02","projectCompany":"Solar91 Project Twenty Three Pvt. Ltd.","commissionedOn":"2026-01-25","capacitykW":3120,"capacitymW":3.12,"acCapacitykW":2520},
+ {"siteCode":"CRI01","plantName":"Chirai","projectCompany":"Solar91 Project Twenty One Pvt. Ltd.","commissionedOn":"2026-01-16","capacitykW":1687.4,"capacitymW":1.687,"acCapacitykW":2520},
+ {"siteCode":"RNR01","plantName":"Raneri Village","projectCompany":"Solar91 Project Twenty Nine Pvt. Ltd.","commissionedOn":"2026-02-01","capacitykW":3173.17,"capacitymW":3.173,"acCapacitykW":2520},
+ {"siteCode":"NKD01","plantName":"Nimeda Ki Dhani ","projectCompany":"Solar91 Project Seventeen Pvt. Ltd.","commissionedOn":"2026-03-16","capacitykW":1953.85,"capacitymW":1.954,"acCapacitykW":1560},
+ {"siteCode":"RJV01","plantName":"Rajveer Nagar","projectCompany":"Solar91 Project Twenty Nine Pvt. Ltd.","commissionedOn":"2026-03-28","capacitykW":5000.84,"capacitymW":5.001,"acCapacitykW":4000},
+ {"siteCode":"RRP01","plantName":"Ramnagar Rampuriya ","projectCompany":"Solar91 Project Thirty pvt. Ltd.","commissionedOn":"2026-04-08","capacitykW":3139.22,"capacitymW":3.139,"acCapacitykW":2520},
+ {"siteCode":"HLM01","plantName":"Halli Maysore","projectCompany":"Solar91 Project Fourty one pvt. Ltd.","commissionedOn":"2026-07-18","capacitykW":3555.58,"capacitymW":3.556,"acCapacitykW":3543},
+ {"siteCode":"TNF01","plantName":"Tinwri Fanta","projectCompany":"Solar91 Project Thirty pvt. Ltd.","commissionedOn":"2026-08-14","capacitykW":1466.4,"capacitymW":1.466,"acCapacitykW":2520},
+ {"siteCode":"BHT01","plantName":"Bohat","projectCompany":"Solar91 Project Thirty pvt. Ltd.","commissionedOn":"2026-08-27","capacitykW":null,"capacitymW":null,"acCapacitykW":2000}
 ];
 const EXCEL_MONTHLY_DATA=[];
 const EXCEL_GENERATION_DATA={dates:[],series:{}};
@@ -533,15 +533,15 @@ window.Solar91Equipment={insert:sbInsertEquipment,update:sbUpdateEquipment,list:
 
 
 const PLANT_MATCH_KEY="id"; /* the plant field imported rows are matched against */
-function normalizeSiteCode(code){return String(code==null?"":code).trim().toUpperCase().replace(/[^A-Z0-9]/g,"")}
+function normalizeSiteCode(code){const n=String(code==null?"":code).trim().toUpperCase().replace(/[^A-Z0-9]/g,"");return n==="KHO01"?"KH001":n}
 /* Known corrections where a source file's code doesn't normalize to match
    the app's site code, but is confirmed to be the same plant.
    Key = normalized code as it appears in the imported file(s).
    Value = normalized code as it appears in S.plants (plant.id). */
 const PLANT_CODE_ALIASES={
- "KHO01":"KH001" /* Khorandi — both Excel files use KHO01, app uses KH0_01 (typo carried in original data) */
+ "KHO01":"KH001" /* Confirmed Khorandi alias; no global O/0 substitution */
 };
-function plantIndexByCode(plants){const idx={};(plants||[]).forEach(p=>{idx[normalizeSiteCode(p[PLANT_MATCH_KEY])]=p});return idx}
+function plantIndexByCode(plants){const idx={};(plants||[]).forEach(p=>{const code=normalizeSiteCode(p[PLANT_MATCH_KEY]);if(code&&(!idx[code]||p[PLANT_MATCH_KEY]===code))idx[code]=p});return idx}
 function resolvePlantByCode(rawCode,idx){
  const n=normalizeSiteCode(rawCode);
  if(idx[n])return idx[n];
@@ -565,7 +565,7 @@ const EXCEL_PLANT_INFO_SEED=[
  {"siteCode":"DMS01","project":"Solar91 Project Twenty Three Private Limited","district":"phalodi","discom":"JDVVNL","dcCapacitykW":3150.42,"acCapacitykW":2520,"cod":"2026-01-12"},
  {"siteCode":"DMS02","project":"Solar91 Project Twenty Three Private Limited","district":"phalodi","discom":"JDVVNL","dcCapacitykW":3120,"acCapacitykW":2520,"cod":"2026-01-25"},
  {"siteCode":"GUL01","project":"Solar91 Project Thirty Seven Private Limited","district":"Dausa","discom":"JVVNL","dcCapacitykW":1441.9,"acCapacitykW":1160,"cod":"2025-07-26"},
- {"siteCode":"HLM_01","project":"Solar91 Project Fourty one pvt. Ltd.","district":"Hassan","discom":"CESCOM","dcCapacitykW":3555.58,"acCapacitykW":3543,"cod":"2026-07-18"},
+ {"siteCode":"HLM01","project":"Solar91 Project Fourty one pvt. Ltd.","district":"Hassan","discom":"CESCOM","dcCapacitykW":3555.58,"acCapacitykW":3543,"cod":"2026-07-18"},
  {"siteCode":"IMS01","project":"Solar91 Project Twenty Six Private Limited","district":"Jodhpur","discom":"JDVVNL","dcCapacitykW":3158.82,"acCapacitykW":2520,"cod":"2025-08-07"},
  {"siteCode":"IMS02","project":"Solar91 Project Twenty Six Private Limited","district":"Jodhpur","discom":"JDVVNL","dcCapacitykW":3157.02,"acCapacitykW":2520,"cod":"2025-08-23"},
  {"siteCode":"IND01","project":"Solar91 Project Six Private Limited","district":"Chittorgarh","discom":"AVVNL","dcCapacitykW":1663.2,"acCapacitykW":1330,"cod":"2024-10-22"},
@@ -573,7 +573,7 @@ const EXCEL_PLANT_INFO_SEED=[
  {"siteCode":"JKD01","project":"Solar91 Project Nineteen Private Limited","district":"Jodhpur","discom":"JDVVNL","dcCapacitykW":3158.82,"acCapacitykW":2520,"cod":"2025-07-19"},
  {"siteCode":"JKD02","project":"Solar91 Project Nineteen Private Limited","district":"Jodhpur","discom":"JDVVNL","dcCapacitykW":3158.82,"acCapacitykW":2520,"cod":"2025-07-19"},
  {"siteCode":"JOD01","project":"Solar91 Project Four Private Limited","district":"Nagaur","discom":"AVVNL","dcCapacitykW":3361.2,"acCapacitykW":2680,"cod":"2024-12-06"},
- {"siteCode":"KHO01","project":"Solar91 Project Three Private Limited","district":"Didwana kuchaman","discom":"AVVNL","dcCapacitykW":3357.2,"acCapacitykW":2680,"cod":"2024-12-26"},
+ {"siteCode":"KH001","project":"Solar91 Project Three Private Limited","district":"Didwana kuchaman","discom":"AVVNL","dcCapacitykW":3357.2,"acCapacitykW":2680,"cod":"2024-12-26"},
  {"siteCode":"KKN01","project":"Solar91 Project Fifteen Private Limited","district":"Jodhpur","discom":"JDVVNL","dcCapacitykW":3148.47,"acCapacitykW":2520,"cod":"2025-05-12"},
  {"siteCode":"KKN03","project":"Solar91 Project Fifteen Private Limited","district":"Jodhpur","discom":"JDVVNL","dcCapacitykW":3148.47,"acCapacitykW":2520,"cod":"2025-05-12"},
  {"siteCode":"KRN01","project":"Solar91 Project Nine Private Limited","district":"Barmer","discom":"JDVVNL","dcCapacitykW":3159.1,"acCapacitykW":2520,"cod":"2024-10-18"},
@@ -589,7 +589,7 @@ const EXCEL_PLANT_INFO_SEED=[
  {"siteCode":"RJV01","project":"Solar91 Project Twenty Nine Private Limited","district":"Jodhpur","discom":"JDVVNL","dcCapacitykW":5000.84,"acCapacitykW":4000,"cod":"2026-03-28"},
  {"siteCode":"RNR01","project":"Solar91 Project Twenty Nine Private Limited","district":"phalodi","discom":"JDVVNL","dcCapacitykW":3173.17,"acCapacitykW":2520,"cod":"2026-02-01"},
  {"siteCode":"RRP01","project":"Solar91 Project Thirty pvt. Ltd.","district":"Jodhpur","discom":"JDVVNL","dcCapacitykW":3139.22,"acCapacitykW":2520,"cod":"2026-04-08"},
- {"siteCode":"TNF_01","project":"Solar91 Project Thirty pvt. Ltd.","district":"Jodhpur","discom":"JDVVNL","dcCapacitykW":1466.4,"acCapacitykW":2520,"cod":"2026-08-14"}
+ {"siteCode":"TNF01","project":"Solar91 Project Thirty pvt. Ltd.","district":"Jodhpur","discom":"JDVVNL","dcCapacitykW":1466.4,"acCapacitykW":2520,"cod":"2026-08-14"}
 ];
 /* Keyed by normalized site code for O(1) lookup — built once, used by applyPlantEnrichment(). */
 const EXCEL_PLANT_INFO_BY_CODE={};
@@ -599,41 +599,41 @@ EXCEL_PLANT_INFO_SEED.forEach(r=>{EXCEL_PLANT_INFO_BY_CODE[normalizeSiteCode(r.s
 const LOCATION_SEED=[
  {"siteCode":"ABH01","city":"Dausa","lat":27.020194,"lng":76.615389},
  {"siteCode":"ALN01","city":"Nagaur","lat":26.511361,"lng":74.313278},
- {"siteCode":"ALN-02","city":"Nagaur","lat":26.511361,"lng":74.313278},
+ {"siteCode":"ALN02","city":"Nagaur","lat":26.511361,"lng":74.313278},
  {"siteCode":"ALN03","city":"Nagaur","lat":26.511361,"lng":74.313278},
- {"siteCode":"ASA-01","city":"Barmer","lat":26.077528,"lng":70.713667},
- {"siteCode":"AVK-01","city":"Tonk","lat":26.313528,"lng":75.460611},
- {"siteCode":"BST-01","city":"Tonk","lat":26.428639,"lng":75.849139},
- {"siteCode":"CRI-01","city":"Jodhpur","lat":26.677,"lng":72.692361},
+ {"siteCode":"ASA01","city":"Barmer","lat":26.077528,"lng":70.713667},
+ {"siteCode":"AVK01","city":"Tonk","lat":26.313528,"lng":75.460611},
+ {"siteCode":"BST01","city":"Tonk","lat":26.428639,"lng":75.849139},
+ {"siteCode":"CRI01","city":"Jodhpur","lat":26.677,"lng":72.692361},
  {"siteCode":"DDS01","city":"Dewrawas, The. Duni Tonk","lat":25.96,"lng":75.593778},
- {"siteCode":"DMS-01","city":"Phalodi","lat":26.998417,"lng":72.757306},
- {"siteCode":"DMS-02","city":"Phalodi","lat":26.998417,"lng":72.757306},
- {"siteCode":"GUL-01","city":"Dausa","lat":27.103222,"lng":76.587472},
- {"siteCode":"IMS-01","city":"Jodhpur","lat":27.082389,"lng":72.919361},
- {"siteCode":"IMS-02","city":"Jodhpur","lat":27.082389,"lng":72.919361},
+ {"siteCode":"DMS01","city":"Phalodi","lat":26.998417,"lng":72.757306},
+ {"siteCode":"DMS02","city":"Phalodi","lat":26.998417,"lng":72.757306},
+ {"siteCode":"GUL01","city":"Dausa","lat":27.103222,"lng":76.587472},
+ {"siteCode":"IMS01","city":"Jodhpur","lat":27.082389,"lng":72.919361},
+ {"siteCode":"IMS02","city":"Jodhpur","lat":27.082389,"lng":72.919361},
  {"siteCode":"IND01","city":"Chhitorgarh","lat":25.046351,"lng":74.517092},
- {"siteCode":"JGM-01","city":"Jodhpur","lat":26.585917,"lng":72.964806},
+ {"siteCode":"JGM01","city":"Jodhpur","lat":26.585917,"lng":72.964806},
  {"siteCode":"JKD01","city":"Jodhpur","lat":26.783306,"lng":72.620472},
  {"siteCode":"JKD02","city":"Jodhpur","lat":26.795889,"lng":72.635083},
- {"siteCode":"JOD-01","city":"Nagaur","lat":27.409694,"lng":73.785694},
- {"siteCode":"KHO-01","city":"Didwana-Kuchaman","lat":27.310944,"lng":75.086556},
+ {"siteCode":"JOD01","city":"Nagaur","lat":27.409694,"lng":73.785694},
+ {"siteCode":"KH001","city":"Didwana-Kuchaman","lat":27.310944,"lng":75.086556},
  {"siteCode":"KKN01","city":"Jodhpur","lat":26.905,"lng":72.935583},
  {"siteCode":"KKN03","city":"Jodhpur","lat":26.905,"lng":72.935583},
  {"siteCode":"KRN01","city":"Barmer","lat":25.645806,"lng":72.376222},
- {"siteCode":"LKT-01","city":"Jodhpur","lat":26.917111,"lng":72.888361},
+ {"siteCode":"LKT01","city":"Jodhpur","lat":26.917111,"lng":72.888361},
  {"siteCode":"MNP01","city":"Dausa","lat":26.9935,"lng":76.702361},
- {"siteCode":"MUW-01","city":"Nagaur","lat":27.167611,"lng":75.072111},
- {"siteCode":"NKD-01","city":"Sikar","lat":27.522833,"lng":75.570306},
+ {"siteCode":"MUW01","city":"Nagaur","lat":27.167611,"lng":75.072111},
+ {"siteCode":"NKD01","city":"Sikar","lat":27.522833,"lng":75.570306},
  {"siteCode":"NSR01","city":"Jodhpur","lat":26.934083,"lng":72.80125},
  {"siteCode":"PAL01","city":"Phalodi","lat":26.92925,"lng":72.697917},
  {"siteCode":"PDA01","city":"Jodhpur","lat":26.887778,"lng":72.89075},
  {"siteCode":"PDA03","city":"Jodhpur","lat":26.887778,"lng":72.89075},
  {"siteCode":"RAM01","city":"Phalodi","lat":27.101306,"lng":72.992194},
- {"siteCode":"RJV-01","city":"Jodhpur","lat":27.186444,"lng":72.751556},
- {"siteCode":"RNR-01","city":"Phalodi","lat":27.38375,"lng":72.101972},
- {"siteCode":"RRP-01","city":"Jodhpur","lat":26.499056,"lng":73.024278},
- {"siteCode":"BHT-01","city":"","lat":25.250833,"lng":76.48775},
- {"siteCode":"TNF-01","city":"","lat":26.665083,"lng":72.913694}
+ {"siteCode":"RJV01","city":"Jodhpur","lat":27.186444,"lng":72.751556},
+ {"siteCode":"RNR01","city":"Phalodi","lat":27.38375,"lng":72.101972},
+ {"siteCode":"RRP01","city":"Jodhpur","lat":26.499056,"lng":73.024278},
+ {"siteCode":"BHT01","city":"","lat":25.250833,"lng":76.48775},
+ {"siteCode":"TNF01","city":"","lat":26.665083,"lng":72.913694}
 ];
 
 const LOCATION_SEED_BY_CODE={};

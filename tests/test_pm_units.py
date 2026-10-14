@@ -56,10 +56,10 @@ def test_plant_configuration_is_per_plant(client, db):
     for code, tot, per in (("A_01", 20, 4), ("B_01", 12, 2)):
         assert client.put("/api/pm-plan/unit-config", json={"plant": code, "equipment_type": "Inverter", "total_units": tot, "units_per_day": per}).status_code == 200
     cfg = client.get("/api/pm-plan/unit-config").json()["configs"]
-    assert {(c["site_code"], c["total_units"], c["units_per_day"], c["days"]) for c in cfg} == {("A_01", 20, 4, 5), ("B_01", 12, 2, 6)}
+    assert {(c["site_code"], c["total_units"], c["units_per_day"], c["days"]) for c in cfg} == {("A01", 20, 4, 5), ("B01", 12, 2, 6)}
     res = client.post("/api/pm-plan/tasks", json=_body(plants=["A_01", "B_01"])).json()     # no overrides: each plant uses its own config
     assert res["count"] == 32
-    a = db.query(OMTask).join(Plant).filter(Plant.site_code == "A_01")
+    a = db.query(OMTask).join(Plant).filter(Plant.site_code == "A01")
     assert a.count() == 20 and max(t.cycle_day for t in a) == 5
 
 
@@ -87,7 +87,7 @@ def test_one_assignee_per_plant(client, db):
     by = {}
     for t in db.query(OMTask).join(Plant, OMTask.plant_id == Plant.id).add_columns(Plant.site_code):
         by.setdefault(t[1], set()).add(t[0].assignee_text)
-    assert by == {"A_01": {"Asha"}, "B_01": {"Ravi"}}
+    assert by == {"A01": {"Asha"}, "B01": {"Ravi"}}
 
 
 def test_missed_units_roll_and_escalate(client, db):

@@ -23,6 +23,13 @@ class PlantBase(BaseModel):
     assigned_engineer: str | None = None
     custom_fields: dict[str, Any] = Field(default_factory=dict)
 
+    @field_validator("site_code", mode="before")
+    @classmethod
+    def canonical_site_code(cls, value):
+        from app.plants.codes import normalize_site_code
+
+        return normalize_site_code(value)
+
     @field_validator("latitude")
     @classmethod
     def lat_range(cls, value):
@@ -193,4 +200,3 @@ class EquipmentPage(BaseModel):
     total: int
     offset: int
     limit: int
-

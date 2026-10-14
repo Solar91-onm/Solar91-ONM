@@ -9,6 +9,7 @@ from datetime import date
 from sqlalchemy import select
 from app.core.database import SessionLocal
 from app.core.models import AppSetting, NotificationRule, Plant
+from app.plants.codes import normalize_site_code, plant_code_index
 
 plants=json.loads((ROOT/"scripts"/"legacy_plants.json").read_text(encoding="utf-8"))
 rules=[
@@ -25,11 +26,16 @@ rules=[
 def main():
     db=SessionLocal()
     try:
+        existing_plants=plant_code_index(db.scalars(select(Plant)))
         for x in plants:
-            row=db.scalar(select(Plant).where(Plant.site_code==x["siteCode"]))
+            site_code=normalize_site_code(x["siteCode"])
+            row=existing_plants.get(site_code)
             if not row:
-                row=Plant(site_code=x["siteCode"],plant_name=str(x.get("plantName") or x["siteCode"]).strip(),source="legacy-seed")
-            row.project_company=x.get("projectCompany"); row.commissioned_on=date.fromisoformat(x["commissionedOn"]) if x.get("commissionedOn") else None; row.dc_capacity_kw=x.get("capacitykW"); row.ac_capacity_kw=x.get("acCapacitykW"); row.legacy_payload={"id":x["siteCode"],"name":x.get("plantName"),"capacity":x.get("capacitymW"),"project":x.get("projectCompany"),"source":"excel"}
+                row=Plant(site_code=site_code,plant_name=str(x.get("plantName") or site_code).strip(),source="legacy-seed")
+                existing_plants[site_code]=row
+            else:
+                row.site_code=site_code
+            row.project_company=x.get("projectCompany"); row.commissioned_on=date.fromisoformat(x["commissionedOn"]) if x.get("commissionedOn") else None; row.dc_capacity_kw=x.get("capacitykW"); row.ac_capacity_kw=x.get("acCapacitykW"); row.legacy_payload={"id":site_code,"name":x.get("plantName"),"capacity":x.get("capacitymW"),"project":x.get("projectCompany"),"source":"excel"}
             db.add(row)
         for r in rules:
             row=db.scalar(select(NotificationRule).where(NotificationRule.legacy_id==r["id"]))
