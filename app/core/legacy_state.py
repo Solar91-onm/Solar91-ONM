@@ -20,6 +20,7 @@ from app.core.models import (
 from app.core.security import WASHING_TYPE, assignee_has_type, equipment_scope_matches, has_portfolio_scope, is_head, resolve_equipment_id, text_is_current_user, user_scoped_equipment_ids, user_scoped_plant_ids
 from app.core.config import get_settings
 from app.issues.schemas import normalize_issue_severity
+from app.plants.codes import normalize_site_code, plant_code_index
 
 BUSINESS_KEYS = ["plants","handovers","tasks","washing","washMeta","issues","inventory","movements","ptw","incidents","docs","vendors","rules","sla","audit","offlineQueue","serviceRequests","events"]
 SETTING_KEYS = ["washPlant","schedScope","view","omTab","extSub","hoOpen","opsDate","scada","scadaConfig","plantEnrich","customPlantColumns","plantCustomValues","_seq"]
@@ -99,7 +100,8 @@ class _TolerantLookup(dict):
 
 def _plant_maps(db:Session):
     rows=list(db.scalars(select(Plant)))
-    by_name=_TolerantLookup({p.plant_name:p for p in rows}); by_code=_TolerantLookup({p.site_code:p for p in rows})
+    by_name=_TolerantLookup({p.plant_name:p for p in rows})
+    by_code=plant_code_index(rows)
     return rows,by_name,by_code
 
 
@@ -334,7 +336,7 @@ def _sync_state_scoped(db:Session,state:dict[str,Any],expected_revision:int|None
             no=str(r.get("id") or "").strip()
             if not no:
                 continue
-            p=by_name.get(r.get("plant")) or by_code.get(r.get("plant"))
+            p=by_name.get(r.get("plant")) or by_code.get(normalize_site_code(r.get("plant")))
             equipment_id=resolve_equipment_id(
                 db,p.id,_uuid_or_none(r.get("equipmentId")),r.get("equip")
             ) if p else None
@@ -465,11 +467,17 @@ def _upsert_setting(db:Session,key:str,value:Any,user:User):
 
 def _sync_state_head(db:Session,state:dict[str,Any],expected_revision:int|None,user:User)->int:
     # Plants first, because nearly every operational entity points to a plant.
+    existing_plant_codes=plant_code_index(db.scalars(select(Plant)))
     for r in state.get("plants",[]) or []:
-        code=str(r.get("id") or r.get("site_code") or "").strip()
+        code=normalize_site_code(r.get("id") or r.get("site_code") or "")
         name=str(r.get("name") or r.get("plant_name") or "").strip()
         if not code or not name: continue
-        p=db.scalar(select(Plant).where(Plant.site_code==code)) or Plant(site_code=code,plant_name=name,created_by=user.id)
+        p=existing_plant_codes.get(code)
+        if p is None:
+            p=Plant(site_code=code,plant_name=name,created_by=user.id)
+            existing_plant_codes[code]=p
+        else:
+            p.site_code=code
         p.plant_name=name; p.project_company=r.get("project") or r.get("projectCompany"); p.district=r.get("district") or None; p.discom=r.get("discom") or None; p.location=r.get("location") or ((r.get("geo") or {}).get("city") if isinstance(r.get("geo"),dict) else None)
         geo=r.get("geo") or {}; p.latitude=_num(geo.get("lat")) if isinstance(geo,dict) else None; p.longitude=_num(geo.get("lng")) if isinstance(geo,dict) else None
         p.dc_capacity_kw=_num(r.get("dcCapacitykW")) or ((_num(r.get("capacity")) or 0)*1000 or None); p.ac_capacity_kw=_num(r.get("acCapacitykW")); p.commissioned_on=_date(r.get("cod") or r.get("commissionedOn")); p.status="active" if r.get("active",True) else "inactive"; p.assigned_engineer=r.get("assignedEngineer") or ((state.get("plantEnrich") or {}).get(code,{}) or {}).get("assignedEngineer"); p.custom_fields=r.get("dbCustomFields") or {}; p.legacy_payload=r; db.add(p)
@@ -482,7 +490,7 @@ def _sync_state_head(db:Session,state:dict[str,Any],expected_revision:int|None,u
             continue   # existing tickets change only through /api/issues; a stale browser copy must never undo an Acknowledge, assignment or closure
         severity=normalize_issue_severity(r.get("severity") or "Medium")
         x=db.scalar(select(Issue).where(Issue.ticket_no==no)) or Issue(ticket_no=no,description=r.get("desc") or "Issue",severity=severity,created_by=user.id)
-        p=by_name.get(r.get("plant")) or by_code.get(r.get("plant")); x.plant_id=p.id if p else None; x.equipment_ref=r.get("equip"); x.vertical=r.get("vertical"); x.subcategory=r.get("sub"); x.description=r.get("desc") or x.description; x.severity=severity or x.severity; x.status=r.get("status") or "Open"; x.occurred_at=_dt(r.get("occurred")); x.etc_at=_dt(r.get("etc")); x.assignee_text=r.get("assignee"); x.maker=r.get("maker") or None; x.impact=r.get("impact"); x.photo_count=int(r.get("photos") or 0); x.vendor=r.get("vendor"); x.closure=r.get("closure"); x.source_task=r.get("sourceTask"); x.reopened_from=r.get("reopenedFrom"); x.reopen_count=int(r.get("reopenCount") or 0); x.legacy_payload=r; db.add(x)
+        p=by_name.get(r.get("plant")) or by_code.get(normalize_site_code(r.get("plant"))); x.plant_id=p.id if p else None; x.equipment_ref=r.get("equip"); x.vertical=r.get("vertical"); x.subcategory=r.get("sub"); x.description=r.get("desc") or x.description; x.severity=severity or x.severity; x.status=r.get("status") or "Open"; x.occurred_at=_dt(r.get("occurred")); x.etc_at=_dt(r.get("etc")); x.assignee_text=r.get("assignee"); x.maker=r.get("maker") or None; x.impact=r.get("impact"); x.photo_count=int(r.get("photos") or 0); x.vendor=r.get("vendor"); x.closure=r.get("closure"); x.source_task=r.get("sourceTask"); x.reopened_from=r.get("reopenedFrom"); x.reopen_count=int(r.get("reopenCount") or 0); x.legacy_payload=r; db.add(x)
 
     for r in state.get("handovers",[]) or []:
         lid=str(r.get("id") or "").strip()
@@ -496,7 +504,7 @@ def _sync_state_head(db:Session,state:dict[str,Any],expected_revision:int|None,u
         no=str(r.get("id") or "").strip()
         if not no: continue
         t=db.scalar(select(OMTask).where(OMTask.work_order_no==no)) or OMTask(work_order_no=no,task_name=r.get("name") or no,status=r.get("status") or "Scheduled",created_by=user.id)
-        p=by_name.get(r.get("plant")) or by_code.get(r.get("plant")); t.plant_id=p.id if p else None; t.task_name=r.get("name") or t.task_name; t.task_type=r.get("type"); t.problem=r.get("problem"); t.problem_source=r.get("problemSource"); t.equipment_ref=r.get("equip"); t.frequency=r.get("freq"); t.due_on=_date(r.get("due")); t.assignee_text=r.get("assignee"); t.assignee_user_id=uuid.UUID(str(r.get("assigneeUserId"))) if r.get("assigneeUserId") else t.assignee_user_id; t.status=r.get("status") or t.status; t.sop=r.get("sop"); t.safety=r.get("safety"); t.tools=r.get("tools"); t.duration=r.get("duration"); t.completion=r.get("completion"); t.actual_completed_on=_date((r.get("completion") or {}).get("date") if isinstance(r.get("completion"),dict) else r.get("actualCompleted")); t.delay_days=int((r.get("completion") or {}).get("delay") or r.get("delayDays") or 0) if r.get("completion") or r.get("delayDays") is not None else None; t.problem_found=bool((r.get("completion") or {}).get("anomaly")) if isinstance(r.get("completion"),dict) else bool(r.get("problemFound")); t.recurrence_parent_no=r.get("recurrenceOf"); t.linked_issue=r.get("linkedIssue"); t.evidence=_clean_evidence(r.get("evidence")) or t.evidence; t.log=r.get("log") or []; t.legacy_payload={k:v for k,v in r.items() if k!="evidence"}; db.add(t)
+        p=by_name.get(r.get("plant")) or by_code.get(normalize_site_code(r.get("plant"))); t.plant_id=p.id if p else None; t.task_name=r.get("name") or t.task_name; t.task_type=r.get("type"); t.problem=r.get("problem"); t.problem_source=r.get("problemSource"); t.equipment_ref=r.get("equip"); t.frequency=r.get("freq"); t.due_on=_date(r.get("due")); t.assignee_text=r.get("assignee"); t.assignee_user_id=uuid.UUID(str(r.get("assigneeUserId"))) if r.get("assigneeUserId") else t.assignee_user_id; t.status=r.get("status") or t.status; t.sop=r.get("sop"); t.safety=r.get("safety"); t.tools=r.get("tools"); t.duration=r.get("duration"); t.completion=r.get("completion"); t.actual_completed_on=_date((r.get("completion") or {}).get("date") if isinstance(r.get("completion"),dict) else r.get("actualCompleted")); t.delay_days=int((r.get("completion") or {}).get("delay") or r.get("delayDays") or 0) if r.get("completion") or r.get("delayDays") is not None else None; t.problem_found=bool((r.get("completion") or {}).get("anomaly")) if isinstance(r.get("completion"),dict) else bool(r.get("problemFound")); t.recurrence_parent_no=r.get("recurrenceOf"); t.linked_issue=r.get("linkedIssue"); t.evidence=_clean_evidence(r.get("evidence")) or t.evidence; t.log=r.get("log") or []; t.legacy_payload={k:v for k,v in r.items() if k!="evidence"}; db.add(t)
     db.flush()
 
     # Legacy client state is read-only for washing; configuration and reports use dedicated APIs.

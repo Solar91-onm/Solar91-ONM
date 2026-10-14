@@ -92,7 +92,7 @@ def test_plant_and_equipment_filters_and_pagination(client, db):
 
     plant_page = client.get("/api/plants?q=Register&limit=1&offset=1")
     assert plant_page.status_code == 200
-    assert [row["site_code"] for row in plant_page.json()] == ["REG-B"]
+    assert [row["site_code"] for row in plant_page.json()] == ["REGB"]
     assert client.get("/api/plants?limit=201").status_code == 422
 
     equipment_page = client.get(

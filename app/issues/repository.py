@@ -4,6 +4,7 @@ from sqlalchemy import String, and_, cast, exists, func, or_, select
 from sqlalchemy.orm import Session, aliased
 
 from app.core.models import Equipment, Issue, Plant, User
+from app.plants.codes import normalize_site_code
 
 
 class IssueRepository:
@@ -53,7 +54,8 @@ class IssueRepository:
         if vertical: stmt = stmt.where(Issue.vertical == vertical)
         if maker: stmt = stmt.where(Issue.maker == maker)
         if equipment: stmt = stmt.where(func.lower(func.coalesce(Issue.equipment_ref, "")).like(f"%{equipment.lower()}%"))
-        if site_code: stmt = stmt.where(func.lower(Plant.site_code) == site_code.lower())
+        if site_code:
+            stmt = stmt.where(Plant.site_code == normalize_site_code(site_code))
         if project_number:
             # Project number is retained in legacy_payload across older migrations.
             # Casting JSON to text keeps the filter portable across PostgreSQL and SQLite.

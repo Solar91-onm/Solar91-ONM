@@ -7,6 +7,27 @@
  const role=()=>hasAppState()?(S._roleLabel||S.currentRole||''):'', siteName=()=>role()==='Site Engineer'?S._sePlant||null:null;
  const authorized=(rows)=>{const site=siteName();return site?(rows||[]).filter(x=>x.plant===site):(rows||[])};
  const reportRole=()=>role()!=='Site Engineer';
+ const assistantHistoryKey='s91-assistant-history-v1';
+ const assistantHistoryLimit=40;
+ // Keep recent chat history locally; do not age-prune it to prevent older valid
+ // follow-up questions from disappearing after a two-day window.
+ function loadAssistantHistory(){
+  try{
+   const raw=localStorage.getItem(assistantHistoryKey);if(!raw)return[];
+   const parsed=JSON.parse(raw);if(!Array.isArray(parsed))return[];
+   return parsed.map(entry=>({who:entry?.who==='user'?'user':'bot',text:String(entry?.text||'').trim(),action:Array.isArray(entry?.action)?entry.action.slice(0,2).map(String):null,records:Array.isArray(entry?.records)?entry.records.slice(0,8):[],when:Number(entry?.when)||Date.now()})).filter(entry=>entry.text).slice(-assistantHistoryLimit);
+  }catch{return[]}
+ }
+ function saveAssistantHistory(log){
+  try{
+   if(!Array.isArray(log)||!log.length){localStorage.removeItem(assistantHistoryKey);return}
+   const next=log.slice(-assistantHistoryLimit).map(entry=>({who:entry?.who==='user'?'user':'bot',text:String(entry?.text||'').trim(),action:Array.isArray(entry?.action)?entry.action.slice(0,2).map(String):null,records:Array.isArray(entry?.records)?entry.records.slice(0,8):[],when:Number(entry?.when)||Date.now()})).filter(entry=>entry.text);
+   localStorage.setItem(assistantHistoryKey, JSON.stringify(next));
+  }catch{}
+ }
+ function clearAssistantHistory(){
+  try{localStorage.removeItem(assistantHistoryKey)}catch{}
+ }
  function destination(selector,label){
   let tries=0;
   function go(){const node=document.querySelector(selector);if(!node&&tries++<12){setTimeout(go,90);return}
@@ -89,7 +110,7 @@
   if(e.target.closest('[data-s91-print-preview]')){window.print();return}
   if(e.target.closest('[data-s91-open-all-reports]')){document.getElementById('s91-report-root')?.remove();if(reportRole()){S.reportKind=previewState.kind;goView('reports');destination('.ops-report-table','Reports')}return}
  });
- const assistant={open:false,log:[],more:null,lastQuery:'',busy:false};
+ const assistant={open:false,log:loadAssistantHistory(),more:null,lastQuery:'',busy:false};
  const allowedAssistantRoles=['O&M Head','Assignee','Administration','Site Engineer'];
  const stopWords=new Set(('a an and are at by can current do for from give how i in is it me my of on or please show tell the their them there this to what where which with about all details find information records search status data list view want overdue overdues late open critical high medium low pending awaiting completed complete done resolved closed unassigned assigned active').split(' '));
  const moduleWords={
@@ -248,20 +269,22 @@
   if(!allowedAssistantRoles.includes(role())){assistant.open=false;drawAssistant();return}
   const expanded=/^(and |what about |those |same |only |filter |which of them)/i.test(str)&&assistant.lastQuery?assistant.lastQuery+' '+str:str;
   const recent=assistant.log.filter(x=>x.who==='user').slice(-4).map(x=>x.text);
-  assistant.more=null;assistant.busy=true;assistant.log.push({who:'user',text:str});
-  assistant.log.push({who:'bot',text:'Checking permitted live records…'});
-  assistant.log=assistant.log.slice(-18);drawAssistant();
+  assistant.more=null;assistant.busy=true;assistant.log.push({who:'user',text:str,when:Date.now()});
+  assistant.log.push({who:'bot',text:'Checking permitted live records…',when:Date.now()});
+  assistant.log=assistant.log.slice(-assistantHistoryLimit);saveAssistantHistory(assistant.log);drawAssistant();
   const position=assistant.log.length-1;
   try{
    const result=await apiFetch('/api/field/ask',{method:'POST',body:JSON.stringify({question:expanded,recent_questions:recent})});
    if(!allowedAssistantRoles.includes(role()))return;
    assistant.lastQuery=expanded;
    assistant.log[position]={who:'bot',text:result.answer||'No matching saved record was found.',records:result.records||[],
-      action:/\b(issue|ticket|fault)\b/i.test(expanded)?['issues','open']:/\b(pm|maintenance)\b/i.test(expanded)?['pm','overdue']:/\b(wash|clean)\b/i.test(expanded)?['washing','late']:null};
+     action:/\b(issue|ticket|fault)\b/i.test(expanded)?['issues','open']:/\b(pm|maintenance)\b/i.test(expanded)?['pm','overdue']:/\b(wash|clean)\b/i.test(expanded)?['washing','late']:null,when:Date.now()};
+   saveAssistantHistory(assistant.log);
   }catch(error){
    // Existing in-browser read-only search is a fallback, NEVER displayed as a live server result.
    const found=answer(expanded);
-   assistant.log[position]={who:'bot',text:'Live search unavailable ('+(error.message||'network error')+'). Showing cached records only.\n'+found.msg,action:found.action};
+   assistant.log[position]={who:'bot',text:'Live search unavailable ('+(error.message||'network error')+'). Showing cached records only.\n'+found.msg,action:found.action,when:Date.now()};
+   saveAssistantHistory(assistant.log);
   }finally{assistant.busy=false;drawAssistant();document.getElementById('s91-assistant-query')?.focus({preventScroll:true})}
  }
  function openAssistantRecord(kind,id,plant){
@@ -275,7 +298,7 @@
  document.addEventListener('click',e=>{
   const item=e.target.closest('[data-s91-assist]');if(item){assistant.open=item.dataset.s91Assist==='toggle'?!assistant.open:item.dataset.s91Assist!=='close';drawAssistant();return}
   const question=e.target.closest('[data-s91-question]');if(question){assistant.open=true;ask(question.dataset.s91Question);return}
-  if(e.target.closest('[data-s91-assist-more]')){const more=assistant.more,data=scope();if(!more||!data)return;const found=searchRecords(more.query,data),start=more.offset;assistant.log.push({who:'bot',text:searchPage(more.query,data,found,start,'Records '+(start+1)+'–'+Math.min(start+20,found.count)+' of '+found.count+':')});assistant.log=assistant.log.slice(-18);drawAssistant();return}
+  if(e.target.closest('[data-s91-assist-more]')){const more=assistant.more,data=scope();if(!more||!data)return;const found=searchRecords(more.query,data),start=more.offset;assistant.log.push({who:'bot',text:searchPage(more.query,data,found,start,'Records '+(start+1)+'–'+Math.min(start+20,found.count)+' of '+found.count+':'),when:Date.now()});assistant.log=assistant.log.slice(-assistantHistoryLimit);saveAssistantHistory(assistant.log);drawAssistant();return}
   const record=e.target.closest('[data-s91-record-kind]');if(record){openAssistantRecord(record.dataset.s91RecordKind,record.dataset.s91RecordId,record.dataset.s91RecordPlant);return}
   const go=e.target.closest('[data-s91-assist-go]');if(go){const [kind,queue]=go.dataset.s91AssistGo.split(':');assistant.open=false;drawAssistant();window.s91OpenQueue(kind,queue);return}
  });
@@ -287,7 +310,7 @@
  const app=document.getElementById('app');
  if(app)new MutationObserver(()=>{
   const signedIn=!!app.querySelector('.shell'),root=assistantRoot();
-  if(!signedIn&&(assistant.open||assistant.log.length)){assistant.open=false;assistant.log=[];drawAssistant()}
+ if(!signedIn&&(assistant.open||assistant.log.length)){assistant.open=false;assistant.log=[];clearAssistantHistory();drawAssistant()}
   else if(root.hidden===signedIn){root.hidden=!signedIn;if(signedIn)drawAssistant()}
  }).observe(app,{childList:true,subtree:false});
  drawAssistant();

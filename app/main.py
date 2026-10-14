@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
+from contextlib import asynccontextmanager
 from pathlib import Path
 import sys
 
@@ -40,10 +42,42 @@ SETUP_RETRY_INITIAL_SECONDS = 5
 SETUP_RETRY_MAX_SECONDS = 60
 SETUP_SCRIPT_TIMEOUT_SECONDS = 60
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    if settings.app_env == "production":
+        app.state.bootstrap_task = asyncio.create_task(_run_deploy_setup())
+        app.state.bootstrap_ready = False
+    else:
+        app.state.bootstrap_ready = True
+
+    if settings.app_env != "test" and os.getenv("PM_DAILY_JOB", "0") == "1":
+        app.state.pm_job = asyncio.create_task(_start_pm_daily_job_loop())
+    else:
+        app.state.pm_job = None
+
+    try:
+        yield
+    finally:
+        tasks = [
+            task
+            for task in (
+                getattr(app.state, "bootstrap_task", None),
+                getattr(app.state, "pm_job", None),
+            )
+            if task is not None and not task.done()
+        ]
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        from app.core.database import engine
+        engine.dispose()
+
 app=FastAPI(
     title="Solar91 O&M Command Center API",
     version="1.6.0",
     description="FastAPI backend for the Solar91 O&M Command Center. Persistent business data is stored in Supabase PostgreSQL; authentication is provided by Supabase Auth only.",
+    lifespan=lifespan,
 )
 app.state.bootstrap_ready = settings.app_env != "production"
 app.add_middleware(CORSMiddleware,allow_origins=settings.origins,allow_credentials=True,allow_methods=["GET","POST","PATCH","PUT","DELETE","OPTIONS"],allow_headers=["Content-Type","Authorization"])
@@ -144,17 +178,8 @@ async def _run_deploy_setup():
         await asyncio.sleep(delay)
         delay = min(delay * 2, SETUP_RETRY_MAX_SECONDS)
 
-@app.on_event("startup")
-async def _start_deploy_setup():
-    if settings.app_env == "production":
-        app.state.bootstrap_task = asyncio.create_task(_run_deploy_setup())
-
-@app.on_event("startup")
-async def _start_pm_daily_job():
+async def _start_pm_daily_job_loop():
     """Hourly PM reminders and washing monthly-target notifications; opt in on one worker only."""
-    import asyncio, logging, os
-    if settings.app_env == "test" or os.getenv("PM_DAILY_JOB", "0") != "1":
-        return
     def _once():
         from app.core.database import SessionLocal
         from app.pmplan.units import run_daily
@@ -165,34 +190,16 @@ async def _start_pm_daily_job():
             result["washing_weekly_compliance_alerts"] = check_weekly_compliance_alerts(db)
             result["washing_overdue_alerts"] = check_washing_overdue(db)
             return result
-    async def _loop():
-        while True:
-            if not app.state.bootstrap_ready:
-                await asyncio.sleep(30)
-                continue
-            try:
-                await asyncio.to_thread(_once)
-            except Exception:                       # the job must never take the API down
-                logging.getLogger("solar91.pm").exception("Daily PM job failed")
-            await asyncio.sleep(3600)
-    app.state.pm_job = asyncio.create_task(_loop())
 
-@app.on_event("shutdown")
-async def _stop_background_tasks():
-    tasks = [
-        task
-        for task in (
-            getattr(app.state, "bootstrap_task", None),
-            getattr(app.state, "pm_job", None),
-        )
-        if task is not None and not task.done()
-    ]
-    for task in tasks:
-        task.cancel()
-    if tasks:
-        await asyncio.gather(*tasks, return_exceptions=True)
-    from app.core.database import engine
-    engine.dispose()
+    while True:
+        if not app.state.bootstrap_ready:
+            await asyncio.sleep(30)
+            continue
+        try:
+            await asyncio.to_thread(_once)
+        except Exception:  # the job must never take the API down
+            logging.getLogger("solar91.pm").exception("Daily PM job failed")
+        await asyncio.sleep(3600)
 
 STATIC=BASE/"frontend"/"static"; TEMPLATES=BASE/"frontend"/"templates"
 if STATIC.is_dir():

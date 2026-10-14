@@ -13,6 +13,7 @@ from app.core.config import get_settings
 from app.core.database import get_db
 from app.core.models import Plant, ScadaTelemetry, User
 from app.core.security import get_current_user, require_csrf, require_permission, user_scoped_plant_ids
+from app.plants.codes import find_plant_by_code
 
 router = APIRouter(prefix="/api/scada", tags=["SCADA"])
 settings = get_settings()
@@ -59,7 +60,7 @@ def _store(db: Session, rows: list[Telemetry], source: str) -> int:
     for r in rows:
         p = None
         if r.siteId:
-            p = db.scalar(select(Plant).where(Plant.site_code == r.siteId))
+            p = find_plant_by_code(db, r.siteId)
         if not p and r.name:
             p = db.scalar(select(Plant).where(Plant.plant_name == r.name))
         db.add(ScadaTelemetry(

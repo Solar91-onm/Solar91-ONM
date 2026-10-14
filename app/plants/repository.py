@@ -4,6 +4,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.models import Equipment, Plant
+from app.plants.codes import find_plant_by_code, normalize_site_code
 
 
 class PlantRepository:
@@ -16,14 +17,16 @@ class PlantRepository:
             stmt = stmt.where(Plant.id.in_(allowed_plant_ids))
         if q:
             like = f"%{q.lower()}%"
-            stmt = stmt.where(or_(func.lower(Plant.plant_name).like(like), func.lower(Plant.site_code).like(like), func.lower(func.coalesce(Plant.project_company, "")).like(like)))
+            code = normalize_site_code(q)
+            code_match = Plant.site_code == code if code else False
+            stmt = stmt.where(or_(func.lower(Plant.plant_name).like(like), func.lower(Plant.site_code).like(like), code_match, func.lower(func.coalesce(Plant.project_company, "")).like(like)))
         if district: stmt = stmt.where(Plant.district == district)
         if project: stmt = stmt.where(Plant.project_company == project)
         if engineer: stmt = stmt.where(Plant.assigned_engineer == engineer)
         return list(self.db.scalars(stmt.order_by(Plant.site_code).offset(offset).limit(limit)))
 
     def by_id(self, plant_id): return self.db.get(Plant, plant_id)
-    def by_site_code(self, site_code: str): return self.db.scalar(select(Plant).where(Plant.site_code == site_code))
+    def by_site_code(self, site_code: str): return find_plant_by_code(self.db, site_code)
 
     def add(self, plant: Plant):
         self.db.add(plant); self.db.commit(); self.db.refresh(plant); return plant
@@ -98,4 +101,3 @@ class EquipmentRepository:
     def add(self, row): self.db.add(row); self.db.commit(); self.db.refresh(row); return row
     def save(self, row): self.db.add(row); self.db.commit(); self.db.refresh(row); return row
     def delete(self,row): self.db.delete(row); self.db.commit()
-

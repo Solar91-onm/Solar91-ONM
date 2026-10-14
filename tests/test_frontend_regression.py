@@ -127,3 +127,34 @@ def test_plant_list_aggregates_issue_stats_once_per_issue_and_preserves_filters(
     ''')
     run=subprocess.run(['node','-e',script],cwd=ROOT,capture_output=True,text=True,timeout=10)
     assert run.returncode==0,run.stderr
+
+def test_plant_code_normalization_and_embedded_seed_codes_are_canonical():
+      script=textwrap.dedent(r'''
+        const fs=require('fs'),vm=require('vm'),assert=require('assert');
+        const source=fs.readFileSync('frontend/static/js/00-auth-data-and-imports.js','utf8');
+        function sourceFunction(name){const start=source.indexOf('function '+name+'(');assert(start>=0,name);
+          let i=source.indexOf('{',start),depth=0;
+          for(let j=i;j<source.length;j++){if(source[j]==='{')depth++;else if(source[j]==='}'&&--depth===0)return source.slice(start,j+1)}
+          throw Error('no function body: '+name)}
+        const sandbox={String,Array};
+        vm.createContext(sandbox);
+        vm.runInContext('const PLANT_MATCH_KEY="id";const PLANT_CODE_ALIASES={"KHO01":"KH001"};'+
+          sourceFunction('normalizeSiteCode')+sourceFunction('plantIndexByCode')+
+          sourceFunction('resolvePlantByCode'),sandbox);
+        for(const [input,expected] of [['abh_01','ABH01'],['KRN_01','KRN01'],
+          ['KH0_01','KH001'],['KHO01','KH001'],['ABO01','ABO01'],['AB001','AB001']])
+          assert.strictEqual(sandbox.normalizeSiteCode(input),expected);
+        const plants=[{id:'KH001'},{id:'ABO01'},{id:'AB001'}];
+        const index=sandbox.plantIndexByCode(plants);
+        assert.strictEqual(sandbox.resolvePlantByCode('KHO01',index).id,'KH001');
+        assert.notStrictEqual(sandbox.resolvePlantByCode('ABO01',index).id,
+          sandbox.resolvePlantByCode('AB001',index).id);
+        const codes=Array.from(source.matchAll(/"siteCode"\s*:\s*"([^"]+)"/g),match=>match[1]);
+        assert(codes.length>0,'embedded plant seeds should be present');
+        assert(codes.every(code=>code===sandbox.normalizeSiteCode(code)),
+          'all embedded siteCode seed values should already be canonical');
+        const legacy=JSON.parse(fs.readFileSync('scripts/legacy_plants.json','utf8'));
+        assert(legacy.every(plant=>plant.siteCode===sandbox.normalizeSiteCode(plant.siteCode)));
+      ''')
+      run=subprocess.run(['node','-e',script],cwd=ROOT,capture_output=True,text=True,timeout=10)
+      assert run.returncode==0,run.stderr

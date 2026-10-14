@@ -5,9 +5,10 @@ from datetime import date, datetime
 from typing import Any
 
 from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Index, Integer, JSON, Numeric, String, Text, UniqueConstraint, func, text
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, validates
 
 from app.core.database import Base
+from app.plants.codes import normalize_site_code
 
 
 def uuid_pk() -> Mapped[uuid.UUID]:
@@ -53,6 +54,13 @@ class Plant(Base, TimestampMixin):
     custom_fields: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     legacy_payload: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     created_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+
+    @validates("site_code")
+    def _canonicalize_site_code(self, _key: str, value: str) -> str:
+        code = normalize_site_code(value)
+        if not code:
+            raise ValueError("site_code must contain at least one letter or digit")
+        return code
 
 
 class UserPlantAssignment(Base):

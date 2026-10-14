@@ -5,6 +5,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.models import AuditLog, Equipment, Plant, User
+from app.plants.codes import find_plant_by_code, normalize_site_code
 from app.plants.repository import EquipmentRepository, PlantRepository
 from app.plants.schemas import EquipmentBulkCreate, EquipmentCreate, EquipmentUpdate, PlantCreate, PlantUpdate
 
@@ -13,7 +14,11 @@ class PlantService:
     def __init__(self, db: Session): self.db=db; self.repo=PlantRepository(db)
 
     def create(self, data: PlantCreate, user: User):
-        row = Plant(**data.model_dump(), source="api", created_by=user.id, legacy_payload={})
+        values = data.model_dump()
+        values["site_code"] = normalize_site_code(values["site_code"])
+        if find_plant_by_code(self.db, values["site_code"]):
+            raise HTTPException(409, "A plant with this site code already exists")
+        row = Plant(**values, source="api", created_by=user.id, legacy_payload={})
         try: return self.repo.add(row)
         except IntegrityError as exc:
             self.db.rollback(); raise HTTPException(409, "A plant with this site code already exists") from exc
@@ -155,4 +160,3 @@ class EquipmentService:
         before=self._snapshot(row)
         self._audit(user,"Permanently deleted equipment",row,before=before,after=None)
         self.db.delete(row); self.db.commit()
-

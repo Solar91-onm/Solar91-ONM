@@ -14,6 +14,7 @@ from app.core.config import get_settings
 from app.core.database import get_db
 from app.core.models import AuditLog, Equipment, Issue, OMTask, PMAlertLog, PMDueChange, PMFollowUp, Plant, User, WashingHistory, WashingTable, WashingConfig, Permit, StateRevision
 from app.core.security import WASHING_TYPE, equipment_scope_matches, get_current_user, require_csrf, require_permission, user_scoped_plant_ids, resolve_equipment_id
+from app.plants.codes import find_plant_by_code, normalize_site_code
 from app.pmplan.units import distribute, next_cycle_id
 from app.scheduled.schemas import PMFollowUpCreate, ProblemTaskCreate, TaskCompletion, TaskIssueLink, TaskReassign, TaskScheduleEdit, TaskUnitPlanEdit, WashingCycleDateRequest, WashingDailyReportRequest, WashingReportReviewRequest, WashingReportUpdateRequest, WashingSetupRequest
 from app.storage.service import SupabaseStorage
@@ -35,7 +36,9 @@ def _plant(db: Session, value: str) -> Plant:
     except Exception:
         row = None
     if not row:
-        row = db.scalar(select(Plant).where((Plant.site_code == value) | (Plant.plant_name == value)))
+        row = find_plant_by_code(db, value)
+    if not row:
+        row = db.scalar(select(Plant).where(func.lower(Plant.plant_name) == value.casefold()))
     if not row:
         raise HTTPException(404, "Plant not found")
     return row
@@ -1067,7 +1070,7 @@ def _wash_plant(db: Session, value) -> Plant:
     if not row:
         key = _wkey(ref)
         for cand in db.scalars(select(Plant)):
-            if _wkey(cand.plant_name) == key or _wkey(cand.site_code) == key:
+            if _wkey(cand.plant_name) == key or normalize_site_code(ref) == normalize_site_code(cand.site_code):
                 row = cand
                 break
     if not row:
@@ -1194,16 +1197,20 @@ def move_washing_tables(payload: dict, db: Annotated[Session, Depends(get_db)], 
     if "from_plant" not in payload:
         raise HTTPException(422, "from_plant is required")
     src_key = _wkey(src_text)  # blank = tables that were saved without any plant
+    src_code = normalize_site_code(src_text)
     src_plant = None
     for cand in db.scalars(select(Plant)):
-        if _wkey(cand.plant_name) == src_key or _wkey(cand.site_code) == src_key:
+        if _wkey(cand.plant_name) == src_key or (src_code and normalize_site_code(cand.site_code) == src_code):
             src_plant = cand
             break
     moving = []
     for w in db.scalars(select(WashingTable)):
         if src_plant is not None and w.plant_id == src_plant.id:
             moving.append(w)
-        elif w.plant_id is None and _wkey((w.legacy_payload or {}).get("plant")) == src_key:
+        elif w.plant_id is None and (
+            _wkey((w.legacy_payload or {}).get("plant")) == src_key
+            or (src_code and normalize_site_code((w.legacy_payload or {}).get("plant")) == src_code)
+        ):
             moving.append(w)
     if not moving:
         raise HTTPException(404, "No washing tables found under that plant")

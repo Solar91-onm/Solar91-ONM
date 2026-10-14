@@ -16,6 +16,7 @@ from app.core.config import get_settings
 from app.core.database import get_db
 from app.core.models import AuditLog, Equipment, Plant, User, UserEquipmentAssignment, UserEquipmentTypeAssignment, UserPlantAssignment
 from app.core.security import require_csrf, require_permission
+from app.plants.codes import normalize_site_code, plant_code_index
 from app.users.router import PORTFOLIO_ROLES, _active_head_count, out
 
 from app.notifications.mailer import send_invite_email
@@ -56,7 +57,7 @@ class InviteIn(BaseModel):
 
 
 def _norm_code(value) -> str:
-    return "".join(ch for ch in str(value or "").split("(", 1)[0].upper() if ch.isalnum())
+    return normalize_site_code(str(value or "").split("(", 1)[0])
 
 
 def _tokens(value) -> list[str]:
@@ -70,7 +71,7 @@ def _role(value) -> str | None:
 
 def _plant_index(db: Session):
     rows = list(db.scalars(select(Plant)))
-    return {_norm_code(p.site_code): p for p in rows}, {p.plant_name.strip().lower(): p for p in rows}
+    return plant_code_index(rows), {p.plant_name.strip().lower(): p for p in rows}
 
 
 def _resolve_plants(tokens: list[str], index) -> list:

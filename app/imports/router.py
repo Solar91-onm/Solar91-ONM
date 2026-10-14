@@ -10,6 +10,7 @@ from app.core.config import get_settings
 from app.core.database import get_db
 from app.core.models import Plant, User
 from app.core.security import require_csrf, require_permission
+from app.plants.codes import normalize_site_code, plant_code_index
 
 router=APIRouter(prefix="/api/imports",tags=["Data / Imports"])
 settings=get_settings()
@@ -52,20 +53,28 @@ async def import_plants(file:UploadFile=File(...),db:Session=Depends(get_db),use
             if h in aliases: mapping[field]=i; break
     if "site_code" not in mapping: raise HTTPException(422,detail={"message":"Missing required column","required":["Site Code"],"found":headers})
     created=updated=0; errors=[]; seen=set()
+    existing_by_code=plant_code_index(db.scalars(select(Plant)))
     for idx,row in enumerate(rows,start=2):
         def val(k): return row[mapping[k]] if k in mapping and mapping[k]<len(row) else None
-        site=str(val("site_code") or "").strip(); name=str(val("plant_name") or "").strip()
-        if not site and not name: continue
-        if not site: errors.append({"row":idx,"error":"Site Code is required"}); continue
-        key=site.upper()
+        raw_site=str(val("site_code") or "").strip(); name=str(val("plant_name") or "").strip()
+        if not raw_site and not name: continue
+        if not raw_site: errors.append({"row":idx,"error":"Site Code is required"}); continue
+        site=normalize_site_code(raw_site)
+        if not site:
+            errors.append({"row":idx,"site_code":raw_site,"error":"Site Code must contain letters or digits"}); continue
+        key=site
         if key in seen: errors.append({"row":idx,"site_code":site,"error":"Duplicate Site Code in workbook"}); continue
         seen.add(key)
         lat=parse_float(val("latitude")); lon=parse_float(val("longitude"))
         if lat is not None and not -90<=lat<=90: errors.append({"row":idx,"site_code":site,"error":"Invalid latitude"}); continue
         if lon is not None and not -180<=lon<=180: errors.append({"row":idx,"site_code":site,"error":"Invalid longitude"}); continue
-        p=db.scalar(select(Plant).where(Plant.site_code==site)); is_new=p is None
+        p=existing_by_code.get(site); is_new=p is None
         if not p and not name: errors.append({"row":idx,"site_code":site,"error":"Plant Name is required for a new plant"}); continue
-        if not p: p=Plant(site_code=site,plant_name=name,source="excel-import",created_by=user.id)
+        if not p:
+            p=Plant(site_code=site,plant_name=name,source="excel-import",created_by=user.id)
+            existing_by_code[site]=p
+        else:
+            p.site_code=site
         if name: p.plant_name=name; p.project_company=str(val("project_company") or "").strip() or None; p.district=str(val("district") or "").strip() or None; p.discom=str(val("discom") or "").strip() or None; p.location=str(val("location") or "").strip() or None; p.dc_capacity_kw=parse_float(val("dc_capacity_kw")); p.ac_capacity_kw=parse_float(val("ac_capacity_kw")); p.commissioned_on=parse_date(val("commissioned_on")); p.latitude=lat; p.longitude=lon
         db.add(p); created+=int(is_new); updated+=int(not is_new)
     db.commit(); return {"filename":file.filename,"created":created,"updated":updated,"invalid_rows":errors,"mapped_columns":mapping}
@@ -76,13 +85,6 @@ LOCATION_ALIASES = {
     "latitude": {"latitude", "lat"},
     "longitude": {"longitude", "lon", "lng", "long"},
 }
-LOCATION_CODE_ALIASES = {"KHO01": "KH001"}
-
-
-def normalize_site_code(value) -> str:
-    return "".join(ch for ch in str(value or "").strip().upper() if ch.isalnum())
-
-
 def extract_site_code(value) -> str:
     text = str(value or "").strip()
     return text.split("(", 1)[0].strip()
@@ -131,7 +133,7 @@ async def import_locations(
         raise HTTPException(422, detail={"message": "Missing required location columns", "required": missing, "found": headers})
 
     plants = list(db.scalars(select(Plant)))
-    by_norm = {normalize_site_code(p.site_code): p for p in plants}
+    by_norm = plant_code_index(plants)
     updated = 0
     unmatched: list[str] = []
     invalid: list[dict] = []
@@ -147,7 +149,6 @@ async def import_locations(
         if not label:
             continue
         code = normalize_site_code(extract_site_code(label))
-        code = LOCATION_CODE_ALIASES.get(code, code)
         lat = parse_float(cell("latitude")); lon = parse_float(cell("longitude"))
         if cell("latitude") in (None, "") and cell("longitude") in (None, ""):
             continue

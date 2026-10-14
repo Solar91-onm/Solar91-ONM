@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from app.core.models import AuditLog, Plant, User, UserPlantAssignment, WashingConfig, WashingDailyReport, WashingHistory, WashingTable
 from app.core.security import WASHING_TYPE, user_scoped_plant_ids
+from app.plants.codes import find_plant_by_code, normalize_site_code, plant_code_index
 from app.scheduled.washing_cycles import (
     _ensure_washing_assignee,
     _is_washing_manager,
@@ -200,7 +201,7 @@ def _cell(row: dict[str, Any], header: str) -> str:
 
 
 def _plant_for_site(db: Session, site_code: str) -> Plant | None:
-    return db.scalar(select(Plant).where(func.lower(Plant.site_code) == site_code.casefold()))
+    return find_plant_by_code(db, site_code)
 
 
 def _reduction_problem(db: Session, plant: Plant, current: int, wanted: int) -> str | None:
@@ -221,7 +222,7 @@ def _reduction_problem(db: Session, plant: Plant, current: int, wanted: int) -> 
 def import_setup(db: Session, user: User, filename: str, content: bytes, *, dry_run: bool) -> dict[str, Any]:
     _require_manager(db, user)
     _headers, rows = _read_rows(filename, content)
-    plants = {p.site_code.casefold(): p for p in db.scalars(select(Plant))}
+    plants = plant_code_index(db.scalars(select(Plant)))
     configs = _configured_rows(db, list(plants.values()))
     used: set[str] = set()
     prepared: list[dict[str, Any]] = []
@@ -231,7 +232,7 @@ def import_setup(db: Session, user: User, filename: str, content: bytes, *, dry_
             continue
         errors: list[str] = []
         site_code = _cell(row, "Site code")
-        key = site_code.casefold()
+        key = normalize_site_code(site_code)
         if not site_code:
             errors.append("Site code is required")
         elif key not in plants:
