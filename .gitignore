@@ -22,3 +22,24 @@ loadtests/results/
 *.swp
 pytest.out
 pytest-output.txt
+
+# Local secrets and environment files
+.env
+.env.*
+!.env.example
+!.env.sample
+
+# Local development and generated files
+.venv/
+venv/
+__pycache__/
+.pytest_cache/
+node_modules/
+
+# Private keys and local databases
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa
+id_ed25519
