@@ -70,8 +70,9 @@ async def lifespan(app: FastAPI):
             task.cancel()
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
-        from app.core.database import engine
-        engine.dispose()
+        if settings.app_env != "test":
+            from app.core.database import engine
+            engine.dispose()
 
 app=FastAPI(
     title="Solar91 O&M Command Center API",
