@@ -997,7 +997,7 @@ function renderIssues(){
  const STAT=["Open","Assigned","Acknowledged","In Progress","Pending Vendor","Resolved","Closed"];
  const AGES=["0–1 days","2–3 days","4–7 days","8–14 days","15+ days"];
  const chips=[["all","All"],["Critical","Critical"],["Overdue","Overdue"],["Unassigned","Unassigned"],["Today","Today"],["Mine","My Issues"]];
- const sel=(k,opts,w)=>'<select class="sel" style="width:'+w+'px" onchange="S.issF.'+k+'=this.value;if(\''+k+'\'===\'status\')S.issF.bucket=\'all\';S.tablePages.issues=1;render()">'+opts.map(([v,l])=>'<option value="'+esc(v)+'"'+(String(f[k])===String(v)?" selected":"")+'>'+esc(l)+'</option>').join("")+'</select>';
+ const sel=(k,opts,w)=>'<select id="issue-filter-'+k+'" class="sel" style="width:'+w+'px" onchange="S.issF.'+k+'=this.value;if(\''+k+'\'===\'status\')S.issF.bucket=\'all\';S.tablePages.issues=1;render()">'+opts.map(([v,l])=>'<option value="'+esc(v)+'"'+(String(f[k])===String(v)?" selected":"")+'>'+esc(l)+'</option>').join("")+'</select>';
  const sorted=filtered.slice().sort((a,b)=>f.sort==="created"?String(b.created).localeCompare(String(a.created)):f.sort==="severity"?(SEV_RANK[a.severity]??9)-(SEV_RANK[b.severity]??9):f.sort==="age"?issueAgeDays(b)-issueAgeDays(a):new Date(a.etc)-new Date(b.etc));
  const issueRows=pageRows("issues",sorted,LIST_SIZE);
  const days=S.trendDays||10;
@@ -1028,22 +1028,22 @@ function renderIssues(){
  h+='<div class="panel filter-panel oi-filter-panel" style="padding:12px 14px">'+
   '<div class="oi-quick-filters"><span class="kpi-label">QUICK FILTERS</span>'+chips.map(([id,l])=>'<button class="pill sev-pill'+(f.chip===id?" active":"")+'" data-act="chip" data-id="'+id+'">'+l+'</button>').join("")+'<button class="btn o sm" onclick="S.issF=blankIssF();S.tablePages.issues=1;render()">Clear filters</button></div>'+
   '<div class="row wrap" style="gap:8px;align-items:flex-end">'+
-  '<div class="field oi-search-field" style="min-width:230px;flex:2"><span class="lbl">Search issues</span><div class="oi-search"><span aria-hidden="true">⌕</span><input class="inp" aria-label="Search issues" value="'+esc(f.q)+'" placeholder="Ticket, plant, maker, description…" oninput="S.issF.q=this.value;S.tablePages.issues=1;renderSoon()"/></div></div>'+
-  '<div class="field"><span class="lbl">Plant</span>'+sel("plant",[["all","All plants"]].concat(S.plants.map(p=>[p.name,p.name])))+'</div>'+
-  '<div class="field"><span class="lbl">Priority</span>'+sel("sev",[["all","All priority"]].concat(SEV.map(s=>[s,s])))+'</div>'+
-  '<div class="field"><span class="lbl">Status</span>'+sel("status",[["all","All statuses"]].concat(STAT.map(s=>[s,s])))+'</div>'+
-  '<div class="field"><span class="lbl">Assignee</span>'+sel("assignee",[["all","All assignees"],["Unassigned","Unassigned"]].concat(people.map(s=>[s,s])))+'</div>'+
+  '<div class="field oi-search-field" style="min-width:230px;flex:2"><label class="lbl" for="issue-filter-search">Search issues</label><div class="oi-search"><span aria-hidden="true">⌕</span><input id="issue-filter-search" name="issue_search" class="inp" aria-label="Search issues" value="'+esc(f.q)+'" placeholder="Ticket, plant, maker, description…" oninput="S.issF.q=this.value;S.tablePages.issues=1;renderSoon()"/></div></div>'+
+  '<div class="field"><label class="lbl" for="issue-filter-plant">Plant</label>'+sel("plant",[["all","All plants"]].concat(S.plants.map(p=>[p.name,p.name])))+'</div>'+
+  '<div class="field"><label class="lbl" for="issue-filter-sev">Priority</label>'+sel("sev",[["all","All priority"]].concat(SEV.map(s=>[s,s])))+'</div>'+
+  '<div class="field"><label class="lbl" for="issue-filter-status">Status</label>'+sel("status",[["all","All statuses"]].concat(STAT.map(s=>[s,s])))+'</div>'+
+  '<div class="field"><label class="lbl" for="issue-filter-assignee">Assignee</label>'+sel("assignee",[["all","All assignees"],["Unassigned","Unassigned"]].concat(people.map(s=>[s,s])))+'</div>'+
   '<button class="btn o sm" style="margin-bottom:1px" onclick="S.issMore=!S.issMore;render()">'+(advOpen?"Hide extra filters":"More filters"+(advCount?" ("+advCount+")":""))+' '+I.chev(12)+'</button>'+
   '</div>'+
   (advOpen?'<div class="row wrap" style="gap:8px;align-items:flex-end;margin-top:10px;padding-top:10px;border-top:1px dashed var(--border)">'+
-  '<div class="field"><span class="lbl">Site code</span>'+sel("site",[["all","All sites"]].concat(sites.map(s=>[s,s])))+'</div>'+
-  '<div class="field"><span class="lbl">Project</span>'+sel("project",[["all","All projects"]].concat(projs.map(s=>[s,s])))+'</div>'+
-  (makers.length?'<div class="field"><span class="lbl">Maker</span>'+sel("maker",[["all","All makers"]].concat(makers.map(s=>[s,s])))+'</div>':'')+
-  (equips.length?'<div class="field"><span class="lbl">Equipment</span>'+sel("equip",[["all","All equipment"]].concat(equips.map(s=>[s,s])))+'</div>':'')+
-  '<div class="field"><span class="lbl">Issue type</span>'+sel("vert",[["all","All types"]].concat(VERTICALS.map(v=>[v,v])))+'</div>'+
-  '<div class="field"><span class="lbl">Aging</span>'+sel("aging",[["all","All aging"]].concat(AGES.map(s=>[s,s])))+'</div>'+
-  '<div class="field"><span class="lbl">Occurred from</span><input type="date" class="inp" style="width:145px" value="'+esc(f.from)+'" onchange="S.issF.from=this.value;S.tablePages.issues=1;render()"/></div>'+
-  '<div class="field"><span class="lbl">to</span><input type="date" class="inp" style="width:145px" value="'+esc(f.to)+'" onchange="S.issF.to=this.value;S.tablePages.issues=1;render()"/></div>'+
+  '<div class="field"><label class="lbl" for="issue-filter-site">Site code</label>'+sel("site",[["all","All sites"]].concat(sites.map(s=>[s,s])))+'</div>'+
+  '<div class="field"><label class="lbl" for="issue-filter-project">Project</label>'+sel("project",[["all","All projects"]].concat(projs.map(s=>[s,s])))+'</div>'+
+  (makers.length?'<div class="field"><label class="lbl" for="issue-filter-maker">Maker</label>'+sel("maker",[["all","All makers"]].concat(makers.map(s=>[s,s])))+'</div>':'')+
+  (equips.length?'<div class="field"><label class="lbl" for="issue-filter-equip">Equipment</label>'+sel("equip",[["all","All equipment"]].concat(equips.map(s=>[s,s])))+'</div>':'')+
+  '<div class="field"><label class="lbl" for="issue-filter-vert">Issue type</label>'+sel("vert",[["all","All types"]].concat(VERTICALS.map(v=>[v,v])))+'</div>'+
+  '<div class="field"><label class="lbl" for="issue-filter-aging">Aging</label>'+sel("aging",[["all","All aging"]].concat(AGES.map(s=>[s,s])))+'</div>'+
+  '<div class="field"><label class="lbl" for="issue-filter-from">Occurred from</label><input id="issue-filter-from" name="occurred_from" type="date" class="inp" style="width:145px" value="'+esc(f.from)+'" onchange="S.issF.from=this.value;S.tablePages.issues=1;render()"/></div>'+
+  '<div class="field"><label class="lbl" for="issue-filter-to">Occurred to</label><input id="issue-filter-to" name="occurred_to" type="date" class="inp" style="width:145px" value="'+esc(f.to)+'" onchange="S.issF.to=this.value;S.tablePages.issues=1;render()"/></div>'+
   '</div>':'')+
   '</div>';
  /* Triage queue: urgent site-engineer issues that still need an owner (frontend only; same ticket data as the Assign dialog) */

@@ -109,14 +109,14 @@ def main():
                 print("PASS: real browser loads authenticated dashboard")
                 # Create plant via actual HTTP API (no fake register state); reload to verify persistence.
                 plant=page.evaluate('''async()=>{const r=await apiFetch("/api/plants",{method:"POST",body:{site_code:"BROWSER-01",plant_name:"Browser QA Solar Plant",district:"Jaipur"}});return r;}''')
-                assert plant["site_code"]=="BROWSER-01",plant
+                assert plant["site_code"]=="BROWSER01",plant
                 edited=page.evaluate('''async id=>await apiFetch("/api/plants/"+id,{method:"PATCH",body:{district:"Ajmer"}})''',plant["id"])
                 assert edited["district"]=="Ajmer",edited
                 equipment=page.evaluate('''async id=>await apiFetch("/api/equipment",{method:"POST",body:{plant_id:id,equipment_name:"QA Inverter 1",equipment_code:"INV-E2E",equipment_type:"Inverter"}})''',plant["id"])
                 assert equipment["equipment_code"]=="INV-E2E",equipment
                 load();page.wait_for_selector(".shell",timeout=20000)
-                assert page.evaluate('S.plants.some(p=>p.id==="BROWSER-01")')
-                assert page.evaluate('S.plants.find(p=>p.id==="BROWSER-01").district')=="Ajmer"
+                assert page.evaluate('S.plants.some(p=>p.id==="BROWSER01")')
+                assert page.evaluate('S.plants.find(p=>p.id==="BROWSER01").district')=="Ajmer"
                 page.evaluate('goView("plants")')
                 page.wait_for_selector(".shell",timeout=10000)
                 assert "Browser QA Solar Plant" in page.locator("#app").inner_text()
@@ -124,10 +124,14 @@ def main():
                 page.evaluate('goTab("issues")')
                 page.wait_for_selector(".si-head",timeout=12000)
                 assert "Site Issues" in page.locator("#app").inner_text()
+                assert page.locator('select[aria-label="Plant"]').count()==1
+                page.locator(".si-more").click()
+                assert page.locator('select[aria-label="Status"]').count()==1
+                assert page.locator("#issue-filter-from").count()==1
                 assert page.evaluate('issueTrendRows(30,[],"0002-10-12","2100-01-01").length')<=366
                 # Route used by the actual HTML UI; no backend mocking.
                 page.evaluate('openModal("newTicket")')
-                page.locator("#tk-plant").select_option(label="BROWSER-01")
+                page.locator("#tk-plant").select_option(label="BROWSER01")
                 page.locator('.wiz-ticket[data-step="1"] button').click()
                 assert page.locator('.wiz-ticket[data-step="2"]').is_visible(),"Step 2 did not open"
                 page.locator("#tk-vert").select_option("Inverter")

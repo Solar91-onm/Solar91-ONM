@@ -102,7 +102,12 @@ def test_frontend_contains_planned_maintenance_hub_and_washing_submodule(client)
     assert 'Operations overview' in html
     assert 'Unplanned · Site Issues' in html
     assert 'Planned · Preventive Maintenance' in html
-    assert 'aria-label="Filter dashboard by equipment"' in html
+    dashboard_script = '/static/js/08-actions-exports-and-submission.js'
+    assert dashboard_script in html
+    dashboard = client.get(dashboard_script)
+    assert dashboard.status_code == 200
+    assert 'aria-label="Filter dashboard by equipment"' in dashboard.text
+    assert 'setDashboardEquipmentFilter(this.value)' in dashboard.text
     assert 'cc-ops-overview' in html
     assert 'Scheduled O&amp;M' not in html
     assert 'link("scheduled","Scheduled O&amp;M"' not in html

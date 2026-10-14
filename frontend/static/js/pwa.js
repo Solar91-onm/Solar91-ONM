@@ -1,5 +1,5 @@
 "use strict";
-if('serviceWorker' in navigator){window.addEventListener('load',()=>navigator.serviceWorker.register('/sw.js').catch(()=>{}));}
+if('serviceWorker' in navigator){window.addEventListener('load',()=>navigator.serviceWorker.register('/sw.js').catch(error=>console.warn('Solar91 service worker registration failed; offline navigation fallback is unavailable.',error)));}
 let _installEvt=null;const _ib=document.getElementById('installApp');const _installHelp=document.getElementById('installHelp');
 function showInstallHelp(message){
   document.getElementById('installHelpMessage').textContent=message;

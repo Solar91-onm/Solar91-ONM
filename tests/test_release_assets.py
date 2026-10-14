@@ -19,3 +19,12 @@ def test_homepage_does_not_embed_production_tokens():
     assert 'SUPABASE_SERVICE_ROLE_KEY' not in page
     assert 'database_url' not in page.lower()
     assert 'document.cookie' not in (ROOT/'frontend/static/js/00-loop-guard.js').read_text()
+
+def test_boot_splash_has_no_empty_form_label():
+    page=(ROOT/'frontend/templates/index.html').read_text(encoding='utf8')
+    assert '<label aria-label="Filter dashboard by equipment"></label>' not in page
+
+def test_signin_fields_have_autofill_metadata_and_names():
+    auth=(ROOT/'frontend/static/js/00-auth-data-and-imports.js').read_text(encoding='utf8')
+    assert 'id="supabase-email" name="email" type="email" autocomplete="email"' in auth
+    assert 'id="supabase-password" name="password" type="password" autocomplete="current-password"' in auth

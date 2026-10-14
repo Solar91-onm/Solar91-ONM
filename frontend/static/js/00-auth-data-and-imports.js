@@ -50,8 +50,8 @@ function showSupabaseSignIn(errorMessage){
         '<h2 class="s91-title">O&amp;M Command Center</h2>'+
         '<p class="s91-sub">Sign in with the email your O&amp;M Head added</p>'+
         '<div class="s91-glow"><form id="supabase-sign-in" style="display:grid;gap:12px;background:#fff;padding:20px;border:1px solid #E4E9E6;border-radius:14px">'+
-          '<label style="display:grid;gap:5px;font-size:12px;font-weight:600">Email<input id="supabase-email" type="email" autocomplete="username" required style="padding:11px;border:1px solid #D7DFD9;border-radius:8px"></label>'+
-          '<label style="display:grid;gap:5px;font-size:12px;font-weight:600">Password<input id="supabase-password" type="password" autocomplete="current-password" required style="padding:11px;border:1px solid #D7DFD9;border-radius:8px"></label>'+
+          '<label style="display:grid;gap:5px;font-size:12px;font-weight:600">Email<input id="supabase-email" name="email" type="email" autocomplete="email" required style="padding:11px;border:1px solid #D7DFD9;border-radius:8px"></label>'+
+          '<label style="display:grid;gap:5px;font-size:12px;font-weight:600">Password<input id="supabase-password" name="password" type="password" autocomplete="current-password" required style="padding:11px;border:1px solid #D7DFD9;border-radius:8px"></label>'+
           '<p id="supabase-auth-error" role="alert" style="margin:0;color:#B42318;font-size:12px">'+esc(errorMessage||"")+'</p>'+
           '<button id="supabase-submit" type="submit" style="padding:11px;border:0;border-radius:8px;background:#16A34A;color:white;font-weight:700;cursor:pointer">Sign in</button>'+
         '</form></div>'+

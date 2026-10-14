@@ -7,6 +7,7 @@
  const AGEC={"0–1 days":"#3B82F6","2–3 days":"#0F9F8C","4–7 days":"#D97706","8–14 days":"#EA7B24","15+ days":"#DC4C3E"};
  const AGES=Object.keys(AGEC);
  const STAT=["Open","Assigned","Acknowledged","In Progress","Pending Vendor","Resolved","Closed"];
+ const FILTER_LABELS={plant:"Plant",site:"Site code",project:"Project",vert:"Issue type",equip:"Equipment",maker:"Maker",assignee:"Assignee",status:"Status",aging:"Age of issue"};
  const F=()=>{const f=Object.assign(blankIssF(),S.issF||{});S.issF=f;return f};
  const q=s=>String(s).replace(/\\/g,"\\\\").replace(/'/g,"\\'");
 
@@ -49,13 +50,13 @@
    '<button class="btn p oi-raise-button" onclick="openModal(\'newTicket\')">'+I.plus(14)+' Raise Issue</button></div></div>';
 
   /* ---- LAYER 1 · search + quick views (always visible, light) ---- */
-  const sel=(k,list,allLabel)=>'<select class="si-sel'+(f[k]!=="all"?" on":"")+'" aria-label="'+k+'" onchange="siSet({'+k+':this.value})"><option value="all">'+allLabel+'</option>'+list.map(([v,l])=>'<option value="'+esc(v)+'"'+(f[k]===v?" selected":"")+'>'+esc(l)+'</option>').join("")+'</select>';
+  const sel=(k,list,allLabel)=>'<select class="si-sel'+(f[k]!=="all"?" on":"")+'" aria-label="'+(FILTER_LABELS[k]||k)+'" onchange="siSet({'+k+':this.value})"><option value="all">'+allLabel+'</option>'+list.map(([v,l])=>'<option value="'+esc(v)+'"'+(f[k]===v?" selected":"")+'>'+esc(l)+'</option>').join("")+'</select>';
   const fld=(t,x)=>'<label class="si-f"><span>'+t+'</span>'+x+'</label>';
   const chip=(id,l,n)=>'<button type="button" class="si-chip'+(f.chip===id?" on":"")+'" onclick="'+(id==="all"?"siSet({chip:\'all\',queue:undefined})":"siChip(\'"+id+"\')")+'">'+l+'<b>'+n+'</b></button>';
   const sugg=[...new Set(all.map(t=>t.id).concat((S.plants||[]).map(p=>p.name),makers,equips,people))].slice(0,200);
   const nTags=[f.q,f.chip!=="all",f.plant!=="all",f.sev!=="all",f.status!=="all",f.assignee!=="all",f.bucket!=="all",f.sla&&f.sla!=="all"].filter(Boolean).length+advCount;
   h+='<div class="si-bar"><div class="si-row">'+
-   '<div class="si-search"><span class="ic">⌕</span><input id="si-q" list="si-sugg" autocomplete="off" aria-label="Search issues" value="'+esc(f.q)+'" placeholder="Search tickets, plants, makers, people…" oninput="siSearch(this)"/>'+
+   '<div class="si-search"><span class="ic">⌕</span><input id="si-q" name="issue_search" list="si-sugg" autocomplete="off" aria-label="Search issues" value="'+esc(f.q)+'" placeholder="Search tickets, plants, makers, people…" oninput="siSearch(this)"/>'+
    (f.q?'<button type="button" title="Clear search" onclick="document.getElementById(\'si-q\').value=\'\';siSearch(document.getElementById(\'si-q\'))">×</button>':'<kbd>/</kbd>')+
    '<datalist id="si-sugg">'+sugg.map(x=>'<option value="'+esc(x)+'">').join("")+'</datalist></div>'+
    sel("plant",(S.plants||[]).map(p=>[p.name,p.name]),"All plants")+
@@ -67,7 +68,7 @@
    '<div class="si-grp"><div class="gh"><i>📍</i>Where</div>'+fld("Site code",sel("site",sites.map(x=>[x,x]),"All sites"))+fld("Project",sel("project",projs.map(x=>[x,x]),"All projects"))+'</div>'+
    '<div class="si-grp"><div class="gh"><i>⚙</i>What</div>'+fld("Issue type",sel("vert",VERTICALS.map(v=>[v,v]),"All types"))+(equips.length?fld("Equipment",sel("equip",equips.map(x=>[x,x]),"All equipment")):"")+(makers.length?fld("Maker",sel("maker",makers.map(x=>[x,x]),"All makers")):"")+'</div>'+
    '<div class="si-grp"><div class="gh"><i>👤</i>Who & stage</div>'+fld("Assignee",sel("assignee",[["Unassigned","Unassigned"]].concat(people.map(x=>[x,x])),"Anyone"))+fld("Status",sel("status",STAT.map(x=>[x,x]),"Any status"))+'</div>'+
-   '<div class="si-grp"><div class="gh"><i>🗓</i>When</div>'+fld("Age of issue",sel("aging",AGES.map(x=>[x,x]),"Any age"))+'<div class="si-dates">'+fld("From",'<input type="date" value="'+esc(f.from)+'" onchange="siSet({from:this.value})"/>')+fld("To",'<input type="date" value="'+esc(f.to)+'" onchange="siSet({to:this.value})"/>')+'</div></div>'+
+   '<div class="si-grp"><div class="gh"><i>🗓</i>When</div>'+fld("Age of issue",sel("aging",AGES.map(x=>[x,x]),"Any age"))+'<div class="si-dates">'+fld("From",'<input id="issue-filter-from" name="occurred_from" type="date" value="'+esc(f.from)+'" onchange="siSet({from:this.value})"/>')+fld("To",'<input id="issue-filter-to" name="occurred_to" type="date" value="'+esc(f.to)+'" onchange="siSet({to:this.value})"/>')+'</div></div>'+
    '<div class="si-pfoot"><button type="button" class="si-clear" onclick="S.issF=blankIssF();S.tablePages.issues=1;render()">Reset all</button><button type="button" class="btn p sm" onclick="siMore()">Show '+filtered.length+' result'+(filtered.length===1?"":"s")+'</button></div></div>';
   /* active filter tags */
   const tags=[];const T=(l,reset)=>tags.push('<span class="si-tag">'+esc(l)+'<button type="button" title="Remove" onclick="siSet('+reset+')">×</button></span>');
