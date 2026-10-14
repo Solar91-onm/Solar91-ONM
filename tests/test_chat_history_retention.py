@@ -94,11 +94,28 @@ def test_assistant_history_keeps_entries_older_than_two_days():
         bounds = launch.bounding_box()
         page.mouse.move(bounds["x"] + bounds["width"] / 2, bounds["y"] + bounds["height"] / 2)
         page.mouse.down()
-        page.mouse.move(bounds["x"] + bounds["width"] / 2 - 180, bounds["y"] + bounds["height"] / 2 - 120, steps=5)
+        page.mouse.move(20, 20, steps=5)
         page.mouse.up()
         position = page.evaluate("JSON.parse(localStorage.getItem('s91-assistant-position-v1:history-user-a'))")
         assert position and position["left"] < bounds["x"]
         assert position["top"] < bounds["y"]
+        panel = page.locator(".s91-assistant-panel").bounding_box()
+        assert panel["x"] >= 0
+        assert panel["y"] >= 0
+        assert panel["x"] + panel["width"] <= 1280
+        assert panel["y"] + panel["height"] <= 900
+
+        bounds = launch.bounding_box()
+        page.mouse.move(bounds["x"] + bounds["width"] / 2, bounds["y"] + bounds["height"] / 2)
+        page.mouse.down()
+        page.mouse.move(1260, 880, steps=5)
+        page.mouse.up()
+        position = page.evaluate("JSON.parse(localStorage.getItem('s91-assistant-position-v1:history-user-a'))")
+        panel = page.locator(".s91-assistant-panel").bounding_box()
+        assert panel["x"] >= 0
+        assert panel["y"] >= 0
+        assert panel["x"] + panel["width"] <= 1280
+        assert panel["y"] + panel["height"] <= 900
 
         page.evaluate(
             """
@@ -120,7 +137,7 @@ def test_assistant_history_keeps_entries_older_than_two_days():
             """
         )
         restored = page.locator(".s91-assistant-launch").bounding_box()
-        assert restored["x"] < bounds["x"]
-        assert restored["y"] < bounds["y"]
+        assert abs(restored["x"] - position["left"]) < 1
+        assert abs(restored["y"] - position["top"]) < 1
 
         browser.close()

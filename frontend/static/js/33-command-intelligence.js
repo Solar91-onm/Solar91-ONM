@@ -35,6 +35,17 @@
   root.style.left=position.left+'px';root.style.top=position.top+'px';
   root.style.right='auto';root.style.bottom='auto';
  }
+ function positionAssistantPanel(root){
+  const panel=root.querySelector('.s91-assistant-panel');if(!panel)return;
+  panel.style.maxHeight='';
+  const bounds=root.getBoundingClientRect(),panelWidth=panel.offsetWidth,panelHeight=panel.offsetHeight,gap=18,margin=8;
+  panel.classList.toggle('s91-assistant-panel-left',bounds.right-panelWidth<margin);
+  const aboveSpace=bounds.top-gap,belowSpace=window.innerHeight-bounds.bottom-gap;
+  const below=aboveSpace<panelHeight&&belowSpace>aboveSpace;
+  const available=Math.max(0,below?belowSpace:aboveSpace);
+  panel.classList.toggle('s91-assistant-panel-below',below);
+  panel.style.maxHeight=Math.min(panelHeight,available)+'px';
+ }
  function syncAssistantUser(){
   const userId=assistantUserId();
   if(userId!==assistant.userId){
@@ -301,15 +312,7 @@
   const visible=hasAppState()&&allowedAssistantRoles.includes(role());
   root.innerHTML=visible?'<button class="s91-assistant-launch" data-s91-assist="toggle" aria-label="'+(assistant.open?'Close':'Open')+' operations answers" title="Drag to move · click to open"><span aria-hidden="true">⌕</span> Ask Solar91</button>'+(assistant.open?'<section class="s91-assistant-panel" role="region" aria-label="Solar91 operations answers"><header><div><span class="s91-eyebrow">LIVE SEARCH · OPTIONAL AI REASONING</span><h2>Ask Solar91</h2><small>Grounded in records your role can access · clickable sources</small></div><button type="button" data-s91-assist="close" aria-label="Close assistant">×</button></header><div class="s91-assistant-conversation" aria-live="polite"><div class="s91-assistant-msg bot">Ask about site problems, maintenance, panel washing, equipment IDs or due dates. I can show matching saved records and take you to the right register.</div>'+assistant.log.map(x=>'<div class="s91-assistant-msg '+x.who+'">'+esc91(x.text).replace(/\n/g,'<br>') +(x.action?'<button type="button" data-s91-assist-go="'+x.action.join(':')+'">Open filtered register ↗</button>':'')+(x.records?.length?'<div class="s91-assistant-sources"><b>Verified saved records</b>'+x.records.slice(0,8).map(r=>'<button type="button" data-s91-record-kind="'+esc91(r.module)+'" data-s91-record-id="'+esc91(r.id)+'" data-s91-record-plant="'+esc91(r.plant||'')+'"><span>'+esc91((r.module||'').toUpperCase())+' · '+esc91(r.id)+'</span><strong>'+esc91(r.title||r.equipment||'View record')+'</strong><small>'+esc91(r.plant)+(r.due?' · Due '+esc91(r.due):'')+'</small></button>').join('')+'</div>':'')+'</div>').join('')+(assistant.more?'<button type="button" data-s91-assist-more>Show more matching records ('+(assistant.more.total-assistant.more.offset)+' remaining)</button>':'')+'</div><div class="s91-assistant-suggestions">'+(role()==='Site Engineer'?['My plant','Open issues','PM overdue','Washing pending','Inverter issues','What is due today?']:['Open issues','Critical tickets','PM overdue','Washing pending','What is due today?','Find INV-01']).map(q=>'<button type="button" data-s91-question="'+q+'">'+q+'</button>').join('')+'</div><form id="s91-assistant-form"><input id="s91-assistant-query" maxlength="300" aria-label="Ask an operations question" placeholder="Ask about any plant, issue, equipment, or module…" autocomplete="off"><button type="submit">Search</button></form><p class="s91-assistant-disclaimer">Read-only answers. AI narration requires separate administrator opt-in; changes are always made in the actual module.</p></section>':''):'';
   applyAssistantPosition(root);
-  const panel=root.querySelector('.s91-assistant-panel');
-  if(panel){
-   const bounds=root.getBoundingClientRect(),panelWidth=panel.offsetWidth,panelHeight=panel.offsetHeight;
-   panel.classList.toggle('s91-assistant-panel-left',bounds.left+panelWidth>window.innerWidth-8);
-   const aboveSpace=bounds.top-18,belowSpace=window.innerHeight-bounds.bottom-18;
-   const below=aboveSpace<panelHeight&&belowSpace>aboveSpace;
-   panel.classList.toggle('s91-assistant-panel-below',below);
-   panel.style.maxHeight=Math.max(180,Math.min(panelHeight,below?belowSpace:aboveSpace))+'px';
-  }
+  positionAssistantPanel(root);
   const launch=root.querySelector('.s91-assistant-launch');
   if(launch)launch.addEventListener('pointerdown',startAssistantDrag);
   if(assistant.open){const c=root.querySelector('.s91-assistant-conversation');if(c)c.scrollTop=c.scrollHeight}
@@ -326,6 +329,7 @@
    moved=true;moveEvent.preventDefault();
    const position=clampAssistantPosition(start.left+dx,start.top+dy,root);
    root.style.left=position.left+'px';root.style.top=position.top+'px';root.style.right='auto';root.style.bottom='auto';
+   positionAssistantPanel(root);
   };
   const finish=finishEvent=>{
    if(finishEvent.pointerId!==event.pointerId)return;
