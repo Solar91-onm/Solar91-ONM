@@ -58,6 +58,8 @@ def test_asset_pages_no_longer_reference_work_radar(client, db):
     page=client.get('/').text
     assert '37-work-radar.js' not in page
     assert '37-work-radar.css' not in page
+    assert '36-field-desk.js' not in page
+    assert '36-field-desk.css' not in page
 
 
 def test_assistant_is_live_role_scoped_and_read_only(client, db, monkeypatch):
