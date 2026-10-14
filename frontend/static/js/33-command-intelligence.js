@@ -7,26 +7,65 @@
  const role=()=>hasAppState()?(S._roleLabel||S.currentRole||''):'', siteName=()=>role()==='Site Engineer'?S._sePlant||null:null;
  const authorized=(rows)=>{const site=siteName();return site?(rows||[]).filter(x=>x.plant===site):(rows||[])};
  const reportRole=()=>role()!=='Site Engineer';
- const assistantHistoryKey='s91-assistant-history-v1';
+ const assistantHistoryPrefix='s91-assistant-history-v1:';
+ const assistantPositionPrefix='s91-assistant-position-v1:';
  const assistantHistoryLimit=40;
+ const assistantUserId=()=>typeof AUTH_IDENTITY!=='undefined'&&AUTH_IDENTITY.userId?String(AUTH_IDENTITY.userId):'';
+ const assistantScopedKey=prefix=>{const userId=assistantUserId();return userId?prefix+encodeURIComponent(userId):''};
+ function loadAssistantPosition(){
+  try{
+   const key=assistantScopedKey(assistantPositionPrefix);if(!key)return null;
+   const value=JSON.parse(localStorage.getItem(key)||'null');
+   if(!value||!Number.isFinite(value.left)||!Number.isFinite(value.top))return null;
+   return{left:value.left,top:value.top};
+  }catch{return null}
+ }
+ function saveAssistantPosition(position){
+  try{const key=assistantScopedKey(assistantPositionPrefix);if(key)localStorage.setItem(key,JSON.stringify(position))}catch{}
+ }
+ function clampAssistantPosition(left,top,root){
+  const margin=8,maxLeft=Math.max(margin,window.innerWidth-root.offsetWidth-margin);
+  const maxTop=Math.max(margin,window.innerHeight-root.offsetHeight-margin);
+  return{left:Math.min(maxLeft,Math.max(margin,left)),top:Math.min(maxTop,Math.max(margin,top))};
+ }
+ function applyAssistantPosition(root){
+  if(!assistant.position){root.style.left='';root.style.top='';root.style.right='';root.style.bottom='';return}
+  const position=clampAssistantPosition(assistant.position.left,assistant.position.top,root);
+  assistant.position=position;
+  root.style.left=position.left+'px';root.style.top=position.top+'px';
+  root.style.right='auto';root.style.bottom='auto';
+ }
+ function syncAssistantUser(){
+  const userId=assistantUserId();
+  if(userId!==assistant.userId){
+   assistant.userId=userId;assistant.log=[];assistant.position=null;
+   assistant.more=null;assistant.lastQuery='';assistant.busy=false;assistant.historyLoaded=false;
+  }
+  if(!userId||!document.querySelector('#app .shell')){
+   assistant.log=[];assistant.position=null;assistant.historyLoaded=false;return;
+  }
+  if(!assistant.historyLoaded){
+   try{localStorage.removeItem('s91-assistant-history-v1')}catch{}
+   assistant.log=loadAssistantHistory();assistant.position=loadAssistantPosition();assistant.historyLoaded=true;
+  }
+ }
  // Keep recent chat history locally; do not age-prune it to prevent older valid
  // follow-up questions from disappearing after a two-day window.
  function loadAssistantHistory(){
   try{
-   const raw=localStorage.getItem(assistantHistoryKey);if(!raw)return[];
+   const key=assistantScopedKey(assistantHistoryPrefix);if(!key)return[];
+   const raw=localStorage.getItem(key);if(!raw)return[];
    const parsed=JSON.parse(raw);if(!Array.isArray(parsed))return[];
    return parsed.map(entry=>({who:entry?.who==='user'?'user':'bot',text:String(entry?.text||'').trim(),action:Array.isArray(entry?.action)?entry.action.slice(0,2).map(String):null,records:Array.isArray(entry?.records)?entry.records.slice(0,8):[],when:Number(entry?.when)||Date.now()})).filter(entry=>entry.text).slice(-assistantHistoryLimit);
   }catch{return[]}
  }
  function saveAssistantHistory(log){
   try{
-   if(!Array.isArray(log)||!log.length){localStorage.removeItem(assistantHistoryKey);return}
+   const key=assistantScopedKey(assistantHistoryPrefix);if(!key)return;
+   if(!Array.isArray(log)||!log.length){localStorage.removeItem(key);return}
    const next=log.slice(-assistantHistoryLimit).map(entry=>({who:entry?.who==='user'?'user':'bot',text:String(entry?.text||'').trim(),action:Array.isArray(entry?.action)?entry.action.slice(0,2).map(String):null,records:Array.isArray(entry?.records)?entry.records.slice(0,8):[],when:Number(entry?.when)||Date.now()})).filter(entry=>entry.text);
-   localStorage.setItem(assistantHistoryKey, JSON.stringify(next));
+   localStorage.setItem(key, JSON.stringify(next));
   }catch{}
- }
- function clearAssistantHistory(){
-  try{localStorage.removeItem(assistantHistoryKey)}catch{}
  }
  function destination(selector,label){
   let tries=0;
@@ -110,7 +149,7 @@
   if(e.target.closest('[data-s91-print-preview]')){window.print();return}
   if(e.target.closest('[data-s91-open-all-reports]')){document.getElementById('s91-report-root')?.remove();if(reportRole()){S.reportKind=previewState.kind;goView('reports');destination('.ops-report-table','Reports')}return}
  });
- const assistant={open:false,log:loadAssistantHistory(),more:null,lastQuery:'',busy:false};
+ const assistant={open:false,log:[],more:null,lastQuery:'',busy:false,userId:'',position:null,dragged:false,historyLoaded:false};
  const allowedAssistantRoles=['O&M Head','Assignee','Administration','Site Engineer'];
  const stopWords=new Set(('a an and are at by can current do for from give how i in is it me my of on or please show tell the their them there this to what where which with about all details find information records search status data list view want overdue overdues late open critical high medium low pending awaiting completed complete done resolved closed unassigned assigned active').split(' '));
  const moduleWords={
@@ -258,15 +297,51 @@
   return{msg,action};
  }
  function assistantRoot(){let root=document.getElementById('s91-assistant-root');if(!root){root=document.createElement('div');root.id='s91-assistant-root';document.body.append(root)}return root}
- function drawAssistant(){const root=assistantRoot();root.hidden=!document.querySelector('#app .shell');
+ function drawAssistant(){syncAssistantUser();const root=assistantRoot();root.hidden=!document.querySelector('#app .shell');
   const visible=hasAppState()&&allowedAssistantRoles.includes(role());
-  root.innerHTML=visible?'<button class="s91-assistant-launch" data-s91-assist="toggle" aria-label="'+(assistant.open?'Close':'Open')+' operations answers"><span aria-hidden="true">⌕</span> Ask Solar91</button>'+(assistant.open?'<section class="s91-assistant-panel" role="region" aria-label="Solar91 operations answers"><header><div><span class="s91-eyebrow">LIVE SEARCH · OPTIONAL AI REASONING</span><h2>Ask Solar91</h2><small>Grounded in records your role can access · clickable sources</small></div><button type="button" data-s91-assist="close" aria-label="Close assistant">×</button></header><div class="s91-assistant-conversation" aria-live="polite"><div class="s91-assistant-msg bot">Ask about site problems, maintenance, panel washing, equipment IDs or due dates. I can show matching saved records and take you to the right register.</div>'+assistant.log.map(x=>'<div class="s91-assistant-msg '+x.who+'">'+esc91(x.text).replace(/\n/g,'<br>') +(x.action?'<button type="button" data-s91-assist-go="'+x.action.join(':')+'">Open filtered register ↗</button>':'')+(x.records?.length?'<div class="s91-assistant-sources"><b>Verified saved records</b>'+x.records.slice(0,8).map(r=>'<button type="button" data-s91-record-kind="'+esc91(r.module)+'" data-s91-record-id="'+esc91(r.id)+'" data-s91-record-plant="'+esc91(r.plant||'')+'"><span>'+esc91((r.module||'').toUpperCase())+' · '+esc91(r.id)+'</span><strong>'+esc91(r.title||r.equipment||'View record')+'</strong><small>'+esc91(r.plant)+(r.due?' · Due '+esc91(r.due):'')+'</small></button>').join('')+'</div>':'')+'</div>').join('')+(assistant.more?'<button type="button" data-s91-assist-more>Show more matching records ('+(assistant.more.total-assistant.more.offset)+' remaining)</button>':'')+'</div><div class="s91-assistant-suggestions">'+(role()==='Site Engineer'?['My plant','Open issues','PM overdue','Washing pending','Inverter issues','What is due today?']:['Open issues','Critical tickets','PM overdue','Washing pending','What is due today?','Find INV-01']).map(q=>'<button type="button" data-s91-question="'+q+'">'+q+'</button>').join('')+'</div><form id="s91-assistant-form"><input id="s91-assistant-query" maxlength="300" aria-label="Ask an operations question" placeholder="Ask about any plant, issue, equipment, or module…" autocomplete="off"><button type="submit">Search</button></form><p class="s91-assistant-disclaimer">Read-only answers. AI narration requires separate administrator opt-in; changes are always made in the actual module.</p></section>':''):'';
+  root.innerHTML=visible?'<button class="s91-assistant-launch" data-s91-assist="toggle" aria-label="'+(assistant.open?'Close':'Open')+' operations answers" title="Drag to move · click to open"><span aria-hidden="true">⌕</span> Ask Solar91</button>'+(assistant.open?'<section class="s91-assistant-panel" role="region" aria-label="Solar91 operations answers"><header><div><span class="s91-eyebrow">LIVE SEARCH · OPTIONAL AI REASONING</span><h2>Ask Solar91</h2><small>Grounded in records your role can access · clickable sources</small></div><button type="button" data-s91-assist="close" aria-label="Close assistant">×</button></header><div class="s91-assistant-conversation" aria-live="polite"><div class="s91-assistant-msg bot">Ask about site problems, maintenance, panel washing, equipment IDs or due dates. I can show matching saved records and take you to the right register.</div>'+assistant.log.map(x=>'<div class="s91-assistant-msg '+x.who+'">'+esc91(x.text).replace(/\n/g,'<br>') +(x.action?'<button type="button" data-s91-assist-go="'+x.action.join(':')+'">Open filtered register ↗</button>':'')+(x.records?.length?'<div class="s91-assistant-sources"><b>Verified saved records</b>'+x.records.slice(0,8).map(r=>'<button type="button" data-s91-record-kind="'+esc91(r.module)+'" data-s91-record-id="'+esc91(r.id)+'" data-s91-record-plant="'+esc91(r.plant||'')+'"><span>'+esc91((r.module||'').toUpperCase())+' · '+esc91(r.id)+'</span><strong>'+esc91(r.title||r.equipment||'View record')+'</strong><small>'+esc91(r.plant)+(r.due?' · Due '+esc91(r.due):'')+'</small></button>').join('')+'</div>':'')+'</div>').join('')+(assistant.more?'<button type="button" data-s91-assist-more>Show more matching records ('+(assistant.more.total-assistant.more.offset)+' remaining)</button>':'')+'</div><div class="s91-assistant-suggestions">'+(role()==='Site Engineer'?['My plant','Open issues','PM overdue','Washing pending','Inverter issues','What is due today?']:['Open issues','Critical tickets','PM overdue','Washing pending','What is due today?','Find INV-01']).map(q=>'<button type="button" data-s91-question="'+q+'">'+q+'</button>').join('')+'</div><form id="s91-assistant-form"><input id="s91-assistant-query" maxlength="300" aria-label="Ask an operations question" placeholder="Ask about any plant, issue, equipment, or module…" autocomplete="off"><button type="submit">Search</button></form><p class="s91-assistant-disclaimer">Read-only answers. AI narration requires separate administrator opt-in; changes are always made in the actual module.</p></section>':''):'';
+  applyAssistantPosition(root);
+  const panel=root.querySelector('.s91-assistant-panel');
+  if(panel){
+   const bounds=root.getBoundingClientRect(),panelWidth=panel.offsetWidth,panelHeight=panel.offsetHeight;
+   panel.classList.toggle('s91-assistant-panel-left',bounds.left+panelWidth>window.innerWidth-8);
+   const aboveSpace=bounds.top-18,belowSpace=window.innerHeight-bounds.bottom-18;
+   const below=aboveSpace<panelHeight&&belowSpace>aboveSpace;
+   panel.classList.toggle('s91-assistant-panel-below',below);
+   panel.style.maxHeight=Math.max(180,Math.min(panelHeight,below?belowSpace:aboveSpace))+'px';
+  }
+  const launch=root.querySelector('.s91-assistant-launch');
+  if(launch)launch.addEventListener('pointerdown',startAssistantDrag);
   if(assistant.open){const c=root.querySelector('.s91-assistant-conversation');if(c)c.scrollTop=c.scrollHeight}
+ }
+ function startAssistantDrag(event){
+  if(event.button!==0&&event.pointerType==='mouse')return;
+  const root=assistantRoot(),launch=event.currentTarget,userId=assistantUserId(),origin={x:event.clientX,y:event.clientY},start=root.getBoundingClientRect();
+  try{launch.setPointerCapture(event.pointerId)}catch{}
+  let moved=false;
+  const move=moveEvent=>{
+   if(moveEvent.pointerId!==event.pointerId)return;
+   const dx=moveEvent.clientX-origin.x,dy=moveEvent.clientY-origin.y;
+   if(!moved&&Math.hypot(dx,dy)<5)return;
+   moved=true;moveEvent.preventDefault();
+   const position=clampAssistantPosition(start.left+dx,start.top+dy,root);
+   root.style.left=position.left+'px';root.style.top=position.top+'px';root.style.right='auto';root.style.bottom='auto';
+  };
+  const finish=finishEvent=>{
+   if(finishEvent.pointerId!==event.pointerId)return;
+   launch.removeEventListener('pointermove',move);launch.removeEventListener('pointerup',finish);launch.removeEventListener('pointercancel',finish);
+   if(moved){
+    if(userId&&assistantUserId()===userId){const rect=root.getBoundingClientRect();assistant.position={left:rect.left,top:rect.top};saveAssistantPosition(assistant.position)}
+    assistant.dragged=true;setTimeout(()=>assistant.dragged=false,0);
+   }
+  };
+  launch.addEventListener('pointermove',move);launch.addEventListener('pointerup',finish);launch.addEventListener('pointercancel',finish);
  }
  window.s91AssistantOpen=function(){assistant.open=true;drawAssistant();document.getElementById('s91-assistant-query')?.focus({preventScroll:true})};
  async function ask(value){
   const str=String(value||'').trim();if(!str||assistant.busy)return;
   if(!allowedAssistantRoles.includes(role())){assistant.open=false;drawAssistant();return}
+  const requestUserId=assistantUserId();if(!requestUserId)return;
   const expanded=/^(and |what about |those |same |only |filter |which of them)/i.test(str)&&assistant.lastQuery?assistant.lastQuery+' '+str:str;
   const recent=assistant.log.filter(x=>x.who==='user').slice(-4).map(x=>x.text);
   assistant.more=null;assistant.busy=true;assistant.log.push({who:'user',text:str,when:Date.now()});
@@ -275,17 +350,22 @@
   const position=assistant.log.length-1;
   try{
    const result=await apiFetch('/api/field/ask',{method:'POST',body:JSON.stringify({question:expanded,recent_questions:recent})});
-   if(!allowedAssistantRoles.includes(role()))return;
+   if(!allowedAssistantRoles.includes(role())||assistantUserId()!==requestUserId||assistant.userId!==requestUserId)return;
    assistant.lastQuery=expanded;
    assistant.log[position]={who:'bot',text:result.answer||'No matching saved record was found.',records:result.records||[],
      action:/\b(issue|ticket|fault)\b/i.test(expanded)?['issues','open']:/\b(pm|maintenance)\b/i.test(expanded)?['pm','overdue']:/\b(wash|clean)\b/i.test(expanded)?['washing','late']:null,when:Date.now()};
    saveAssistantHistory(assistant.log);
   }catch(error){
+   if(assistantUserId()!==requestUserId||assistant.userId!==requestUserId)return;
    // Existing in-browser read-only search is a fallback, NEVER displayed as a live server result.
    const found=answer(expanded);
    assistant.log[position]={who:'bot',text:'Live search unavailable ('+(error.message||'network error')+'). Showing cached records only.\n'+found.msg,action:found.action,when:Date.now()};
    saveAssistantHistory(assistant.log);
-  }finally{assistant.busy=false;drawAssistant();document.getElementById('s91-assistant-query')?.focus({preventScroll:true})}
+  }finally{
+   if(assistantUserId()===requestUserId&&assistant.userId===requestUserId){
+    assistant.busy=false;drawAssistant();document.getElementById('s91-assistant-query')?.focus({preventScroll:true});
+   }
+  }
  }
  function openAssistantRecord(kind,id,plant){
   assistant.open=false;drawAssistant();
@@ -296,6 +376,7 @@
  }
 
  document.addEventListener('click',e=>{
+  if(assistant.dragged){assistant.dragged=false;e.preventDefault();return}
   const item=e.target.closest('[data-s91-assist]');if(item){assistant.open=item.dataset.s91Assist==='toggle'?!assistant.open:item.dataset.s91Assist!=='close';drawAssistant();return}
   const question=e.target.closest('[data-s91-question]');if(question){assistant.open=true;ask(question.dataset.s91Question);return}
   if(e.target.closest('[data-s91-assist-more]')){const more=assistant.more,data=scope();if(!more||!data)return;const found=searchRecords(more.query,data),start=more.offset;assistant.log.push({who:'bot',text:searchPage(more.query,data,found,start,'Records '+(start+1)+'–'+Math.min(start+20,found.count)+' of '+found.count+':'),when:Date.now()});assistant.log=assistant.log.slice(-assistantHistoryLimit);saveAssistantHistory(assistant.log);drawAssistant();return}
@@ -304,13 +385,22 @@
  });
  document.addEventListener('submit',e=>{if(e.target.id!=='s91-assistant-form')return;e.preventDefault();ask(document.getElementById('s91-assistant-query')?.value)});
  document.addEventListener('keydown',e=>{if(e.key==='Escape'&&document.getElementById('s91-report-root'))document.getElementById('s91-report-root').remove();else if(e.key==='Escape'&&assistant.open){assistant.open=false;drawAssistant()}});
+ document.addEventListener('keydown',e=>{
+  if(!e.altKey||!['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.key)||!e.target.closest('.s91-assistant-launch'))return;
+  e.preventDefault();const root=assistantRoot(),rect=root.getBoundingClientRect(),step=e.shiftKey?40:12;
+  const delta={ArrowUp:[0,-step],ArrowDown:[0,step],ArrowLeft:[-step,0],ArrowRight:[step,0]}[e.key];
+  assistant.position=clampAssistantPosition(rect.left+delta[0],rect.top+delta[1],root);
+  root.style.left=assistant.position.left+'px';root.style.top=assistant.position.top+'px';root.style.right='auto';root.style.bottom='auto';
+  saveAssistantPosition(assistant.position);
+ });
  // Preserve existing success/error semantics; merely make the application's toast UI more legible.
  function styleToasts(){document.querySelectorAll('body>.toast').forEach(n=>{if(n.dataset.s91Decorated)return;n.dataset.s91Decorated='1';const t=(n.textContent||'').toLowerCase();n.classList.add(/fail|error|denied|unable|could not|required|invalid/.test(t)?'s91-toast-error':/saved|sent|completed|confirmed|downloaded|uploaded|created|success/.test(t)?'s91-toast-success':'s91-toast-info')})}
  new MutationObserver(styleToasts).observe(document.body,{childList:true});
+ window.addEventListener('resize',()=>{if(assistant.position)drawAssistant()});
  const app=document.getElementById('app');
  if(app)new MutationObserver(()=>{
   const signedIn=!!app.querySelector('.shell'),root=assistantRoot();
- if(!signedIn&&(assistant.open||assistant.log.length)){assistant.open=false;assistant.log=[];clearAssistantHistory();drawAssistant()}
+ if(!signedIn&&(assistant.open||assistant.log.length||assistant.historyLoaded)){assistant.open=false;assistant.log=[];assistant.position=null;assistant.more=null;assistant.busy=false;assistant.historyLoaded=false;drawAssistant()}
   else if(root.hidden===signedIn){root.hidden=!signedIn;if(signedIn)drawAssistant()}
  }).observe(app,{childList:true,subtree:false});
  drawAssistant();
