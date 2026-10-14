@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import csv
 import io
+import re
 import uuid
 from datetime import date, datetime, timezone
 from typing import Annotated
+from urllib.parse import quote
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile
@@ -76,8 +78,21 @@ def _type_owners(db: Session, equipment_type: str | None) -> list[str]:
     return list(rows)
 
 
-def _equipment_out(db: Session, row: Equipment) -> dict:
-    person=db.get(User,row.in_charge_user_id) if row.in_charge_user_id else None
+def _equipment_out(
+    db: Session,
+    row: Equipment,
+    *,
+    in_charge_name: str | None = None,
+    type_owners: list[str] | None = None,
+    prefetched: bool = False,
+) -> dict:
+    if prefetched:
+        person_name=in_charge_name
+        owners=type_owners or []
+    else:
+        person=db.get(User,row.in_charge_user_id) if row.in_charge_user_id else None
+        person_name=person.display_name if person else None
+        owners=_type_owners(db,row.equipment_type)
     return {
         "id":row.id,"plant_id":row.plant_id,"equipment_code":row.equipment_code,"equipment_name":row.equipment_name,
         "equipment_type":row.equipment_type,"maker":row.maker,"model":row.model,"serial_number":row.serial_number,
@@ -86,10 +101,45 @@ def _equipment_out(db: Session, row: Equipment) -> dict:
         "location_in_plant":row.location_in_plant,"manufacture_year":row.manufacture_year,"commissioned_on":row.commissioned_on,
         "warranty_start":row.warranty_start,"warranty_end":row.warranty_end,"amc_vendor":row.amc_vendor,"amc_end":row.amc_end,
         "supplier":row.supplier,"purchase_order_no":row.purchase_order_no,"criticality":row.criticality,"notes":row.notes,
-        "in_charge_user_id":row.in_charge_user_id,"in_charge_name":person.display_name if person else None,
+        "in_charge_user_id":row.in_charge_user_id,"in_charge_name":person_name,
         "last_service_on":row.last_service_on,"next_service_due":row.next_service_due,"metadata":row.metadata_json or {},
-        "type_owners":_type_owners(db,row.equipment_type),"created_at":row.created_at,"updated_at":row.updated_at,
+        "type_owners":owners,"created_at":row.created_at,"updated_at":row.updated_at,
     }
+
+
+def _equipment_out_many(db: Session, rows: list[Equipment]) -> list[dict]:
+    if not rows:
+        return []
+
+    user_ids={row.in_charge_user_id for row in rows if row.in_charge_user_id}
+    people={
+        person.id:person.display_name
+        for person in db.scalars(select(User).where(User.id.in_(user_ids)))
+    } if user_ids else {}
+    equipment_types={row.equipment_type.strip().casefold() for row in rows if row.equipment_type and row.equipment_type.strip()}
+    owners_by_type:dict[str,list[str]]={}
+    if equipment_types:
+        assignments=db.execute(
+            select(UserEquipmentTypeAssignment.equipment_type,User.display_name)
+            .join(User,User.id==UserEquipmentTypeAssignment.user_id)
+            .where(
+                User.is_active.is_(True),
+                func.lower(UserEquipmentTypeAssignment.equipment_type).in_(equipment_types),
+            )
+            .order_by(User.display_name)
+        ).all()
+        for equipment_type,display_name in assignments:
+            owners_by_type.setdefault(equipment_type.strip().casefold(),[]).append(display_name)
+
+    return [
+        _equipment_out(
+            db,row,
+            in_charge_name=people.get(row.in_charge_user_id) if row.in_charge_user_id else None,
+            type_owners=owners_by_type.get((row.equipment_type or "").strip().casefold(),[]),
+            prefetched=True,
+        )
+        for row in rows
+    ]
 
 
 def _list_filters(plant_id,q,equipment_type,maker,status,discom,in_charge_user_id,warranty,no_in_charge,maker_missing,serial_missing=False):
@@ -106,7 +156,7 @@ def list_equipment(
 ):
     filters=_list_filters(plant_id,q,equipment_type,maker,status,discom,in_charge_user_id,warranty,no_in_charge,maker_missing,serial_missing)
     rows=EquipmentRepository(db).list(**filters,**_equipment_scope(db,user),offset=offset,limit=limit)
-    return [_equipment_out(db,row) for row in rows]
+    return _equipment_out_many(db,rows)
 
 
 @router.get("/equipment/page", response_model=EquipmentPage)
@@ -120,7 +170,7 @@ def page_equipment(
     scoped={**filters,**_equipment_scope(db,user)}
     repo=EquipmentRepository(db)
     rows=repo.list(**scoped,offset=offset,limit=limit)
-    return {"items":[_equipment_out(db,row) for row in rows],"total":repo.count(**scoped),"offset":offset,"limit":limit}
+    return {"items":_equipment_out_many(db,rows),"total":repo.count(**scoped),"offset":offset,"limit":limit}
 
 
 @router.post("/equipment", response_model=EquipmentOut, status_code=201, dependencies=[Depends(require_csrf)])
@@ -130,7 +180,7 @@ def create_equipment(data:EquipmentCreate,db:Annotated[Session,Depends(get_db)],
 
 @router.post("/equipment/bulk", response_model=list[EquipmentOut], status_code=201, dependencies=[Depends(require_csrf)])
 def create_equipment_bulk(data:EquipmentBulkCreate,db:Annotated[Session,Depends(get_db)],user:Annotated[User,Depends(require_permission("plants.manage"))]):
-    return [_equipment_out(db,row) for row in EquipmentService(db).bulk_create(data,user)]
+    return _equipment_out_many(db,EquipmentService(db).bulk_create(data,user))
 
 
 @router.patch("/equipment/{equipment_id}", response_model=EquipmentOut, dependencies=[Depends(require_csrf)])
@@ -186,6 +236,19 @@ _DOC_KINDS={"datasheet","warranty_certificate","test_report"}
 _DOC_TYPES={"application/pdf":"pdf","image/jpeg":"jpg","image/png":"png","image/webp":"webp","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":"xlsx"}
 
 
+def _safe_document_filename(filename: str | None, fallback: str = "document") -> str:
+    basename=(filename or "").replace("\\","/").rsplit("/",1)[-1]
+    basename="".join(character for character in basename if character.isprintable()).strip(" .")
+    return basename[:255] or fallback
+
+
+def _document_content_disposition(filename: str) -> str:
+    safe_name=_safe_document_filename(filename)
+    ascii_name=safe_name.encode("ascii","ignore").decode("ascii")
+    fallback=re.sub(r"[^A-Za-z0-9._ -]","_",ascii_name).strip(" .") or "document"
+    return f"inline; filename=\"{fallback}\"; filename*=UTF-8''{quote(safe_name,safe='')}"
+
+
 @router.post("/equipment/{equipment_id}/documents", dependencies=[Depends(require_csrf)])
 def upload_equipment_document(
     equipment_id:UUID,db:Annotated[Session,Depends(get_db)],user:Annotated[User,Depends(require_permission("plants.manage"))],
@@ -201,7 +264,8 @@ def upload_equipment_document(
     if len(data)<16: raise HTTPException(422,"File is empty or invalid")
     path=f"equipment/{row.id}/{kind}-{uuid.uuid4().hex}.{_DOC_TYPES[content_type]}"
     SupabaseStorage().upload(path,data,content_type)
-    doc=EquipmentDocument(equipment_id=row.id,kind=kind,original_name=file.filename or f"{kind}.{_DOC_TYPES[content_type]}",storage_path=path,content_type=content_type,size_bytes=len(data),uploaded_by=user.id)
+    original_name=_safe_document_filename(file.filename,f"{kind}.{_DOC_TYPES[content_type]}")
+    doc=EquipmentDocument(equipment_id=row.id,kind=kind,original_name=original_name,storage_path=path,content_type=content_type,size_bytes=len(data),uploaded_by=user.id)
     db.add(doc); db.flush()
     db.add(AuditLog(user_id=user.id,actor_name=user.display_name,action="Uploaded equipment document",module="Equipment Register",entity_type="equipment",entity_id=str(row.id),metadata_json={"document_id":str(doc.id),"kind":kind,"name":doc.original_name}))
     db.commit(); db.refresh(doc)
@@ -216,7 +280,7 @@ def get_equipment_document(equipment_id:UUID,document_id:UUID,db:Annotated[Sessi
     doc=db.get(EquipmentDocument,document_id)
     if not doc or doc.equipment_id!=row.id: raise HTTPException(404,"Document not found")
     data,content_type=SupabaseStorage().download(doc.storage_path)
-    return Response(content=data,media_type=content_type,headers={"Content-Disposition":f'inline; filename="{doc.original_name}"',"Cache-Control":"private, max-age=60"})
+    return Response(content=data,media_type=content_type,headers={"Content-Disposition":_document_content_disposition(doc.original_name),"Cache-Control":"private, max-age=60"})
 
 
 @router.delete("/equipment/{equipment_id}/documents/{document_id}", status_code=204, dependencies=[Depends(require_csrf)])
@@ -344,7 +408,7 @@ def import_equipment(
     if invalid:
         raise HTTPException(422,detail={"message":"Import has invalid rows. Run dry-run and correct them before commit.","rows":previews})
     created=EquipmentService(db).bulk_create(EquipmentBulkCreate(items=valid),user)
-    return {**result,"dry_run":False,"created":[_equipment_out(db,row) for row in created]}
+    return {**result,"dry_run":False,"created":_equipment_out_many(db,created)}
 
 
 @router.get("/equipment/export.xlsx")
@@ -355,11 +419,17 @@ def export_equipment(
 ):
     filters=_list_filters(plant_id,q,equipment_type,maker,status,discom,in_charge_user_id,warranty,no_in_charge,maker_missing,serial_missing)
     rows=EquipmentRepository(db).list(**filters,**_equipment_scope(db,user),offset=0,limit=10000)
+    plant_ids={row.plant_id for row in rows}
+    plants_by_id={
+        plant.id:plant
+        for plant in db.scalars(select(Plant).where(Plant.id.in_(plant_ids)))
+    } if plant_ids else {}
+    details=_equipment_out_many(db,rows)
     wb=Workbook(); ws=wb.active; ws.title="Equipment register"
     headers=["Plant","DISCOM","Code","Name","Type","Maker","Model","Serial","Status","In charge","Type owners","Rating","Capacity kW","Quantity","Location","Manufacture year","Commissioned","Warranty start","Warranty end","AMC vendor","AMC end","Supplier","PO No","Criticality","Last service","Next service","Notes"]
     ws.append(headers)
-    for row in rows:
-        plant=db.get(Plant,row.plant_id); out=_equipment_out(db,row)
+    for row,out in zip(rows,details):
+        plant=plants_by_id.get(row.plant_id)
         ws.append([plant.site_code if plant else "",row.discom,row.equipment_code,row.equipment_name,row.equipment_type,row.maker,row.model,row.serial_number,row.status,out["in_charge_name"],", ".join(out["type_owners"]),row.rating,float(row.capacity_kw) if row.capacity_kw is not None else None,row.quantity,row.location_in_plant,row.manufacture_year,row.commissioned_on,row.warranty_start,row.warranty_end,row.amc_vendor,row.amc_end,row.supplier,row.purchase_order_no,row.criticality,row.last_service_on,row.next_service_due,row.notes])
     bio=io.BytesIO(); wb.save(bio); bio.seek(0)
     return StreamingResponse(bio,media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",headers={"Content-Disposition":"attachment; filename=equipment-register.xlsx"})

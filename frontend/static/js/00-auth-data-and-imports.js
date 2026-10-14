@@ -225,23 +225,30 @@ async function apiFetch(url,opts){
   if(opts.body&&typeof opts.body!=="string"&&!isForm)opts.body=JSON.stringify(opts.body);
   if(opts.body&&!isForm)opts.headers["Content-Type"]="application/json";
   const isRead=!opts.method||["GET","HEAD"].includes(String(opts.method).toUpperCase());
+  const externalSignal=opts.signal;
   // Bounded requests: a sleeping server must not leave the portal in a permanent spinner.
   // Never retry writes automatically; a timed-out write could already have committed.
   async function attempt(){
-    const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),isRead?45000:60000);
+    const controller=new AbortController(),abortFromCaller=()=>controller.abort();
+    if(externalSignal){
+      if(externalSignal.aborted)controller.abort();
+      else externalSignal.addEventListener("abort",abortFromCaller,{once:true});
+    }
+    const timeout=setTimeout(()=>controller.abort(),isRead?45000:60000);
     try{return await fetch(url,{...opts,signal:controller.signal});}
-    finally{clearTimeout(timeout);}
+    finally{clearTimeout(timeout);if(externalSignal)externalSignal.removeEventListener("abort",abortFromCaller);}
   }
   let res;
   try{res=await attempt();}
   catch(error){
+    if(externalSignal&&externalSignal.aborted)throw error;
     if(!isRead)throw new Error(error?.name==="AbortError"?"Request timed out. Check the record before retrying to avoid duplicates.":"No connection. Check connectivity and verify whether the change was saved.");
     await new Promise(resolve=>setTimeout(resolve,600));
-    try{res=await attempt();}catch(retryError){throw new Error("The server is unreachable or timed out. Retry the page once connectivity returns.");}
+    try{res=await attempt();}catch(retryError){if(externalSignal&&externalSignal.aborted)throw retryError;throw new Error("The server is unreachable or timed out. Retry the page once connectivity returns.");}
   }
   if(isRead&&[502,503,504].includes(res.status)){
     await new Promise(resolve=>setTimeout(resolve,600));
-    try{res=await attempt();}catch(error){throw new Error("The server did not respond. Please retry.");}
+    try{res=await attempt();}catch(error){if(externalSignal&&externalSignal.aborted)throw error;throw new Error("The server did not respond. Please retry.");}
   }
   if(res.status===401){
     try{await supabaseSignOut();}catch(e){}
@@ -1095,6 +1102,14 @@ function listCtl(key,rows,o){S.lf=S.lf||{};const st=S.lf[key]=S.lf[key]||{q:"",f
  return{rows:fl.slice((page-1)*size,page*size),all:fl,n:fl.length,bar,pager:tablePager(key,fl.length,size)}}
 /* dashboard plant list: search + filters + sort, 6 per page */
 function plantListRows(sp){const f=S.plF=Object.assign({q:"",rep:"all",tgt:"all",cap:"all",ach:"all",sort:"name",health:"all",site:"all",project:"all",assignee:"all",maker:"all",district:"all",loc:"all"},S.plF||{}),q=f.q.trim().toLowerCase();
+ const issueStats=new Map();
+ (S.issues||[]).forEach(t=>{
+  if(!t.plant)return;
+  let stats=issueStats.get(t.plant);
+  if(!stats){stats={makers:new Set(),open:0};issueStats.set(t.plant,stats)}
+  if(t.maker)stats.makers.add(t.maker);
+  if(t.status!=="Closed"&&t.status!=="Resolved")stats.open++;
+ });
  const r=sp.filter(p=>{const x=XL_BY[p.id],m=xlPlantMtd(p.id),has=!!(x&&x.pvSystMonthlykWh),eng=plantEngineer(p),proj=plantProject(p);
   if(q&&!(p.name+" "+p.id+" "+proj+" "+eng+" "+(p.district||"")+" "+(p.geo&&p.geo.city||"")).toLowerCase().includes(q))return false;
   if(f.district&&f.district!=="all"&&(p.district||"—")!==f.district)return false;
@@ -1108,9 +1123,9 @@ function plantListRows(sp){const f=S.plF=Object.assign({q:"",rep:"all",tgt:"all"
   if(f.site&&f.site!=="all"&&p.id!==f.site)return false;
   if(f.project&&f.project!=="all"&&proj!==f.project)return false;
   if(f.assignee&&f.assignee!=="all"&&eng!==f.assignee)return false;
-  if(f.maker&&f.maker!=="all"){const mk=(S.issues||[]).filter(t=>t.plant===p.name&&t.maker).map(t=>t.maker);if(!mk.includes(f.maker))return false}
+  if(f.maker&&f.maker!=="all"&&!(issueStats.get(p.name)&&issueStats.get(p.name).makers.has(f.maker)))return false;
   return true});
- const val={name:p=>p.name.toLowerCase(),cap:p=>plantCapMw(p)!=null?-plantCapMw(p):1,gen:p=>-(p.generation||0),ach:p=>{const m=xlPlantMtd(p.id);return -(m&&m.pct!=null?m.pct:-1)},issues:p=>-openTk((S.issues||[]).filter(t=>t.plant===p.name)).length}[f.sort]||(p=>p.name.toLowerCase());
+ const val={name:p=>p.name.toLowerCase(),cap:p=>plantCapMw(p)!=null?-plantCapMw(p):1,gen:p=>-(p.generation||0),ach:p=>{const m=xlPlantMtd(p.id);return -(m&&m.pct!=null?m.pct:-1)},issues:p=>-((issueStats.get(p.name)||{}).open||0)}[f.sort]||(p=>p.name.toLowerCase());
  return r.slice().sort((a,b)=>{const x=val(a),y=val(b);return x<y?-1:x>y?1:0})}
 function plantListBar(){const f=S.plF,sel=(k,opts)=>'<select class="inp" onchange="S.plF.'+k+'=this.value;S.tablePages.plants=1;render()">'+opts.map(([v,l])=>'<option value="'+v+'"'+(f[k]===v?" selected":"")+'>'+l+'</option>').join("")+'</select>',fld=(l,c,w)=>'<div class="field" style="min-width:'+w+'px;flex:1"><span class="lbl">'+l+'</span>'+c+'</div>';
  const sites=[...new Set((S.plants||[]).map(p=>p.id))].sort(),projs=[...new Set((S.plants||[]).map(plantProject).filter(Boolean))].sort();

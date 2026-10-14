@@ -60,7 +60,7 @@ Operational source of truth for users, plants, issues, scheduled tasks, washing,
 
 Scheduled O&M Before/After images. FastAPI alone holds the Storage service credential.
 
-`python scripts/ensure_storage.py` verifies or creates the configured private evidence bucket.
+`python scripts/ensure_storage.py` verifies the configured private evidence bucket and fails if it is missing or public. It never creates or modifies buckets; verify the existing bucket manually before deployment, and stop to investigate if it is missing.
 
 ## 7. Compatibility bridge
 

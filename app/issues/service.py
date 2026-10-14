@@ -7,7 +7,7 @@ import uuid
 
 from fastapi import HTTPException
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy import select
+from sqlalchemy import select, text, update
 from sqlalchemy.orm import Session
 
 from app.core.models import AuditLog, Equipment, InventoryItem, InventoryMovement, Issue, IssueETCChange, IssueHistory, IssueStep, Plant, User, UserEquipmentTypeAssignment
@@ -46,6 +46,11 @@ def next_issue_ticket_no(db:Session)->str:
     existing=db.scalars(select(Issue.ticket_no).where(Issue.ticket_no.like("ISS-%"))).all()
     numbers=[int(value[4:]) for value in existing if value[4:].isdigit()]
     return f"ISS-{max(numbers,default=0)+1:04d}"
+
+
+def _lock_issue_ticket_numbers(db: Session) -> None:
+    if db.get_bind().dialect.name == "postgresql":
+        db.execute(text("SELECT pg_advisory_xact_lock(:lock_id)"), {"lock_id": 910091001})
 
 
 class IssueService:
@@ -110,8 +115,7 @@ class IssueService:
         supplier = payload.pop("supplier", None)
         serial_number = payload.pop("serial_number", None)
         ticket_no = (payload.pop("ticket_no", None) or "").strip()
-        if not ticket_no:
-            ticket_no = next_issue_ticket_no(self.db)
+        auto_number = not ticket_no
         plant_id = payload.get("plant_id")
         if plant_id and not self.db.get(Plant, plant_id):
             raise HTTPException(404, "Plant not found")
@@ -125,10 +129,10 @@ class IssueService:
         assignee = self._resolve_assignee(assigned_to, None) if assigned_to else None
         if assignee:
             self._ensure_assignee_scope(assignee, user, plant_id, equipment_id, payload.get("equipment_ref"), payload.get("vertical"))
-        auto_number = not ticket_no
         row = None
-        for attempt in range(6):          # two people raising an issue at the same moment must not collide on the ticket number
-            if auto_number and attempt:
+        for attempt in range(6):
+            if auto_number:
+                _lock_issue_ticket_numbers(self.db)
                 ticket_no = next_issue_ticket_no(self.db)
             row=Issue(
                 ticket_no=ticket_no, **payload,
@@ -171,7 +175,7 @@ class IssueService:
         return row
 
     def update(self,issue_id,data:IssueUpdate,user:User):
-        row=self.repo.by_id(issue_id)
+        row=self.repo.by_id(issue_id,for_update=True)
         if not row: raise HTTPException(404,"Issue not found")
         changes=data.model_dump(exclude_unset=True)
         reason=(changes.pop("change_reason", None) or "").strip()
@@ -190,7 +194,7 @@ class IssueService:
 
     def change_dates(self,issue_id:uuid.UUID,data,user:User):
         """Edit the start date (occurred_at) and/or deadline (etc_at) of an open issue, with a mandatory reason."""
-        issue=self.repo.by_id(issue_id)
+        issue=self.repo.by_id(issue_id,for_update=True)
         if not issue: raise HTTPException(404,"Issue not found")
         if issue.status=="Closed": raise HTTPException(409,"A closed ticket's dates cannot be changed")
         fields=data.model_dump(exclude_unset=True)
@@ -222,7 +226,7 @@ class IssueService:
         self.db.commit(); self.db.refresh(issue); return issue
 
     def archive(self,issue_id,data,user:User):
-        row=self.repo.by_id(issue_id,include_deleted=True)
+        row=self.repo.by_id(issue_id,include_deleted=True,for_update=True)
         if not row: raise HTTPException(404,"Issue not found")
         if row.deleted_at is not None: raise HTTPException(409,"Ticket is already in Deleted tickets")
         if data.confirm_ticket.strip()!=row.ticket_no:
@@ -236,7 +240,7 @@ class IssueService:
         return {"ticket_no":row.ticket_no,"deleted":True,"restorable":True}
 
     def restore(self,issue_id,data,user:User):
-        row=self.repo.by_id(issue_id,include_deleted=True)
+        row=self.repo.by_id(issue_id,include_deleted=True,for_update=True)
         if not row: raise HTTPException(404,"Issue not found")
         if row.deleted_at is None: raise HTTPException(409,"Ticket is not deleted")
         reason=data.reason.strip()
@@ -247,7 +251,7 @@ class IssueService:
         self.db.commit(); self.db.refresh(row); return row
 
     def reset(self,issue_id,user:User):
-        row=self.repo.by_id(issue_id)
+        row=self.repo.by_id(issue_id,for_update=True)
         if not row: raise HTTPException(404,"Issue not found")
         before=row.status
         row.status="Open"
@@ -274,7 +278,7 @@ class IssueService:
         return row
 
     def assign(self,issue_id,data:AssignmentRequest,user:User,reassign:bool=False):
-        row=self.repo.by_id(issue_id)
+        row=self.repo.by_id(issue_id,for_update=True)
         if not row: raise HTTPException(404,"Issue not found")
         if row.status not in {"Open","Assigned","Acknowledged"}:
             raise HTTPException(409,"A completed or active-work ticket cannot be reassigned")
@@ -299,7 +303,7 @@ class IssueService:
         self.db.refresh(row); return row
 
     def transition(self,issue_id,next_status:str,user:User,note:str|None=None,resolve:ResolveRequest|None=None):
-        row=self.repo.by_id(issue_id)
+        row=self.repo.by_id(issue_id,for_update=True)
         if not row: raise HTTPException(404,"Issue not found")
         transitions = {
             "Open": {"Assigned", "Acknowledged"},
@@ -391,7 +395,7 @@ class IssueService:
         self.db.refresh(row); return row
 
     def progress(self,issue_id,data:ProgressRequest,user:User):
-        row=self.repo.by_id(issue_id)
+        row=self.repo.by_id(issue_id,for_update=True)
         if not row: raise HTTPException(404,"Issue not found")
         if row.status not in {"Acknowledged","In Progress"}:
             raise HTTPException(409, "Acknowledge the ticket before adding work progress")
@@ -432,7 +436,18 @@ class IssueService:
                 raise HTTPException(422, "A positive spare-part quantity is required")
             if available<quantity:
                 raise HTTPException(409, f"Insufficient stock: {available} available")
-            item.quantity=available-quantity
+            result = self.db.execute(
+                update(InventoryItem)
+                .where(InventoryItem.id == item.id, InventoryItem.quantity >= quantity)
+                .values(quantity=InventoryItem.quantity - quantity)
+                .execution_options(synchronize_session=False)
+            )
+            if result.rowcount != 1:
+                current = self.db.scalar(
+                    select(InventoryItem.quantity).where(InventoryItem.id == item.id)
+                )
+                raise HTTPException(409, f"Insufficient stock: {current or 0} available")
+            self.db.expire(item, ["quantity"])
             part_label=f"{item.item_name or item.legacy_id} x{quantity:g}"
             self.db.add(InventoryMovement(
                 legacy_id="MV-"+uuid.uuid4().hex[:16].upper(),
@@ -510,7 +525,7 @@ class IssueService:
         return [self._step_out(step) for step in steps]
 
     def add_step(self,issue_id:UUID,title:str,position:int|None,user:User)->dict:
-        issue=self.repo.by_id(issue_id)
+        issue=self.repo.by_id(issue_id,for_update=True)
         if not issue: raise HTTPException(404,"Issue not found")
         steps=list(self.db.scalars(
             select(IssueStep).where(IssueStep.issue_id==issue.id,IssueStep.removed_at.is_(None))
@@ -531,7 +546,7 @@ class IssueService:
         return self._step_out(created)
 
     def update_step(self,issue_id:UUID,step_id:UUID,data,user:User)->dict:
-        issue=self.repo.by_id(issue_id)
+        issue=self.repo.by_id(issue_id,for_update=True)
         if not issue: raise HTTPException(404,"Issue not found")
         steps=list(self.db.scalars(
             select(IssueStep).where(IssueStep.issue_id==issue.id,IssueStep.removed_at.is_(None))
@@ -578,7 +593,7 @@ class IssueService:
         return self._step_out(step)
 
     def remove_step(self,issue_id:UUID,step_id:UUID,user:User)->None:
-        issue=self.repo.by_id(issue_id)
+        issue=self.repo.by_id(issue_id,for_update=True)
         if not issue: raise HTTPException(404,"Issue not found")
         step=self.db.scalar(select(IssueStep).where(
             IssueStep.issue_id==issue.id,IssueStep.id==step_id,IssueStep.removed_at.is_(None),
@@ -599,7 +614,7 @@ class IssueService:
         self.db.commit()
 
     def change_etc(self,issue_id:UUID,data,user:User):
-        issue=self.repo.by_id(issue_id)
+        issue=self.repo.by_id(issue_id,for_update=True)
         if not issue: raise HTTPException(404,"Issue not found")
         old_etc=issue.etc_at
         new_etc=data.new_etc
@@ -633,7 +648,7 @@ class IssueService:
         return issue
 
     def reopen(self,issue_id,data:dict,user:User):
-        row=self.repo.by_id(issue_id)
+        row=self.repo.by_id(issue_id,for_update=True)
         if not row: raise HTTPException(404,"Issue not found")
         if row.status not in {"Resolved","Closed"}:
             raise HTTPException(409, "Only a resolved or closed issue can be reopened")
@@ -655,7 +670,7 @@ class IssueService:
         self.db.refresh(row); return row
 
     def close(self,issue_id,data:CloseRequest,user:User):
-        row=self.repo.by_id(issue_id)
+        row=self.repo.by_id(issue_id,for_update=True)
         if not row: raise HTTPException(404,"Issue not found")
         if data.direct:
             if user.role!="O&M Head":

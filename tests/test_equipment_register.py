@@ -2,8 +2,27 @@ from __future__ import annotations
 
 import uuid
 
-from app.core.models import Equipment, Plant
+from sqlalchemy import event
+
+from app.core.database import engine
+from app.core.models import Equipment, Plant, User, UserEquipmentTypeAssignment
+from app.plants.router import (
+    _document_content_disposition,
+    _safe_document_filename,
+)
 from tests.conftest import login_user
+
+
+def test_equipment_document_filename_is_safe_for_storage_and_response_headers():
+    filename = _safe_document_filename(
+        "..\\private\\bad\r\nSet-Cookie: x.pdf"
+    )
+    disposition = _document_content_disposition(filename)
+
+    assert filename == "badSet-Cookie: x.pdf"
+    assert "\r" not in disposition and "\n" not in disposition
+    assert 'filename="badSet-Cookie_ x.pdf"' in disposition
+    assert "filename*=UTF-8''badSet-Cookie%3A%20x.pdf" in disposition
 
 
 def test_equipment_can_be_added_edited_moved_between_plants_and_removed(client, db):
@@ -395,6 +414,61 @@ def test_equipment_warranty_filter_and_move_audit(client, db):
         AuditLog.entity_id == eq["id"],
         AuditLog.action == "Moved equipment to another plant",
     ).one()
+
+
+def test_equipment_page_batches_owner_lookups(client, db):
+    login_user(
+        client,
+        db,
+        role="O&M Head",
+        name="Equipment Page Head",
+        email="equipment-page-head@example.com",
+    )
+    plant = Plant(site_code="BATCH1", plant_name="Batch Plant")
+    owner = User(
+        auth_provider="supabase",
+        external_subject="equipment-page-owner",
+        email="equipment-page-owner@example.com",
+        display_name="Inverter Owner",
+        role="Assignee",
+        is_active=True,
+    )
+    db.add_all([plant, owner])
+    db.flush()
+    db.add(UserEquipmentTypeAssignment(user_id=owner.id, equipment_type="Inverter"))
+    db.add_all(
+        [
+            Equipment(
+                plant_id=plant.id,
+                equipment_code=f"INV-{number}",
+                equipment_name=f"Inverter {number}",
+                equipment_type="Inverter",
+                in_charge_user_id=owner.id if number == 1 else None,
+            )
+            for number in range(1, 4)
+        ]
+    )
+    db.commit()
+
+    statements = []
+
+    def count_statement(_conn, _cursor, statement, _parameters, _context, _executemany):
+        if statement.lstrip().lower().startswith("select"):
+            statements.append(statement)
+
+    event.listen(engine, "before_cursor_execute", count_statement)
+    try:
+        response = client.get("/api/equipment/page?plant_id={}&limit=10".format(plant.id))
+    finally:
+        event.remove(engine, "before_cursor_execute", count_statement)
+
+    assert response.status_code == 200, response.text
+    page = response.json()
+    assert page["total"] == 3
+    first = next(item for item in page["items"] if item["equipment_code"] == "INV-1")
+    assert first["in_charge_name"] == "Inverter Owner"
+    assert first["type_owners"] == ["Inverter Owner"]
+    assert len(statements) == 4
 
 
 def test_equipment_import_dry_run(client, db):

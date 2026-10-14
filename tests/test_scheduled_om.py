@@ -41,6 +41,14 @@ def test_site_engineer_can_complete_scheduled_task_and_next_occurrence_is_genera
         },
     )
     assert response.status_code == 200, response.text
+    repeated = client.post(
+        '/api/scheduled/tasks/WO-PM-001/complete',
+        json={
+            'completed_on': '2026-09-29', 'readings': 'IR 5.2 MΩ',
+            'remarks': 'PM complete', 'anomaly': False, 'checklist': [],
+        },
+    )
+    assert repeated.status_code == 409, repeated.text
 
     db.expire_all()
     completed = db.query(OMTask).filter(OMTask.work_order_no == 'WO-PM-001').one()

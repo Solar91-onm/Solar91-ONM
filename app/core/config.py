@@ -2,13 +2,19 @@ from __future__ import annotations
 
 from functools import lru_cache
 from typing import Literal
+from urllib.parse import urlsplit
 
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+        hide_input_in_errors=True,
+    )
 
     app_name: str = "Solar91 O&M Command Center"
     app_env: Literal["development", "test", "production"] = "development"
@@ -64,6 +70,41 @@ class Settings(BaseSettings):
             if value.startswith(old):
                 return new + value[len(old):]
         return value
+
+    @field_validator("supabase_url", mode="before")
+    @classmethod
+    def _validate_supabase_url(cls, value):
+        """Accept only a Supabase project origin, never a REST/Auth endpoint or secret-bearing URL."""
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            return value
+        value = value.strip().strip("\"'").strip()
+        if not value:
+            return value
+
+        try:
+            parsed = urlsplit(value)
+            hostname = parsed.hostname
+            parsed.port
+        except ValueError as exc:
+            raise ValueError("SUPABASE_URL must be a valid project base URL.") from exc
+
+        local_http = hostname in {"localhost", "127.0.0.1", "::1"}
+        if (
+            parsed.scheme not in ({"https", "http"} if local_http else {"https"})
+            or not hostname
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.path not in ("", "/")
+            or parsed.query
+            or parsed.fragment
+        ):
+            raise ValueError(
+                "SUPABASE_URL must be an HTTPS project base URL without credentials, a path, query, or fragment."
+            )
+
+        return value.rstrip("/")
 
     @property
     def origins(self) -> list[str]:

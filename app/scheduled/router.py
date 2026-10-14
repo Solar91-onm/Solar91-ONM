@@ -41,8 +41,11 @@ def _plant(db: Session, value: str) -> Plant:
     return row
 
 
-def _task(db: Session, work_order_no: str) -> OMTask:
-    row = db.scalar(select(OMTask).where(OMTask.work_order_no == work_order_no))
+def _task(db: Session, work_order_no: str, *, for_update: bool = False) -> OMTask:
+    stmt=select(OMTask).where(OMTask.work_order_no == work_order_no)
+    if for_update:
+        stmt=stmt.with_for_update().execution_options(populate_existing=True)
+    row = db.scalar(stmt)
     if not row:
         raise HTTPException(404, "Preventive Maintenance task not found")
     return row
@@ -489,7 +492,7 @@ def delete_evidence(work_order_no: str, kind: str, db: Annotated[Session, Depend
 
 @router.post("/tasks/{work_order_no}/complete", dependencies=[Depends(require_csrf)])
 def complete_task(work_order_no: str, payload: TaskCompletion, db: Annotated[Session, Depends(get_db)], user: Annotated[User, Depends(get_current_user)]):
-    task = _task(db, work_order_no)
+    task = _task(db, work_order_no, for_update=True)
     if not _can_execute_task(db, user, task):
         raise HTTPException(403, "You cannot complete this task")
     if task.status == "Completed":

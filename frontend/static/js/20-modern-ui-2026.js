@@ -517,7 +517,23 @@ function m26EqOwnerNames(e){return m26EqOwners(e).map(u=>u.name).filter(Boolean)
 function m26EqInChargePeople(){const m=new Map();(TA.users||[]).filter(u=>u.active!==false).forEach(u=>m.set(String(u.id),u.name));(S.equipment||[]).forEach(e=>{if(e.in_charge_user_id&&e.in_charge_name)m.set(String(e.in_charge_user_id),e.in_charge_name)});return [...m].map(([id,name])=>({id,name})).sort((a,b)=>a.name.localeCompare(b.name))}
 function m26EqWarranty(e){if(!e.warranty_end)return ["Missing","#64748B","#F1F5F9"];const end=new Date(e.warranty_end+"T00:00:00"),now=new Date(),d=Math.ceil((end-now)/86400000);if(d<0)return ["Expired","#9B2C20","#FCEAE8"];if(d<90)return [d+"d left","#92600E","#FDF3E3"];return ["OK","#0C6B38","#E7F6EC"]}
 function m26EqQuery(page){const q=new URLSearchParams();if(M26R.q)q.set("q",M26R.q);if(M26R.plant)q.set("plant_id",M26R.plant);if(M26R.type)q.set("equipment_type",M26R.type);if(M26R.status)q.set("status",M26R.status);if(M26R.maker)q.set("maker",M26R.maker);if(M26R.discom)q.set("discom",M26R.discom);if(M26R.inCharge)q.set("in_charge_user_id",M26R.inCharge);if(M26R.warranty)q.set("warranty",M26R.warranty);if(M26R.noInCharge)q.set("no_in_charge","true");if(M26R.makerMissing)q.set("maker_missing","true");if(M26R.serialMissing)q.set("serial_missing","true");q.set("offset",String((Math.max(1,page||M26R.page)-1)*M26R.pageSize));q.set("limit",String(M26R.pageSize));return q}
-async function m26EqLoadPage(reset){if(reset)M26R.page=1;M26R.loading=true;m26EqPersist();if(S.view==="equipment")render();try{const data=await apiFetch("/api/equipment/page?"+m26EqQuery().toString());M26R.items=data.items||[];M26R.total=Number(data.total||0);M26R.loading=false;m26EqPersist();if(S.view==="equipment")render()}catch(e){M26R.loading=false;toast("Equipment could not load — "+(e.message||"try again"));if(S.view==="equipment")render()}}
+let m26EqLoadController=null;
+async function m26EqLoadPage(reset){
+ if(reset)M26R.page=1;
+ if(m26EqLoadController)m26EqLoadController.abort();
+ const controller=new AbortController();m26EqLoadController=controller;
+ M26R.loading=true;m26EqPersist();if(S.view==="equipment")render();
+ try{
+  const data=await apiFetch("/api/equipment/page?"+m26EqQuery().toString(),{signal:controller.signal});
+  if(controller.signal.aborted)return;
+  M26R.items=data.items||[];M26R.total=Number(data.total||0);M26R.loading=false;m26EqPersist();if(S.view==="equipment")render();
+ }catch(e){
+  if(controller.signal.aborted)return;
+  M26R.loading=false;toast("Equipment could not load — "+(e.message||"try again"));if(S.view==="equipment")render();
+ }finally{
+  if(m26EqLoadController===controller)m26EqLoadController=null;
+ }
+}
 function m26GoEq(){S.view="equipment";S.omTab="equipment";S.modal=null;if(m26EqCan()&&!M26R.loaded&&typeof taLoad==="function"){M26R.loaded=true;taLoad(true)}render();m26EqLoadPage(false)}
 function m26GoEqPlant(pid){M26R.plant=String(pid||"");M26R.page=1;m26EqPersist();m26GoEq()}
 function m26EqFilter(k,v){M26R[k]=v;M26R.page=1;m26EqPersist();m26EqLoadPage(true)}

@@ -35,33 +35,17 @@ def main() -> int:
                     return 4
                 print(f"OK: private Supabase Storage bucket '{bucket}' is ready.")
                 return 0
-            if check.status_code not in {400, 404}:
-                print(f"ERROR: Could not verify Supabase Storage bucket ({check.status_code}): {check.text[:300]}")
-                return 3
+            if check.status_code in {400, 404}:
+                print(
+                    f"ERROR: Required Storage bucket '{bucket}' was not found. "
+                    "Verify the existing bucket manually; startup will not create or recreate it."
+                )
+                return 5
+            print(f"ERROR: Could not verify Supabase Storage bucket (HTTP {check.status_code}).")
+            return 3
 
-            create = client.post(
-                f"{base}/bucket",
-                headers=headers,
-                json={
-                    "id": bucket,
-                    "name": bucket,
-                    "public": False,
-                    "file_size_limit": settings.max_upload_mb * 1024 * 1024,
-                    "allowed_mime_types": ["image/jpeg", "image/png", "image/webp"],
-                },
-            )
-            if create.status_code not in {200, 201}:
-                # A race or provider variation may report an already-existing bucket as 400/409.
-                retry = client.get(f"{base}/bucket/{bucket}", headers=headers)
-                if retry.status_code == 200 and (retry.json() or {}).get("public") is not True:
-                    print(f"OK: private Supabase Storage bucket '{bucket}' is ready.")
-                    return 0
-                print(f"ERROR: Could not create private Storage bucket '{bucket}' ({create.status_code}): {create.text[:300]}")
-                return 3
-            print(f"OK: created private Supabase Storage bucket '{bucket}'.")
-            return 0
     except httpx.HTTPError as exc:
-        print(f"ERROR: Supabase Storage connection failed: {exc}")
+        print(f"ERROR: Supabase Storage connection failed ({type(exc).__name__}).")
         return 3
 
 

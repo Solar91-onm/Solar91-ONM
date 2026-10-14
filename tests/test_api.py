@@ -132,6 +132,16 @@ def test_issue_progress_consumes_tracked_spare_part(client, db):
     db.add(item); db.commit()
     assert client.post(f'/api/issues/{issue_id}/acknowledge').status_code == 200
 
+    insufficient=client.post(f'/api/issues/{issue_id}/progress',json={
+        'note':'Attempted to use more stock than available',
+        'inventory_item_id':item.legacy_id,
+        'quantity':6,
+    })
+    assert insufficient.status_code == 409, insufficient.text
+    db.refresh(item)
+    assert float(item.quantity)==5
+    assert db.query(InventoryMovement).filter(InventoryMovement.inventory_item_id==item.id).count()==0
+
     progressed=client.post(f'/api/issues/{issue_id}/progress',json={
         'note':'Replaced blown fuse','hours':1.5,'inventory_item_id':item.legacy_id,'quantity':2,
     })

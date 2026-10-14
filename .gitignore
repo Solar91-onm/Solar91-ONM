@@ -1,5 +1,6 @@
 .env
 .venv/
+.venv-load/
 venv/
 __pycache__/
 *.py[cod]
@@ -15,6 +16,7 @@ uploads/
 *.dump
 *.gpg
 backups/
+loadtests/results/
 
 .git_backup_corrupted~/
 *.swp

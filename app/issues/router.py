@@ -278,7 +278,7 @@ def _require_issue_workflow_role(user:User):
         raise HTTPException(403,"Only an Assignee or O&M Head can advance the issue workflow")
 
 def _require_issue_workflow_scope(db:Session,user:User,issue_id:UUID):
-    row=IssueRepository(db).by_id(issue_id)
+    row=IssueRepository(db).by_id(issue_id,for_update=True)
     if not row:
         raise HTTPException(404,"Issue not found")
     _require_issue_action_scope(db,user,issue_id)

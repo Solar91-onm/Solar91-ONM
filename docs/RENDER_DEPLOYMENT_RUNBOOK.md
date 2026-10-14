@@ -50,7 +50,9 @@ Before a test or production deployment:
 4. Apply only the approved SQL against the intended Supabase project using its SQL editor or a controlled migration process. Do not blindly run `scripts/migrate.py` against a populated database.
 5. Verify schema and representative records/relationships before routing users to the service.
 
-The application checks PostgreSQL connectivity for readiness but does not prove that every application table is current.
+The application checks PostgreSQL connectivity for readiness but does not prove that every application table is current. The `SUPABASE_URL` setting must be the HTTPS project origin (or a localhost origin for local development), without `/rest/v1`, `/auth/v1`, query parameters, or fragments. Validation errors do not include the configured URL.
+
+Production startup retries transient PostgreSQL/Storage connection failures with exponential backoff capped at 60 seconds while readiness remains unavailable. Deterministic configuration errors and a missing or public Storage bucket do not retry. Startup verifies the configured bucket only; it never creates, changes, or deletes a bucket. Verify that the existing `scheduled-om-evidence` bucket is private before deployment; if it is missing or public, stop and investigate without recreating or changing it.
 
 ## Deploy and smoke test
 

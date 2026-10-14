@@ -138,6 +138,22 @@ def test_ticket_number_is_assigned_even_if_notifications_fail(client, db, monkey
     assert issue["ticket_no"].startswith("ISS-") and issue["status"] == "Open"
 
 
+def test_generated_ticket_number_retries_after_a_collision(client, db, monkeypatch):
+    _, plant, existing = _head_with_issue(client, db, code="WR03")
+    assert existing["ticket_no"] == "ISS-0001"
+    candidates = iter(["ISS-0001", "ISS-0002"])
+    monkeypatch.setattr("app.issues.service.next_issue_ticket_no", lambda _db: next(candidates))
+
+    response = client.post("/api/issues", json={
+        "plant_id": plant["id"],
+        "description": "A second fault",
+        "severity": "Medium",
+    })
+
+    assert response.status_code == 201, response.text
+    assert response.json()["ticket_no"] == "ISS-0002"
+
+
 def test_site_engineer_can_raise_equipment_issue_and_notifies_assignee_and_heads(client, db):
     head = login_user(client, db, role="O&M Head", name="Operations Head", email="raise-head@example.com")
     plant = Plant(site_code="WR-SE-ISSUE", plant_name="Site Engineer Issue Plant")

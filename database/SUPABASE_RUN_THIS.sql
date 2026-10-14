@@ -152,6 +152,18 @@ CREATE TABLE IF NOT EXISTS issue_etc_changes (
     changed_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS ix_issue_etc_changes_issue_changed_at ON issue_etc_changes(issue_id, changed_at);
+ALTER TABLE IF EXISTS public.issue_steps ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.issue_etc_changes ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON TABLE public.issue_steps, public.issue_etc_changes FROM PUBLIC;
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
+    REVOKE ALL ON TABLE public.issue_steps, public.issue_etc_changes FROM anon;
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN
+    REVOKE ALL ON TABLE public.issue_steps, public.issue_etc_changes FROM authenticated;
+  END IF;
+END $$;
 ALTER TABLE issues ADD COLUMN IF NOT EXISTS fixed_on date;
 ALTER TABLE issues ADD COLUMN IF NOT EXISTS closed_on date;
 UPDATE issues SET fixed_on = COALESCE(fixed_on, NULLIF(COALESCE(closure->>'fixed_on', closure->>'fixedOn'), '')::date)

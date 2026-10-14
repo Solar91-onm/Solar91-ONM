@@ -66,8 +66,19 @@ class IssueRepository:
             stmt = stmt.where(or_(func.lower(Issue.ticket_no).like(like), func.lower(Issue.description).like(like), func.lower(func.coalesce(Issue.equipment_ref, " ")).like(like)))
         return list(self.db.scalars(stmt.order_by(Issue.created_at.desc()).offset(offset).limit(limit)))
 
-    def by_id(self, issue_id, *, include_deleted=False):
-        row=self.db.get(Issue, issue_id)
+    def by_id(self, issue_id, *, include_deleted=False, for_update=False):
+        if for_update:
+            # Flush authorization-side changes in this request before refreshing the locked row.
+            self.db.flush()
+            stmt = (
+                select(Issue)
+                .where(Issue.id == issue_id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+            row = self.db.scalar(stmt)
+        else:
+            row=self.db.get(Issue, issue_id)
         return row if row and (include_deleted or row.deleted_at is None) else None
     def by_ticket(self, ticket_no, *, include_deleted=False):
         stmt=select(Issue).where(Issue.ticket_no == ticket_no)

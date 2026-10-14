@@ -36,6 +36,9 @@ settings=get_settings()
 BASE=Path(__file__).resolve().parents[1]
 logging.basicConfig(level=logging.INFO,format="%(asctime)s %(levelname)s %(name)s %(message)s")
 logger=logging.getLogger("solar91")
+SETUP_RETRY_INITIAL_SECONDS = 5
+SETUP_RETRY_MAX_SECONDS = 60
+SETUP_SCRIPT_TIMEOUT_SECONDS = 60
 
 app=FastAPI(
     title="Solar91 O&M Command Center API",
@@ -69,20 +72,77 @@ async def security_headers(request: Request, call_next):
         response.headers["Cache-Control"] = "no-store"
     return response
 
-async def _run_deploy_setup():
+async def _run_setup_script(script: str) -> int:
+    path = BASE / "scripts" / script
+    logger.info("Running deployment setup: %s", script)
+    process = await asyncio.create_subprocess_exec(
+        sys.executable, str(path), cwd=str(BASE)
+    )
     try:
-        for script in ("preflight.py", "ensure_storage.py"):
-            path = BASE / "scripts" / script
-            logger.info("Running deployment setup: %s", script)
-            process = await asyncio.create_subprocess_exec(sys.executable,str(path),cwd=str(BASE))
-            exit_code = await process.wait()
-            if exit_code:
-                logger.error("Deployment setup failed: %s exited with status %s",script,exit_code)
+        return await asyncio.wait_for(
+            process.wait(), timeout=SETUP_SCRIPT_TIMEOUT_SECONDS
+        )
+    except asyncio.TimeoutError:
+        logger.error(
+            "Deployment setup timed out: %s exceeded %s seconds",
+            script,
+            SETUP_SCRIPT_TIMEOUT_SECONDS,
+        )
+        process.terminate()
+        try:
+            await asyncio.wait_for(process.wait(), timeout=5)
+        except asyncio.TimeoutError:
+            process.kill()
+            await process.wait()
+        return 3
+    except asyncio.CancelledError:
+        process.terminate()
+        try:
+            await asyncio.wait_for(process.wait(), timeout=5)
+        except asyncio.TimeoutError:
+            process.kill()
+            await process.wait()
+        raise
+
+
+async def _run_deploy_setup():
+    delay = SETUP_RETRY_INITIAL_SECONDS
+    while True:
+        try:
+            transient_failure = False
+            for script in ("preflight.py", "ensure_storage.py"):
+                exit_code = await _run_setup_script(script)
+                if exit_code == 0:
+                    continue
+                if exit_code == 3:
+                    transient_failure = True
+                    break
+                logger.error(
+                    "Deployment setup failed: %s exited with status %s",
+                    script,
+                    exit_code,
+                )
                 return
-        app.state.bootstrap_ready = True
-        logger.info("Deployment setup complete; application is ready.")
-    except Exception:
-        logger.exception("Deployment setup could not complete; application remains unavailable.")
+
+            if not transient_failure:
+                app.state.bootstrap_ready = True
+                logger.info("Deployment setup complete; application is ready.")
+                return
+            logger.warning(
+                "Deployment setup encountered a temporary dependency failure; "
+                "retrying in %s seconds.",
+                delay,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception(
+                "Deployment setup attempt failed; application remains unavailable."
+            )
+            return
+
+        await asyncio.sleep(delay)
+        delay = min(delay * 2, SETUP_RETRY_MAX_SECONDS)
 
 @app.on_event("startup")
 async def _start_deploy_setup():
@@ -116,6 +176,23 @@ async def _start_pm_daily_job():
                 logging.getLogger("solar91.pm").exception("Daily PM job failed")
             await asyncio.sleep(3600)
     app.state.pm_job = asyncio.create_task(_loop())
+
+@app.on_event("shutdown")
+async def _stop_background_tasks():
+    tasks = [
+        task
+        for task in (
+            getattr(app.state, "bootstrap_task", None),
+            getattr(app.state, "pm_job", None),
+        )
+        if task is not None and not task.done()
+    ]
+    for task in tasks:
+        task.cancel()
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
+    from app.core.database import engine
+    engine.dispose()
 
 STATIC=BASE/"frontend"/"static"; TEMPLATES=BASE/"frontend"/"templates"
 if STATIC.is_dir():
