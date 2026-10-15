@@ -19,6 +19,8 @@ AUTH_SETTINGS = Settings(
     supabase_anon_key="test-anon-key",
     supabase_jwt_secret=JWT_SECRET,
 )
+OPEN_SETTINGS = Settings(app_env="test", supabase_url="https://solar91-test.supabase.co", supabase_anon_key="test-anon-key",
+                         supabase_jwt_secret=JWT_SECRET, allow_unregistered_signin=True)
 ADMIN_SETTINGS = Settings(
     app_env="test",
     supabase_url="https://solar91-test.supabase.co",
@@ -162,7 +164,7 @@ def test_user_metadata_cannot_grant_application_privileges(db, monkeypatch):
             "app_metadata": {"role": "O&M Head"},
             "user_metadata": {"role": "O&M Head"},
         },
-        AUTH_SETTINGS,
+        OPEN_SETTINGS,
         access_token="verified-session-token",
     )
     assert user.auth_provider == "supabase"
@@ -412,3 +414,22 @@ def test_existing_user_keeps_established_role_and_disabled_restriction(db, monke
     with pytest.raises(HTTPException) as exc:
         upsert_supabase_user(db, {"sub": AUTH_SUBJECT}, AUTH_SETTINGS)
     assert exc.value.status_code == 403
+
+
+def test_unregistered_email_is_refused_and_not_created(db, monkeypatch):
+    monkeypatch.setattr("app.auth.service._fetch_supabase_user", lambda token, settings: verified_profile())
+    with pytest.raises(HTTPException) as exc:
+        upsert_supabase_user(db, {"sub": AUTH_SUBJECT, "email": "staff@example.com"}, AUTH_SETTINGS,
+                             access_token="verified-session-token")
+    assert exc.value.status_code == 403
+    assert db.query(User).count() == 0
+
+
+def test_pre_added_email_can_sign_in(db, monkeypatch):
+    db.add(User(auth_provider="supabase", external_subject="invite:staff@example.com", email="staff@example.com",
+                display_name="Staff", role="Assignee", is_active=True))
+    db.commit()
+    monkeypatch.setattr("app.auth.service._fetch_supabase_user", lambda token, settings: verified_profile())
+    user = upsert_supabase_user(db, {"sub": AUTH_SUBJECT, "email": "staff@example.com"}, AUTH_SETTINGS,
+                                access_token="verified-session-token")
+    assert user.role == "Assignee" and user.external_subject == AUTH_SUBJECT

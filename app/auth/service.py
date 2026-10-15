@@ -188,6 +188,12 @@ def upsert_supabase_user(
         db.refresh(invited_user)
         return invited_user
 
+    if email.casefold() not in settings.admin_emails and not settings.allow_unregistered_signin:
+        raise HTTPException(
+            status_code=403,
+            detail="This email is not registered for Solar91. Ask your O&M Head to add you.",
+        )
+
     display_name = str(claims.get("name") or "").strip() or str(claims.get("full_name") or "").strip() or email
     if not display_name or display_name == "None":
         display_name = email

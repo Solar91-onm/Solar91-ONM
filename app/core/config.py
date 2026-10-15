@@ -31,6 +31,9 @@ class Settings(BaseSettings):
     supabase_storage_bucket: str = "scheduled-om-evidence"
 
     bootstrap_admin_emails: str = ""
+    # False (default): only people already added to the users table (or listed in BOOTSTRAP_ADMIN_EMAILS) may sign in.
+    # True: any verified Supabase user is auto-created as a role-less "Viewer".
+    allow_unregistered_signin: bool = False
 
     # Invite e-mails (Resend, https://resend.com). Leave empty to disable sending.
     resend_api_key: str = ""

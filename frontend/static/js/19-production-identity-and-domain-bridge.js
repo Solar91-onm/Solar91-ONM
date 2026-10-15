@@ -56,7 +56,7 @@ async function startSolar91App(){
   }
   S.currentUser=AUTH_IDENTITY.name;S.currentRole=AUTH_IDENTITY.role;S._roleLabel=AUTH_IDENTITY.role;S._readOnly=AUTH_IDENTITY.role==='Administration';
   await init();
- }catch(e){console.error('Solar91 startup',e);if(String(e.message||e).includes('Authentication required')){showSupabaseSignIn();return}authSetupCard('Solar91 could not start',esc(e.message||String(e)))}
+ }catch(e){console.error('Solar91 startup',e);if(String(e.message||e).includes('Authentication required')){showSupabaseSignIn();return}if(/not registered for Solar91/i.test(String(e.message||e))){try{await window.supabaseClient.auth.signOut()}catch(_){}showSupabaseSignIn('This email is not registered. Ask your O&M Head to add you, then try again.');return}authSetupCard('Solar91 could not start',esc(e.message||String(e)))}
 }
 
 /* ================================================================
