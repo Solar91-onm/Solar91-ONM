@@ -3,6 +3,16 @@
 
 const AUTH_PROVIDER = (window.S91_CONFIG && window.S91_CONFIG.authProvider) || "supabase";
 const AUTH_IDENTITY={name:null,role:null};
+/* Email-code (OTP) sign-in. Supabase Auth emails the code; SMTP is Resend (configured in the Supabase dashboard).
+   true  = an invited person who has no Supabase account yet can create it by verifying a code. The server then
+           promotes their pending invite by verified email; an unknown email becomes a Viewer with no permissions.
+   false = only people who already have a Supabase Auth account can receive a code. */
+const S91_CODE_SIGNIN_CREATES_USERS=true;
+const S91_CODE_RESEND_SECONDS=60;
+/* false = the login page shows ONLY the emailed-code flow (every login needs a fresh code).
+   true  = the email + password form is shown as well. NOTE: this only hides the form. Supabase itself still accepts a
+           password for any account that has one, so do not give people passwords if you want code-only to be strict. */
+const S91_PASSWORD_LOGIN_ENABLED=false;
 
 function authSetupCard(title, detail){
   document.getElementById("app").innerHTML = '<div style="min-height:100vh;display:grid;place-items:center;padding:24px;background:#F4F6F5;font-family:Inter,system-ui,sans-serif"><div style="width:min(520px,100%);background:#fff;border:1px solid #E4E9E6;border-radius:16px;padding:24px;box-shadow:0 12px 38px rgba(16,24,20,.10)"><div style="display:flex;align-items:center;gap:10px"><img src="/static/brand/solar91-emblem.png" height="34" alt=""><img src="/static/brand/solar91-wordmark.png" height="22" alt="SOLAR 91"></div><h2 style="margin:8px 0 8px;font-size:22px">'+title+'</h2><p style="margin:0;color:#69756F;line-height:1.55">'+detail+'</p></div></div>';
@@ -54,7 +64,8 @@ function showSupabaseSignIn(errorMessage){
           '<label style="display:grid;gap:5px;font-size:12px;font-weight:600">Password<input id="supabase-password" name="password" type="password" autocomplete="current-password" required style="padding:11px;border:1px solid #D7DFD9;border-radius:8px"></label>'+
           '<p id="supabase-auth-error" role="alert" style="margin:0;color:#B42318;font-size:12px">'+esc(errorMessage||"")+'</p>'+
           '<button id="supabase-submit" type="submit" style="padding:11px;border:0;border-radius:8px;background:#16A34A;color:white;font-weight:700;cursor:pointer">Sign in</button>'+
-        '</form></div>'+
+        '</form>'+
+        '<button type="button" id="supabase-code-link" style="margin-top:10px;width:100%;background:none;border:0;color:#16794A;font-size:13px;font-weight:700;cursor:pointer;padding:6px">Email me a sign-in code instead</button></div>'+
         '<div class="s91-foot">Solar91 Cleantech Limited · <b>Energizing India</b></div>'+
       '</div>'+
     '</main>'+
@@ -75,7 +86,102 @@ function showSupabaseSignIn(errorMessage){
       button.disabled=false;button.textContent="Sign in";
     }
   });
+  document.getElementById("supabase-code-link").addEventListener("click",function(){
+    s91ShowCodeSignIn(document.getElementById("supabase-email").value.trim());
+  });
+  if(!S91_PASSWORD_LOGIN_ENABLED)s91ShowCodeSignIn("",errorMessage);
   s91Alive(document.querySelector(".s91-mesh"));
+}
+
+/* ---- sign in with an emailed code (Supabase email OTP) ---- */
+/* Same rule as app/auth/emails.py: Gmail ignores dots and +tags, so one mailbox = one account. Typos are never corrected. */
+function s91CanonEmail(v){
+  const e=String(v||"").trim().toLowerCase(),i=e.lastIndexOf("@");
+  if(i<1)return e;
+  const dom=e.slice(i+1);
+  if(dom==="gmail.com"||dom==="googlemail.com"){
+    const local=e.slice(0,i).split("+")[0].replace(/\./g,"");
+    if(local)return local+"@gmail.com";
+  }
+  return e;
+}
+function s91CodeError(err){
+  const m=String(err&&err.message||"");
+  if(err&&err.status===429||/rate limit|only request this after|seconds/i.test(m))return "Please wait a minute before asking for another code.";
+  if(/signups not allowed|not allowed for otp/i.test(m))return "This email has no account yet. Ask your O&M Head to add you.";
+  if(/expired|invalid/i.test(m))return "That code is wrong or has expired. Check the newest email, or ask for a new code.";
+  return m||"Something went wrong. Please try again.";
+}
+function s91ShowCodeSignIn(prefillEmail,errorMessage){
+  const box=document.querySelector(".s91-glow");
+  if(!box)return;
+  const fld='display:grid;gap:5px;font-size:12px;font-weight:600',inp='padding:11px;border:1px solid #D7DFD9;border-radius:8px',
+        lnk='background:none;border:0;color:#16794A;font-size:12px;font-weight:600;cursor:pointer;padding:4px';
+  box.innerHTML=
+    '<form id="supabase-code-form" style="display:grid;gap:12px;background:#fff;padding:20px;border:1px solid #E4E9E6;border-radius:14px">'+
+      '<label style="'+fld+'">Email<input id="supabase-code-email" name="email" type="email" autocomplete="email" required value="'+esc(prefillEmail||"")+'" style="'+inp+'"></label>'+
+      '<label id="supabase-code-field" style="'+fld+';display:none">Code from your email<input id="supabase-code" name="code" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="10" placeholder="123456" style="'+inp+';letter-spacing:4px;font-size:18px;text-align:center"></label>'+
+      '<p id="supabase-code-msg" role="status" style="margin:0;color:#2B4033;font-size:12px"></p>'+
+      '<p id="supabase-code-error" role="alert" style="margin:0;color:#B42318;font-size:12px"></p>'+
+      '<button id="supabase-code-submit" type="submit" style="padding:11px;border:0;border-radius:8px;background:#16A34A;color:white;font-weight:700;cursor:pointer">Email me a code</button>'+
+      '<button id="supabase-code-resend" type="button" style="'+lnk+';display:none"></button>'+
+      (S91_PASSWORD_LOGIN_ENABLED?'<button id="supabase-code-back" type="button" style="'+lnk+'">Use my password instead</button>':'')+
+    '</form>';
+  const $=id=>document.getElementById(id);
+  let sent=false,cool=0,timer=null;
+  const msg=t=>{$("supabase-code-msg").textContent=t||""},fail=t=>{$("supabase-code-error").textContent=t||""};
+  function tick(){
+    const b=$("supabase-code-resend");
+    if(!b||!document.body.contains(b)){clearInterval(timer);return}
+    if(cool>0){b.disabled=true;b.textContent="Send a new code in "+cool+"s";cool-=1}
+    else{clearInterval(timer);b.disabled=false;b.textContent="Send a new code"}
+  }
+  function startCooldown(){cool=S91_CODE_RESEND_SECONDS;clearInterval(timer);timer=setInterval(tick,1000);tick()}
+  async function sendCode(){
+    const email=$("supabase-code-email").value.trim();
+    const {error:e}=await window.supabaseClient.auth.signInWithOtp({email:s91CanonEmail(email),options:{shouldCreateUser:S91_CODE_SIGNIN_CREATES_USERS}});
+    if(e)throw e;
+    sent=true;
+    $("supabase-code-email").readOnly=true;
+    $("supabase-code-field").style.display="grid";
+    $("supabase-code-resend").style.display="block";
+    $("supabase-code-submit").textContent="Verify and sign in";
+    msg("We emailed a code to "+email+". It can take a minute. Check spam if you do not see it.");
+    startCooldown();
+    $("supabase-code").focus();
+  }
+  $("supabase-code-form").addEventListener("submit",async function(ev){
+    ev.preventDefault();
+    const submit=$("supabase-code-submit");fail("");
+    submit.disabled=true;
+    try{
+      if(!sent){
+        submit.textContent="Sending…";
+        await sendCode();
+      }else{
+        const token=$("supabase-code").value.replace(/\D/g,"");
+        if(token.length<6){fail("Enter the code from the email.");return}
+        submit.textContent="Verifying…";
+        const {error:e}=await window.supabaseClient.auth.verifyOtp({email:s91CanonEmail($("supabase-code-email").value),token:token,type:"email"});
+        if(e)throw e;
+        await startSolar91App();
+        return;
+      }
+    }catch(err){
+      fail(s91CodeError(err));
+      submit.textContent=sent?"Verify and sign in":"Email me a code";
+    }finally{
+      if(document.body.contains(submit))submit.disabled=false;
+    }
+  });
+  $("supabase-code-resend").addEventListener("click",async function(){
+    fail("");
+    try{await sendCode();msg("A new code was sent. Use the newest email only.")}catch(err){fail(s91CodeError(err))}
+  });
+  const back=$("supabase-code-back");
+  if(back)back.addEventListener("click",function(){clearInterval(timer);showSupabaseSignIn()});
+  if(errorMessage)fail(errorMessage);
+  $("supabase-code-email").focus();
 }
 
 /* ---- sign-in page life: neural mesh + typing AI line. Both stop by themselves once the page is replaced. ---- */
