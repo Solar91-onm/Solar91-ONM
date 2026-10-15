@@ -1,6 +1,6 @@
 # Render deployment runbook
 
-This runbook describes the current FastAPI + Supabase + Render deployment. It does not create a Render service or apply database changes.
+This runbook describes the current FastAPI + Clerk + Supabase + Render deployment. It does not create a Render service or apply database changes.
 
 ## Runtime configuration
 
@@ -21,21 +21,23 @@ Configure these in the Render service environment. Never place secret values in 
 | `APP_ENV` | Set to `production`. |
 | `DEBUG` | Set to `false`. |
 | `DATABASE_URL` | Supabase PostgreSQL Session Pooler URI using `postgresql+psycopg://`, port `5432`, and `sslmode=require`. |
-| `SUPABASE_URL` | Project URL, for example `https://<project-ref>.supabase.co`. |
-| `SUPABASE_ANON_KEY` | Supabase publishable/anon key; intentionally public and used by browser Auth. |
+| `SUPABASE_URL` | Project URL, for example `https://<project-ref>.supabase.co`; used for Storage. |
 | `SUPABASE_SERVICE_ROLE_KEY` | Server-only service credential for private Storage operations. Never expose it to the frontend. |
 | `SUPABASE_STORAGE_BUCKET` | Private evidence bucket name; default is `scheduled-om-evidence`. |
+| `CLERK_PUBLISHABLE_KEY` | Clerk publishable key; safe to send to the browser. |
+| `CLERK_SECRET_KEY` | Server-only Clerk API key used to confirm verified email identity. |
+| `CLERK_ISSUER` | Exact issuer origin of Clerk session tokens, such as `https://<instance>.clerk.accounts.dev`. |
 | `ALLOWED_ORIGINS` | Comma-separated exact HTTPS origins; include the Render URL and any active custom domain. |
 
-`PORT` is assigned by Render and must not be set manually. `SUPABASE_JWT_SECRET` is optional and only for projects still using the legacy HS256 signing secret; asymmetric signing keys are verified through the Supabase JWKS endpoint. Other optional settings include `BOOTSTRAP_ADMIN_EMAILS`, `APP_PUBLIC_URL`, `RESEND_API_KEY`, `MAIL_FROM`, `MAX_UPLOAD_MB`, and the `DB_POOL_*` variables. `PM_DAILY_JOB` defaults to `0`.
+`PORT` is assigned by Render and must not be set manually. Other optional settings include `BOOTSTRAP_ADMIN_EMAILS`, `APP_PUBLIC_URL`, `RESEND_API_KEY`, `MAIL_FROM`, `MAX_UPLOAD_MB`, and the `DB_POOL_*` variables. `PM_DAILY_JOB` defaults to `0`.
 
-## Supabase setup
+## Clerk setup
 
-1. Configure Supabase Auth's Site URL to the deployed HTTPS origin, e.g. `https://<service>.onrender.com`.
-2. Add that origin to the Auth redirect URL allowlist. Add the custom domain too, if one is used.
-3. For this portal's current sign-in screen, create/confirm staff accounts in Supabase Auth and distribute credentials securely. Public self-registration should remain disabled unless the business explicitly chooses otherwise.
-4. Configure email confirmation and password recovery policy in Supabase. The browser persists and refreshes sessions using the Supabase JS client.
-5. Keep the evidence bucket private. The application uses its server-side service-role key and applies Solar91 route/role checks before file access.
+1. Add the deployed HTTPS origin and any active custom domain to Clerk's allowed origins.
+2. Enable email address verification with email codes in the Clerk Dashboard. The portal sends codes for sign-in and uses verified email to match existing Solar91 invitations and accounts.
+3. Copy Clerk's publishable key and secret key to the service environment. Set `CLERK_ISSUER` to the issuer origin shown in a Clerk session token; do not set a JWKS URL here.
+4. Existing Supabase Auth accounts are not used for login. On first Clerk sign-in, the portal links the Clerk identity to a matching verified Solar91 email while preserving that user's role and assignments.
+5. Keep the Supabase evidence bucket private. The application uses its server-side service-role key and applies Solar91 route/role checks before file access.
 6. Back up the database and Storage objects before schema changes. A database backup does not include Storage objects.
 
 ## Database migration safety
@@ -60,7 +62,7 @@ Production startup retries transient PostgreSQL/Storage connection failures with
 2. In Render, create/refresh the Blueprint from `render.yaml`; verify it will create/update only the intended `solar91-om` service.
 3. Add the environment variables above in Render and deploy. Do not deploy if preflight fails.
 4. Confirm `/health` returns HTTP 200 and `/health/ready` returns HTTP 200 with `status: "ready"` and `auth_configured: true`.
-5. Open the service URL, sign in as an existing Supabase Auth user, and verify `/api/auth/session`, plant scope, issue workflows, evidence access, and sign-out.
+5. Open the service URL, sign in with a Clerk email code, and verify `/api/auth/session`, plant scope, issue workflows, evidence access, and sign-out.
 6. Review Render logs for startup/preflight errors without copying credentials or tokens into tickets.
 7. Record the actual deployed URL and smoke-test results. A successful build alone is not a deployment smoke test.
 
@@ -81,7 +83,7 @@ No Render service is created or deployed by repository changes alone. Before pro
 
 This release makes frontend assets revalidate after deployment, clears old modals during navigation, limits recursive render storms, and avoids live-refresh redraws while the operator interacts with the UI.
 
-**Supabase project**: the supplied browser-public `SUPABASE_URL` and `SUPABASE_ANON_KEY` are populated in `.env.example` and `render.yaml`. They are not database credentials. The uploaded configuration did **not** contain a completed `DATABASE_URL`. Obtain the **PostgreSQL Session Pooler** connection string from Supabase Dashboard → Connect; paste it into Render Environment (set `sslmode=require`). Ensure the database schema was previously migrated before connecting production.
+**Supabase project**: `SUPABASE_URL` is used for Storage; it is not the database credential. The configuration does **not** contain a completed `DATABASE_URL`. Obtain the **PostgreSQL Session Pooler** connection string from Supabase Dashboard → Connect; paste it into Render Environment (set `sslmode=require`). Ensure the database schema was previously migrated before connecting production.
 
 `SUPABASE_SERVICE_ROLE_KEY` must be configured **only in Render → service → Environment** (and locally in ignored `.env` if needed). Do **not** put the live key into `.env.example`, `render.yaml`, frontend JS, committed source, logs, or a downloadable ZIP. Because a service-role credential was shared in a conversation/file, rotate it in the Supabase dashboard and replace the Render environment value with the newly issued key.
 

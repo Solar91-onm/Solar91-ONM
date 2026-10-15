@@ -1,6 +1,6 @@
 # Historical Solar91 O&M Command Center — Production Completion Audit
 
-> Historical audit snapshot. References to the earlier identity implementation do not describe the current runtime. Supabase Auth is now the only active identity provider. See the current Render runbook for deployment guidance.
+> Historical audit snapshot. References to earlier identity implementations do not describe the current runtime. Clerk is the active identity provider. See the current Render runbook for deployment guidance.
 
 ## Phase 1 — Audit
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 import jwt
@@ -10,8 +11,8 @@ from jwt import PyJWKClient
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.core.config import Settings, get_settings
 from app.auth.emails import canonical_email, is_gmail_family
+from app.core.config import Settings, get_settings
 from app.core.models import User
 
 
@@ -20,199 +21,188 @@ def _jwks_client(jwks_url: str) -> PyJWKClient:
     return PyJWKClient(jwks_url, cache_keys=True, timeout=5)
 
 
-def verify_supabase_session_token(token: str, settings: Settings | None = None) -> dict[str, Any]:
+def verify_session_token(token: str, settings: Settings | None = None) -> dict[str, Any]:
     settings = settings or get_settings()
-    issuer = settings.supabase_auth_issuer
-    secret = (settings.supabase_jwt_secret or "").strip()
-    if not settings.supabase_configured or not issuer:
-        raise HTTPException(status_code=503, detail="Supabase authentication is not configured")
+    issuer = settings.clerk_issuer
+    if not settings.clerk_configured:
+        raise HTTPException(status_code=503, detail="Clerk authentication is not configured")
 
     try:
         header = jwt.get_unverified_header(token)
         algorithm = header.get("alg")
-        if algorithm == "HS256" and secret:
-            claims = jwt.decode(
-                token,
-                secret,
-                algorithms=["HS256"],
-                issuer=issuer,
-                audience="authenticated",
-                options={"require": ["exp", "sub", "iat", "iss", "aud"]},
-                leeway=5,
-            )
-        else:
-            if algorithm not in {"RS256", "ES256", "ES384", "EdDSA"}:
-                raise jwt.InvalidAlgorithmError("Unsupported Supabase signing algorithm")
-            signing_key_info = _jwks_client(f"{issuer}/.well-known/jwks.json").get_signing_key_from_jwt(token)
-            if signing_key_info.algorithm_name and signing_key_info.algorithm_name != algorithm:
-                raise jwt.InvalidAlgorithmError("JWT algorithm does not match the Supabase signing key")
-            claims = jwt.decode(
-                token,
-                signing_key_info.key,
-                algorithms=[algorithm],
-                issuer=issuer,
-                audience="authenticated",
-                options={"require": ["exp", "sub", "iat", "iss", "aud"]},
-                leeway=5,
-            )
+        if algorithm not in {"RS256", "ES256", "ES384", "EdDSA"}:
+            raise jwt.InvalidAlgorithmError("Unsupported Clerk signing algorithm")
+        signing_key = _jwks_client(f"{issuer}/.well-known/jwks.json").get_signing_key_from_jwt(token)
+        if signing_key.algorithm_name and signing_key.algorithm_name != algorithm:
+            raise jwt.InvalidAlgorithmError("JWT algorithm does not match the Clerk signing key")
+        claims = jwt.decode(
+            token,
+            signing_key.key,
+            algorithms=[algorithm],
+            issuer=issuer,
+            options={"require": ["exp", "sub", "iat", "iss"]},
+            leeway=5,
+        )
     except jwt.PyJWTError as exc:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired Supabase session") from exc
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired Clerk session") from exc
 
-    if not claims.get("sub"):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Supabase session missing subject")
-    if claims.get("role") != "authenticated":
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Supabase session is not authenticated")
+    if not claims.get("sub") or not claims.get("sid"):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Clerk session is missing its identity")
     return claims
 
 
-def verify_session_token(token: str, settings: Settings | None = None) -> dict[str, Any]:
-    settings = settings or get_settings()
-    return verify_supabase_session_token(token, settings)
-
-
-def _fetch_supabase_user(token: str, settings: Settings) -> dict[str, Any]:
-    if not settings.supabase_url or not settings.supabase_anon_key:
-        raise HTTPException(status_code=503, detail="Supabase authentication is not configured")
+def _fetch_clerk_user(subject: str, settings: Settings) -> dict[str, Any]:
+    if not settings.clerk_secret_key.strip():
+        raise HTTPException(status_code=503, detail="Clerk authentication is not configured")
 
     try:
         with httpx.Client(timeout=8.0) as client:
             response = client.get(
-                f"{settings.supabase_url.rstrip('/')}/auth/v1/user",
-                headers={
-                    "apikey": settings.supabase_anon_key,
-                    "Authorization": f"Bearer {token}",
-                },
+                f"https://api.clerk.com/v1/users/{quote(subject, safe='')}",
+                headers={"Authorization": f"Bearer {settings.clerk_secret_key.strip()}"},
             )
     except (httpx.RequestError, httpx.InvalidURL) as exc:
-        raise HTTPException(status_code=503, detail="Could not verify the authenticated user with Supabase Auth") from exc
+        raise HTTPException(status_code=503, detail="Could not verify the authenticated user with Clerk") from exc
 
+    if response.status_code == 404:
+        raise HTTPException(status_code=401, detail="Clerk rejected the authenticated session")
     if response.status_code in {401, 403}:
-        raise HTTPException(status_code=401, detail="Supabase rejected the authenticated session")
+        raise HTTPException(status_code=503, detail="Could not verify the authenticated user with Clerk")
     if response.status_code != 200:
-        raise HTTPException(status_code=503, detail="Could not verify the authenticated user with Supabase Auth")
+        raise HTTPException(status_code=503, detail="Could not verify the authenticated user with Clerk")
 
     try:
         profile = response.json()
     except ValueError as exc:
-        raise HTTPException(status_code=503, detail="Supabase Auth returned an invalid user response") from exc
+        raise HTTPException(status_code=503, detail="Clerk returned an invalid user response") from exc
     if not isinstance(profile, dict):
-        raise HTTPException(status_code=503, detail="Supabase Auth returned an invalid user response")
+        raise HTTPException(status_code=503, detail="Clerk returned an invalid user response")
     return profile
 
 
-def _verified_identity(
-    claims: dict[str, Any], access_token: str | None, settings: Settings
-) -> str:
-    if not access_token:
-        raise HTTPException(status_code=401, detail="Authentication required")
-
+def _verified_identity(claims: dict[str, Any], settings: Settings) -> tuple[str, str]:
     subject = str(claims.get("sub") or "")
-    profile = _fetch_supabase_user(access_token, settings)
-    profile_subject = profile.get("id")
-    if not subject or not isinstance(profile_subject, str) or profile_subject != subject:
-        raise HTTPException(status_code=401, detail="Supabase user does not match the authenticated session")
+    profile = _fetch_clerk_user(subject, settings)
+    if profile.get("id") != subject:
+        raise HTTPException(status_code=401, detail="Clerk user does not match the authenticated session")
 
-    claim_email = claims.get("email")
-    profile_email = profile.get("email")
-    if not isinstance(claim_email, str) or not isinstance(profile_email, str):
-        raise HTTPException(status_code=401, detail="Supabase session is missing a verified email identity")
-    email = profile_email.strip()
-    if not email or claim_email.strip().casefold() != email.casefold():
-        raise HTTPException(status_code=401, detail="Supabase session email does not match the authenticated user")
+    email_addresses = profile.get("email_addresses")
+    if not isinstance(email_addresses, list):
+        raise HTTPException(status_code=401, detail="Clerk user is missing a verified email identity")
+    primary_id = profile.get("primary_email_address_id")
+    primary = next(
+        (
+            address for address in email_addresses
+            if isinstance(address, dict)
+            and address.get("id") == primary_id
+            and isinstance(address.get("email_address"), str)
+            and isinstance(address.get("verification"), dict)
+            and address["verification"].get("status") == "verified"
+        ),
+        None,
+    )
+    if primary is None:
+        raise HTTPException(status_code=403, detail="Verify your primary email address before accessing this account")
+    email = primary["email_address"].strip()
+    if not email:
+        raise HTTPException(status_code=401, detail="Clerk user is missing a verified email identity")
 
-    confirmed_at = profile.get("email_confirmed_at")
-    if not isinstance(confirmed_at, str) or not confirmed_at.strip():
-        raise HTTPException(status_code=403, detail="Verify your email address before accessing this account")
-    return email
+    name_parts = [profile.get("first_name"), profile.get("last_name")]
+    name = " ".join(part.strip() for part in name_parts if isinstance(part, str) and part.strip())
+    return email, name
 
 
-def upsert_supabase_user(
+def upsert_clerk_user(
     db: Session,
     claims: dict[str, Any],
     settings: Settings | None = None,
-    *,
-    access_token: str | None = None,
 ) -> User:
     settings = settings or get_settings()
     subject = str(claims.get("sub") or "")
     if not subject:
-        raise HTTPException(status_code=401, detail="Supabase session did not include a user identifier")
+        raise HTTPException(status_code=401, detail="Clerk session did not include a user identifier")
 
-    user = db.scalar(select(User).where(User.auth_provider == "supabase", User.external_subject == subject))
-    if user:
-        if not user.is_active:
-            raise HTTPException(status_code=403, detail="This Solar91 account is disabled")
-        claimed_email = claims.get("email")
-        if (
-            user.role == "Viewer"
-            and isinstance(claimed_email, str)
-            and claimed_email.strip().casefold() in settings.admin_emails
-        ):
-            email = _verified_identity(claims, access_token, settings)
-            if email.casefold() in settings.admin_emails:
-                user.role = "O&M Head"
-                db.commit()
-                db.refresh(user)
-        return user
+    user = db.scalar(select(User).where(User.auth_provider == "clerk", User.external_subject == subject))
+    email: str | None = None
+    name = ""
+    if user is None:
+        email, name = _verified_identity(claims, settings)
 
-    email = _verified_identity(claims, access_token, settings)
-    invited_user = db.scalar(
-        select(User).where(
-            User.auth_provider == "supabase",
-            User.external_subject.like("invite:%"),
-            func.lower(User.email) == email.lower(),
+        candidates = list(
+            db.scalars(
+                select(User).where(
+                    User.auth_provider.in_(("clerk", "supabase")),
+                    func.lower(User.email) == email.lower(),
+                )
+            )
         )
-    )
-    if invited_user is None and is_gmail_family(email):
-        wanted = canonical_email(email)
-        invited_user = next(
-            (
-                u
-                for u in db.scalars(
+        if not candidates and is_gmail_family(email):
+            wanted = canonical_email(email)
+            candidates = [
+                candidate
+                for candidate in db.scalars(
                     select(User).where(
-                        User.auth_provider == "supabase",
-                        User.external_subject.like("invite:%"),
+                        User.auth_provider.in_(("clerk", "supabase")),
                         User.email.ilike("%@gmail.com") | User.email.ilike("%@googlemail.com"),
                     )
                 )
-                if canonical_email(u.email) == wanted
-            ),
-            None,
+                if canonical_email(candidate.email or "") == wanted
+            ]
+
+        if len(candidates) > 1:
+            raise HTTPException(status_code=409, detail="More than one Solar91 account matches this email. Ask your O&M Head to resolve it.")
+
+        matching_invites = [candidate for candidate in candidates if candidate.external_subject.startswith("invite:")]
+        legacy_accounts = [
+            candidate for candidate in candidates
+            if candidate.auth_provider == "supabase" and not candidate.external_subject.startswith("invite:")
+        ]
+        if matching_invites:
+            user = matching_invites[0]
+        elif legacy_accounts:
+            user = legacy_accounts[0]
+        elif candidates:
+            raise HTTPException(status_code=409, detail="This email is linked to a different Clerk account. Ask your O&M Head to resolve it.")
+
+        if user is not None:
+            if not user.is_active:
+                raise HTTPException(status_code=403, detail="This Solar91 account is disabled")
+            user.auth_provider = "clerk"
+            user.external_subject = subject
+            user.email = email
+            if name:
+                user.display_name = name
+            if user.role == "Viewer" and email.casefold() in settings.admin_emails:
+                user.role = "O&M Head"
+            db.commit()
+            db.refresh(user)
+            return user
+
+        if email.casefold() not in settings.admin_emails and not settings.allow_unregistered_signin:
+            raise HTTPException(
+                status_code=403,
+                detail="This email is not registered for Solar91. Ask your O&M Head to add you.",
+            )
+
+        user = User(
+            auth_provider="clerk",
+            external_subject=subject,
+            email=email,
+            display_name=name or email,
+            role="O&M Head" if email.casefold() in settings.admin_emails else "Viewer",
+            is_active=True,
         )
-    if invited_user:
-        if not invited_user.is_active:
-            raise HTTPException(status_code=403, detail="This Solar91 account is disabled")
-        invited_user.external_subject = subject
-        invited_user.email = email
+        db.add(user)
         db.commit()
-        db.refresh(invited_user)
-        return invited_user
+        db.refresh(user)
+        return user
 
-    if email.casefold() not in settings.admin_emails and not settings.allow_unregistered_signin:
-        raise HTTPException(
-            status_code=403,
-            detail="This email is not registered for Solar91. Ask your O&M Head to add you.",
-        )
-
-    display_name = str(claims.get("name") or "").strip() or str(claims.get("full_name") or "").strip() or email
-    if not display_name or display_name == "None":
-        display_name = email
-
-    role = "Viewer"
-    if email.casefold() in settings.admin_emails:
-        role = "O&M Head"
-
-    user = User(
-        auth_provider="supabase",
-        external_subject=subject,
-        email=email,
-        display_name=display_name,
-        role=role,
-        is_active=True,
-    )
-    db.add(user)
-    db.commit()
-    db.refresh(user)
+    if not user.is_active:
+        raise HTTPException(status_code=403, detail="This Solar91 account is disabled")
+    if user.role == "Viewer" and user.email and user.email.casefold() in settings.admin_emails:
+        user.role = "O&M Head"
+        db.commit()
+        db.refresh(user)
     return user
 
 
@@ -223,4 +213,4 @@ def upsert_user_for_claims(
     *,
     access_token: str | None = None,
 ) -> User:
-    return upsert_supabase_user(db, claims, settings, access_token=access_token)
+    return upsert_clerk_user(db, claims, settings)

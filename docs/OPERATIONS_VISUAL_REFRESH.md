@@ -19,7 +19,7 @@ The existing **FastAPI + Supabase** application is the baseline. This release up
 
 ## Checklist for live acceptance
 
-1. Sign in through **Supabase Auth** under O&M Head; confirm plant scoping and access control.
+1. Sign in through **Clerk email code** under O&M Head; confirm plant scoping and access control.
 2. Load Command Centre and open Site Issues, PM, Washing, Plants and Reports using both sidebar and shortcut cards.
 3. In Site Issues, create a ticket, assign, acknowledge, add notes/photos, resolve, verify and reopen. Confirm database values persist on reload.
 4. In Washing, open a plant, review daily calendar and report evidence; test confirm and reject (reason required).

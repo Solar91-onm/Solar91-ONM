@@ -324,15 +324,15 @@ def test_excel_plant_and_location_imports_run_on_backend(client, db):
     assert round(float(plant.latitude),2) == 26.90
 
 
-def test_auth_config_reports_supabase(client):
+def test_auth_config_reports_clerk(client):
     from app.core.config import get_settings
 
     response = client.get("/api/auth/config")
     assert response.status_code == 200
 
     body = response.json()
-    assert body["provider"] == "supabase"
-    assert body["configured"] is get_settings().supabase_configured
+    assert body["provider"] == "clerk"
+    assert body["configured"] is get_settings().clerk_configured
 def test_site_engineer_fails_closed_if_assigned_to_multiple_plants(client, db):
     from app.core.models import Plant, User, UserPlantAssignment, WashingConfig, WashingTable
     from tests.conftest import login_user

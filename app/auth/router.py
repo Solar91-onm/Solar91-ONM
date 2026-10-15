@@ -21,16 +21,15 @@ def login_entry():
 
 @router.post("/auth/logout")
 def logout_entry():
-    return {"ok": True, "provider": "supabase"}
+    return {"ok": True, "provider": "clerk"}
 
 
 @router.get("/api/auth/config")
 def auth_config():
     return {
-        "provider": "supabase",
-        "configured": settings.supabase_configured,
-        "supabase_url": settings.supabase_url,
-        "anon_key": settings.supabase_anon_key,
+        "provider": "clerk",
+        "configured": settings.clerk_configured,
+        "publishable_key": settings.clerk_publishable_key,
     }
 
 
@@ -38,7 +37,7 @@ def auth_config():
 def session_info(user: Annotated[User, Depends(get_current_user)]):
     return {
         "authenticated": True,
-        "provider": "supabase",
+        "provider": "clerk",
         "user": {
             "id": str(user.id),
             "external_id": user.external_subject,

@@ -32,25 +32,17 @@
 <div id="app"><div class="s91-boot" role="status" aria-live="polite"><div class="s91-boot-card cc-ops-overview"><img src="/static/brand/solar91-emblem.png?v=20261006-portal-v11" width="42" height="42" alt=""><div><b>Solar91 O&amp;M</b><span>Loading operations…</span><small>Waking up the server if it has been idle.</small></div></div><div class="s91-boot-lines"><i></i><i></i><i></i></div><div class="s91-boot-context"><span>Operations overview</span><span>Unplanned · Site Issues</span><span>Planned · Preventive Maintenance</span><span>Washing</span><small>Sudden breakdowns and urgent requests remain in Site Issues.</small></div></div></div>
 <!-- PRODUCTION IDENTITY + ACCESS ENFORCEMENT -->
 
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.57.0/dist/umd/supabase.min.js"></script>
-<script id="s91-config" type="application/json">{{ {"authProvider": "supabase", "supabaseUrl": supabase_url, "supabaseAnonKey": supabase_anon_key} | tojson }}</script>
+<script id="s91-config" type="application/json">{{ {"authProvider": "clerk", "clerkPublishableKey": clerk_publishable_key} | tojson }}</script>
+{% if clerk_frontend_api %}
+<script defer crossorigin="anonymous" data-clerk-publishable-key="{{ clerk_publishable_key }}" src="https://{{ clerk_frontend_api }}/npm/@clerk/clerk-js@6/dist/clerk.browser.js" type="text/javascript"></script>
+{% endif %}
 <script>
 window.S91_CONFIG = JSON.parse(document.getElementById("s91-config").textContent);
-window.supabaseClient = null;
-if (window.S91_CONFIG.supabaseUrl && window.S91_CONFIG.supabaseAnonKey) {
-  if (window.supabase && typeof window.supabase.createClient === "function") {
-    window.supabaseClient = window.supabase.createClient(window.S91_CONFIG.supabaseUrl, window.S91_CONFIG.supabaseAnonKey, {
-      auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true }
-    });
-  } else {
-    console.error("Supabase Auth SDK failed to load.");
-  }
-}
 </script>
 <script src="/static/js/00-loop-guard.js?v=20261013-stability-r2"></script>
-<script defer src="/static/js/00-auth-data-and-imports.js?v=20261013-stability-r2"></script>
-<script defer src="/static/js/01-state-and-init.js?v=20261013-stability-r2"></script>
-<script defer src="/static/js/02-core-render-and-dashboard.js?v=20261013-stability-r2"></script>
+<script defer src="/static/js/00-auth-data-and-imports.js?v=20261015-clerk-auth"></script>
+<script defer src="/static/js/01-state-and-init.js?v=20261015-clerk-auth"></script>
+<script defer src="/static/js/02-core-render-and-dashboard.js?v=20261015-clerk-auth"></script>
 <script defer src="/static/js/03-analytics-and-handover.js?v=20261013-stability-r2"></script>
 <script defer src="/static/js/04-handover-and-maintenance-hub.js?v=20261013-stability-r2"></script>
 <script defer src="/static/js/05-preventive-maintenance-and-washing.js?v=20261013-stability-r2"></script>
@@ -67,7 +59,7 @@ if (window.S91_CONFIG.supabaseUrl && window.S91_CONFIG.supabaseAnonKey) {
 <script defer src="/static/js/16-site-ask-and-team-model.js?v=20261013-stability-r2"></script>
 <script defer src="/static/js/17-site-engineer-access-lock.js?v=20261013-stability-r2"></script>
 <script defer src="/static/js/18-role-and-maintenance-upgrades.js?v=20261013-stability-r2"></script>
-<script defer src="/static/js/19-production-identity-and-domain-bridge.js?v=20261013-stability-r2"></script>
+<script defer src="/static/js/19-production-identity-and-domain-bridge.js?v=20261015-clerk-auth"></script>
 <script defer src="/static/js/20-modern-ui-2026.js?v=20261013-stability-r2"></script>
 <script defer src="/static/js/21-washing-portfolio.js?v=20261013-stability-r2"></script>
 <script defer src="/static/js/22-site-issues-redesign.js?v=20261013-stability-r2"></script>

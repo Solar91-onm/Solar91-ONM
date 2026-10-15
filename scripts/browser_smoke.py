@@ -1,7 +1,7 @@
 """Browser + live FastAPI SQLite smoke. Run: python scripts/browser_smoke.py
 
 Requires requirements-dev.txt and either a system Chromium or Playwright Chromium.
-Test-only Supabase SDK stub runs *only* in the temporary Playwright page; no
+Test-only Clerk SDK stub runs *only* in the temporary Playwright page; no
 bypass, credentials or mock identity is shipped into the application's JS.
 """
 from pathlib import Path
@@ -20,14 +20,17 @@ from urllib.error import HTTPError
 from playwright.sync_api import sync_playwright
 
 ROOT=Path(__file__).resolve().parents[1]
-SDK_STUB='''window.supabase={createClient:function(){return {auth:{getSession:async()=>({data:{session:{access_token:"isolated-browser-test-token"}},error:null}),signOut:async()=>({}),signInWithPassword:async()=>({error:null})}}}};'''
+SDK_STUB='''window.Clerk={load:async()=>{},session:{getToken:async()=>"isolated-browser-test-token"},signOut:async()=>{}};'''
 
 def main():
     with tempfile.TemporaryDirectory(prefix="solar91-browser-") as td:
         db_file=Path(td)/"smoke.sqlite3"
         env={**os.environ,"SOLAR91_E2E_TEST_MODE":"1","APP_ENV":"test",
              "DATABASE_URL":"sqlite:///"+db_file.as_posix(),
-             "SUPABASE_URL":"https://example.invalid","SUPABASE_ANON_KEY":"test-public-placeholder",
+             "SUPABASE_URL":"https://example.invalid",
+             "CLERK_PUBLISHABLE_KEY":"pk_test_c2lsdmVyLWV3ZS0yOS5jbGVyay5hY2NvdW50cy5kZXYk",
+             "CLERK_SECRET_KEY":"sk_test_isolated_browser_smoke",
+             "CLERK_ISSUER":"https://silver-ewe-29.clerk.accounts.dev",
              "PM_DAILY_JOB":"0"}
         with socket.socket() as sock:
             sock.bind(("127.0.0.1",0));port=sock.getsockname()[1]
@@ -49,7 +52,7 @@ def main():
                 page=browser.new_page(viewport={"width":1400,"height":900},reduced_motion="reduce")
                 errors=[]
                 page.on("pageerror",lambda exc: errors.append(str(exc)))
-                page.route(re.compile(r"https://cdn\.jsdelivr\.net/npm/@supabase/"),lambda r:r.fulfill(status=200,content_type="application/javascript",body=SDK_STUB))
+                page.route(re.compile(r"https://silver-ewe-29\.clerk\.accounts\.dev/npm/@clerk/clerk-js@6/"),lambda r:r.fulfill(status=200,content_type="application/javascript",body=SDK_STUB))
                 page.route(re.compile(r"https://fonts\.googleapis\.com/|https://fonts\.gstatic\.com/"),lambda r:r.abort())
 
                 # Some hosted environments prohibit Chromium from navigating to *any*
@@ -87,8 +90,8 @@ def main():
                     page.on("pageerror",lambda exc:errors.append(str(exc)))
                     page.expose_function("__s91BrowserTransport",transport)
                     html=urlopen(base+"/",timeout=15).read().decode("utf8")
-                    # Supabase is mocked only in this isolated browser test.
-                    html=re.sub(r'<script src="https://cdn\.jsdelivr\.net/npm/@supabase/[^"]+"></script>',
+                    # Clerk is mocked only in this isolated browser test.
+                    html=re.sub(r'<script defer crossorigin="anonymous" data-clerk-publishable-key="[^"]+" src="https://[^"]+/npm/@clerk/clerk-js@6/dist/clerk.browser.js" type="text/javascript"></script>',
                                 '<script>'+SDK_STUB+'</script>',html)
                     scripts=re.findall(r'<script defer src="(/static/js/[^"]+)"></script>',html)
                     html=re.sub(r'<script defer src="/static/js/[^"]+"></script>','',html)

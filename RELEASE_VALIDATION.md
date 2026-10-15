@@ -7,7 +7,7 @@
 - Site Issues: original API-backed creation/assignment/acknowledgement/progress/resolution/verification/closure/reopen workflow retained, with reference-style overlay tabs, activity/evidence sections and updated section styling.
 - Washing: original live plant register, summary cards, overdue matrix, cycles, daily reports, confirmation/rejection, evidence and exports retained. Added a data-driven day-by-day calendar to the plant detail overlay.
 - Preventive Maintenance: existing PM dashboard, unit/planning controls, task execution, follow-ups, evidence and alerts retained, with reference-style task overlay and section-only styling.
-- Dashboard, Reports, Plants, User Management, top header, sidebar, Supabase Auth login and other modules are retained, not overwritten by sample HTML.
+- Dashboard, Reports, Plants, User Management, top header, sidebar, Clerk email-code login and other modules are retained, not overwritten by sample HTML.
 - API actions continue to use `apiFetch` with an `Authorization: Bearer <Supabase access token>` header, through FastAPI to Supabase PostgreSQL and private Storage. No mock-only API paths were added.
 
 ## Backend corrections

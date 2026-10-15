@@ -1,7 +1,7 @@
 "use strict";
 /* ================================================================
    PRODUCTION IDENTITY + ACCESS ENFORCEMENT
-   Role comes only from the verified Supabase identity -> Solar91 users table.
+   Role comes only from the verified Clerk identity -> Solar91 users table.
    No browser role selector is an authority mechanism.
    ================================================================ */
 (function(){
@@ -44,19 +44,17 @@
 
 async function startSolar91App(){
  try{
-  const ready=await ensureSupabaseReady();if(!ready)return;
-  const {data,error}=await window.supabaseClient.auth.getSession();
-  if(error)throw error;
-  if(!data.session){showSupabaseSignIn();return;}
+  const ready=await ensureClerkReady();if(!ready)return;
+  if(!window.Clerk.session){showClerkSignIn();return;}
   const session=await apiFetch('/api/auth/session');
   AUTH_IDENTITY.name=session.user.name||session.user.email||'Solar91 User';
   AUTH_IDENTITY.role=session.user.role||'Viewer';
   if(AUTH_IDENTITY.role==='Viewer'){
-   authSetupCard('Access pending','Your Supabase sign-in is valid, but a Solar91 O&M Head must assign your operational role before business data is shown.<button onclick="supabaseSignOut()" style="margin-left:12px;padding:8px 12px">Sign out</button>');return;
+   authSetupCard('Access pending','Your Clerk sign-in is valid, but a Solar91 O&M Head must assign your operational role before business data is shown.<button onclick="clerkSignOut()" style="margin-left:12px;padding:8px 12px">Sign out</button>');return;
   }
   S.currentUser=AUTH_IDENTITY.name;S.currentRole=AUTH_IDENTITY.role;S._roleLabel=AUTH_IDENTITY.role;S._readOnly=AUTH_IDENTITY.role==='Administration';
   await init();
- }catch(e){console.error('Solar91 startup',e);if(String(e.message||e).includes('Authentication required')){showSupabaseSignIn();return}if(/not registered for Solar91/i.test(String(e.message||e))){try{await window.supabaseClient.auth.signOut()}catch(_){}showSupabaseSignIn('This email is not registered. Ask your O&M Head to add you, then try again.');return}authSetupCard('Solar91 could not start',esc(e.message||String(e)))}
+ }catch(e){console.error('Solar91 startup',e);if(String(e.message||e).includes('Authentication required')){showClerkSignIn();return}if(/not registered for Solar91/i.test(String(e.message||e))){try{await window.Clerk.signOut()}catch(_){}showClerkSignIn('This email is not registered. Ask your O&M Head to add you, then try again.');return}authSetupCard('Solar91 could not start',esc(e.message||String(e)))}
 }
 
 /* ================================================================

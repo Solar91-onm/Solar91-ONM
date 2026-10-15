@@ -32,4 +32,4 @@ Take a Supabase backup before applying migrations. Use staging before production
 - `pytest -q` — includes `tests/test_issue_admin_archive.py`.
 - `for f in frontend/static/js/*.js; do node --check "$f"; done`.
 - Browser UI test was performed against simulated `apiFetch` responses, validating the edit button, confirmation dialog, archive listing and restore controls at desktop and mobile widths. This is not a live Supabase acceptance test.
-- In staging with live Supabase Auth, verify O&M Head operation plus 403s for other roles; check audit trail, two-browser stale state behavior, and attachment access after restoration.
+- In staging with Clerk email-code sign-in, verify O&M Head operation plus 403s for other roles; check audit trail, two-browser stale state behavior, and attachment access after restoration.

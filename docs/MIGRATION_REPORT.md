@@ -1,6 +1,6 @@
 # Historical Solar91 O&M Production Migration Report (rev15)
 
-> Historical snapshot only. Its original third-party-authentication statements describe an earlier implementation and have been superseded. The active application now uses Supabase Auth only; see `README.md` and `docs/RENDER_DEPLOYMENT_RUNBOOK.md`.
+> Historical snapshot only. Its original authentication statements describe earlier implementations and have been superseded. The active application now uses Clerk email-code sign-in; see `README.md` and `docs/RENDER_DEPLOYMENT_RUNBOOK.md`.
 
 ## 1. Goal
 
@@ -8,7 +8,7 @@ Convert the latest standalone Solar91 UI (through rev14) into a real FastAPI app
 
 ## 2. Identity architecture at the time of this report (superseded)
 
-The earlier version used a third-party identity provider and verified its session JWTs in FastAPI. Solar91 roles and plant assignments lived in PostgreSQL, independent from that identity. The current runtime instead uses Supabase Auth only.
+The earlier version used a third-party identity provider and verified its session JWTs in FastAPI. Solar91 roles and plant assignments live in PostgreSQL, independent from that identity. The current runtime uses Clerk for authentication and Supabase for PostgreSQL and Storage.
 - Mutating APIs require an explicit Bearer token.
 - The standalone test-role selector is not a production authority mechanism and is removed at runtime.
 

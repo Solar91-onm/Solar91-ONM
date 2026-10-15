@@ -20,7 +20,7 @@ def test_new_nav_bundle_served_and_revalidated(client):
 def test_supabase_public_config_not_secret_in_example():
     source=(ROOT/".env.example").read_text()
     assert "SUPABASE_URL=\n" in source
-    assert "SUPABASE_ANON_KEY=\n" in source
+    assert "CLERK_PUBLISHABLE_KEY=\n" in source
     assert "SUPABASE_SERVICE_ROLE_KEY=\n" in source
     assert "sb_publishable_" not in source
     assert "SUPABASE_SERVICE_ROLE_KEY=sb_secret_" not in source

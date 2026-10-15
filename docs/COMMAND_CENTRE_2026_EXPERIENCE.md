@@ -40,7 +40,7 @@ Updated the existing FastAPI / Supabase application. The original header, sideba
 - Run backend suite: `APP_ENV=test PM_DAILY_JOB=0 pytest -q`.
 - JavaScript syntax: `for f in frontend/static/js/*.js; do node --check "$f"; done`.
 - Browser smoke test: install development dependencies with `python -m pip install -r requirements-dev.txt`, install the Playwright-managed browser with `python -m playwright install chromium`, then run `python scripts/verify_command_experience.py`. The test uses the managed Chromium build on Windows, macOS, and Linux; Linux CI installs its system dependencies automatically.
-- Check in deployed environment: sign in through Supabase Auth; confirm Supabase data and access-scoped counts, queue navigation, print/Excel/CSV exports, notification/email delivery configuration, and real task/ticket mutations.
+- Check in deployed environment: sign in through Clerk email code; confirm Supabase data and access-scoped counts, queue navigation, print/Excel/CSV exports, notification/email delivery configuration, and real task/ticket mutations.
 
 ## Deployment limitations
 

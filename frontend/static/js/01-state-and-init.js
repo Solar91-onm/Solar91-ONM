@@ -51,7 +51,7 @@ async function init(){
   }
 
   if(AUTH_IDENTITY.role==="Viewer"){
-   authSetupCard("Waiting for access","Your Solar91 account ("+esc(AUTH_IDENTITY.email||AUTH_IDENTITY.name||"")+") is created. The O&amp;M Head needs to assign your role and plants before you can use the portal. Once they do, reload this page.<div style=\"margin-top:16px;display:flex;gap:8px\"><button onclick=\"location.reload()\" style=\"padding:9px 14px;border-radius:9px;border:1px solid #E4E9E6;background:#fff;cursor:pointer\">Check again</button><button onclick=\"supabaseSignOut()\" style=\"padding:9px 14px;border-radius:9px;border:0;background:#16A34A;color:#fff;cursor:pointer\">Sign out</button></div>");
+   authSetupCard("Waiting for access","Your Solar91 account ("+esc(AUTH_IDENTITY.email||AUTH_IDENTITY.name||"")+") is created. The O&amp;M Head needs to assign your role and plants before you can use the portal. Once they do, reload this page.<div style=\"margin-top:16px;display:flex;gap:8px\"><button onclick=\"location.reload()\" style=\"padding:9px 14px;border-radius:9px;border:1px solid #E4E9E6;background:#fff;cursor:pointer\">Check again</button><button onclick=\"clerkSignOut()\" style=\"padding:9px 14px;border-radius:9px;border:0;background:#16A34A;color:#fff;cursor:pointer\">Sign out</button></div>");
    return;
   }
 

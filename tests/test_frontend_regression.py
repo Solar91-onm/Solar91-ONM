@@ -52,7 +52,7 @@ def test_superseded_equipment_read_can_be_aborted_without_retry():
       assert(end>0);
       let calls=0,started;
       const requestStarted=new Promise(resolve=>{started=resolve});
-      const sandbox={AbortController,FormData,clearTimeout,setTimeout,supabaseToken:async()=>null,
+      const sandbox={AbortController,FormData,clearTimeout,setTimeout,clerkToken:async()=>null,
         fetch:(_url,options)=>{calls++;started();return new Promise((_resolve,reject)=>{
           options.signal.addEventListener('abort',()=>{const error=new Error('aborted');error.name='AbortError';reject(error)},{once:true});
         })}};

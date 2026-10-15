@@ -32,8 +32,14 @@ def main() -> int:
         problems.append("DATABASE_URL is missing or still contains a placeholder")
     if bad(settings.supabase_url):
         problems.append("SUPABASE_URL is missing or still contains a placeholder")
-    if bad(settings.supabase_anon_key):
-        problems.append("SUPABASE_ANON_KEY is missing or still contains a placeholder")
+    if bad(settings.clerk_publishable_key):
+        problems.append("CLERK_PUBLISHABLE_KEY is missing or still contains a placeholder")
+    if bad(settings.clerk_secret_key):
+        problems.append("CLERK_SECRET_KEY is missing or still contains a placeholder")
+    if bad(settings.clerk_issuer):
+        problems.append("CLERK_ISSUER is missing or still contains a placeholder")
+    if not settings.clerk_frontend_api:
+        problems.append("CLERK_PUBLISHABLE_KEY must be a valid Clerk publishable key")
     if bad(settings.supabase_service_role_key):
         problems.append(
             "SUPABASE_SERVICE_ROLE_KEY is missing or still contains a placeholder "
@@ -97,7 +103,7 @@ def main() -> int:
             pass
         return 3
 
-    print("OK: Supabase Auth public configuration is present.")
+    print("OK: Clerk authentication configuration is present.")
     print("OK: Supabase Storage credentials are present; bucket privacy is checked by ensure_storage.py.")
     print("OK: Authorized application origins: " + ", ".join(settings.origins))
     print("Preflight passed.")

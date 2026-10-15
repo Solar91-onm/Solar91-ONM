@@ -103,7 +103,7 @@ function topbar(crumb,notifs){
    '<div style="padding:12px 14px;border-bottom:1px solid var(--border);font-size:13px;font-weight:600">Notification engine (3.8) — handover · scheduled · washing · issues · spares · documents <button class="btn g sm" style="float:right" onclick="markAllEventsRead()">Mark events read</button></div>'+
    '<div style="max-height:340px;overflow-y:auto">'+(notifs.length?notifs.map(n=>'<div style="padding:11px 14px;border-bottom:1px solid var(--border);font-size:12px"><div class="row between" style="align-items:flex-start;gap:8px"><div><div style="font-weight:500">'+esc(n.title)+'</div><div style="color:var(--muted-foreground);font-size:11px;margin-top:2px">'+esc(n.meta)+'</div></div><button class="btn g sm" data-act="notif" data-id="'+esc(n.id)+'">Open</button></div></div>').join(""):'<div style="padding:20px;text-align:center;color:var(--muted-foreground);font-size:12px">All caught up.</div>')+'</div></div>':'')+
   '</div>'+
-  '<div class="row" style="gap:8px;margin-left:2px;cursor:pointer" onclick="supabaseSignOut()" title="Sign out"><div class="tb-av">'+esc(authInitials)+'</div><div style="line-height:1.2"><div style="font-size:12px;font-weight:600;white-space:nowrap">'+esc(authName)+'</div><div style="font-size:10px;color:var(--muted-foreground)">'+esc(authRole)+'</div></div></div>'+
+  '<div class="row" style="gap:8px;margin-left:2px;cursor:pointer" onclick="clerkSignOut()" title="Sign out"><div class="tb-av">'+esc(authInitials)+'</div><div style="line-height:1.2"><div style="font-size:12px;font-weight:600;white-space:nowrap">'+esc(authName)+'</div><div style="font-size:10px;color:var(--muted-foreground)">'+esc(authRole)+'</div></div></div>'+
   '</div></div>';
 }
 function setPlantScope(v){

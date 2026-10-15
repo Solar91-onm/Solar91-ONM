@@ -19,7 +19,7 @@ class StoredObject:
 class SupabaseStorage:
     """Server-side private Storage adapter.
 
-    Supabase Auth authenticates users; the Supabase service-role key is used only by FastAPI to
+    Clerk authenticates users; the Supabase service-role key is used only by FastAPI to
     access the private evidence bucket and is never sent to the browser.
     """
 
