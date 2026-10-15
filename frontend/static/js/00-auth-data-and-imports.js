@@ -12,7 +12,7 @@ const S91_CODE_RESEND_SECONDS=60;
 /* false = the login page shows ONLY the emailed-code flow (every login needs a fresh code).
    true  = the email + password form is shown as well. NOTE: this only hides the form. Supabase itself still accepts a
            password for any account that has one, so do not give people passwords if you want code-only to be strict. */
-const S91_PASSWORD_LOGIN_ENABLED=false;
+const S91_PASSWORD_LOGIN_ENABLED=true;
 
 function authSetupCard(title, detail){
   document.getElementById("app").innerHTML = '<div style="min-height:100vh;display:grid;place-items:center;padding:24px;background:#F4F6F5;font-family:Inter,system-ui,sans-serif"><div style="width:min(520px,100%);background:#fff;border:1px solid #E4E9E6;border-radius:16px;padding:24px;box-shadow:0 12px 38px rgba(16,24,20,.10)"><div style="display:flex;align-items:center;gap:10px"><img src="/static/brand/solar91-emblem.png" height="34" alt=""><img src="/static/brand/solar91-wordmark.png" height="22" alt="SOLAR 91"></div><h2 style="margin:8px 0 8px;font-size:22px">'+title+'</h2><p style="margin:0;color:#69756F;line-height:1.55">'+detail+'</p></div></div>';

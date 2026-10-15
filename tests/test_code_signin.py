@@ -24,8 +24,8 @@ def test_invite_email_no_longer_mentions_a_signup_screen():
     assert "Sign up" not in mailer
 
 
-def test_code_only_login_is_the_default():
-    assert "const S91_PASSWORD_LOGIN_ENABLED=false;" in AUTH
+def test_password_login_is_the_default_and_code_signin_is_still_offered():
+    assert "const S91_PASSWORD_LOGIN_ENABLED=true;" in AUTH
     assert "if(!S91_PASSWORD_LOGIN_ENABLED)s91ShowCodeSignIn(" in AUTH
-    # the password form markup stays in the file (switchable back on) so the existing autofill test still holds
+    assert 'id="supabase-code-link"' in AUTH  # "Email me a sign-in code instead" remains available
     assert 'id="supabase-password" name="password" type="password" autocomplete="current-password"' in AUTH
