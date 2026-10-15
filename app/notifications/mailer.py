@@ -147,7 +147,7 @@ def _invite_html(name: str, email: str, role: str, scope: str, invited_by: str, 
    <div style="font-size:12px;letter-spacing:.1em;text-transform:uppercase;color:#6B7F72;font-weight:700;margin-bottom:4px">Get started in 3 steps</div>
    <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
      {step("1", "Open the portal", "Tap the green button above.")}
-     {step("2", "Sign in with this exact email", f'<span style="color:#1F5C38;font-weight:700">{e}</span><br>New here? Choose &ldquo;Sign up&rdquo; with this email and verify it.')}
+     {step("2", "Sign in with this exact email", f'<span style="color:#1F5C38;font-weight:700">{e}</span><br>No password needed: tap &ldquo;Email me a sign-in code instead&rdquo;, then enter the 6-digit code we send you.')}
      {step("3", "Start working", "Your role and assignments are waiting for you.")}
    </table>
  </td></tr>

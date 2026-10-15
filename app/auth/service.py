@@ -11,6 +11,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
+from app.auth.emails import canonical_email, is_gmail_family
 from app.core.models import User
 
 
@@ -162,6 +163,22 @@ def upsert_supabase_user(
             func.lower(User.email) == email.lower(),
         )
     )
+    if invited_user is None and is_gmail_family(email):
+        wanted = canonical_email(email)
+        invited_user = next(
+            (
+                u
+                for u in db.scalars(
+                    select(User).where(
+                        User.auth_provider == "supabase",
+                        User.external_subject.like("invite:%"),
+                        User.email.ilike("%@gmail.com") | User.email.ilike("%@googlemail.com"),
+                    )
+                )
+                if canonical_email(u.email) == wanted
+            ),
+            None,
+        )
     if invited_user:
         if not invited_user.is_active:
             raise HTTPException(status_code=403, detail="This Solar91 account is disabled")

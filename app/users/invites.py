@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
+from app.auth.emails import canonical_email, is_gmail_family
 from app.core.config import get_settings
 from app.core.database import get_db
 from app.core.models import AuditLog, Equipment, Plant, User, UserEquipmentAssignment, UserEquipmentTypeAssignment, UserPlantAssignment
@@ -131,6 +132,14 @@ def _upsert_person(
     equipment = _resolve_types(equipment_tokens) if role == "Assignee" else []
 
     existing = db.scalar(select(User).where(func.lower(User.email) == key))
+    if existing is None and is_gmail_family(email):
+        wanted = canonical_email(email)   # Gmail ignores dots and +tags: same mailbox = same person
+        existing = next(
+            (u for u in db.scalars(select(User).where(
+                User.email.ilike("%@gmail.com") | User.email.ilike("%@googlemail.com")))
+             if canonical_email(u.email) == wanted),
+            None,
+        )
     before = None
     if existing:
         if existing.id == actor.id and role != "O&M Head":
@@ -147,7 +156,7 @@ def _upsert_person(
         status = "updated"
     else:
         user = User(
-            auth_provider="supabase", external_subject=INVITE_PREFIX + key, email=email,
+            auth_provider="supabase", external_subject=INVITE_PREFIX + canonical_email(email), email=email,
             display_name=(name or "").strip() or email, role=role, is_active=True,
             metadata_json={"invited_by": actor.display_name},
         )
