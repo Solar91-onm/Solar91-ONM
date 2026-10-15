@@ -252,7 +252,7 @@ function teamAccessPanel(){
  if(AUTH_IDENTITY.role!=="O&M Head")return "";
  taLoad(false);
  const legend='<div class="ta-legend">'+TA_ROLES.map(r=>'<span class="ta-pill '+taRoleCls(r)+'">'+esc(r)+'</span>').join("")+'</div>';
- const head='<div style="padding:14px 16px 0"><h2 style="font-size:15px;font-weight:700">Team &amp; access</h2><p style="font-size:12px;color:var(--muted-foreground);margin:3px 0 10px">New people sign in with Supabase Auth and wait here as <b>Viewer</b>. Choose their role, then Save. <b>Assignees</b> are given equipment types (e.g. Inverter) — every issue, schedule and washing job of that type, in all plants, goes to them. <b>Site Engineers</b> are tied to exactly one plant. Changes apply on their next screen load.</p>'+legend+'</div>';
+ const head='<div style="padding:14px 16px 0"><h2 style="font-size:15px;font-weight:700">Team &amp; access</h2><p style="font-size:12px;color:var(--muted-foreground);margin:3px 0 10px">New people sign in with a Clerk email code and wait here as <b>Viewer</b>. Choose their role, then Save. <b>Assignees</b> are given equipment types (e.g. Inverter) — every issue, schedule and washing job of that type, in all plants, goes to them. <b>Site Engineers</b> are tied to exactly one plant. Changes apply on their next screen load.</p>'+legend+'</div>';
  const wrap=b=>'<div class="panel no-stick ta-panel" style="padding:0">'+head+b+'</div>';
  if(TA.error)return wrap('<div style="padding:0 16px 16px"><div class="bn-warn banner">Could not load users: '+esc(TA.error)+'</div><button class="btn o sm" onclick="TA.error=null;taLoad(true)">Retry</button></div>');
  if(!TA.users)return wrap('<div style="padding:0 16px 16px;font-size:12px;color:var(--muted-foreground)">Loading team…</div>');

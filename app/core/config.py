@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import base64
+import binascii
 from functools import lru_cache
+import re
 from typing import Literal
 from urllib.parse import urlsplit
 
@@ -21,18 +24,19 @@ class Settings(BaseSettings):
     debug: bool = False
     database_url: str = "postgresql+psycopg://postgres:postgres@localhost:5432/postgres"
 
-    # Supabase provides PostgreSQL, Storage, and the only active user identity provider.
+    # Supabase provides PostgreSQL and Storage. Clerk is the identity provider.
     supabase_url: str | None = None
-    # This publishable key is intentionally sent to the browser; it is not a secret.
-    supabase_anon_key: str | None = None
     # Server-only Supabase Storage credential. This is NOT used for login/authentication.
     supabase_service_role_key: str | None = None
-    supabase_jwt_secret: str | None = None
     supabase_storage_bucket: str = "scheduled-om-evidence"
+
+    clerk_publishable_key: str = ""
+    clerk_secret_key: str = ""
+    clerk_issuer: str = ""
 
     bootstrap_admin_emails: str = ""
     # False (default): only people already added to the users table (or listed in BOOTSTRAP_ADMIN_EMAILS) may sign in.
-    # True: any verified Supabase user is auto-created as a role-less "Viewer".
+    # True: any verified Clerk user is auto-created as a role-less "Viewer".
     allow_unregistered_signin: bool = False
 
     # Invite e-mails (Resend, https://resend.com). Leave empty to disable sending.
@@ -117,20 +121,64 @@ class Settings(BaseSettings):
     def admin_emails(self) -> set[str]:
         return {x.strip().lower() for x in self.bootstrap_admin_emails.split(",") if x.strip()}
 
-    @property
-    def supabase_auth_issuer(self) -> str | None:
-        if not self.supabase_url:
-            return None
-        base = self.supabase_url.rstrip("/")
-        return f"{base}/auth/v1"
+    @field_validator("clerk_issuer", mode="before")
+    @classmethod
+    def _validate_clerk_issuer(cls, value):
+        if value is None:
+            return ""
+        if not isinstance(value, str):
+            return value
+        value = value.strip().strip("\"'").strip()
+        if not value:
+            return value
+        try:
+            parsed = urlsplit(value)
+            hostname = parsed.hostname
+            parsed.port
+        except ValueError as exc:
+            raise ValueError("CLERK_ISSUER must be a valid HTTPS origin.") from exc
+        local_http = hostname in {"localhost", "127.0.0.1", "::1"}
+        if (
+            parsed.scheme not in ({"https", "http"} if local_http else {"https"})
+            or not hostname
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.path not in ("", "/")
+            or parsed.query
+            or parsed.fragment
+        ):
+            raise ValueError("CLERK_ISSUER must be an HTTPS origin without credentials, a path, query, or fragment.")
+        return value.rstrip("/")
 
     @property
-    def supabase_configured(self) -> bool:
-        return bool(self.supabase_url and self.supabase_anon_key)
+    def clerk_configured(self) -> bool:
+        issuer_host = urlsplit(self.clerk_issuer).netloc.casefold()
+        return bool(
+            self.clerk_publishable_key.strip()
+            and self.clerk_secret_key.strip()
+            and self.clerk_issuer
+            and self.clerk_frontend_api
+            and issuer_host == self.clerk_frontend_api.casefold()
+        )
+
+    @property
+    def clerk_frontend_api(self) -> str | None:
+        parts = self.clerk_publishable_key.strip().split("_", 2)
+        if len(parts) != 3 or parts[0] != "pk" or parts[1] not in {"test", "live"}:
+            return None
+        encoded_domain = parts[2]
+        try:
+            decoded = base64.b64decode(encoded_domain + "=" * (-len(encoded_domain) % 4), altchars=b"-_", validate=True)
+        except (ValueError, binascii.Error):
+            return None
+        domain = decoded.decode("ascii", errors="ignore").rstrip("$")
+        if not re.fullmatch(r"[A-Za-z0-9.-]+(?::[0-9]{1,5})?", domain):
+            return None
+        return domain.lower()
 
     @property
     def auth_configured(self) -> bool:
-        return self.supabase_configured
+        return self.clerk_configured
 
     @property
     def storage_configured(self) -> bool:

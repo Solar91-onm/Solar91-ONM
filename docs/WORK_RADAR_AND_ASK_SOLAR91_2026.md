@@ -50,5 +50,5 @@ Add an immediately understandable, visually refined *interaction layer* over the
 - Use your own Render **private** `DATABASE_URL` (Supabase PostgreSQL Session Pooler DSN), `SUPABASE_SERVICE_ROLE_KEY`, and optional `OPENAI_API_KEY`; never commit them in the ZIP or repository.
 - The supplied configuration had no complete `DATABASE_URL`, so production connectivity cannot be certified.
 - Rotate the Supabase service-role key previously shared via a chat attachment before deploying.
-- On Render, set `APP_ENV=production`, `APP_PUBLIC_URL`, `ALLOWED_ORIGINS`, `SUPABASE_URL`, `SUPABASE_ANON_KEY` and verified private environment variables.
+- On Render, set `APP_ENV=production`, `APP_PUBLIC_URL`, `ALLOWED_ORIGINS`, `SUPABASE_URL`, the Clerk publishable key and verified private environment variables.
 - Check `/health/ready`, log in by role in staging, and force a refresh after updating application files.

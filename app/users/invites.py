@@ -25,9 +25,8 @@ from app.notifications.mailer import send_invite_email
 router = APIRouter(prefix="/api/users", tags=["Users"])
 settings = get_settings()
 
-# A person added by the O&M Head before they have ever signed in is stored as a pending user row
-# whose external_subject is "invite:<email>". On their first Supabase sign-in with the same email,
-# the auth layer can promote that row to the real Supabase subject while preserving the role + plants.
+# A person added by the O&M Head before signing in is stored as a pending user row whose
+# external_subject is "invite:<email>". Clerk's first verified sign-in promotes the row.
 INVITE_PREFIX = "invite:"
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
@@ -156,7 +155,7 @@ def _upsert_person(
         status = "updated"
     else:
         user = User(
-            auth_provider="supabase", external_subject=INVITE_PREFIX + canonical_email(email), email=email,
+            auth_provider="clerk", external_subject=INVITE_PREFIX + canonical_email(email), email=email,
             display_name=(name or "").strip() or email, role=role, is_active=True,
             metadata_json={"invited_by": actor.display_name},
         )

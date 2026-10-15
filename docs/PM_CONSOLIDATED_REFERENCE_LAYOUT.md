@@ -20,7 +20,7 @@ The selected plant shows a context summary for **Not maintained**, **Coming up**
 - **Unit counts** opens the original equipment unit configuration tool.
 - **CSV/Excel import** and template download use the existing validated import API and role checks.
 - Chart drill-down and Command Centre PM queue navigation retain live registers.
-- Tasks, follow-ups, completion evidence, notifications, Excel compliance export, Supabase Auth, Supabase integration, Reports and other modules remain on existing routes.
+- Tasks, follow-ups, completion evidence, notifications, Excel compliance export, Clerk authentication, Supabase integration, Reports and other modules remain on existing routes.
 
 ## Validation performed
 

@@ -60,7 +60,7 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
     "Administration": {"plants.view", "issues.view", "tasks.view", "reports.view"},
     # Exactly one assigned plant; no fleet-wide modules.
     "Site Engineer": {"plants.view", "issues.view", "issues.create", "tasks.view", "tasks.execute", "washing.log"},
-    # New Supabase-authenticated users wait here until an O&M Head assigns one of the four operational roles.
+    # New Clerk-authenticated users wait here until an O&M Head assigns one of the four operational roles.
     "Viewer": set(),
 }
 

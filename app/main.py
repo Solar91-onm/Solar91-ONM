@@ -77,7 +77,7 @@ async def lifespan(app: FastAPI):
 app=FastAPI(
     title="Solar91 O&M Command Center API",
     version="1.6.0",
-    description="FastAPI backend for the Solar91 O&M Command Center. Persistent business data is stored in Supabase PostgreSQL; authentication is provided by Supabase Auth only.",
+    description="FastAPI backend for the Solar91 O&M Command Center. Persistent business data is stored in Supabase PostgreSQL; authentication is provided by Clerk.",
     lifespan=lifespan,
 )
 app.state.bootstrap_ready = settings.app_env != "production"
@@ -228,9 +228,9 @@ def index(request:Request):
         request=request,
         name="index.html",
         context={
-            "auth_provider": "supabase",
-            "supabase_url": settings.supabase_url,
-            "supabase_anon_key": settings.supabase_anon_key,
+            "auth_provider": "clerk",
+            "clerk_publishable_key": settings.clerk_publishable_key,
+            "clerk_frontend_api": settings.clerk_frontend_api,
         },
     )
 
@@ -259,7 +259,7 @@ def ready():
         return JSONResponse(status_code=503,content={"status":"database_unreachable"})
     return {
         "status": "ready",
-        "auth_provider": "supabase",
+        "auth_provider": "clerk",
         "auth_configured": settings.auth_configured,
         "storage_configured": settings.storage_configured,
     }

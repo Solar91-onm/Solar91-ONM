@@ -26,5 +26,5 @@ def test_boot_splash_has_no_empty_form_label():
 
 def test_signin_fields_have_autofill_metadata_and_names():
     auth=(ROOT/'frontend/static/js/00-auth-data-and-imports.js').read_text(encoding='utf8')
-    assert 'id="supabase-email" name="email" type="email" autocomplete="email"' in auth
-    assert 'id="supabase-password" name="password" type="password" autocomplete="current-password"' in auth
+    assert 'id="clerk-code-email" name="email" type="email" autocomplete="email"' in auth
+    assert 'id="clerk-code" name="code" type="text" inputmode="numeric" autocomplete="one-time-code"' in auth

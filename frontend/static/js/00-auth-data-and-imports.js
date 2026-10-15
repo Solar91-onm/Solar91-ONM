@@ -1,31 +1,29 @@
 
 "use strict";
 
-const AUTH_PROVIDER = (window.S91_CONFIG && window.S91_CONFIG.authProvider) || "supabase";
+const AUTH_PROVIDER = (window.S91_CONFIG && window.S91_CONFIG.authProvider) || "clerk";
 const AUTH_IDENTITY={name:null,role:null};
-/* Email-code (OTP) sign-in. Supabase Auth emails the code; SMTP is Resend (configured in the Supabase dashboard).
-   true  = an invited person who has no Supabase account yet can create it by verifying a code. The server then
-           promotes their pending invite by verified email; an unknown email becomes a Viewer with no permissions.
-   false = only people who already have a Supabase Auth account can receive a code. */
-const S91_CODE_SIGNIN_CREATES_USERS=true;
 const S91_CODE_RESEND_SECONDS=60;
-/* false = the login page shows ONLY the emailed-code flow (every login needs a fresh code).
-   true  = the email + password form is shown as well. NOTE: this only hides the form. Supabase itself still accepts a
-           password for any account that has one, so do not give people passwords if you want code-only to be strict. */
-const S91_PASSWORD_LOGIN_ENABLED=true;
 
 function authSetupCard(title, detail){
   document.getElementById("app").innerHTML = '<div style="min-height:100vh;display:grid;place-items:center;padding:24px;background:#F4F6F5;font-family:Inter,system-ui,sans-serif"><div style="width:min(520px,100%);background:#fff;border:1px solid #E4E9E6;border-radius:16px;padding:24px;box-shadow:0 12px 38px rgba(16,24,20,.10)"><div style="display:flex;align-items:center;gap:10px"><img src="/static/brand/solar91-emblem.png" height="34" alt=""><img src="/static/brand/solar91-wordmark.png" height="22" alt="SOLAR 91"></div><h2 style="margin:8px 0 8px;font-size:22px">'+title+'</h2><p style="margin:0;color:#69756F;line-height:1.55">'+detail+'</p></div></div>';
 }
-async function ensureSupabaseReady(){
-  if (AUTH_PROVIDER !== "supabase" || !window.supabaseClient) {
-    authSetupCard("Authentication setup required","Supabase Auth is unavailable. Configure SUPABASE_URL and SUPABASE_ANON_KEY on the server, then reload.");
+async function ensureClerkReady(){
+  if (AUTH_PROVIDER !== "clerk" || !window.S91_CONFIG?.clerkPublishableKey) {
+    authSetupCard("Authentication setup required","Clerk is unavailable. Configure CLERK_PUBLISHABLE_KEY, CLERK_SECRET_KEY, and CLERK_ISSUER on the server, then reload.");
     return false;
   }
+  const deadline=Date.now()+10000;
+  while(!window.Clerk&&Date.now()<deadline)await new Promise(resolve=>setTimeout(resolve,100));
+  if (!window.Clerk || typeof window.Clerk.load !== "function") {
+    authSetupCard("Authentication setup required","The Clerk sign-in service could not be loaded. Check your connection and reload.");
+    return false;
+  }
+  await window.Clerk.load();
   return true;
 }
 
-function showSupabaseSignIn(errorMessage){
+function showClerkSignIn(errorMessage){
   const h=new Date().getHours();
   const greet=h<12?"Good morning":h<17?"Good afternoon":"Good evening";
   const EM='<img src="/static/brand/solar91-emblem.png" alt="">';
@@ -59,41 +57,16 @@ function showSupabaseSignIn(errorMessage){
         '<div class="s91-brand">'+EM.replace('<img','<img class="em"')+'<img class="wm" src="/static/brand/solar91-wordmark.png" alt="SOLAR 91"></div>'+
         '<h2 class="s91-title">O&amp;M Command Center</h2>'+
         '<p class="s91-sub">Sign in with the email your O&amp;M Head added</p>'+
-        '<div class="s91-glow"><form id="supabase-sign-in" style="display:grid;gap:12px;background:#fff;padding:20px;border:1px solid #E4E9E6;border-radius:14px">'+
-          '<label style="display:grid;gap:5px;font-size:12px;font-weight:600">Email<input id="supabase-email" name="email" type="email" autocomplete="email" required style="padding:11px;border:1px solid #D7DFD9;border-radius:8px"></label>'+
-          '<label style="display:grid;gap:5px;font-size:12px;font-weight:600">Password<input id="supabase-password" name="password" type="password" autocomplete="current-password" required style="padding:11px;border:1px solid #D7DFD9;border-radius:8px"></label>'+
-          '<p id="supabase-auth-error" role="alert" style="margin:0;color:#B42318;font-size:12px">'+esc(errorMessage||"")+'</p>'+
-          '<button id="supabase-submit" type="submit" style="padding:11px;border:0;border-radius:8px;background:#16A34A;color:white;font-weight:700;cursor:pointer">Sign in</button>'+
-        '</form>'+
-        '<button type="button" id="supabase-code-link" style="margin-top:10px;width:100%;background:none;border:0;color:#16794A;font-size:13px;font-weight:700;cursor:pointer;padding:6px">Email me a sign-in code instead</button></div>'+
+        '<div class="s91-glow"></div>'+
         '<div class="s91-foot">Solar91 Cleantech Limited · <b>Energizing India</b></div>'+
       '</div>'+
     '</main>'+
    '</div>';
-  document.getElementById("supabase-sign-in").addEventListener("submit",async function(event){
-    event.preventDefault();
-    const button=document.getElementById("supabase-submit"),error=document.getElementById("supabase-auth-error");
-    button.disabled=true;button.textContent="Signing in…";error.textContent="";
-    try{
-      const {error:authError}=await window.supabaseClient.auth.signInWithPassword({
-        email:document.getElementById("supabase-email").value.trim(),
-        password:document.getElementById("supabase-password").value
-      });
-      if(authError)throw authError;
-      await startSolar91App();
-    }catch(err){
-      error.textContent=err&&err.message?err.message:"Sign-in failed. Check your credentials and try again.";
-      button.disabled=false;button.textContent="Sign in";
-    }
-  });
-  document.getElementById("supabase-code-link").addEventListener("click",function(){
-    s91ShowCodeSignIn(document.getElementById("supabase-email").value.trim());
-  });
-  if(!S91_PASSWORD_LOGIN_ENABLED)s91ShowCodeSignIn("",errorMessage);
+  s91ShowClerkCodeSignIn("",errorMessage);
   s91Alive(document.querySelector(".s91-mesh"));
 }
 
-/* ---- sign in with an emailed code (Supabase email OTP) ---- */
+/* ---- Clerk email-code sign-in ---- */
 /* Same rule as app/auth/emails.py: Gmail ignores dots and +tags, so one mailbox = one account. Typos are never corrected. */
 function s91CanonEmail(v){
   const e=String(v||"").trim().toLowerCase(),i=e.lastIndexOf("@");
@@ -106,64 +79,82 @@ function s91CanonEmail(v){
   return e;
 }
 function s91CodeError(err){
-  const m=String(err&&err.message||"");
+  const clerkError=err&&Array.isArray(err.errors)&&err.errors[0];
+  const m=String(clerkError&&(clerkError.longMessage||clerkError.message)||err&&err.message||"");
   if(err&&err.status===429||/rate limit|only request this after|seconds/i.test(m))return "Please wait a minute before asking for another code.";
-  if(/signups not allowed|not allowed for otp/i.test(m))return "This email has no account yet. Ask your O&M Head to add you.";
+  if(/signups not allowed|sign.?up.*disabled/i.test(m))return "This email has no Clerk account yet. Ask your O&M Head to add you.";
   if(/expired|invalid/i.test(m))return "That code is wrong or has expired. Check the newest email, or ask for a new code.";
   return m||"Something went wrong. Please try again.";
 }
-function s91ShowCodeSignIn(prefillEmail,errorMessage){
+function s91ShowClerkCodeSignIn(prefillEmail,errorMessage){
   const box=document.querySelector(".s91-glow");
   if(!box)return;
   const fld='display:grid;gap:5px;font-size:12px;font-weight:600',inp='padding:11px;border:1px solid #D7DFD9;border-radius:8px',
         lnk='background:none;border:0;color:#16794A;font-size:12px;font-weight:600;cursor:pointer;padding:4px';
   box.innerHTML=
-    '<form id="supabase-code-form" style="display:grid;gap:12px;background:#fff;padding:20px;border:1px solid #E4E9E6;border-radius:14px">'+
-      '<label style="'+fld+'">Email<input id="supabase-code-email" name="email" type="email" autocomplete="email" required value="'+esc(prefillEmail||"")+'" style="'+inp+'"></label>'+
-      '<label id="supabase-code-field" style="'+fld+';display:none">Code from your email<input id="supabase-code" name="code" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="10" placeholder="123456" style="'+inp+';letter-spacing:4px;font-size:18px;text-align:center"></label>'+
-      '<p id="supabase-code-msg" role="status" style="margin:0;color:#2B4033;font-size:12px"></p>'+
-      '<p id="supabase-code-error" role="alert" style="margin:0;color:#B42318;font-size:12px"></p>'+
-      '<button id="supabase-code-submit" type="submit" style="padding:11px;border:0;border-radius:8px;background:#16A34A;color:white;font-weight:700;cursor:pointer">Email me a code</button>'+
-      '<button id="supabase-code-resend" type="button" style="'+lnk+';display:none"></button>'+
-      (S91_PASSWORD_LOGIN_ENABLED?'<button id="supabase-code-back" type="button" style="'+lnk+'">Use my password instead</button>':'')+
+    '<form id="clerk-code-form" style="display:grid;gap:12px;background:#fff;padding:20px;border:1px solid #E4E9E6;border-radius:14px">'+
+      '<label style="'+fld+'">Email<input id="clerk-code-email" name="email" type="email" autocomplete="email" required value="'+esc(prefillEmail||"")+'" style="'+inp+'"></label>'+
+      '<label id="clerk-code-field" style="'+fld+';display:none">Code from your email<input id="clerk-code" name="code" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="10" placeholder="123456" style="'+inp+';letter-spacing:4px;font-size:18px;text-align:center"></label>'+
+      '<p id="clerk-code-msg" role="status" style="margin:0;color:#2B4033;font-size:12px"></p>'+
+      '<p id="clerk-code-error" role="alert" style="margin:0;color:#B42318;font-size:12px"></p>'+
+      '<button id="clerk-code-submit" type="submit" style="padding:11px;border:0;border-radius:8px;background:#16A34A;color:white;font-weight:700;cursor:pointer">Email me a code</button>'+
+      '<button id="clerk-code-resend" type="button" style="'+lnk+';display:none"></button>'+
     '</form>';
   const $=id=>document.getElementById(id);
-  let sent=false,cool=0,timer=null;
-  const msg=t=>{$("supabase-code-msg").textContent=t||""},fail=t=>{$("supabase-code-error").textContent=t||""};
+  let sent=false,cool=0,timer=null,signInAttempt=null,signUpAttempt=null,flow=null;
+  const msg=t=>{$("clerk-code-msg").textContent=t||""},fail=t=>{$("clerk-code-error").textContent=t||""};
   function tick(){
-    const b=$("supabase-code-resend");
+    const b=$("clerk-code-resend");
     if(!b||!document.body.contains(b)){clearInterval(timer);return}
     if(cool>0){b.disabled=true;b.textContent="Send a new code in "+cool+"s";cool-=1}
     else{clearInterval(timer);b.disabled=false;b.textContent="Send a new code"}
   }
   function startCooldown(){cool=S91_CODE_RESEND_SECONDS;clearInterval(timer);timer=setInterval(tick,1000);tick()}
-  async function sendCode(){
-    const email=$("supabase-code-email").value.trim();
-    const {error:e}=await window.supabaseClient.auth.signInWithOtp({email:s91CanonEmail(email),options:{shouldCreateUser:S91_CODE_SIGNIN_CREATES_USERS}});
-    if(e)throw e;
-    sent=true;
-    $("supabase-code-email").readOnly=true;
-    $("supabase-code-field").style.display="grid";
-    $("supabase-code-resend").style.display="block";
-    $("supabase-code-submit").textContent="Verify and sign in";
-    msg("We emailed a code to "+email+". It can take a minute. Check spam if you do not see it.");
-    startCooldown();
-    $("supabase-code").focus();
+  async function requestCode(){
+    const email=s91CanonEmail($("clerk-code-email").value);
+    try{
+      signInAttempt=await window.Clerk.client.signIn.create({identifier:email});
+      const factor=(signInAttempt.supportedFirstFactors||[]).find(item=>item.strategy==="email_code");
+      if(!factor)throw new Error("Email sign-in codes are not enabled for this Clerk account.");
+      flow="signIn";
+      await signInAttempt.prepareFirstFactor({strategy:"email_code",emailAddressId:factor.emailAddressId});
+    }catch(err){
+      const notFound=err&&Array.isArray(err.errors)&&err.errors.some(item=>item.code==="form_identifier_not_found");
+      if(!notFound)throw err;
+      signUpAttempt=await window.Clerk.client.signUp.create({emailAddress:email});
+      flow="signUp";
+      await signUpAttempt.prepareEmailAddressVerification({strategy:"email_code"});
+    }
   }
-  $("supabase-code-form").addEventListener("submit",async function(ev){
+  async function sendCode(){
+    const email=$("clerk-code-email").value.trim();
+    await requestCode();
+    sent=true;
+    $("clerk-code-email").readOnly=true;
+    $("clerk-code-field").style.display="grid";
+    $("clerk-code-resend").style.display="block";
+    $("clerk-code-submit").textContent="Verify and sign in";
+    msg("Clerk emailed a code to "+email+". Check spam if you do not see it.");
+    startCooldown();
+    $("clerk-code").focus();
+  }
+  $("clerk-code-form").addEventListener("submit",async function(ev){
     ev.preventDefault();
-    const submit=$("supabase-code-submit");fail("");
+    const submit=$("clerk-code-submit");fail("");
     submit.disabled=true;
     try{
       if(!sent){
         submit.textContent="Sending…";
         await sendCode();
       }else{
-        const token=$("supabase-code").value.replace(/\D/g,"");
+        const token=$("clerk-code").value.replace(/\D/g,"");
         if(token.length<6){fail("Enter the code from the email.");return}
         submit.textContent="Verifying…";
-        const {error:e}=await window.supabaseClient.auth.verifyOtp({email:s91CanonEmail($("supabase-code-email").value),token:token,type:"email"});
-        if(e)throw e;
+        const attempt=flow==="signIn"
+          ?await signInAttempt.attemptFirstFactor({strategy:"email_code",code:token})
+          :await signUpAttempt.attemptEmailAddressVerification({code:token});
+        if(attempt.status!=="complete"||!attempt.createdSessionId)throw new Error("Clerk could not complete sign-in. Request a new code and try again.");
+        await window.Clerk.setActive({session:attempt.createdSessionId});
         await startSolar91App();
         return;
       }
@@ -174,14 +165,12 @@ function s91ShowCodeSignIn(prefillEmail,errorMessage){
       if(document.body.contains(submit))submit.disabled=false;
     }
   });
-  $("supabase-code-resend").addEventListener("click",async function(){
+  $("clerk-code-resend").addEventListener("click",async function(){
     fail("");
-    try{await sendCode();msg("A new code was sent. Use the newest email only.")}catch(err){fail(s91CodeError(err))}
+    try{await requestCode();msg("A new code was sent. Use the newest email only.");startCooldown()}catch(err){fail(s91CodeError(err))}
   });
-  const back=$("supabase-code-back");
-  if(back)back.addEventListener("click",function(){clearInterval(timer);showSupabaseSignIn()});
   if(errorMessage)fail(errorMessage);
-  $("supabase-code-email").focus();
+  $("clerk-code-email").focus();
 }
 
 /* ---- sign-in page life: neural mesh + typing AI line. Both stop by themselves once the page is replaced. ---- */
@@ -248,23 +237,18 @@ function s91Alive(canvas){
 
 
 
-async function supabaseToken(){
-  if (AUTH_PROVIDER !== "supabase") return null;
+async function clerkToken(){
+  if (AUTH_PROVIDER !== "clerk") return null;
   try {
-    if (window.supabaseClient && typeof window.supabaseClient.auth?.getSession === "function") {
-      const { data } = await window.supabaseClient.auth.getSession();
-      return data?.session?.access_token ?? null;
-    }
+    if (window.Clerk?.session) return await window.Clerk.session.getToken();
   } catch (err) {
-    console.warn("Supabase session could not be read.");
+    console.warn("Clerk session could not be read.");
   }
   return null;
 }
-async function supabaseSignOut(){
+async function clerkSignOut(){
   try {
-    if (window.supabaseClient && typeof window.supabaseClient.auth?.signOut === "function") {
-      await window.supabaseClient.auth.signOut();
-    }
+    if (window.Clerk && typeof window.Clerk.signOut === "function") await window.Clerk.signOut();
   } finally {
     window.location.assign("/");
   }
@@ -272,11 +256,11 @@ async function supabaseSignOut(){
 async function authenticatedFetch(url, options){
   const request=options||{};
   request.headers=Object.assign({},request.headers||{});
-  const token=await supabaseToken();
+  const token=await clerkToken();
   if(token)request.headers.Authorization="Bearer "+token;
   const response=await fetch(url,request);
   if(response.status===401){
-    await supabaseSignOut();
+    await clerkSignOut();
     throw new Error("Authentication required");
   }
   return response;
@@ -325,7 +309,7 @@ function saveK(k,v){
 function clearK(){try{Object.keys(sessionStorage).filter(k=>k.startsWith(PRE)).forEach(k=>sessionStorage.removeItem(k))}catch(e){}}
 async function apiFetch(url,opts){
   opts=Object.assign({},opts||{});opts.headers=Object.assign({"Accept":"application/json"},opts.headers||{});
-  const token=await supabaseToken();
+  const token=await clerkToken();
   if(token)opts.headers["Authorization"]="Bearer "+token;
   const isForm=(typeof FormData!=="undefined"&&opts.body instanceof FormData);
   if(opts.body&&typeof opts.body!=="string"&&!isForm)opts.body=JSON.stringify(opts.body);
@@ -357,8 +341,8 @@ async function apiFetch(url,opts){
     try{res=await attempt();}catch(error){if(externalSignal&&externalSignal.aborted)throw error;throw new Error("The server did not respond. Please retry.");}
   }
   if(res.status===401){
-    try{await supabaseSignOut();}catch(e){}
-    showSupabaseSignIn();
+    try{await window.Clerk?.signOut();}catch(e){}
+    showClerkSignIn();
     throw new Error("Authentication required");
   }
   const data=res.status===204?null:await res.json().catch(()=>({}));

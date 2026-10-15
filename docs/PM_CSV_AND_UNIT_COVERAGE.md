@@ -7,7 +7,7 @@
 - Each row shows total configured/registered units, units with PM tasks, maintained units, overdue units, and a "Not planned" indicator for inventory with no job. "Not configured" means the unit total is unknown, not zero.
 - **Unit counts** opens the existing unit-configuration editor. **Add job** opens the existing API-backed PM task creator, prefilling the current plant and, if selected, the equipment category. It runs an API dry-run before creating tasks.
 - **Import CSV / Excel** accepts UTF-8 `.csv` and existing `.xlsx` / `.xlsm` files. Both formats use the same backend validation, role checks, template creation, plant association and duplicate prevention. **CSV template** downloads the correct header row.
-- Existing task completion, reminders, reporting, notification preferences, Supabase Auth, Supabase Storage, and API routes remain.
+- Existing task completion, reminders, reporting, notification preferences, Clerk authentication, Supabase Storage, and API routes remain.
 - Removed the duplicate **Day-by-day cleaning** box from the main Washing section. Plant detail overlays and their day-by-day calendars remain.
 
 ## CSV columns

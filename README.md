@@ -1,6 +1,6 @@
 # Solar91 O&M Portal — Field Desk + stabilized source release
 
-FastAPI operations portal for Solar91's solar plants, equipment, Site Issues, scheduled maintenance, washing, reports and administrative access. The **database is authoritative**: the browser sends operational writes to FastAPI, backed by Supabase PostgreSQL. Supabase Auth is the only live login provider; no demo login or built-in default password exists.
+FastAPI operations portal for Solar91's solar plants, equipment, Site Issues, scheduled maintenance, washing, reports and administrative access. The **database is authoritative**: the browser sends operational writes to FastAPI, backed by Supabase PostgreSQL. Clerk sends email sign-in codes; Solar91 roles and access scopes remain in the application database.
 
 This release preserves the existing business modules, includes navigation/freeze protections, and adds a **site-engineer-first Field Desk** for real daily issue and scheduled maintenance work, plus a top-left Ask Solar91 entry. The search assistant is read-only and rule-based, not a paid generative AI service. See [`docs/FIELD_DESK_RELEASE_2026-10-13.md`](docs/FIELD_DESK_RELEASE_2026-10-13.md) for access rights and verification. See [`docs/STABLE_RELEASE_2026-10-13.md`](docs/STABLE_RELEASE_2026-10-13.md) for changes and **precise verification limitations**.
 
@@ -14,7 +14,7 @@ The **Ask Solar91** entry under the upper-left sidebar brand searches the curren
 
 - Python/FastAPI and SQLAlchemy (PostgreSQL production; SQLite **tests only**).
 - Plain JavaScript/CSS frontend served by FastAPI at `/`; asset files at `/static/`.
-- Supabase Auth for sign-in and role/plant permissions checked again on the server.
+- Clerk email-code sign-in; session tokens and verified email identity are checked on the server before loading Solar91 roles and plant permissions.
 - Supabase PostgreSQL for operational records, Supabase Storage for protected evidence.
 - Render web-service deployment configuration: `render.yaml` and `scripts/render_start.sh`.
 
@@ -30,7 +30,7 @@ Copy-Item .env.example .env
 notepad .env
 ```
 
-Replace placeholders in `.env` with the **staging/test project's** credentials. `DATABASE_URL`, `SUPABASE_URL`, `SUPABASE_ANON_KEY`, and valid Supabase Auth configuration are necessary to operate the normal application. `SUPABASE_SERVICE_ROLE_KEY` and `SUPABASE_STORAGE_BUCKET` are required for protected evidence file operations. **Never** put the service-role key or DB password in browser code.
+Replace placeholders in `.env` with the **staging/test project's** credentials. `DATABASE_URL`, `SUPABASE_URL`, the Clerk publishable/secret keys, and the exact Clerk session issuer are required to operate the application. `SUPABASE_SERVICE_ROLE_KEY` and `SUPABASE_STORAGE_BUCKET` are required for protected evidence file operations. **Never** put the Clerk secret key, service-role key, or DB password in browser code.
 
 Once the staging database schema is in the required state, check it and launch:
 
@@ -40,7 +40,7 @@ python scripts/ensure_storage.py
 python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 ```
 
-Open `http://127.0.0.1:8000/` and sign in with an **existing Supabase user** whose Solar91 role/scope is configured. Check `/health` for process liveness, `/health/ready` for live database access and `/docs` for the FastAPI API reference. `/health` **alone does not prove** database connectivity.
+Open `http://127.0.0.1:8000/` and sign in using the emailed code for a Clerk account whose Solar91 role/scope is configured. Set Clerk's allowed origin and enable email-code verification in its dashboard. Check `/health` for process liveness, `/health/ready` for live database access and `/docs` for the FastAPI API reference. `/health` **alone does not prove** database connectivity.
 
 **Migrations:** `database/migrations/001_*.sql` through `028_*.sql` are the supplied historical migration set. Review current schema, back up staging, and apply **only missing, approved migrations in order**. Do not indiscriminately re-run all SQL on an existing instance. No new migration was required for this release.
 
@@ -85,13 +85,13 @@ Or on Linux/macOS: `for f in frontend/static/js/*.js; do node --check "$f" || ex
 
 ## Deployment
 
-`render.yaml`, `Dockerfile`, and the [Render runbook](docs/RENDER_DEPLOYMENT_RUNBOOK.md) are provided for the existing Render service. Set private environment variables through the Render dashboard. Configure real Supabase Auth site URLs and authorized redirect URLs; verify readiness and permissions in staging. **This ZIP has not been deployed to Render or connected to production Supabase.** See the stabilization record for checks that remain external.
+`render.yaml`, `Dockerfile`, and the [Render runbook](docs/RENDER_DEPLOYMENT_RUNBOOK.md) are provided for the existing Render service. Set private environment variables through the Render dashboard. Configure Clerk's allowed origins and email-code sign-in, then verify readiness and permissions in staging. **This ZIP has not been deployed to Render or connected to production services.** See the stabilization record for checks that remain external.
 
 Production entry point: `uvicorn app.main:app`; test-only entry point `tests.e2e_server:app` is strictly for local browser smoke tests and is guarded against accidental production execution.
 
 ### Portal hangs after a Render deployment? (October 2026 stability release)
 
-Check `/health/ready` first. If it returns 503, solve the Render database/service configuration before changing frontend files. The supplied keys only configure Supabase Auth and private Storage; the database still requires its own **PostgreSQL Session Pooler `DATABASE_URL`**. Copy `.env.example` locally and fill missing private values in ignored `.env`; for Render, add private values in its Environment panel. The private service-role key must never be committed. See `docs/RENDER_DEPLOYMENT_RUNBOOK.md` for the exact variable names and key-rotation warning.
+Check `/health/ready` first. If it returns 503, solve the Render database/service configuration before changing frontend files. Clerk keys configure authentication; Supabase credentials configure PostgreSQL and private Storage, which still require their own **PostgreSQL Session Pooler `DATABASE_URL`**. Copy `.env.example` locally and fill missing private values in ignored `.env`; for Render, add private values in its Environment panel. Never commit private credentials. See `docs/RENDER_DEPLOYMENT_RUNBOOK.md` for the exact variable names.
 
 If the backend is ready but navigation seems blocked, refresh in a private browsing window to eliminate old JS caches. Press **Escape** to close a stuck modal. If startup cannot complete in 16 seconds, the login splash displays a Reload portal control.
 

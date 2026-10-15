@@ -15,9 +15,13 @@ services:
         sync: false
       - key: SUPABASE_URL
         value: https://bszyxstmdywwexelaxaq.supabase.co
-      - key: SUPABASE_ANON_KEY
-        value: sb_publishable_VURDMKM6jXV6axYyVT7jrg_58pTtGe5
       - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: CLERK_PUBLISHABLE_KEY
+        sync: false
+      - key: CLERK_SECRET_KEY
+        sync: false
+      - key: CLERK_ISSUER
         sync: false
       - key: SUPABASE_STORAGE_BUCKET
         value: scheduled-om-evidence
