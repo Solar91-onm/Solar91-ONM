@@ -1,10 +1,65 @@
 from concurrent.futures import ThreadPoolExecutor
+from datetime import date
 
 from fastapi.testclient import TestClient
 
-from app.core.models import Issue, OMTask, WashingTable
+from app.core.models import Issue, OMTask, Plant, WashingHistory, WashingTable
 from app.main import app
 from tests.conftest import login_user
+
+
+def test_collection_fetch_loads_washing_only_when_requested(client, db, monkeypatch):
+    login_user(client, db)
+    plant = Plant(site_code="WASH01", plant_name="Washing Plant")
+    db.add(plant)
+    db.flush()
+    table = WashingTable(
+        legacy_id="WT-001",
+        plant_id=plant.id,
+        inverter_no=1,
+        table_code="INV-01-T-01",
+        legacy_payload={},
+    )
+    db.add(table)
+    db.flush()
+    db.add(
+        WashingHistory(
+            washing_table_id=table.id,
+            event_type="wash",
+            event_date=date(2026, 10, 15),
+            actor="Technician",
+        )
+    )
+    db.commit()
+
+    from app.operations import router as operations_router
+
+    original_load_state = operations_router.load_state
+    loaded_washing = []
+
+    def track_load_state(*args, **kwargs):
+        loaded_washing.append(kwargs["include_washing"])
+        return original_load_state(*args, **kwargs)
+
+    monkeypatch.setattr(operations_router, "load_state", track_load_state)
+
+    unrelated = client.get("/api/state/collections?keys=opsDate")
+    assert unrelated.status_code == 200, unrelated.text
+    assert set(unrelated.json()["state"]) == {"opsDate"}
+    assert loaded_washing == [False]
+
+    washing = client.get("/api/state/collections?keys=washing")
+    assert washing.status_code == 200, washing.text
+    row = washing.json()["state"]["washing"][0]
+    assert row["tableId"] == "INV-01-T-01"
+    assert row["history"] == [
+        {
+            "type": "wash",
+            "date": "2026-10-15",
+            "by": "Technician",
+        }
+    ]
+    assert loaded_washing == [False, True]
 
 
 def test_collection_revisions_are_independent_and_return_scoped_conflicts(client, db):

@@ -39,10 +39,10 @@
 
   async function refresh(){
     var before=snap();
-    var boot=await apiFetch("/api/bootstrap");
+    var boot=await apiFetch("/api/bootstrap?lite=1");
     var st=(boot&&boot.state)||{};
     if(uiBusy())return false;                       /* user started typing / opened a form meanwhile: try again next tick */
-    ["issues","tasks","washing","equipment","events"].forEach(function(k){if(Array.isArray(st[k]))S[k]=st[k]});
+    ["issues","tasks","equipment","events"].forEach(function(k){if(Array.isArray(st[k]))S[k]=st[k]});
     if(typeof s91NormalizeRows==="function")s91NormalizeRows();
     try{if(typeof _lastServerState!=="undefined"&&typeof cloneStateValue==="function")_lastServerState.events=cloneStateValue(S.events||[])}catch(e){}
     describe(before,snap());

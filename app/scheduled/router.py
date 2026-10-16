@@ -575,8 +575,8 @@ def washing_assignees(db: Annotated[Session, Depends(get_db)], user: Annotated[U
 
 
 @router.get("/washing/overview")
-def washing_overview(db: Annotated[Session, Depends(get_db)], user: Annotated[User, Depends(get_current_user)]):
-    return get_overview(db, user)
+def washing_overview(db: Annotated[Session, Depends(get_db)], user: Annotated[User, Depends(get_current_user)], include_tables: bool = False, report_days: int = 35):
+    return get_overview(db, user, include_tables=include_tables, report_days=report_days)
 
 
 @router.post("/washing/setup", dependencies=[Depends(require_csrf)])
@@ -631,7 +631,7 @@ def upload_washing_evidence(
     kind: Annotated[str, Form()] = "other",
 ):
     from app.core.models import WashingDailyReport
-    from app.scheduled.washing_cycles import _can_access_plant
+    from app.scheduled.washing_cycles import _can_access_plant, _can_add_washing_evidence
 
     report = db.scalar(select(WashingDailyReport).where(WashingDailyReport.id == report_id).with_for_update())
     if not report:
@@ -639,8 +639,8 @@ def upload_washing_evidence(
     config = db.scalar(select(WashingConfig).where(WashingConfig.plant_id == report.plant_id))
     if not config or not _can_access_plant(db, user, report.plant_id, config):
         raise HTTPException(403, "This washing report is outside your plant scope")
-    if report.review_status != "Pending" or report.reported_by_id != user.id:
-        raise HTTPException(403, "Only the report submitter can add evidence before review")
+    if not _can_add_washing_evidence(user, report, config):
+        raise HTTPException(403, "Only the report submitter, the O&M Head or this plant's washing Assignee can add evidence before review")
     if not files:
         raise HTTPException(422, "Choose at least one photo")
     kind = (kind or "other").strip().lower()

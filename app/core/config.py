@@ -56,6 +56,9 @@ class Settings(BaseSettings):
     # 0 = send every issue to the browser. Set e.g. 365 to leave out tickets closed more than a year ago
     # (they stay in the database and in /api/issues). Recommended once total issues pass ~20,000.
     bootstrap_closed_issue_days: int = 0
+    # Retained for backwards-compatible config parsing. Full bootstrap includes washing because legacy views,
+    # dashboards, reports, and the PM Excel export consume it; lite refreshes omit it explicitly.
+    bootstrap_include_washing: bool = True
 
     scada_base_url: str | None = None
     scada_telemetry_path: str = "/telemetry"

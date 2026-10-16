@@ -320,8 +320,9 @@ async function completeTask(){
  try{
   const result=await apiFetch('/api/scheduled/tasks/'+encodeURIComponent(id)+'/complete',{method:'POST',body:{completed_on:date,readings:readings||null,remarks:remarks||null,anomaly:!!anomaly,checklist:subs}});
   S.modal=null;
-  const boot=await apiFetch('/api/bootstrap');
-  const ui={view:S.view,omTab:S.omTab,extSub:S.extSub,hoOpen:S.hoOpen,plantId:S.plantId,washPlant:S.washPlant,schedScope:S.schedScope,issF:S.issF,schedF:S.schedF,washF:S.washF};
+  /* lite=1 leaves the large washing collection out; keep the washing rows already loaded so they are not overwritten with [] */
+  const boot=await apiFetch('/api/bootstrap?lite=1');
+  const ui={view:S.view,omTab:S.omTab,extSub:S.extSub,hoOpen:S.hoOpen,plantId:S.plantId,washPlant:S.washPlant,schedScope:S.schedScope,issF:S.issF,schedF:S.schedF,washF:S.washF,washing:S.washing};
   Object.assign(S,boot.state||{},ui);S._serverRevision=boot.revision||S._serverRevision;S._collectionRevisions=boot.collection_revisions||S._collectionRevisions||{};
   setLastServerState(stateSnapshot());render();
   toast(result.linked_issue?'Completed — Site Issue '+result.linked_issue+' created and linked.':'Completed — next recurrence generated server-side.');

@@ -30,6 +30,7 @@ from app.plants.router import router as plants_router
 from app.pmplan.router import router as pmplan_router
 from app.scada.router import router as scada_router
 from app.scheduled.router import router as scheduled_router
+from app.scheduled.washing_cycles import invalidate_overview_cache
 from app.services.router import router as services_router
 from app.users.invites import router as users_invites_router
 from app.users.router import router as users_router
@@ -106,6 +107,14 @@ async def security_headers(request: Request, call_next):
     if request.url.path == "/":
         response.headers["Cache-Control"] = "no-store"
     return response
+
+@app.middleware("http")
+async def drop_washing_cache_after_writes(request: Request, call_next):
+    try:
+        return await call_next(request)
+    finally:  # also runs if the write fails half-way, so the cached overview is never left stale
+        if request.method not in ("GET", "HEAD", "OPTIONS") and request.url.path.startswith("/api/"):
+            invalidate_overview_cache()
 
 async def _run_setup_script(script: str) -> int:
     path = BASE / "scripts" / script

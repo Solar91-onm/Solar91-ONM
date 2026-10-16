@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+from datetime import date
+
 from app.core.models import Plant, WashingConfig, WashingHistory, WashingTable, StateRevision
+from app.core.config import get_settings
 from tests.conftest import login_user
 
 BASE = '/api/scheduled/washing'
@@ -16,6 +19,44 @@ def _setup(db, client, role='O&M Head'):
 
 def _add(client, plant='Asadi', table='INV-01-T-01', inv=1, **extra):
     return client.post(f'{BASE}/register', json={'plant': plant, 'table_id': table, 'inverter': inv, **extra})
+
+
+def test_bootstrap_retains_washing_and_compresses_valid_json(client, db, monkeypatch):
+    plant, _ = _setup(db, client)
+    table = WashingTable(
+        legacy_id="WT-BOOT-001",
+        plant_id=plant.id,
+        inverter_no=1,
+        table_code="INV-01-T-01",
+        legacy_payload={},
+    )
+    db.add(table)
+    db.flush()
+    db.add(
+        WashingHistory(
+            washing_table_id=table.id,
+            event_type="wash",
+            event_date=date(2026, 10, 15),
+            actor="Technician",
+            notes="Initial bootstrap history",
+        )
+    )
+    db.commit()
+    monkeypatch.setattr(get_settings(), "bootstrap_include_washing", False)
+
+    response = client.get("/api/bootstrap", headers={"Accept-Encoding": "gzip"})
+    assert response.status_code == 200, response.text
+    full = response.json()
+    assert full["state"]["washing"][0]["history"][0]["notes"] == "Initial bootstrap history"
+    assert response.headers["content-encoding"] == "gzip"
+    assert int(response.headers["content-length"]) < len(response.content)
+
+    lite_response = client.get("/api/bootstrap?lite=1")
+    assert lite_response.status_code == 200, lite_response.text
+    lite = lite_response.json()
+    assert lite["state"]["washing"] == []
+    for key in ("user", "scope", "permissions", "modules", "pending_access", "revision", "collection_revisions"):
+        assert lite[key] == full[key]
 
 
 def test_add_edit_move_delete_roundtrip(client, db):

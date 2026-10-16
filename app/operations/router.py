@@ -18,8 +18,9 @@ router = APIRouter(prefix="/api", tags=["Application State"])
 def bootstrap(
     db: Annotated[Session, Depends(get_db)],
     user: Annotated[User, Depends(get_current_user)],
+    lite: bool = False
 ):
-    result = load_state(db, user)
+    result = load_state(db, user, include_washing=not lite)
     allowed = user_scoped_plant_ids(db, user)
     equipment_scope = user_scoped_equipment_ids(db, user)
     type_scope = user_scoped_equipment_types(db, user)
@@ -61,7 +62,7 @@ def state_collections(
     user: Annotated[User, Depends(get_current_user)],
 ):
     requested={key.strip() for key in keys.split(",") if key.strip()}
-    result=load_state(db,user)
+    result=load_state(db,user,include_washing="washing" in requested)
     state=result["state"]
     return {
         "state":{key:state[key] for key in requested if key in state},

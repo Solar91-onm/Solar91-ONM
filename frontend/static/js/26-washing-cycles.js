@@ -28,7 +28,7 @@
 
  async function loadOverview(){
   if(S._washCycleLoading)return S._washCycleLoading;
-  S._washCycleLoading=apiFetch("/api/scheduled/washing/overview").then(d=>{S._washCycles=d;S._washCycleError=null;S._washCycleLoading=null;if(onWashing())render();return d}).catch(e=>{S._washCycleLoading=null;S._washCycleError=e;if(onWashing())render();throw e});
+  S._washCycleLoading=apiFetch("/api/scheduled/washing/overview"+(S._washReportDays?"?report_days="+S._washReportDays:"")).then(d=>{S._washCycles=d;S._washCycleError=null;S._washCycleLoading=null;if(onWashing())render();return d}).catch(e=>{S._washCycleLoading=null;S._washCycleError=e;if(onWashing())render();throw e});
   return S._washCycleLoading;
  }
  window.washCyclesEnsureLoaded=function(){if(!S._washCycles&&!S._washCycleLoading&&!S._washCycleError)loadOverview().catch(()=>{})};
@@ -299,7 +299,14 @@
 
  /* ---------- plant overlay ---------- */
  window.openWashingPlantDetails=function(id){S.washDetailsPlant=id;S.washReportPlant=id;S.washDayFocus=null;S.washEditReport=null;S.washShowAllReports=false;S.washReportDraft={status:"Done",tables:"",exception:"",remarks:"",date:""};S.modal="washingPlantDetails";S.modalCtx={};render()};
+ window.washShowAllReports=async function(){S.washShowAllReports=true;S._washReportDays=90;render();try{await loadOverview()}catch(e){toast(detailOf(e,"Could not load older reports."))}};
  window.washFocusDay=function(d){S.washDayFocus=S.washDayFocus===d?null:d;render()};
+ /* Site Engineer: pick any day in the last 45 days, enter the cleaned count and add before/after photos. The O&M Head / the plant's Assignee confirm it. */
+ window.washReportForDay=function(day){
+  if(!isField()||!day)return;
+  const d=S.washReportDraft||{status:"Done",tables:"",exception:"",remarks:"",date:""};d.date=day;S.washReportDraft=d;S.washDayFocus=day;render();
+  setTimeout(function(){const el=document.getElementById("wc-date");if(el&&el.scrollIntoView)el.scrollIntoView({block:"center",behavior:"smooth"})},60);
+ };
  function reportCard(r){
   const ev=r.evidence||[],by=k=>ev.filter(e=>e.kind===k),other=ev.filter(e=>e.kind!=="before"&&e.kind!=="after");
   const col=(title,list)=>'<div><h5>'+title+'</h5><div class="wc-thumbs">'+(list.length?list.map(e=>thumb(r,e)).join(""):'<div class="wc-nophoto">No '+title.toLowerCase()+' photo</div>')+'</div></div>';
@@ -325,8 +332,8 @@
   const p=rowOf(S.washDetailsPlant);if(!p)return "";const head=isTeam();
   const reports=(data().reports||[]).filter(r=>r.plant_id===p.plant_id),focus=S.washDayFocus;
   const shown=(focus?reports.filter(r=>r.report_date===focus):reports).slice(0,focus||S.washShowAllReports?200:12);
-  const photoCount=day=>reports.filter(r=>r.report_date===day).reduce((n,r)=>n+(r.evidence||[]).length,0);
-  const days=(p.daily_status||[]).slice().reverse().map(d=>'<tr class="wc-day'+(focus===d.date?" focus":"")+'" onclick="washFocusDay(\''+d.date+'\')"><td><b>'+fmt(d.date)+'</b></td>'+(head?'<td>'+d.target+'</td>':'')+'<td>'+d.confirmed+'</td><td>'+(d.pending||"—")+'</td><td>'+chip(d.status,dtone(d.status))+(d.exception?' <small>'+h(d.exception)+'</small>':'')+'</td><td>'+h(d.reported_by||"—")+'</td><td>'+(photoCount(d.date)||"—")+'</td></tr>').join("");
+  const photoCount=day=>reports.filter(r=>r.report_date===day).reduce((n,r)=>n+(r.evidence||[]).length,0),canDayReport=isField();
+  const days=(p.daily_status||[]).slice().reverse().map(d=>'<tr class="wc-day'+(focus===d.date?" focus":"")+'" onclick="washFocusDay(\''+d.date+'\')"><td><b>'+fmt(d.date)+'</b></td>'+(head?'<td>'+d.target+'</td>':'')+'<td>'+d.confirmed+'</td><td>'+(d.pending||"—")+'</td><td>'+chip(d.status,dtone(d.status))+(d.exception?' <small>'+h(d.exception)+'</small>':'')+'</td><td>'+h(d.reported_by||"—")+'</td><td>'+(photoCount(d.date)||"—")+'</td>'+(canDayReport?'<td>'+(d.date<=todayIso()&&d.date>=isoDaysAgo(45)?'<button class="btn o sm" onclick="event.stopPropagation();washReportForDay(\''+d.date+'\')">Report / photos</button>':'')+'</td>':'')+'</tr>').join("");
   const mk=(data().today||"").slice(0,7),mkLast=mk?new Date(Number(mk.slice(0,4)),Number(mk.slice(5,7)),0).getDate():31;
   const dateBox=(c,kind)=>{const isS=kind==="start",val=isS?c.start_date:c.due_date,def=isS?c.default_start_date:c.default_due_date,over=isS?c.start_overridden:c.due_overridden,id=(isS?"wc-cs-":"wc-cd-")+c.cycle_no;
    return '<div class="wc-cydate"><label>'+(isS?"Start date":"Deadline")+' <input type="date" id="'+id+'" value="'+h(val)+'" min="'+mk+'-01" max="'+mk+'-'+String(mkLast).padStart(2,"0")+'"/></label><button class="btn o sm" onclick="washSaveCycleDate(\''+h(p.plant_id)+'\','+c.cycle_no+',\''+kind+'\')">Save</button>'+(over?'<button class="btn g sm" onclick="washResetCycleDate(\''+h(p.plant_id)+'\','+c.cycle_no+',\''+kind+'\')">Reset to '+fmt(def)+'</button>':'')+'</div>'};
@@ -339,8 +346,8 @@
   return modal(h(p.plant)+' <small style="font-weight:500;color:var(--muted-foreground)">'+h(p.site_code)+'</small>',plural(p.table_count,"table")+' · washing Assignee: '+h(p.assignee_name||"not set"),
    '<div class="wc-ov"><div class="wc-ov-top">'+(head?(p.overdue_bucket==="on_track"?chip("On track — next deadline "+fmt(p.next_due),"ok"):chip(p.overdue_days+" day(s) late — cycle "+p.overdue_cycle+" was due "+fmt(p.next_due),TONE[p.overdue_bucket]))+chip("Weekly compliance "+wk+"% (target "+thr+"%)",wk>=thr?"ok":wk>=thr-15?"warn":"crit"):"")+chip(p.cycles_this_month+" of "+p.monthly_target+" cycles done this month","info")+chip(plural(p.cycle_remaining,"table")+" left in cycle "+p.current_cycle,"mute")+'</div>'+
    (canReport?inlineReport(p):'')+'<div class="wc-cycles">'+cyc+'</div>'+
-   '<div class="wc-sec"><h3>Day-by-day status — this month</h3><p class="sub">What was cleaned each day, and whether the O&amp;M team confirmed it. Click a day to see its photos.</p><div class="wc-days-wrap"><table class="wc-days"><thead><tr><th>Date</th>'+(head?'<th>Target</th>':'')+'<th>Confirmed</th><th>Awaiting</th><th>Status</th><th>Reported by</th><th>Photos</th></tr></thead><tbody>'+days+'</tbody></table></div></div>'+
-   '<div class="wc-sec"><div class="row between wrap"><div><h3>Before &amp; after photos and confirmation</h3><p class="sub">'+(focus?'Showing '+fmt(focus):'Latest reports')+' · the O&amp;M team confirms each report after checking the photos.</p></div>'+(focus?'<button class="btn g sm" onclick="washFocusDay(\''+focus+'\')">Show all</button>':'')+'</div>'+(shown.length?shown.map(reportCard).join(""):'<div class="wc-empty">No reports for this selection.</div>')+(allReports?'<div style="margin-top:10px"><button class="btn o sm" onclick="S.washShowAllReports=true;render()">Show all '+reports.length+' reports (older dates)</button></div>':'')+'</div></div>',
+   '<div class="wc-sec"><h3>Day-by-day status — this month</h3><p class="sub">What was cleaned each day, and whether the O&amp;M team confirmed it. Click a day to see its photos'+(canDayReport?', or use Report / photos to enter that day\'s cleaned count and upload before &amp; after photos':'')+'.</p><div class="wc-days-wrap"><table class="wc-days"><thead><tr><th>Date</th>'+(head?'<th>Target</th>':'')+'<th>Confirmed</th><th>Awaiting</th><th>Status</th><th>Reported by</th><th>Photos</th>'+(canDayReport?'<th></th>':'')+'</tr></thead><tbody>'+days+'</tbody></table></div></div>'+
+   '<div class="wc-sec"><div class="row between wrap"><div><h3>Before &amp; after photos and confirmation</h3><p class="sub">'+(focus?'Showing '+fmt(focus):'Latest reports')+' · the O&amp;M team confirms each report after checking the photos.</p></div>'+(focus?'<button class="btn g sm" onclick="washFocusDay(\''+focus+'\')">Show all</button>':'')+'</div>'+(shown.length?shown.map(reportCard).join(""):'<div class="wc-empty">No reports for this selection.</div>')+(allReports?'<div style="margin-top:10px"><button class="btn o sm" onclick="washShowAllReports()">Show all '+reports.length+' reports (older dates)</button></div>':'')+'</div></div>',
    '<button class="btn o" onclick="closeModal()">Close</button>'+"",true)+(setTimeout(hydrate,40),"");
  }
 

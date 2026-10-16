@@ -120,7 +120,7 @@ def _plant_legacy(p:Plant)->dict:
     return r
 
 
-def load_state(db:Session,user:User)->dict[str,Any]:
+def load_state(db:Session,user:User,include_washing:bool=True)->dict[str,Any]:
     plants,by_name,by_code=_plant_maps(db); name_by_id={p.id:p.plant_name for p in plants}
     state:dict[str,Any]={"plants":[_plant_legacy(p) for p in plants]}
     equipment_rows=list(db.scalars(select(Equipment).order_by(Equipment.equipment_name)))
@@ -209,10 +209,21 @@ def load_state(db:Session,user:User)->dict[str,Any]:
     state["tasks"]=tasks
 
     washing=[]
-    washing_rows=list(db.scalars(select(WashingTable).order_by(WashingTable.table_code)))
+    # The full bootstrap is consumed across legacy views, dashboards, reports, and exports; only lite refreshes skip washing.
+    # Roles that never receive washing (Viewer etc.) skip the query; Site Engineers / Assignees only read their own plants.
+    wash_stmt=select(WashingTable).order_by(WashingTable.table_code)
+    wash_ids=select(WashingTable.id)
+    if include_washing and not is_head(user):
+        if user.role not in {"Assignee","Site Engineer"}: include_washing=False
+        else:
+            wash_scope=user_scoped_plant_ids(db,user)
+            if wash_scope is not None:
+                wash_stmt=wash_stmt.where(WashingTable.plant_id.in_(wash_scope)); wash_ids=wash_ids.where(WashingTable.plant_id.in_(wash_scope))
+    washing_rows=list(db.scalars(wash_stmt)) if include_washing else []
     history_by_table=defaultdict(list)
     if washing_rows:
-        for hh in db.scalars(select(WashingHistory).where(WashingHistory.washing_table_id.in_([w.id for w in washing_rows])).order_by(WashingHistory.event_date)):
+        # sub-select instead of a bound list of every table id (a 6,000-item IN list is slow)
+        for hh in db.scalars(select(WashingHistory).where(WashingHistory.washing_table_id.in_(wash_ids)).order_by(WashingHistory.event_date)):
             history_by_table[hh.washing_table_id].append(hh)
     for w in washing_rows:
         r=dict(w.legacy_payload or {}); hist=[]

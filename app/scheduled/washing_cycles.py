@@ -9,6 +9,7 @@ from fastapi import HTTPException
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
+from app.core.config import get_settings
 from app.core.models import AuditLog, Notification, Plant, User, UserEquipmentTypeAssignment, WashingConfig, WashingDailyReport, WashingHistory, WashingTable
 from app.core.security import WASHING_TYPE, assignee_has_type, user_scoped_plant_ids
 from app.notifications.service import notify_users, users_with_role
@@ -22,6 +23,18 @@ from app.scheduled.schemas import (
 
 MONTHLY_CYCLE_TARGET = 3
 MAX_BACKDATE_DAYS = 45  # how far back a Site Engineer may enter a missed report
+OVERVIEW_REPORT_DAYS = 90  # the overview sends reports from the last 90 days (plus every report still awaiting review)
+OVERVIEW_CACHE_SECONDS = 20
+OVERVIEW_SEND_REPORT_DAYS = 35  # reports sent to the browser by default (this month + a little); ?report_days=90 sends the full window
+_OVERVIEW_CACHE: dict[tuple, tuple[float, dict]] = {}
+_OVERVIEW_VERSION = 0
+
+
+def invalidate_overview_cache() -> None:
+    """Called after every write request, so a user always sees their own change straight away."""
+    global _OVERVIEW_VERSION
+    _OVERVIEW_VERSION += 1
+    _OVERVIEW_CACHE.clear()
 
 
 def _month_key(value: date) -> str:
@@ -138,6 +151,14 @@ def _can_review_washing(user: User, config: WashingConfig | None) -> bool:
     ))
 
 
+def _can_add_washing_evidence(user: User, report: WashingDailyReport, config: WashingConfig | None) -> bool:
+    """Before/after photos may be added while a report is Pending by its submitter (Site Engineer) or by the
+    O&M Head / this plant's configured washing Assignee, who also confirm the report."""
+    if report.review_status != "Pending":
+        return False
+    return report.reported_by_id == user.id or _can_review_washing(user, config)
+
+
 def _can_access_plant(db: Session, user: User, plant_id: UUID, config: WashingConfig | None) -> bool:
     if _is_washing_manager(db, user):
         return True
@@ -219,7 +240,7 @@ def _report_out(report: WashingDailyReport, plant: Plant, viewer: User, config: 
         "review_note": report.review_note,
         "cycle_completed": report.cycle_completed,
         "can_review": can_review,
-        "can_add_evidence": report.review_status == "Pending" and report.reported_by_id == viewer.id,
+        "can_add_evidence": _can_add_washing_evidence(viewer, report, config),
         "can_edit": manager or (report.reported_by_id == viewer.id and report.review_status in ("Pending", "Rejected")),
         "can_delete": manager or (report.reported_by_id == viewer.id and report.review_status in ("Pending", "Rejected")),
         "has_before": any(e.get("kind") == "before" for e in (report.evidence or []) if isinstance(e, dict)),
@@ -334,7 +355,25 @@ def list_assignees(db: Session, user: User) -> list[dict]:
     return [{"id": str(user_id), "name": name, "has_washing_scope": user_id in scoped} for user_id, name in users]
 
 
-def get_overview(db: Session, user: User) -> dict:
+def get_overview(db: Session, user: User, include_tables: bool = False, report_days: int = OVERVIEW_SEND_REPORT_DAYS) -> dict:
+    report_days = max(1, min(int(report_days), OVERVIEW_REPORT_DAYS))
+    ttl = 0 if get_settings().app_env == "test" else OVERVIEW_CACHE_SECONDS
+    if ttl <= 0:
+        return _build_overview(db, user, include_tables, report_days)
+    key = (str(user.id), user.role, include_tables, report_days, date.today().isoformat())
+    hit = _OVERVIEW_CACHE.get(key)
+    if hit and datetime.now(timezone.utc).timestamp() - hit[0] < ttl:
+        return hit[1]
+    version = _OVERVIEW_VERSION
+    result = _build_overview(db, user, include_tables, report_days)
+    if version == _OVERVIEW_VERSION:  # no write happened while this was being built
+        if len(_OVERVIEW_CACHE) > 50:
+            _OVERVIEW_CACHE.clear()
+        _OVERVIEW_CACHE[key] = (datetime.now(timezone.utc).timestamp(), result)
+    return result
+
+
+def _build_overview(db: Session, user: User, include_tables: bool = False, report_days: int = OVERVIEW_SEND_REPORT_DAYS) -> dict:
     manager = _is_washing_manager(db, user)
     configs = list(db.scalars(select(WashingConfig)))
     configured_ids = [config.plant_id for config in configs]
@@ -349,29 +388,50 @@ def get_overview(db: Session, user: User) -> dict:
         and (manager or (user.role == "Site Engineer" and config.plant_id in allowed_plant_ids))
     ]
     visible_ids = [plant.id for plant, _config in visible_configs]
-    tables_by_plant: dict[UUID, list[WashingTable]] = {}
+    table_counts: dict[UUID, int] = {}
+    codes_by_plant: dict[UUID, list[str]] = {}
     reports_by_plant: dict[UUID, list[WashingDailyReport]] = {}
+    last_report_by_plant: dict[UUID, date] = {}
     if visible_ids:
-        for table in db.scalars(
-            select(WashingTable).where(WashingTable.plant_id.in_(visible_ids))
-            .order_by(WashingTable.plant_id, WashingTable.table_code)
-        ):
-            tables_by_plant.setdefault(table.plant_id, []).append(table)
+        # Only a count per plant (thousands of table rows are no longer loaded on every call).
+        table_counts = {
+            plant_id: count for plant_id, count in db.execute(
+                select(WashingTable.plant_id, func.count(WashingTable.id))
+                .where(WashingTable.plant_id.in_(visible_ids)).group_by(WashingTable.plant_id)
+            ).all()
+        }
+        if include_tables:
+            for plant_id, code, legacy_id in db.execute(
+                select(WashingTable.plant_id, WashingTable.table_code, WashingTable.legacy_id)
+                .where(WashingTable.plant_id.in_(visible_ids))
+                .order_by(WashingTable.plant_id, WashingTable.table_code)
+            ).all():
+                codes_by_plant.setdefault(plant_id, []).append(code or legacy_id)
+        report_cutoff = date.today() - timedelta(days=OVERVIEW_REPORT_DAYS)
         for report in db.scalars(
-            select(WashingDailyReport).where(WashingDailyReport.plant_id.in_(visible_ids))
+            select(WashingDailyReport).where(
+                WashingDailyReport.plant_id.in_(visible_ids),
+                or_(WashingDailyReport.report_date >= report_cutoff, WashingDailyReport.review_status == "Pending"),
+            )
             .order_by(WashingDailyReport.plant_id, WashingDailyReport.report_date.desc(), WashingDailyReport.created_at.desc())
         ):
             reports_by_plant.setdefault(report.plant_id, []).append(report)
+        last_report_by_plant = {
+            plant_id: last for plant_id, last in db.execute(
+                select(WashingDailyReport.plant_id, func.max(WashingDailyReport.report_date))
+                .where(WashingDailyReport.plant_id.in_(visible_ids)).group_by(WashingDailyReport.plant_id)
+            ).all()
+        }
     assignee_ids = {config.assigned_user_id for _plant, config in visible_configs if config.assigned_user_id}
     assignee_names = {
         assignee.id: assignee.display_name
         for assignee in db.scalars(select(User).where(User.id.in_(assignee_ids)))
     } if assignee_ids else {}
-    visible: list[tuple[Plant, WashingConfig, list[WashingTable], list[WashingDailyReport]]] = []
+    visible: list[tuple[Plant, WashingConfig, int, list[WashingDailyReport]]] = []
     for plant, config in visible_configs:
-        tables = tables_by_plant.get(plant.id, [])
-        if tables:
-            visible.append((plant, config, tables, reports_by_plant.get(plant.id, [])))
+        table_count = table_counts.get(plant.id, 0)
+        if table_count:
+            visible.append((plant, config, table_count, reports_by_plant.get(plant.id, [])))
 
     today = date.today()
     month = _month_key(today)
@@ -385,11 +445,12 @@ def get_overview(db: Session, user: User) -> dict:
         month_keys.append(_month_key(cursor))
         cursor = (cursor.replace(day=monthrange(cursor.year, cursor.month)[1]) + timedelta(days=1)).replace(day=1)
 
+    send_cutoff = today - timedelta(days=report_days)
     plant_rows = []
     reports_out = []
     monthly_out = []
     cycle_events_all: list[dict] = []
-    for plant, config, tables, reports in visible:
+    for plant, config, table_count, reports in visible:
         completed_by_month: dict[str, set[int]] = {}
         for report in reports:
             if report.cycle_completed and report.review_status == "Confirmed":
@@ -406,25 +467,27 @@ def get_overview(db: Session, user: User) -> dict:
         cleaned_pending = sum(
             report.tables_cleaned for report in current_reports if report.review_status == "Pending"
         )
-        table_codes = [table.table_code or table.legacy_id for table in tables]
-        last_wash: dict[str, date] = {}
-        for report in reports:
-            if report.review_status != "Confirmed":
-                continue
-            for table_code in report.cleaned_table_codes or []:
-                if table_code not in last_wash:
-                    last_wash[table_code] = report.report_date
-        table_health = []
-        for table_code in table_codes:
-            last = last_wash.get(table_code)
-            days_since = (today - last).days if last else None
-            table_health.append({
-                "table_code": table_code,
-                "last_washed": last.isoformat() if last else None,
-                "days_since_last_wash": days_since,
-                "indicator": "green" if days_since is not None and days_since < 10 else
-                    "amber" if days_since is not None and days_since <= 15 else "red",
-            })
+        table_codes: list[str] = []
+        table_health: list[dict] = []
+        if include_tables:  # nothing in the portal reads these two lists; opt in with ?include_tables=true
+            table_codes = codes_by_plant.get(plant.id, [])
+            last_wash: dict[str, date] = {}
+            for report in reports:
+                if report.review_status != "Confirmed":
+                    continue
+                for table_code in report.cleaned_table_codes or []:
+                    if table_code not in last_wash:
+                        last_wash[table_code] = report.report_date
+            for table_code in table_codes:
+                last = last_wash.get(table_code)
+                days_since = (today - last).days if last else None
+                table_health.append({
+                    "table_code": table_code,
+                    "last_washed": last.isoformat() if last else None,
+                    "days_since_last_wash": days_since,
+                    "indicator": "green" if days_since is not None and days_since < 10 else
+                        "amber" if days_since is not None and days_since <= 15 else "red",
+                })
         today_cleaned = sum(
             report.tables_cleaned for report in reports
             if report.report_date == today and report.review_status == "Confirmed"
@@ -450,9 +513,9 @@ def get_overview(db: Session, user: User) -> dict:
                 completed_dates.setdefault(report.cycle_no, report.report_date)
         due_by_today = min(MONTHLY_CYCLE_TARGET, (today.day - 1) // 10 + 1)
         completed_due = sum(1 for cycle_no in completed_dates if cycle_no <= due_by_today)
-        today_target = _daily_table_target(len(tables), today, config.cycle_overrides)
+        today_target = _daily_table_target(table_count, today, config.cycle_overrides)
         weekly_due = sum(
-            _daily_table_target(len(tables), week_start + timedelta(days=offset), config.cycle_overrides)
+            _daily_table_target(table_count, week_start + timedelta(days=offset), config.cycle_overrides)
             for offset in range(7)
             if week_start + timedelta(days=offset) <= today
             and week_start + timedelta(days=offset) not in excused_dates
@@ -495,7 +558,7 @@ def get_overview(db: Session, user: User) -> dict:
                 day_status = "Not reported yet"
             daily_status.append({
                 "date": day.isoformat(),
-                "target": _daily_table_target(len(tables), day, config.cycle_overrides),
+                "target": _daily_table_target(table_count, day, config.cycle_overrides),
                 "confirmed": confirmed_n,
                 "pending": pending_n,
                 "status": day_status,
@@ -538,16 +601,15 @@ def get_overview(db: Session, user: User) -> dict:
             **overdue,
             "cycles": cycle_rows,
             "daily_status": daily_status,
-            "last_report_date": reports[0].report_date.isoformat() if reports else None,
+            "last_report_date": last_report_by_plant[plant.id].isoformat() if last_report_by_plant.get(plant.id) else None,
             "plant_id": str(plant.id),
             "plant": plant.plant_name,
             "site_code": plant.site_code,
-            "table_count": len(tables),
+            "table_count": table_count,
             "active": config.active,
             "notes": config.notes,
             "district": plant.district,
             "location": plant.location,
-            "table_codes": table_codes,
             "assignee_user_id": str(config.assigned_user_id) if config.assigned_user_id else None,
             "assignee_name": assignee_names.get(config.assigned_user_id),
             "cycles_this_month": cycles_this_month,
@@ -555,7 +617,7 @@ def get_overview(db: Session, user: User) -> dict:
             "current_cycle": current_cycle,
             "confirmed_tables_cleaned": cleaned_confirmed,
             "pending_tables_cleaned": cleaned_pending,
-            "cycle_remaining": max(0, len(tables) - cleaned_confirmed - cleaned_pending),
+            "cycle_remaining": max(0, table_count - cleaned_confirmed - cleaned_pending),
             "today_report": next((r.job_status for r in reports if r.report_date == today), None),
             "tables_due_today": today_target,
             "tables_washed_today": today_cleaned,
@@ -571,10 +633,14 @@ def get_overview(db: Session, user: User) -> dict:
             "productivity": [{"person": person, "tables": count} for person, count in sorted(productivity.items())],
             "daily_productivity": sorted(daily_productivity, key=lambda row: (row["date"], row["person"])),
             "compliance_threshold_percent": config.compliance_threshold_percent,
-            "table_health": table_health,
         })
+        if include_tables:
+            plant_rows[-1]["table_codes"] = table_codes
+            plant_rows[-1]["table_health"] = table_health
+        # Every report still feeds the figures above; only recent ones (and any awaiting review) are sent to the browser.
         for report in reports:
-            reports_out.append(_report_out(report, plant, user, config, manager))
+            if report.report_date >= send_cutoff or report.review_status == "Pending":
+                reports_out.append(_report_out(report, plant, user, config, manager))
 
     completed_rows = db.execute(
         select(
