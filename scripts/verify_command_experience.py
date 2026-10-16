@@ -33,6 +33,17 @@ with sync_playwright() as p:
   window.reportRowsForHub=kind=>({title:'Report '+kind,cols:['Metric','Value'],rows:[['Open issues',2],['Overdue PM',1]]});
   window.goView=page=>{S.view=page;document.querySelector('.content').innerHTML='<div class="ops-report-table">Full report</div>'};
   window.TODAY='2026-10-10';
+  // This is a frontend smoke test: the API contract itself is exercised by pytest.
+  // The assistant now requires an authenticated identity and reads answers from its API.
+  window.AUTH_IDENTITY={userId:'browser-smoke-user'};
+  window.apiFetch=async (path,options={})=>{
+   if(path!=='/api/field/ask')throw new Error('Unexpected browser smoke API request: '+path);
+   const question=JSON.parse(options.body||'{}').question||'';
+   if(/pm|preventive|maintenance|task/i.test(question))return {answer:'1 overdue preventive tasks found',records:[],summary:{label:'Overdue preventive tasks',value:1},breakdown:[],source:'Smoke fixture'};
+   if(/bearing-stock-unique/i.test(question))return {answer:'No matching records were found.',records:[],summary:null,breakdown:[],source:'Smoke fixture'};
+   if(/inverter|inv-01/i.test(question))return {answer:'Found 3 matching records',records:[{module:'equipment',id:'EQ-1',title:'INV-01 · Inverter 1',plant:'Bhadla',site_code:'SP-01',status:'Active'}],summary:null,breakdown:[],source:'Smoke fixture'};
+   return {answer:'2 open tickets, including 1 critical',records:[],summary:{label:'Open issues',value:2},breakdown:[],source:'Smoke fixture'};
+  };
  }''')
  page.add_script_tag(path=str(base/'js/33-command-intelligence.js'))
  assert page.evaluate("typeof window.S")=='undefined'
@@ -59,13 +70,16 @@ with sync_playwright() as p:
  assert 'weekly' in page.locator('.s91-report-summary').inner_text()
  page.locator('[data-s91-close-report]').last.click()
  page.locator('.s91-assistant-launch').click()
- page.locator('[data-s91-question="PM overdue"]').click()
- assert '1 active preventive work orders, including 1 overdue' in page.locator('.s91-assistant-conversation').inner_text()
+ page.locator('[data-s91-question="Overdue PM tasks"]').click()
+ page.wait_for_function("document.querySelector('.s91-assistant-conversation')?.innerText.includes('1 overdue preventive tasks found')")
+ assert '1 overdue preventive tasks found' in page.locator('.s91-assistant-conversation').inner_text()
  page.locator('#s91-assistant-query').fill('critical tickets')
  page.get_by_role('button',name='Search',exact=True).click()
+ page.wait_for_function("document.querySelector('.s91-assistant-conversation')?.innerText.includes('2 open tickets, including 1 critical')")
  assert '2 open tickets, including 1 critical' in page.locator('.s91-assistant-conversation').inner_text()
  page.locator('#s91-assistant-query').fill('inverter at Bhadla')
  page.get_by_role('button',name='Search',exact=True).click()
+ page.wait_for_function("document.querySelector('.s91-assistant-conversation')?.innerText.includes('Found 3 matching records')")
  assert 'Found 3 matching records' in page.locator('.s91-assistant-conversation').inner_text()
  assert 'INV-01' in page.locator('.s91-assistant-conversation').inner_text()
  page.evaluate("S._roleLabel='Assignee';window.s91AssistantOpen()")
@@ -81,7 +95,7 @@ with sync_playwright() as p:
  page.get_by_role('button',name='Search',exact=True).click()
  assert 'No matching records' in page.locator('.s91-assistant-conversation').inner_text()
  page.evaluate("S._roleLabel='Site Engineer';window.s91AssistantOpen()")
- assert page.locator('.s91-assistant-launch').count()==0
+ assert page.locator('.s91-assistant-launch').count()==1
  assert not errors,errors
  print('PASS Chrome desktop: dashboard queues -> filtered registers, report layer tabs, read-only assistant, no runtime errors')
  page.evaluate("S._roleLabel='Assignee';window.s91AssistantOpen()")
