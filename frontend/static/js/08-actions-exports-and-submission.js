@@ -635,18 +635,38 @@ function syncQueue(){S.offlineQueue=S.offlineQueue.map(q=>({...q,status:"Synced"
    the Reports hub UI. */
 function reportRowsExport(kind){
  const R=[],push=(...r)=>R.push(r);
+ const needsOpen=kind==="daily"||kind==="pack"||kind==="weekly";
+ const needsPm=kind==="daily"||kind==="pack"||kind==="weekly"||kind==="monthly";
+ const needsWash=kind==="daily"||kind==="pack"||kind==="monthly";
+ const openIssues=needsOpen?openTk(S.issues):[];
+ const pmPct=needsPm?pmOnTimePct():null;
+ const washPct=needsWash?washCompliancePct():null;
+ const weeklyByPlant=new Map();
+ if(kind==="weekly"||kind==="pack"){
+  const plantsByName=new Map((S.plants||[]).map(p=>[p.name,{count:0,onTime:0,critical:0}]));
+  (S.washing||[]).forEach(row=>{
+   const summary=plantsByName.get(row.plant);if(!summary)return;
+   summary.count++;
+   const freq=(S.washMeta[row.plant]||{freq:14}).freq;
+   if(daysSince(row)<=freq)summary.onTime++;
+  });
+  openIssues.forEach(issue=>{
+   if(!isCriticalIssue(issue))return;
+   const summary=plantsByName.get(issue.plant);if(summary)summary.critical++;
+  });
+  plantsByName.forEach((summary,name)=>weeklyByPlant.set(name,summary));
+ }
  if(kind==="daily"||kind==="pack"){
   push("DAILY OPERATIONS SNAPSHOT — generation as of "+XL_LAST+" (Excel DGR); N/A = not in workbook");push("Plant","Capacity (mW)","Generation (mWh)","Availability %","PR %","Alarms","Status");
   S.plants.forEach(p=>push(p.name,xlNA(p.capacity),xlNA(p.generation),xlNA(p.availability),xlNA(p.pr),xlNA(p.alarms),xlNA(p.status)));
-  push("Open issues",openTk(S.issues).length,"Wash compliance %",washCompliancePct(),"PM on-time %",pmOnTimePct());push([]);}
+  push("Open issues",openIssues.length,"Wash compliance %",washPct,"PM on-time %",pmPct);push([]);}
  if(kind==="weekly"||kind==="pack"){
   push("WEEKLY CLIENT REPORT — PER PLANT");push("Plant","Wash compliance %","Tables in cycle","PM adherence %","Open critical");
-  S.plants.forEach(p=>{const rows=S.washing.filter(t=>t.plant===p.name),freq=(S.washMeta[p.name]||{freq:14}).freq;
-   const ok=rows.filter(t=>daysSince(t)<=freq).length;
-   push(p.name,rows.length?Math.round(100*ok/rows.length):100,rows.length,pmOnTimePct(),openTk(S.issues).filter(t=>t.plant===p.name&&isCriticalIssue(t)).length);});push([]);}
+  S.plants.forEach(p=>{const summary=weeklyByPlant.get(p.name)||{count:0,onTime:0,critical:0};
+   push(p.name,summary.count?Math.round(100*summary.onTime/summary.count):100,summary.count,pmPct,summary.critical);});push([]);}
  if(kind==="monthly"||kind==="pack"){
   push("MONTHLY O&M COMPLIANCE PACK");push("Metric","Value");
-  push("Scheduled compliance %",pmOnTimePct());push("Washing compliance %",washCompliancePct());
+  push("Scheduled compliance %",pmPct);push("Washing compliance %",washPct);
   push("Safety incidents (register)",S.incidents.length);push("PR vs target (80%)","N/A");
   healthScores().forEach(x=>push("Health score — "+x.label,(x.pct==null?"N/A":x.pct+"% ("+x.note+")")));push([]);}
  if(kind==="handover"||kind==="pack"){

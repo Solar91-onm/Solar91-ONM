@@ -1,15 +1,15 @@
 /* Solar91 Command Centre visual refresh — application content only.
    Navigation, header, authentication, REST actions and reports remain unchanged.
    Palette: forest green and sun-gold brand accents, readable on field tablets. */
-:root {--s91-forest:#0c5e2a;--s91-deep:#083a20;--s91-leaf:#168342;--s91-sun:#f6b51f;--s91-ink:#15271d;--s91-light:#f5f8f5;--s91-elev:0 3px 10px rgba(13,49,28,.045),0 16px 36px rgba(13,49,28,.055);--s91-line:#dae6dd;}
-.content{background:radial-gradient(ellipse 100% 310px at 50% -100px,rgba(190,227,198,.26),transparent 85%),#f5f8f5;color:var(--s91-ink)}
+:root {--s91-forest:#0c5e2a;--s91-deep:#083a20;--s91-leaf:#168342;--s91-sun:#f6b51f;--s91-ink:#15271d;--s91-light:#f5f8f5;--s91-elev:0 1px 3px rgba(13,49,28,.055);--s91-line:#dae6dd;}
+.content{background:#f5f8f5;color:var(--s91-ink)}
 .content .portal-page-stack{gap:20px!important}
 .content h1,.content h2,.content h3{line-height:1.28;letter-spacing:-.025em;text-wrap:balance}
 .content h1{font-size:clamp(21px,2vw,30px)!important;font-weight:800!important;color:#122c1c}
 .content h2{font-size:clamp(15px,1.2vw,18px);font-weight:750}
 .content .panel,.content .m26-card,.content .wc-card,.content .pml-card,.content .metric,.content .cc26-card{
- background:#fff;border:1px solid var(--s91-line);border-radius:17px;box-shadow:var(--s91-elev);}
-.content .panel:has(table){border-radius:17px}
+ background:#fff;border:1px solid var(--s91-line);border-radius:12px;box-shadow:var(--s91-elev);}
+.content .panel:has(table){border-radius:12px}
 .content .panel>.row.between:first-child{gap:14px}
 .content .panel>h2:first-child,.content .panel>.row:first-child h2{color:#173b25}
 .content .panel:not(:has(table)):not(.cc-hero):hover,.content .metric:hover{border-color:#badbc6}
@@ -17,13 +17,13 @@
 .content .panel h2+p,.content .panel h3+p{line-height:1.55;color:#64776c}
 .content .kpis8,.content .kpis4,.content .kgrid{gap:14px}
 .content .metric,.content .cc-kpi2,.content .wc-kpi,.content .pml-stat{
- overflow:hidden;position:relative;border-left:3px solid rgba(22,131,66,.7);background:linear-gradient(155deg,#fff 42%,#f7fbf7 100%);}
-.content .metric::before,.content .cc-kpi2::before{content:"";position:absolute;width:82px;height:82px;border:14px solid rgba(28,145,71,.045);border-radius:50%;right:-26px;top:-32px;pointer-events:none}
+ overflow:hidden;position:relative;border-left:3px solid rgba(22,131,66,.7);background:#fff;}
+.content .metric::before,.content .cc-kpi2::before{content:none}
 .content .metric .v,.content .kpi-value{font-weight:800;font-variant-numeric:tabular-nums;letter-spacing:-.035em}
 .content .metric .k,.content .kpi-label{font-weight:700;color:#607467;letter-spacing:.04em}
 .content .pill:not(.active),.content .badge{font-weight:700}
-.content .btn.p{background:linear-gradient(120deg,#0a602d,#158345);border-color:#0d6231;color:#fff;box-shadow:0 4px 12px rgba(12,94,42,.16)}
-.content .btn.p:hover{background:linear-gradient(120deg,#084d24,#0d6f36);box-shadow:0 7px 19px rgba(12,94,42,.24)}
+.content .btn.p{background:#0c6b34;border-color:#0c6b34;color:#fff;box-shadow:none}
+.content .btn.p:hover{background:#084f27;box-shadow:none}
 .content .btn.o:hover,.content .btn.g:hover{background:#e9f7ed;color:#0c5e2a;border-color:#add3b8}
 .content .inp:focus,.content .txt:focus,.content select:focus-visible{border-color:#18894b;box-shadow:0 0 0 3px rgba(22,131,66,.13)}
 .content .panel table th{background:#f0f6f2;color:#5b6d61;font-size:11px;font-weight:750;letter-spacing:.055em}
@@ -35,15 +35,15 @@
 .content .status-ring,.content .ring{filter:drop-shadow(0 4px 8px rgba(20,55,28,.09))}
 .content .empty-box{background:#f9fbfa;border:1px dashed #ccded1;border-radius:12px;padding:14px}
 /* Command Centre: operational hero, improved hierarchy and immediate workflow access. */
-.content .cc-hero{border-radius:20px;box-shadow:0 14px 35px rgba(4,37,18,.16);border:1px solid #286944;overflow:hidden;position:relative;background:linear-gradient(114deg,#07381d 0%,#0b5b30 65%,#1b7a40 100%)}
+.content .cc-hero{border-radius:14px;box-shadow:0 3px 10px rgba(4,37,18,.11);border:1px solid #286944;overflow:hidden;position:relative;background:linear-gradient(114deg,#07381d 0%,#0b5b30 65%,#1b7a40 100%)}
 .content .cc-hero:before{content:"";position:absolute;inset:0 0 0 35%;background:radial-gradient(ellipse at 78% 40%,rgba(255,197,64,.17),transparent 44%),repeating-linear-gradient(123deg,transparent 0 54px,rgba(255,255,255,.025) 55px 56px);pointer-events:none}
 .content .cc-hero>*{position:relative;z-index:1}
 .content .cc-hero-pill{border:1px solid rgba(255,255,255,.3);background:rgba(255,255,255,.12);backdrop-filter:blur(6px)}
 .content .cc-hero-stats{gap:0;border-top:1px solid rgba(255,255,255,.18)}
 .content .cc-hstat{border-right:1px solid rgba(255,255,255,.17)}
 .content .cc-hstat:last-child{border-right:0}
-.content .cc-work-overview>section{background:linear-gradient(158deg,#fff 50%,#f5f9f6 100%);border:1px solid #dce8df;border-radius:16px;box-shadow:0 5px 16px rgba(12,47,21,.055);transition:box-shadow .16s,border-color .16s}
-.content .cc-work-overview>section:hover{box-shadow:0 9px 25px rgba(12,47,21,.1);border-color:#b8d6c2}
+.content .cc-work-overview>section{background:#fff;border:1px solid #dce8df;border-radius:12px;box-shadow:var(--s91-elev);transition:border-color .16s}
+.content .cc-work-overview>section:hover{box-shadow:var(--s91-elev);border-color:#b8d6c2}
 .content .cc-ops-overview{padding:19px!important}
 .content .cc-ops-overview h2{font-size:18px!important}
 .content .cc-dashboard-filters{border:1px solid #cfdfd3!important;background:linear-gradient(135deg,#fff,#f8fbf9)}
@@ -53,7 +53,7 @@
 .content .cc-ops-foot{background:#f4f8f5;border-radius:0 0 14px 14px}
 .content .cc-work-overview .btn{white-space:normal;text-align:center}
 /* Quick entry strip complements, not replaces, the source-backed dashboard. */
-.s91-command-shortcuts{padding:20px 21px 22px;background:linear-gradient(135deg,#fff 60%,#f0f8f2);border:1px solid #d9e8dc;border-radius:19px;box-shadow:var(--s91-elev)}
+.s91-command-shortcuts{padding:20px 21px 22px;background:#fff;border:1px solid #d9e8dc;border-radius:12px;box-shadow:var(--s91-elev)}
 .s91-shortcuts-heading{display:flex;justify-content:space-between;gap:14px;align-items:center;margin-bottom:16px}
 .s91-shortcuts-heading h2{font-size:19px!important;margin:4px 0 3px!important;color:#163e28}
 .s91-shortcuts-heading p{font-size:12.5px;color:#62776a;margin:3px 0 0}

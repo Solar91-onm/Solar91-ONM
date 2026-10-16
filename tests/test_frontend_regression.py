@@ -128,6 +128,38 @@ def test_plant_list_aggregates_issue_stats_once_per_issue_and_preserves_filters(
     run=subprocess.run(['node','-e',script],cwd=ROOT,capture_output=True,text=True,timeout=10)
     assert run.returncode==0,run.stderr
 
+def test_weekly_export_aggregates_operational_rows_in_single_pass():
+    script=textwrap.dedent(r'''
+      const fs=require('fs'),vm=require('vm'),assert=require('assert');
+      const s=fs.readFileSync('frontend/static/js/08-actions-exports-and-submission.js','utf8');
+      const start=s.indexOf('function reportRowsExport(');assert(start>=0);
+      let i=s.indexOf('{',start),depth=0,end=-1;
+      for(let j=i;j<s.length;j++){if(s[j]==='{')depth++;else if(s[j]==='}'&&--depth===0){end=j+1;break}}
+      assert(end>0);
+      let washingVisits=0,issueVisits=0,openCalls=0,pmCalls=0;
+      const washing=[{plant:'A',age:2},{plant:'A',age:30},{plant:'B',age:4}];
+      washing.forEach=((original)=>function(fn){return original.call(this,row=>{washingVisits++;fn(row)})})(washing.forEach);
+      const issues=[{plant:'A',severity:'Critical'},{plant:'B',severity:'Low'},{plant:'A',severity:'Critical'}];
+      issues.forEach=((original)=>function(fn){return original.call(this,row=>{issueVisits++;fn(row)})})(issues.forEach);
+      const plants=[{name:'A'},{name:'B'},{name:'C'}];
+      const sandbox={S:{plants,washing,washMeta:{A:{freq:14},B:{freq:14}},issues},Map,Array,
+        openTk:rows=>{openCalls++;return rows},isCriticalIssue:x=>x.severity==='Critical',
+        daysSince:x=>x.age,pmOnTimePct:()=>{pmCalls++;return 90},
+        washCompliancePct:()=>80,XL_LAST:'today',xlNA:x=>x==null?'N/A':x};
+      vm.createContext(sandbox);vm.runInContext(s.slice(start,end),sandbox);
+      const rows=sandbox.reportRowsExport('weekly');
+      const report=Array.from(rows,row=>Array.from(row));
+      assert.deepStrictEqual(report.slice(2,5),[
+        ['A',50,2,90,2],['B',100,1,90,0],['C',100,0,90,0]
+      ]);
+      assert.strictEqual(washingVisits,washing.length,'washing history should be visited once');
+      assert.strictEqual(issueVisits,issues.length,'open issues should be visited once');
+      assert.strictEqual(openCalls,1,'open issue filtering should run once');
+      assert.strictEqual(pmCalls,1,'shared PM percentage should be calculated once');
+    ''')
+    run=subprocess.run(['node','-e',script],cwd=ROOT,capture_output=True,text=True,timeout=10)
+    assert run.returncode==0,run.stderr
+
 def test_plant_code_normalization_and_embedded_seed_codes_are_canonical():
       script=textwrap.dedent(r'''
         const fs=require('fs'),vm=require('vm'),assert=require('assert');

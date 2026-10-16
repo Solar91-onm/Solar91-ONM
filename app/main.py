@@ -71,6 +71,8 @@ async def lifespan(app: FastAPI):
             task.cancel()
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
+        from app.storage.service import close_storage_http_client
+        close_storage_http_client()
         if settings.app_env != "test":
             from app.core.database import engine
             engine.dispose()

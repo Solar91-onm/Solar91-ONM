@@ -136,8 +136,8 @@
   */
   var MAP = {
     "O&M Head":      { role:"O&M Head",      readOnly:false, pickUser:false },
-    "Assignee":      { role:"Site Engineer", readOnly:false, pickUser:true  },
-    "Administration":       { role:"O&M Head",      readOnly:true,  pickUser:false },
+    "Assignee":      { role:"Assignee",      readOnly:false, pickUser:true  },
+    "Administration": { role:"Administration", readOnly:true,  pickUser:false },
     "Site Engineer": { role:"Site Engineer", readOnly:false, pickUser:true  }
   };
 

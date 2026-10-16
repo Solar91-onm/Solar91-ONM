@@ -34,7 +34,7 @@ S.toastMsg=null;
 function mobileNav(b){const raw=S.view==="dashboard"?"dashboard":(S.view==="plants"||S.view==="plant")?"plants":S.view==="work"?"work":S.omTab;const act=(raw==="scheduled"||raw==="washing")?"scheduled":raw;
  const it=(id,l,ic,fn,n)=>'<div class="'+(act===id?"active":"")+'" onclick="'+fn+'">'+ic+'<span>'+l+'</span>'+(n?'<span class="side-badge">'+Math.min(n,99)+'</span>':'')+'</div>';
  const isSE=(S._roleLabel||S.currentRole)==="Site Engineer";
- if(isSE){return '<nav class="mnav">'+it("dashboard","My Plant",I.dash(18),"goView('dashboard')")+it("issues","Issues",I.alert(18),"goTab('issues')",b.isBadge)+it("scheduled","Preventive",I.clipc(18),"goScheduledOM('maintenance')",(b.scBadge||0)+(b.waBadge||0))+'</nav>';}
+ if(isSE){return '<nav class="mnav">'+it("dashboard","My Plant",I.dash(18),"goView('dashboard')")+it("issues","Issues",I.alert(18),"goTab('issues')",b.isBadge)+it("scheduled","Preventive",I.clipc(18),"goScheduledOM('maintenance')",(b.scBadge||0)+(b.waBadge||0))+it("washing","Washing",I.clipc(18),"goScheduledOM('washing')",b.waBadge)+'</nav>';}
  return '<nav class="mnav">'+it("dashboard","Home",I.dash(18),"goView('dashboard')")+it("plants","Plants",I.sun(18),"goView('plants')")+it("issues","Issues",I.alert(18),"goTab('issues')",b.isBadge)+it("scheduled","Preventive",I.clipc(18),"goScheduledOM('maintenance')",(b.scBadge||0)+(b.waBadge||0))+it("work","Work",I.clipc(18),"goView('work')")+it("reports","Reports",I.gauge(18),"goView('reports')")+'</nav>'}
 function sidebar(b){
  let act=S.view==="dashboard"?"dashboard":S.view==="plants"||S.view==="plant"?"plants":["work","performance","reports","data","settings"].includes(S.view)?S.view:((S.omTab==="scheduled"||S.omTab==="washing")?"scheduled":S.omTab);
@@ -45,7 +45,8 @@ function sidebar(b){
   links='<div class="side-label">Field Operations</div>'+
    link("dashboard","My Plant",I.dash(16),"goView('dashboard')")+
    link("issues","Site Issues",I.alert(16),"goTab('issues')",b.isBadge)+
-   link("scheduled","Preventive Maintenance",I.clipc(16),"goScheduledOM('maintenance')",(b.scBadge||0)+(b.waBadge||0));
+   link("scheduled","Preventive Maintenance",I.clipc(16),"goScheduledOM('maintenance')",(b.scBadge||0)+(b.waBadge||0))+
+   link("washing","Washing",I.clipc(16),"goScheduledOM('washing')",b.waBadge);
  }else{
   links='<div class="side-label">Command Center</div>'+
    link("dashboard","Command Center",I.dash(16),"goView('dashboard')")+
