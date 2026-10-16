@@ -47,10 +47,11 @@
   const assignees=S._washAssignees||[];
   const options='<option value="">Select an Assignee</option>'+assignees.map(a=>'<option value="'+h(a.id)+'"'+(a.id===draft.assignee?" selected":"")+'>'+h(a.name)+(a.has_washing_scope?"":" (will be given Tables cleaning)")+'</option>').join("");
   const hint=assignees.length?"":'<div class="bn-warn banner" style="margin-top:10px">No active user has the Assignee role yet. In <b>Settings → Team access</b>, set a user\'s role to Assignee, then reopen this form.</div>';
+  const nextSteps='<div class="wc-flow-note"><b>What happens after setup</b><ol><li>Assign a Site Engineer to this plant in <b>Settings → Team access</b>.</li><li>The Site Engineer submits daily cleaned-table counts with before and after photos.</li><li>Open <b>Cycle &amp; reports</b> to edit a report, add missing photos, and confirm it.</li></ol><small>A cycle completes when all registered tables are confirmed. The next cycle starts automatically.</small></div>';
   return modal("Set up plant washing","Set the plant table count and the Assignee responsible for this site.",
    '<div class="pm-form"><div class="field"><span class="lbl">Plant</span><select id="wc-plant" class="inp" onchange="washSetupPlantChanged()">'+plants.map(p=>'<option value="'+h(plantIdOf(p))+'"'+(plantIdOf(p)===draft.plantId?" selected":"")+'>'+h(typeof pmPlantLabelText==="function"?pmPlantLabelText(p.name):p.name)+'</option>').join("")+'</select></div>'+
    '<div class="kgrid" style="grid-template-columns:1fr 1fr;gap:12px"><div class="field"><span class="lbl">Number of tables</span><input id="wc-tables" class="inp" type="number" min="1" max="5000" value="'+h(draft.tables)+'" placeholder="e.g. 120" oninput="washSetupDraftChanged()"/></div><div class="field"><span class="lbl">Washing Assignee</span><select id="wc-assignee" class="inp" onchange="washSetupDraftChanged()">'+options+'</select></div></div>'+
-   '<div class="field"><span class="lbl">Alert when weekly compliance falls below (%)</span><input id="wc-threshold" class="inp" type="number" min="1" max="100" value="'+h(draft.threshold)+'" oninput="washSetupDraftChanged()"/></div>'+hint+'</div>',
+   '<div class="field"><span class="lbl">Alert when weekly compliance falls below (%)</span><input id="wc-threshold" class="inp" type="number" min="1" max="100" value="'+h(draft.threshold)+'" oninput="washSetupDraftChanged()"/></div>'+hint+nextSteps+'</div>',
    '<button class="btn o" onclick="closeModal()">Cancel</button><button class="btn p" onclick="saveWashingSetup()">Save plant setup</button>',true);
  }
 
@@ -96,9 +97,10 @@
   if(!Number.isInteger(complianceThreshold)||complianceThreshold<1||complianceThreshold>100){toast("The alert threshold must be between 1 and 100.");return}
   try{
    await apiFetch("/api/scheduled/washing/setup",{method:"POST",body:{plant_id:f.plantId,table_count:count,assignee_user_id:f.assignee,compliance_threshold_percent:complianceThreshold}});
-   S.washCyclePlant=f.plantId;S.modal=null;S.washSetupDraft=null;
+   S.washCyclePlant=f.plantId;S.washSetupDraft=null;
    try{await loadOverview()}catch(e){}
-   render();toast("Plant washing setup saved.");
+   if(rowOf(f.plantId)){openWashingPlantDetails(f.plantId);toast("Setup saved. Cycle & reports is open.")}
+   else{S.modal=null;render();toast("Setup saved. Open Cycle & reports when the plant list refreshes.")}
   }catch(error){toast(detailOf(error,"Unable to save plant washing setup."))}
  };
 
@@ -127,7 +129,7 @@
  function expandHtml(p){
   const cy=(p.cycles||[]).map(c=>'<div class="wc-ex-cy"><b>Cycle '+c.cycle_no+'</b> '+chip(c.state,c.state==="Completed"?"ok":c.state==="In progress"?"info":"mute")+'<small>'+(c.state==="Completed"?'Started '+fmt(c.started_on)+' · completed '+fmt(c.completed_on)+(isTeam()?(c.late_days?' · '+c.late_days+' day(s) after deadline':' · on time'):''):c.state==="In progress"?'Started '+fmt(c.started_on)+' · '+(c.confirmed||0)+' confirmed'+(c.pending?' + '+c.pending+' awaiting':'')+' of '+p.table_count+' tables':'Starts automatically when cycle '+(c.cycle_no-1)+' is complete')+(isTeam()?' · deadline '+fmt(c.due_date):'')+'</small></div>').join("");
   const canReport=isField(),id=h(p.plant_id);
-  return '<div class="wc-ex"><div class="wc-ex-cycles">'+cy+'</div><div class="wc-actions"><button class="btn o sm" onclick="openWashingPlantDetails(\''+id+'\')">Day-by-day &amp; photos</button>'+(canReport?'<button class="btn p sm" onclick="openWashingDailyReport(\''+id+'\')">Report today</button>':'')+(isTeam()?'<button class="btn g sm" onclick="openWashingSetup(\''+id+'\')">Edit setup</button>':'')+'</div></div>';
+  return '<div class="wc-ex"><div class="wc-ex-cycles">'+cy+'</div><div class="wc-actions"><button class="btn o sm" onclick="openWashingPlantDetails(\''+id+'\')">Cycle &amp; reports</button>'+(canReport?'<button class="btn p sm" onclick="openWashingDailyReport(\''+id+'\')">Report today</button>':'')+(isTeam()?'<button class="btn g sm" onclick="openWashingSetup(\''+id+'\')">Edit setup</button>':'')+'</div></div>';
  }
  function filtered(){
   const ui=S._washUi=S._washUi||{q:"",bucket:"all",show:"all",assignee:"all",region:"all",sort:"late",page:1,pageSize:12,selected:[]};
@@ -157,7 +159,7 @@
    const todayCell=todayChip(p),status=p.overdue_bucket==="on_track"?chip("On track","ok"):chip(p.overdue_days+" d late",TONE[p.overdue_bucket]||"warn");
    const confirmedPercent=current?Math.min(100,100*confirmed/(p.table_count||1)):100,pendingPercent=current?Math.min(100-confirmedPercent,100*pending/(p.table_count||1)):0,progress='<div class="wc-plant-progress"><div class="wc-bar"><i class="wc-bar-ok" style="width:'+confirmedPercent+'%"></i><i class="wc-bar-pend" style="width:'+pendingPercent+'%"></i></div><small>'+(current?confirmed+' confirmed'+(pending?' · '+pending+' pending':'')+' · '+remaining+' left':'All monthly cycles complete')+'</small></div>';
    const currentNo=current?current.cycle_no:null;
-   const action=head?'<button class="btn o sm" onclick="event.stopPropagation();openWashingSetup(\''+h(p.plant_id)+'\')">Edit</button>':isField()?'<button class="btn p sm" onclick="event.stopPropagation();openWashingDailyReport(\''+h(p.plant_id)+'\')">Report</button>':'<button class="btn o sm" onclick="event.stopPropagation();openWashingPlantDetails(\''+h(p.plant_id)+'\')">View</button>';
+   const action=head?'<div class="wc-row-actions"><button class="btn p sm" onclick="event.stopPropagation();openWashingPlantDetails(\''+h(p.plant_id)+'\')">Cycle &amp; reports</button><button class="btn o sm" onclick="event.stopPropagation();openWashingSetup(\''+h(p.plant_id)+'\')">Edit setup</button></div>':isField()?'<button class="btn p sm" onclick="event.stopPropagation();openWashingDailyReport(\''+h(p.plant_id)+'\')">Report today</button>':'<button class="btn o sm" onclick="event.stopPropagation();openWashingPlantDetails(\''+h(p.plant_id)+'\')">View</button>';
    return '<tr class="wc-row'+(isOpen?" open":"")+'" onclick="openWashingPlantDetails(\''+h(p.plant_id)+'\')"><td>'+checkbox+'</td><td class="wc-plant"><div><b>'+(fresh?'<i class="wc-live" title="Updated today"></i>':'')+h(p.plant)+'</b><small>'+h(p.site_code)+' · '+plural(p.table_count,"table")+'</small></div></td>'+
     '<td>'+progress+'</td><td><div class="wc-cycle-summary">'+dots(p)+'</div><small class="wc-cycle-label">'+(currentNo?'Cycle '+currentNo+' · ':'')+p.cycles_this_month+' of '+p.monthly_target+' this month</small></td>'+
     '<td>'+todayCell+'<small class="wc-upd">'+updateText(p)+'</small></td>'+(head?'<td>'+weekly(p)+'</td>':'')+'<td>'+status+'</td><td>'+(!p.assignee_user_id&&head?chip("Unassigned","crit"):h(p.assignee_name||"—"))+'</td><td>'+action+'</td></tr>'+
@@ -331,7 +333,8 @@
  function detailsModal(){
   const p=rowOf(S.washDetailsPlant);if(!p)return "";const head=isTeam();
   const reports=(data().reports||[]).filter(r=>r.plant_id===p.plant_id),focus=S.washDayFocus;
-  const shown=(focus?reports.filter(r=>r.report_date===focus):reports).slice(0,focus||S.washShowAllReports?200:12);
+  const pending=reports.filter(r=>r.can_review),recent=focus?reports.filter(r=>r.report_date===focus):reports;
+  const shown=focus?recent.slice(0,200):S.washShowAllReports?reports.slice(0,200):pending.concat(reports.filter(r=>!r.can_review).slice(0,Math.max(0,12-pending.length)));
   const photoCount=day=>reports.filter(r=>r.report_date===day).reduce((n,r)=>n+(r.evidence||[]).length,0),canDayReport=isField();
   const days=(p.daily_status||[]).slice().reverse().map(d=>'<tr class="wc-day'+(focus===d.date?" focus":"")+'" onclick="washFocusDay(\''+d.date+'\')"><td><b>'+fmt(d.date)+'</b></td>'+(head?'<td>'+d.target+'</td>':'')+'<td>'+d.confirmed+'</td><td>'+(d.pending||"—")+'</td><td>'+chip(d.status,dtone(d.status))+(d.exception?' <small>'+h(d.exception)+'</small>':'')+'</td><td>'+h(d.reported_by||"—")+'</td><td>'+(photoCount(d.date)||"—")+'</td>'+(canDayReport?'<td>'+(d.date<=todayIso()&&d.date>=isoDaysAgo(45)?'<button class="btn o sm" onclick="event.stopPropagation();washReportForDay(\''+d.date+'\')">Report / photos</button>':'')+'</td>':'')+'</tr>').join("");
   const mk=(data().today||"").slice(0,7),mkLast=mk?new Date(Number(mk.slice(0,4)),Number(mk.slice(5,7)),0).getDate():31;
@@ -343,11 +346,12 @@
   const wk=p.weekly_compliance_percent,thr=p.compliance_threshold_percent;
   const canReport=isField();
   const allReports=reports.length>shown.length&&!focus;
+  const reviewGuidance=head?(pending.length?'<div class="wc-flow-note"><b>'+pending.length+' daily report'+(pending.length===1?'':'s')+' waiting for your review</b><p>Check the before and after photos below. You can add missing evidence or edit a pending report, then confirm the cleaning. The cycle completes automatically after all registered tables are confirmed.</p></div>':p.cycle_remaining===0?'<div class="wc-flow-note"><b>This cycle is complete</b><p>All registered tables are confirmed. The next cycle starts automatically.</p></div>':'<div class="wc-flow-note"><b>No reports are waiting for confirmation</b><p>The Site Engineer assigned to this plant submits the daily cleaned-table count and before and after photos. New reports will appear here for review.</p></div>'):'';
+  const reportSection='<div class="wc-sec"><div class="row between wrap"><div><h3>Daily reports · photos · review</h3><p class="sub">'+(focus?'Showing '+fmt(focus):'Latest reports')+' · open a report below to edit it, add missing photos, or confirm it when those actions are available to your role.</p></div>'+(focus?'<button class="btn g sm" onclick="washFocusDay(\''+focus+'\')">Show all</button>':'')+'</div>'+(shown.length?shown.map(reportCard).join(""):'<div class="wc-empty">No reports for this selection.</div>')+(allReports?'<div style="margin-top:10px"><button class="btn o sm" onclick="washShowAllReports()">Show all '+reports.length+' reports (older dates)</button></div>':'')+'</div>';
+  const daySection='<div class="wc-sec"><h3>Day-by-day status — this month</h3><p class="sub">What was cleaned each day, and whether the O&amp;M team confirmed it. Click a day to see its photos'+(canDayReport?', or use Report / photos to enter that day\'s cleaned count and upload before &amp; after photos':'')+'.</p><div class="wc-days-wrap"><table class="wc-days"><thead><tr><th>Date</th>'+(head?'<th>Target</th>':'')+'<th>Confirmed</th><th>Awaiting</th><th>Status</th><th>Reported by</th><th>Photos</th>'+(canDayReport?'<th></th>':'')+'</tr></thead><tbody>'+days+'</tbody></table></div></div>';
   return modal(h(p.plant)+' <small style="font-weight:500;color:var(--muted-foreground)">'+h(p.site_code)+'</small>',plural(p.table_count,"table")+' · washing Assignee: '+h(p.assignee_name||"not set"),
    '<div class="wc-ov"><div class="wc-ov-top">'+(head?(p.overdue_bucket==="on_track"?chip("On track — next deadline "+fmt(p.next_due),"ok"):chip(p.overdue_days+" day(s) late — cycle "+p.overdue_cycle+" was due "+fmt(p.next_due),TONE[p.overdue_bucket]))+chip("Weekly compliance "+wk+"% (target "+thr+"%)",wk>=thr?"ok":wk>=thr-15?"warn":"crit"):"")+chip(p.cycles_this_month+" of "+p.monthly_target+" cycles done this month","info")+chip(plural(p.cycle_remaining,"table")+" left in cycle "+p.current_cycle,"mute")+'</div>'+
-   (canReport?inlineReport(p):'')+'<div class="wc-cycles">'+cyc+'</div>'+
-   '<div class="wc-sec"><h3>Day-by-day status — this month</h3><p class="sub">What was cleaned each day, and whether the O&amp;M team confirmed it. Click a day to see its photos'+(canDayReport?', or use Report / photos to enter that day\'s cleaned count and upload before &amp; after photos':'')+'.</p><div class="wc-days-wrap"><table class="wc-days"><thead><tr><th>Date</th>'+(head?'<th>Target</th>':'')+'<th>Confirmed</th><th>Awaiting</th><th>Status</th><th>Reported by</th><th>Photos</th>'+(canDayReport?'<th></th>':'')+'</tr></thead><tbody>'+days+'</tbody></table></div></div>'+
-   '<div class="wc-sec"><div class="row between wrap"><div><h3>Before &amp; after photos and confirmation</h3><p class="sub">'+(focus?'Showing '+fmt(focus):'Latest reports')+' · the O&amp;M team confirms each report after checking the photos.</p></div>'+(focus?'<button class="btn g sm" onclick="washFocusDay(\''+focus+'\')">Show all</button>':'')+'</div>'+(shown.length?shown.map(reportCard).join(""):'<div class="wc-empty">No reports for this selection.</div>')+(allReports?'<div style="margin-top:10px"><button class="btn o sm" onclick="washShowAllReports()">Show all '+reports.length+' reports (older dates)</button></div>':'')+'</div></div>',
+   (canReport?inlineReport(p):'')+'<div class="wc-cycles">'+cyc+'</div>'+reviewGuidance+reportSection+daySection+'</div>',
    '<button class="btn o" onclick="closeModal()">Close</button>'+"",true)+(setTimeout(hydrate,40),"");
  }
 

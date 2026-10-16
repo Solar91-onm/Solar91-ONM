@@ -1,5 +1,7 @@
 from __future__ import annotations
+import csv
 import io
+import re
 from datetime import date, datetime
 from typing import Annotated
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
@@ -15,17 +17,17 @@ from app.plants.codes import normalize_site_code, plant_code_index
 router=APIRouter(prefix="/api/imports",tags=["Data / Imports"])
 settings=get_settings()
 ALIASES={
- "site_code":{"site code","site_code","sitecode","plant code","code"},
+ "site_code":{"site code","site_code","sitecode","plant code","plant/site code","code"},
  "plant_name":{"plant name","plant_name","name","site name"},
- "project_company":{"project company","project_company","project","company"},
+ "project_company":{"project company","project_company","project company name","project","company","spv name","spv/project"},
  "district":{"district"},"discom":{"discom"},"location":{"location","city","village"},
- "dc_capacity_kw":{"dc capacity kw","dc_capacity_kw","dc capacity","capacitykw","capacity kw"},
- "ac_capacity_kw":{"ac capacity kw","ac_capacity_kw","ac capacity"},
+ "dc_capacity_kw":{"dc capacity kw","dc_capacity_kw","dc capacity","capacitykw","capacity kw","dc capacity kwp","dc capacity (kwp)","dc kwp","dc (kwp)","installed dc capacity (kwp)"},
+ "ac_capacity_kw":{"ac capacity kw","ac_capacity_kw","ac capacity","ac capacity (kw)","ac kw","ac (kw)","installed ac capacity (kw)"},
  "commissioned_on":{"commissioned on","commissioned_on","cod","commissioning date"},
  "latitude":{"latitude","lat"},"longitude":{"longitude","lng","lon"},
 }
 
-def norm(v): return " ".join(str(v or "").strip().lower().replace("_"," ").split())
+def norm(v): return " ".join(re.sub(r"[^a-z0-9]+", " ", str(v or "").strip().lower()).split())
 def parse_float(v):
     if v in (None,""): return None
     try:return float(v)
@@ -39,16 +41,25 @@ def parse_date(v):
 
 @router.post("/plants",dependencies=[Depends(require_csrf)])
 async def import_plants(file:UploadFile=File(...),db:Session=Depends(get_db),user:User=Depends(require_permission("plants.manage"))):
-    if not file.filename or not file.filename.lower().endswith((".xlsx",".xlsm")): raise HTTPException(415,"Upload an .xlsx or .xlsm workbook")
+    if not file.filename or not file.filename.lower().endswith((".xlsx",".xlsm",".csv")): raise HTTPException(415,"Upload an .xlsx, .xlsm, or .csv plant information file")
     data=await file.read()
     if len(data)>settings.max_upload_mb*1024*1024: raise HTTPException(413,"Workbook is too large")
-    try: wb=load_workbook(io.BytesIO(data),read_only=True,data_only=True)
-    except Exception as exc: raise HTTPException(422,"Workbook could not be read") from exc
-    ws=wb.active; rows=ws.iter_rows(values_only=True)
-    try: headers=[norm(x) for x in next(rows)]
-    except StopIteration: raise HTTPException(422,"Workbook is empty")
+    if file.filename.lower().endswith(".csv"):
+        try:
+            matrix=list(csv.reader(io.StringIO(data.decode("utf-8-sig"))))
+        except Exception as exc:
+            raise HTTPException(422,"CSV could not be read") from exc
+        if not matrix: raise HTTPException(422,"Workbook is empty")
+        headers=[norm(x) for x in matrix[0]]; rows=iter(matrix[1:])
+    else:
+        try: wb=load_workbook(io.BytesIO(data),read_only=True,data_only=True)
+        except Exception as exc: raise HTTPException(422,"Workbook could not be read") from exc
+        ws=wb.active; rows=ws.iter_rows(values_only=True)
+        try: headers=[norm(x) for x in next(rows)]
+        except StopIteration: raise HTTPException(422,"Workbook is empty")
     mapping={}
     for field,aliases in ALIASES.items():
+        aliases={norm(alias) for alias in aliases}
         for i,h in enumerate(headers):
             if h in aliases: mapping[field]=i; break
     if "site_code" not in mapping: raise HTTPException(422,detail={"message":"Missing required column","required":["Site Code"],"found":headers})
@@ -75,9 +86,23 @@ async def import_plants(file:UploadFile=File(...),db:Session=Depends(get_db),use
             existing_by_code[site]=p
         else:
             p.site_code=site
-        if name: p.plant_name=name; p.project_company=str(val("project_company") or "").strip() or None; p.district=str(val("district") or "").strip() or None; p.discom=str(val("discom") or "").strip() or None; p.location=str(val("location") or "").strip() or None; p.dc_capacity_kw=parse_float(val("dc_capacity_kw")); p.ac_capacity_kw=parse_float(val("ac_capacity_kw")); p.commissioned_on=parse_date(val("commissioned_on")); p.latitude=lat; p.longitude=lon
+        if name: p.plant_name=name
+        for field in ("project_company","district","discom","location"):
+            value=val(field)
+            if value is not None and str(value).strip(): setattr(p,field,str(value).strip())
+        for field in ("dc_capacity_kw","ac_capacity_kw"):
+            value=val(field)
+            parsed=parse_float(value)
+            if parsed is not None: setattr(p,field,parsed)
+        commissioned=val("commissioned_on")
+        parsed_commissioned=parse_date(commissioned)
+        if parsed_commissioned is not None: p.commissioned_on=parsed_commissioned
+        if lat is not None: p.latitude=lat
+        if lon is not None: p.longitude=lon
         db.add(p); created+=int(is_new); updated+=int(not is_new)
-    db.commit(); return {"filename":file.filename,"created":created,"updated":updated,"invalid_rows":errors,"mapped_columns":mapping}
+    db.commit()
+    if file.filename.lower().endswith((".xlsx",".xlsm")): wb.close()
+    return {"filename":file.filename,"created":created,"updated":updated,"invalid_rows":errors,"mapped_columns":mapping}
 
 LOCATION_ALIASES = {
     "label": {"plant name", "plant_name", "site", "site code", "site_code"},

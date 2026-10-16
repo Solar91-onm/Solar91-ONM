@@ -58,6 +58,10 @@
 .wc-cy p{margin:6px 0 0;font-size:11.5px;color:var(--muted-foreground);line-height:1.45}
 .wc-sec{border:1px solid var(--border);border-radius:12px;padding:14px;background:var(--card)}
 .wc-sec h3{margin:0 0 3px;font-size:14px}.wc-sec .sub{margin:0 0 10px;color:var(--muted-foreground);font-size:12px}
+.wc-flow-note{border:1px solid rgba(24,134,75,.22);border-left:4px solid var(--primary,#18864b);border-radius:10px;background:var(--surface-subtle,#f6f7f6);padding:12px 14px;color:var(--foreground);font-size:12px;line-height:1.5}
+.wc-flow-note>b{display:block;font-size:13px;margin-bottom:3px}.wc-flow-note p{margin:3px 0 0;color:var(--muted-foreground)}
+.wc-flow-note ol{margin:6px 0;padding-left:20px}.wc-flow-note li+li{margin-top:3px}.wc-flow-note small{color:var(--muted-foreground)}
+.wc-row-actions{display:flex;justify-content:flex-end;gap:6px;flex-wrap:wrap}
 .wc-days{width:100%;border-collapse:collapse;font-size:12.5px}
 .wc-days th{text-align:left;font-size:11px;letter-spacing:.04em;text-transform:uppercase;color:var(--muted-foreground);padding:6px 8px;border-bottom:1px solid var(--border)}
 .wc-days td{padding:8px;border-bottom:1px solid var(--border)}

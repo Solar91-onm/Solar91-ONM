@@ -736,13 +736,13 @@ LOCATION_SEED.forEach(r=>{
 
 
 const PLANT_EXCEL_FIELD_MAPPING={
- siteCode:["SITE CODE","SITECODE","SITE"],
- project:["PROJECT COMPANY","PROJECT","SPV","SPV NAME"],
+ siteCode:["SITE CODE","SITECODE","SITE","PLANT CODE","PLANT/SITE CODE"],
+ project:["PROJECT COMPANY","PROJECT COMPANY NAME","PROJECT","SPV","SPV NAME","SPV / PROJECT"],
  district:["DISTRICT"],
  discom:["DISCOM"],
- dcCapacitykW:["DC(kW)","DC (kW)","DC"],
- acCapacitykW:["AC","AC(kW)","AC (kW)"],
- cod:["COD","COMMISSIONED ON","COMMISSIONED"]
+ dcCapacitykW:["DC(kW)","DC (kW)","DC","DC CAPACITY","DC CAPACITY KW","DC CAPACITY KWP","DC (KWP)","DC KWP","INSTALLED DC CAPACITY (KWP)"],
+ acCapacitykW:["AC","AC(kW)","AC (kW)","AC CAPACITY","AC CAPACITY KW","INSTALLED AC CAPACITY (KW)"],
+ cod:["COD","COMMISSIONED ON","COMMISSIONED","COMMISSIONING DATE"]
 };
 
 
@@ -760,8 +760,9 @@ function extractSiteCodeFromLabel(label){ /* "ABH01 (Abhaneri, Dausa)" -> "ABH01
 
 /* ---------- generic header lookup shared by both importers ---------- */
 function findHeaderIndex(headers,aliases){
- const H=headers.map(h=>String(h||"").trim().toUpperCase());
- for(const a of aliases){const i=H.indexOf(a.toUpperCase());if(i>=0)return i}
+ const key=value=>String(value||"").trim().toUpperCase().replace(/[^A-Z0-9]/g,"");
+ const H=headers.map(key);
+ for(const a of aliases){const i=H.indexOf(key(a));if(i>=0)return i}
  return -1;
 }
 let _xlsxLoadPromise=null;
@@ -890,18 +891,15 @@ function importPlantExcel(file){
    const plant=resolvePlantByCode(rawCode,idx);
    if(!plant){unmatched.push(rawCode);return}
    const target=normalizeSiteCode(plant.id);
-   en[target]=Object.assign({},en[target],{
-    project:ix.project>=0?String(r[ix.project]||"").trim()||undefined:undefined,
-    district:ix.district>=0?String(r[ix.district]||"").trim()||undefined:undefined,
-    discom:ix.discom>=0?String(r[ix.discom]||"").trim()||undefined:undefined,
-    dcCapacitykW:ix.dc>=0&&Number.isFinite(parseFloat(r[ix.dc]))?parseFloat(r[ix.dc]):undefined,
-    acCapacitykW:ix.ac>=0&&Number.isFinite(parseFloat(r[ix.ac]))?parseFloat(r[ix.ac]):undefined,
-    cod:ix.cod>=0?String(r[ix.cod]||"").trim()||undefined:undefined
-   });
+   const update={},setText=(field,index)=>{if(index<0)return;const value=String(r[index]||"").trim();if(value)update[field]=value},setNumber=(field,index)=>{if(index<0||r[index]==null||String(r[index]).trim()==="")return;const value=parseFloat(r[index]);if(Number.isFinite(value))update[field]=value};
+   setText("project",ix.project);setText("district",ix.district);setText("discom",ix.discom);setText("cod",ix.cod);
+   setNumber("dcCapacitykW",ix.dc);setNumber("acCapacitykW",ix.ac);
+   en[target]=Object.assign({},en[target],update);
    matched++;
   });
   S.plantEnrich=en;S.plants=applyPlantEnrichment(S.plants);
-  S.plantImportReport={type:"plant",file:file.name,total:parsed.rows.length,matched,unmatched,duplicate,at:stampLong()};
+  const warnings=[];if(ix.dc<0)warnings.push("No recognized DC capacity column; DC values were not changed.");if(ix.ac<0)warnings.push("No recognized AC capacity column; AC values were not changed.");
+  S.plantImportReport={type:"plant",file:file.name,total:parsed.rows.length,matched,unmatched,duplicate,warnings,at:stampLong()};
   persist();render();
   toast("Plant data import — "+matched+" matched"+(unmatched.length?", "+unmatched.length+" unmatched":"")+(duplicate.length?", "+duplicate.length+" duplicate":"")+".");
  });
@@ -944,13 +942,14 @@ async function importPlantExcelServer(file){
  const fd=new FormData();fd.append("file",file);
  try{
   const res=await apiFetch("/api/imports/plants",{method:"POST",body:fd});
-  S.plantImportReport={type:"plant",file:file.name,total:(res.created||0)+(res.updated||0)+(res.invalid_rows||[]).length,matched:(res.created||0)+(res.updated||0),unmatched:(res.invalid_rows||[]).map(x=>x.site_code||("row "+x.row)),duplicate:(res.invalid_rows||[]).filter(x=>/duplicate/i.test(x.error||"")).map(x=>x.site_code),at:stampLong()};
+  const mapped=res.mapped_columns||{},missingCapacity=["dc_capacity_kw","ac_capacity_kw"].filter(k=>!Object.prototype.hasOwnProperty.call(mapped,k)),warnings=missingCapacity.length?["No recognized "+missingCapacity.map(k=>k==="dc_capacity_kw"?"DC":"AC").join(" / ")+" capacity column; those values were not changed."]:[];
+  S.plantImportReport={type:"plant",file:file.name,total:(res.created||0)+(res.updated||0)+(res.invalid_rows||[]).length,matched:(res.created||0)+(res.updated||0),unmatched:(res.invalid_rows||[]).map(x=>x.site_code||("row "+x.row)),duplicate:(res.invalid_rows||[]).filter(x=>/duplicate/i.test(x.error||"")).map(x=>x.site_code),warnings,at:stampLong()};
  try{await refreshServerCollections(["plants","plantEnrich"])}catch(refreshError){console.error("Solar91 plant import refresh",refreshError);toast("Plant import completed, but refreshed plant data could not be loaded. "+refreshError.message);return}
   toast("Plant data import — "+(res.created||0)+" created, "+(res.updated||0)+" updated"+((res.invalid_rows||[]).length?", "+res.invalid_rows.length+" invalid":"")+".");
   render();
  }catch(e){toast("Plant import failed: "+e.message)}
 }
-function pickPlantExcel(input){const f=input.files&&input.files[0];if(f)importPlantExcel(f);input.value=""}
+function pickPlantExcel(input){const f=input.files&&input.files[0];if(f){if(/\.(xlsx|xlsm|csv)$/i.test(f.name))importPlantExcelServer(f);else importPlantExcel(f)}input.value=""}
 async function importLocationExcelServer(file){
  const fd=new FormData();fd.append("file",file);
  try{
@@ -1054,8 +1053,8 @@ function plantFormHtml(plant){
   fld("pf-discom","DISCOM",plant&&plant.discom||"")+
   fld("pf-cod","Commissioning date (COD)",plant&&plant.cod||"",{type:"date"})+
   '</div><div class="row" style="gap:12px">'+
-  fld("pf-ac","AC CAPACITY (kW) (kW)(kW)(kW)(kW)",plant&&xlNum(plant.acCapacitykW)?plant.acCapacitykW:"",{type:"number",step:"0.01",ph:"Optional"})+
-  fld("pf-dc","DC CAPACITY (kWp) (kWp)(kWp)(kW)",plant&&xlNum(plant.dcCapacitykW)?plant.dcCapacitykW:"",{type:"number",step:"0.01",ph:"Optional"})+
+  fld("pf-ac","AC capacity (kW)",plant&&xlNum(plant.acCapacitykW)?plant.acCapacitykW:"",{type:"number",step:"0.01",ph:"Optional"})+
+  fld("pf-dc","DC capacity (kWp)",plant&&xlNum(plant.dcCapacitykW)?plant.dcCapacitykW:"",{type:"number",step:"0.01",ph:"Optional"})+
   '</div>'+
   '<div style="margin-top:4px;padding-top:12px;border-top:1px solid var(--border)">'+
   '<div style="font-size:12.5px;font-weight:700;margin-bottom:8px">📍 Location</div>'+

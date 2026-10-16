@@ -156,7 +156,7 @@ function m26Hub(){
  const plants=S.plants||[],issues=S.issues||[],open=openTk(issues);
  const crit=open.filter(t=>normalizeIssueSeverity(t.severity)==="Critical"),od=open.filter(isOverdueIssue),un=open.filter(t=>!t.assignee);
  const hc={Healthy:0,Warning:0,Critical:0};plants.forEach(p=>{const k=plantHealth(p);if(hc[k]!=null)hc[k]++});
- const mw=plants.reduce((a,p)=>a+(Number.isFinite(p.capacity)?p.capacity:0),0);
+ const mw=totalPlantCapacitykW(plants,"capacitykW")/1000,acMw=totalPlantCapacitykW(plants,"acCapacitykW")/1000;
  const tasks=S.tasks||[],tDone=tasks.filter(t=>t.status==="Completed").length,tOd=tasks.filter(t=>taskOD(t)>0);
  const pmPct=tDone+tOd.length?Math.round(tDone/(tDone+tOd.length)*100):null;
  const dueWk=tasks.filter(t=>t.status!=="Completed"&&t.due&&t.due>=TODAY&&t.due<=addDays(TODAY,6)).length;
@@ -191,7 +191,9 @@ function m26Hub(){
   +'<text x="150" y="98" font-size="30" fill="#fff" text-anchor="middle" font-weight="500">'+(hasTel?fmtN(gen):plants.length)+'</text><text x="150" y="118" font-size="12" fill="#9CC9AE" text-anchor="middle">'+(hasTel?'mWh generated (latest)':'plants in portfolio')+'</text></svg>'
   +'<div class="cc26-stats">'
   +stat("Healthy plants",hc.Healthy+" / "+plants.length,(hc.Warning+hc.Critical)+" need attention")
-  +(hasTel&&prv!=null?stat("Performance ratio",prv.toFixed(1)+"%","average across plants"):stat("Capacity",mw>0?(mw>=10?Math.round(mw):mw.toFixed(1))+" MW":"—","portfolio total"))
+  +stat("DC capacity",mw>0?(mw>=10?Math.round(mw):mw.toFixed(2))+" MW":"—","portfolio total")
+  +stat("AC capacity",acMw>0?(acMw>=10?Math.round(acMw):acMw.toFixed(2))+" MW":"—","portfolio total")
+  +(hasTel&&prv!=null?stat("Performance ratio",prv.toFixed(1)+"%","average across plants"):"")
   +(hasTel&&av!=null
   ?stat("Availability",av.toFixed(1)+"%",open.length+" open issues · "+crit.length+" critical")
   :stat("Open issues",open.length,crit.length+" critical · "+od.length+" overdue","m26Nav('issues')"))

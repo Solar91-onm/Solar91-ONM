@@ -305,12 +305,44 @@ def test_excel_plant_and_location_imports_run_on_backend(client, db):
     login_user(client, db)
 
     wb = Workbook(); ws = wb.active
-    ws.append(['Site Code','Plant Name','District','DC Capacity kW'])
-    ws.append(['XL01','Excel Plant','Dausa',1234.5])
+    ws.append(['Site Code','Plant Name','District','DC Capacity (kWp)','AC Capacity (kW)'])
+    ws.append(['XL01','Excel Plant','Dausa',1234.5,1000])
     buf = BytesIO(); wb.save(buf)
     response = client.post('/api/imports/plants', files={'file':('plants.xlsx',buf.getvalue(),'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')})
     assert response.status_code == 200, response.text
     assert response.json()['created'] == 1
+    db.expire_all()
+    plant = db.query(Plant).filter(Plant.site_code=='XL01').one()
+    assert float(plant.dc_capacity_kw) == 1234.5
+    assert float(plant.ac_capacity_kw) == 1000
+
+    # Capacity-only updates are valid for known plants and blank/omitted fields stay intact.
+    csv_update = b'Site Code,DC Capacity (kWp)\nXL01,1500\n'
+    response_update = client.post('/api/imports/plants', files={'file':('capacity-update.csv',csv_update,'text/csv')})
+    assert response_update.status_code == 200, response_update.text
+    assert response_update.json()['updated'] == 1
+    db.expire_all()
+    plant = db.query(Plant).filter(Plant.site_code=='XL01').one()
+    assert float(plant.dc_capacity_kw) == 1500
+    assert float(plant.ac_capacity_kw) == 1000
+    bootstrap = client.get('/api/bootstrap').json()['state']
+    plant_state = next(row for row in bootstrap['plants'] if row['id'] == 'XL01')
+    assert plant_state['dcCapacitykW'] == 1500
+    assert plant_state['acCapacitykW'] == 1000
+    refreshed = client.get('/api/state/collections?keys=plants,plantEnrich').json()['state']
+    refreshed_plant = next(row for row in refreshed['plants'] if row['id'] == 'XL01')
+    assert refreshed_plant['dcCapacitykW'] == 1500
+    assert refreshed_plant['acCapacitykW'] == 1000
+
+    # Alternate site-code header is accepted, and malformed numeric cells do not erase saved capacity.
+    invalid_capacity = b'Plant/Site Code,DC Capacity (kWp)\nXL01,not-a-number\n'
+    response_invalid = client.post('/api/imports/plants', files={'file':('invalid-capacity.csv',invalid_capacity,'text/csv')})
+    assert response_invalid.status_code == 200, response_invalid.text
+    assert response_invalid.json()['updated'] == 1
+    db.expire_all()
+    plant = db.query(Plant).filter(Plant.site_code=='XL01').one()
+    assert float(plant.dc_capacity_kw) == 1500
+    assert float(plant.ac_capacity_kw) == 1000
 
     wb2 = Workbook(); ws2 = wb2.active
     ws2.append(['Plant Name','City','Latitude','Longitude'])
