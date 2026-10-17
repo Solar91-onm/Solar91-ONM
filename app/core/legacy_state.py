@@ -211,7 +211,8 @@ def load_state(db:Session,user:User,include_washing:bool=True)->dict[str,Any]:
     washing=[]
     # The full bootstrap is consumed across legacy views, dashboards, reports, and exports; only lite refreshes skip washing.
     # Roles that never receive washing (Viewer etc.) skip the query; Site Engineers / Assignees only read their own plants.
-    wash_stmt=select(WashingTable).order_by(WashingTable.table_code)
+    # Plain column rows, not ORM entities: building ~40,000 entities cost more than the whole rest of the bootstrap.
+    wash_stmt=select(WashingTable.id,WashingTable.legacy_id,WashingTable.plant_id,WashingTable.inverter_no,WashingTable.secondary_inverter_no,WashingTable.table_code,WashingTable.next_due_on,WashingTable.rescheduled_to,WashingTable.legacy_payload).order_by(WashingTable.table_code)
     wash_ids=select(WashingTable.id)
     if include_washing and not is_head(user):
         if user.role not in {"Assignee","Site Engineer"}: include_washing=False
@@ -219,11 +220,11 @@ def load_state(db:Session,user:User,include_washing:bool=True)->dict[str,Any]:
             wash_scope=user_scoped_plant_ids(db,user)
             if wash_scope is not None:
                 wash_stmt=wash_stmt.where(WashingTable.plant_id.in_(wash_scope)); wash_ids=wash_ids.where(WashingTable.plant_id.in_(wash_scope))
-    washing_rows=list(db.scalars(wash_stmt)) if include_washing else []
+    washing_rows=db.execute(wash_stmt).all() if include_washing else []
     history_by_table=defaultdict(list)
     if washing_rows:
         # sub-select instead of a bound list of every table id (a 6,000-item IN list is slow)
-        for hh in db.scalars(select(WashingHistory).where(WashingHistory.washing_table_id.in_(wash_ids)).order_by(WashingHistory.event_date)):
+        for hh in db.execute(select(WashingHistory.washing_table_id,WashingHistory.event_type,WashingHistory.event_date,WashingHistory.actor,WashingHistory.reason,WashingHistory.notes,WashingHistory.payload).where(WashingHistory.washing_table_id.in_(wash_ids)).order_by(WashingHistory.event_date)):
             history_by_table[hh.washing_table_id].append(hh)
     for w in washing_rows:
         r=dict(w.legacy_payload or {}); hist=[]

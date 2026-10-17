@@ -322,3 +322,15 @@ class PortalUser(HttpUser):
     @task(2)
     def issue_detail(self) -> None:
         self._issue_detail()
+
+    @task(3)
+    def washing_overview(self) -> None:
+        with self.client.get("/api/scheduled/washing/overview", name="/api/scheduled/washing/overview", catch_response=True) as response:
+            if response.status_code != 200:
+                response.failure(f"Washing overview returned HTTP {response.status_code}")
+
+    @task(2)
+    def bootstrap_lite(self) -> None:
+        with self.client.get("/api/bootstrap?lite=1", name="/api/bootstrap?lite=1", catch_response=True) as response:
+            if response.status_code != 200:
+                response.failure(f"Lite bootstrap returned HTTP {response.status_code}")

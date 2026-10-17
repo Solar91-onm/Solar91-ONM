@@ -118,6 +118,12 @@ async def drop_washing_cache_after_writes(request: Request, call_next):
         if request.method not in ("GET", "HEAD", "OPTIONS") and request.url.path.startswith("/api/"):
             invalidate_overview_cache()
 
+from app.core.database import engine as _engine_for_timing
+from app.core.observability import install_query_counter, make_timing_middleware
+
+install_query_counter(_engine_for_timing)
+app.middleware("http")(make_timing_middleware(settings.slow_request_ms))  # added last = outermost, so it times everything
+
 async def _run_setup_script(script: str) -> int:
     path = BASE / "scripts" / script
     logger.info("Running deployment setup: %s", script)

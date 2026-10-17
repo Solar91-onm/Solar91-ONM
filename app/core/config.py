@@ -52,6 +52,11 @@ class Settings(BaseSettings):
     db_pool_size: int = 5
     db_max_overflow: int = 2
     db_pool_recycle_seconds: int = 300
+    db_pool_timeout_seconds: int = 30  # how long a request waits for a free connection before failing
+    # True = test each pooled connection before use (one extra round trip per request; safest). Set DB_POOL_PRE_PING=false
+    # only after measuring that the round trip matters AND the pooler does not drop idle connections.
+    db_pool_pre_ping: bool = True
+    slow_request_ms: int = 1000  # requests slower than this are logged with their database query count/time
     state_sync_enabled: bool = True
     # 0 = send every issue to the browser. Set e.g. 365 to leave out tickets closed more than a year ago
     # (they stay in the database and in /api/issues). Recommended once total issues pass ~20,000.

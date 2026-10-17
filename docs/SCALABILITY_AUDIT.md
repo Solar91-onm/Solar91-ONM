@@ -74,3 +74,16 @@ No new SQL is proposed. Checked-in migrations already define indexes for common 
 4. Verify private bucket access, upload size/type policy, RLS/role rules, restoration procedures, and the connection budget before production rollout.
 
 No additional paid infrastructure is supported by the available evidence. Scale the existing Render/PostgreSQL setup based on measured staging headroom and latency.
+
+## Addendum 2026-10-17: bootstrap cost, request timing and washing payload
+
+Measured on a synthetic SQLite database (not production; 40 plants, 10,000 washing tables, 30,000 history rows):
+
+- `load_state` (full bootstrap) took 1.84 s before and 0.87 s after reading washing tables/history as plain column rows instead of ORM entities (same output; a shape test covers it). Lite bootstrap takes about 0.01 s.
+- Washing is about 99.7% of the raw bootstrap JSON (2.49 MB of 2.50 MB); gzip reduces the response to about 42 KB.
+- The washing overview used to send every report of the last 90 days (8.4 MB in a 25-plant, 3-reports-per-day stress case). It now sends 35 days plus anything still pending (about 3.4 MB in the same case); `?report_days=90` returns the full window.
+- On Render, `/api/bootstrap` took 11.27 s (97 kB) and `/api/scheduled/washing/overview` 3.91 s (7.9 kB). The small payloads and the roughly constant 0.43-0.45 s per database query (about 25 and 9 queries) point at database round-trip latency or a slow free-tier CPU. This is an inference; the new request timing below distinguishes the two.
+
+Added: `app/core/observability.py` sets `X-Request-ID` and `Server-Timing` (total ms, database ms, query count) and logs `slow_or_failed_request` lines for requests slower than `SLOW_REQUEST_MS` (default 1000) or with status 500+. Credentials, query strings and bodies are never logged. `DB_POOL_TIMEOUT_SECONDS` and `DB_POOL_PRE_PING` (default true, unchanged behaviour) are now configurable.
+
+Not implemented (needs a decision or a schema change): an idempotency key for washing report submissions. A time-window duplicate check was tried and removed because it would swallow a legitimate second report with the same count.
