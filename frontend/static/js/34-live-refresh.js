@@ -43,6 +43,8 @@
     var st=(boot&&boot.state)||{};
     if(uiBusy())return false;                       /* user started typing / opened a form meanwhile: try again next tick */
     ["issues","tasks","equipment","events"].forEach(function(k){if(Array.isArray(st[k]))S[k]=st[k]});
+    /* Plants added or edited elsewhere (another user, Excel import) appear without a reload; unsynced local edits are kept. */
+    try{if(Array.isArray(st.plants)&&typeof mergeServerCollection==="function"&&typeof _lastServerState!=="undefined"){S.plants=mergeServerCollection(S.plants||[],st.plants,_lastServerState.plants);_lastServerState.plants=cloneStateValue(st.plants)}}catch(e){}
     if(typeof s91NormalizeRows==="function")s91NormalizeRows();
     try{if(typeof _lastServerState!=="undefined"&&typeof cloneStateValue==="function")_lastServerState.events=cloneStateValue(S.events||[])}catch(e){}
     describe(before,snap());

@@ -62,8 +62,9 @@ class EquipmentRepository:
         if maker_missing: stmt = stmt.where(or_(Equipment.maker.is_(None), func.trim(Equipment.maker) == ""))
         if serial_missing: stmt = stmt.where(or_(Equipment.serial_number.is_(None), func.trim(Equipment.serial_number) == ""))
         if warranty:
-            from datetime import date, timedelta
-            today = date.today()
+            from datetime import timedelta
+            from app.core.timeutil import business_today
+            today = business_today()
             if warranty == "expired":
                 stmt = stmt.where(Equipment.warranty_end.is_not(None), Equipment.warranty_end < today)
             elif warranty in {"expiring", "90"}:

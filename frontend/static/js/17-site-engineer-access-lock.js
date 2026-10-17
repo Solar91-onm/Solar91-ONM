@@ -312,7 +312,7 @@ function rev05RebuildRolePicker(){
   const b=document.createElement("span");
   b.className="cc-proto-role-badge";
   b.textContent="Managed";
-  b.style.cssText="font-size:9px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:var(--primary);background:var(--secondary);border:1px solid #bfe5cc;border-radius:999px;padding:4px 7px;white-space:nowrap";
+  b.style.cssText="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:var(--primary);background:var(--secondary);border:1px solid #bfe5cc;border-radius:999px;padding:4px 7px;white-space:nowrap";
   sel.parentElement.appendChild(b);
  }
  const labels=["O&M Head","Assignee","Administration","Site Engineer"],want=rev05Role();
@@ -332,7 +332,8 @@ function rev05RebuildRolePicker(){
 function rev05ApplyPermissions(){
  const role=rev05Role(),allowed=rev05AllowedModules();
  document.querySelectorAll(".side-link").forEach(a=>{const sp=a.querySelector("span"),txt=(sp?sp.textContent:a.textContent||"").trim();a.style.display=allowed.some(x=>txt===x||txt.indexOf(x)===0)?"":"none"});
- document.querySelectorAll(".mnav > div").forEach(d=>{const txt=(d.textContent||"").trim(),map={Home:"Command Center",Plants:"Plants",Issues:"Site Issues",Work:"Work / Assignments",Reports:"Reports"},lab=map[txt]||txt;d.style.display=allowed.some(x=>lab===x||lab.indexOf(x)===0)?"":"none"});
+ /* Bottom bar: ignore badge counts in the label ("Issues76") and map the short mobile names; "More" lists only role-allowed modules. */
+ document.querySelectorAll(".mnav > div").forEach(d=>{const txt=(d.textContent||"").replace(/\d+/g,"").trim(),map={Home:"Command Center","My Plant":"Command Center",Plants:"Plants",Issues:"Site Issues",Preventive:"Preventive Maintenance",Planned:"Preventive Maintenance",Work:"Work / Assignments",Reports:"Reports"};if(txt==="More"){d.style.display="";return}const lab=map[txt]||txt;d.style.display=allowed.some(x=>lab===x||lab.indexOf(x)===0)?"":"none"});
  if(rev05ReadOnly()){
   const mutate=/create|save|delete|remove|assign|reassign|approve|reject|startTask|completeTask|convertToIssue|washTable|bulkWash|logException|import|updateWash|toggleRule|syncQueue|renewDoc|reorder|bumpESR|verifyESR|changeESR|closePTW|reportIncident|omHeadMoveTicket/i;
   document.querySelectorAll(".content button,.modal button").forEach(b=>{const oc=b.getAttribute("onclick")||"",tx=(b.textContent||"").trim();if(mutate.test(oc)||/^(Add|Build|Upload|Create|Start|Complete|Reassign|Approve|Reject|Close ticket|Log |Record renewal|Run now|Sync now|\+ Add)/i.test(tx)){b.style.display="none"}});
@@ -354,7 +355,7 @@ function rev05ApplyPermissions(){
   '.sched-scope-card{border:1px solid var(--border);background:var(--card);border-radius:11px;padding:10px 11px;display:grid;grid-template-columns:10px minmax(0,1fr) auto;align-items:center;gap:8px;text-align:left;font:inherit;color:var(--foreground);cursor:pointer;transition:.16s ease}'+
   '.sched-scope-card:hover{border-color:var(--primary);transform:translateY(-1px);box-shadow:var(--shadow-panel)}'+
   '.sched-scope-card.active{border-color:var(--primary);background:var(--secondary);box-shadow:0 0 0 2px rgba(12,94,42,.08)}'+
-  '.sched-scope-dot{width:8px;height:8px;border-radius:999px}.sched-scope-name{font-size:11.5px;font-weight:650;overflow:hidden;text-overflow:ellipsis}.sched-scope-card b{font-size:11px;color:var(--muted-foreground)}'+
+  '.sched-scope-dot{width:8px;height:8px;border-radius:999px}.sched-scope-name{font-size:12.5px;font-weight:650;overflow:hidden;text-overflow:ellipsis}.sched-scope-card b{font-size:12.5px;color:var(--muted-foreground)}'+
   '@media(max-width:1100px){.sched-scope-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.sched-donut-grid{grid-template-columns:1fr 1fr!important}}'+
   '@media(max-width:700px){.sched-scope-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.sched-donut-grid{grid-template-columns:1fr!important}}';document.head.appendChild(css);
 })();

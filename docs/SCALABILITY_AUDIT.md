@@ -95,3 +95,44 @@ Not implemented (needs a decision or a schema change): an idempotency key for wa
 - CORS allows `X-Request-ID` on preflight requests and exposes `X-Request-ID` and `Server-Timing` to approved browser origins.
 - The isolated browser smoke pins `DEBUG=false` in its child process so an unrelated host environment value cannot prevent the test server from starting.
 - Verification on 2026-10-17: all 316 pytest cases passed; the focused observability file passed 9 tests; the isolated browser smoke passed; all 40 frontend JavaScript files passed `node --check`. No Render, Supabase, production data, or network service was used.
+
+### Addendum 2026-10-17: scheduled API round trips
+
+- `GET /api/scheduled/tasks` now batches plant names, equipment resolution and per-plant/type quantity totals, and selects only each task's newest follow-up in SQL. Its query count is bounded at three for the O&M Head list in an isolated API regression test with eight tasks; inactive equipment remains excluded from reference resolution but is included in the existing quantity total.
+- `GET /api/scheduled/washing/overview` now returns plant/configuration/assignee data together with table counts and latest report dates in one query; reports and monthly completion totals remain batched reads. An isolated API regression test asserts no more than three database queries for the O&M Head overview.
+- The existing Render measurements (11.27 s for `/api/bootstrap`, 3.91 s for washing overview) are historical. The washing query reduction should lower cold-request time where database round-trip latency dominates, but has not been measured against Render/Supabase and does not prove a 1.5 s ceiling. The bootstrap still loads broad legacy collections and remains the principal unbounded latency risk; replacing its response safely requires migrating frontend consumers to the existing bounded module APIs and checking parity. No production connection, service setting, or load test was used for this follow-up.
+
+### Addendum 2026-10-17: end-to-end API latency and portal startup
+
+#### Changes
+
+- Request timing now reports `app` (total server time less measured SQL execution), `db` (SQL execute time and query count), and `total`; exceptions and slow responses include the sanitized request ID, Render `Rndr-Id` when available, instance ID, and deployed commit. It never logs query strings, bodies, credentials, or record IDs. CORS exposes the timing and correlation headers.
+- The browser now has an opt-in `window.Solar91Latency` sampler. It keeps at most 500 in-memory samples, groups only by HTTP method and API family, and summarizes client elapsed time (Clerk wait, network/retry, JSON parse), server timings and response `Content-Length`. It sends nothing and stores no URLs, query strings, record identifiers, payloads, tokens, or error messages. Enable it for the initial load by opening the portal with `?s91_latency=1`; for later actions run `Solar91Latency.enable()` and then `Solar91Latency.report()` in DevTools.
+- Initial rendering no longer waits for the independent `/api/users` and `/api/issues/assignees` calls. They start after the first screen is rendered; those results only populate pickers.
+- Assignee bootstrap reuses the issue rows it already loaded and resolves equipment references from the bootstrap's batched equipment map. This removes a second issue-table read and per-issue scope lookups. The field overview now loads an Assignee's equipment-type scope once and applies it in SQL / in-memory checks rather than requerying it for each issue, task and washing table. Regression checks confirm its query count stays flat after adding work rows and the bootstrap query count stays flat as scoped issue rows grow.
+
+#### Local API benchmark
+
+`scripts/benchmark_api_latency.py` was run against a fresh temporary SQLite database with only synthetic records, as the synthetic Assignee, using warmed FastAPI TestClient requests. Each 1x and 5x endpoint has 20 measured samples; 10x has 10 samples, so its p95 is a preliminary high-rank sample. Client wall time includes TestClient and response decompression. `Server-Timing` app/db figures below are p95; payload is median decoded response size. All sampled requests returned 200 with zero errors.
+
+| Endpoint | Rows (1x / 5x) | Wall p50/p95 ms (1x) | Wall p50/p95 ms (5x) | Server app/db p95 ms (5x) | Queries (5x) | Decoded bytes p50 (5x) |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `/api/bootstrap` | 100 / 2,500 issues | 47 / 80 | 743 / 809 | 788 / 16 | 38 | 3,178,424 |
+| `/api/bootstrap?lite=1` | same | 44 / 56 | 645 / 731 | 712 / 12 | 34 | 2,826,651 |
+| `/api/state/collections?keys=issues` | same | 35 / 50 | 510 / 571 | 555 / 11 | 29 | 1,672,558 |
+| `/api/field/overview?limit=15` | same | 13 / 19 | 44 / 106 | 98 / 7 | 7 | 8,820 |
+| `/api/issues?limit=50` | same | 14 / 17 | 18 / 21 | 12 / 8 | 5 | 40,951 |
+| `/api/issues/pulse` | same | 7 / 9 | 7 / 8 | 5 / 2 | 4 | 45 |
+| `/api/scheduled/tasks` | 75 / 1,875 tasks | 23 / 32 | 388 / 417 | 408 / 6 | 5 | 1,750,476 |
+| `/api/scheduled/washing/overview` | 50 / 1,250 tables | 21 / 29 | 165 / 254 | 245 / 4 | 5 | 957,108 |
+| `/api/plants?limit=50` | 5 / 25 plants | 8 / 10 | 9 / 10 | 8 / 1 | 4 | 11,076 |
+
+The 1x fixture is 5 plants, 100 issues, 75 PM tasks and 50 washing tables. The 5x fixture is 25 plants, 2,500 issues, 1,875 PM tasks, 1,250 washing tables and 1,000 washing reports. Common bounded reads remained far below 1.5 seconds in these local samples. Full bootstrap was 0.81 seconds p95 at 5x, while its application portion was 0.79 seconds and SQL portion 0.016 seconds.
+
+At 10x (50 plants, 10,000 issues, 7,500 PM tasks, 5,000 washing tables and 4,000 washing reports), the full bootstrap reached 3.67 seconds p95 (3.59 s app, 67 ms SQL, 38 queries, 12.62 MB decoded), lite bootstrap 3.17 seconds (3.10 s app, 52 ms SQL, 34 queries, 11.21 MB), issue collection refresh 2.80 seconds (2.74 s app, 47 ms SQL, 29 queries, 6.69 MB), and scheduled task list 1.97 seconds (1.92 s app, 34 ms SQL, 5 queries, 7.00 MB). Washing overview was 0.63 seconds p95. These results identify full response construction/serialization and unbounded legacy collections as the local scale boundary; this is not a Postgres or Render measurement and app residual is not a standalone CPU profile.
+
+The full bootstrap and scheduled task list still return records consumed by multiple legacy screens, charts, reports and exports. Changing them to silently return fewer records would break existing features, so pagination requires a planned frontend migration with list/detail loading and parity checks. The `state/collections` endpoint similarly rebuilds a full state snapshot before selecting the requested keys; the issue-key sample above is diagnostic and is not currently used by the frontend's ordinary refresh paths. This remains a useful follow-up for bounded collection refresh.
+
+No before/after Render comparison is available. The previous 11.27 s bootstrap and 3.91 s washing-overview results are historical. After an authorized deploy, use `?s91_latency=1` for browser measurements, compare `client_ms` with the server `app/db/total` fields, and correlate the response `Rndr-Id` with `slow_or_failed_request` logs. The checked-in `render.yaml` declares the Free plan, but the live dashboard plan and instance settings were not inspected; Render's current documentation says Free web services spin down after 15 minutes without traffic and take about one minute to restart. This is a possible cold-start contribution, not an explanation proven for the historical 11-second requests. See [Render Free service limitations](https://render.com/docs/free), [Render environment variables](https://render.com/docs/environment-variables), and [Render request ID logging](https://render.com/docs/logging).
+
+No production/staging connection, load test, setting change, migration, or deploy was performed. Local SQLite p95 values do not establish the 1.5-second goal on PostgreSQL/Render. A measured 100-user capacity claim is not made.

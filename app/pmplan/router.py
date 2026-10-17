@@ -23,6 +23,7 @@ from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.core.timeutil import business_today, log_stamp
 from app.core.database import get_db
 from app.core.models import AuditLog, Equipment, OMTask, NotificationPreference, PMScopeConfig, PMTemplate, PMUnitConfig, Plant, User
 from app.core.security import equipment_scope_matches, get_current_user, require_csrf, user_scoped_plant_ids
@@ -312,7 +313,7 @@ def _create_tasks(db: Session, user: User, tpl: dict[str, Any], items: list[dict
             safety=tpl.get("safety") or "—", tools=tpl.get("tools"),
             duration=f"{hours:g} hrs" if hours else "2 hrs", completion=None, evidence=[],
             problem_source="PM template",
-            log=[{"at": datetime.now().isoformat(),
+            log=[{"at": log_stamp(),
                   "text": "Created from PM plan" + (f" — {it['day']} day workload" if it.get("unit_no") else ""),
                   "actor": user.display_name}],
             legacy_payload={"template_id": template_id, "checks": checks}, created_by=user.id))
@@ -907,7 +908,7 @@ async def import_plan(db: Annotated[Session, Depends(get_db)], user: Annotated[U
     seen: set[tuple[Any, str, int | None]] = set()
     users_cache: dict[str, User | None] = {}
     templates_only = skipped = 0
-    default_start = date.today() + timedelta(days=3)
+    default_start = business_today() + timedelta(days=3)
     for cell in cells:
         tpl, errs = _clean_row(cell)
         plant_text = str(cell.get("plants") or "").strip()

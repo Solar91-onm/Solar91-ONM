@@ -32,6 +32,20 @@ def test_safe_incoming_request_id_is_kept_and_unsafe_one_is_replaced(client, db)
     assert replaced != "bad id\twith spaces" and len(replaced) == 16
 
 
+def test_render_request_id_is_correlated_and_server_timing_has_total():
+    mini = FastAPI()
+    mini.middleware("http")(make_timing_middleware(10_000))
+
+    @mini.get("/api/health-check")
+    def health_check():
+        return {"ok": True}
+
+    response = TestClient(mini).get("/api/health-check", headers={"Rndr-Id": "req-render-123456"})
+    assert response.headers["x-request-id"] == "req-render-123456"
+    assert response.headers["rndr-id"] == "req-render-123456"
+    assert "total;dur=" in response.headers["server-timing"]
+
+
 def test_health_endpoints_stay_cheap_and_untimed(client):
     response = client.get("/health")
     assert response.status_code == 200 and "server-timing" not in response.headers
@@ -114,7 +128,7 @@ def test_cors_exposes_request_timing_headers_and_allows_request_id(client, db):
 
     response = client.get("/api/bootstrap?lite=1", headers={"Origin": origin})
     exposed = response.headers["access-control-expose-headers"].lower()
-    assert "x-request-id" in exposed and "server-timing" in exposed
+    assert "x-request-id" in exposed and "rndr-id" in exposed and "server-timing" in exposed
 
 
 def test_washing_bootstrap_rows_keep_their_exact_shape(client, db):

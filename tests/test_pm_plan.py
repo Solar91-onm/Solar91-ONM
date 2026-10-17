@@ -5,6 +5,7 @@ from datetime import date
 
 from openpyxl import Workbook
 
+from app.core.timeutil import business_today
 from app.core.models import Equipment, OMTask, PMTemplate, Plant
 from tests.conftest import login_user
 
@@ -19,7 +20,7 @@ def _plant(db, code="KRN_01", name="Kerli"):
 
 def _quick(**over):
     body = {"equipment_type": "Inverter", "task_name": "Clean fans", "frequency": "Monthly", "safety": "PTW + LOTO required",
-            "est_hours": 2, "plants": ["KRN_01"], "start_date": date.today().isoformat(), "assignees": [], "per_unit": True}
+            "est_hours": 2, "plants": ["KRN_01"], "start_date": business_today().isoformat(), "assignees": [], "per_unit": True}
     body.update(over)
     return body
 

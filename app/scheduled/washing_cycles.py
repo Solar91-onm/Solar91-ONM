@@ -9,6 +9,7 @@ from fastapi import HTTPException
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
+from app.core.timeutil import business_today
 from app.core.config import get_settings
 from app.core.models import AuditLog, Notification, Plant, User, UserEquipmentTypeAssignment, WashingConfig, WashingDailyReport, WashingHistory, WashingTable
 from app.core.security import WASHING_TYPE, assignee_has_type, user_scoped_plant_ids
@@ -154,6 +155,10 @@ def _can_review_washing(user: User, config: WashingConfig | None) -> bool:
 def _can_add_washing_evidence(user: User, report: WashingDailyReport, config: WashingConfig | None) -> bool:
     """Before/after photos may be added while a report is Pending by its submitter (Site Engineer) or by the
     O&M Head / this plant's configured washing Assignee, who also confirm the report."""
+    if report.review_status == "Confirmed":
+        # An O&M entry is confirmed the moment it is saved (no second review), so its author may still attach
+        # the before/after photos for it. Reports confirmed by someone else stay frozen as reviewed.
+        return bool(user.is_active and report.reported_by_id == user.id and report.reviewed_by_id == user.id)
     if report.review_status != "Pending":
         return False
     return report.reported_by_id == user.id or _can_review_washing(user, config)
@@ -360,7 +365,7 @@ def get_overview(db: Session, user: User, include_tables: bool = False, report_d
     ttl = 0 if get_settings().app_env == "test" else OVERVIEW_CACHE_SECONDS
     if ttl <= 0:
         return _build_overview(db, user, include_tables, report_days)
-    key = (str(user.id), user.role, include_tables, report_days, date.today().isoformat())
+    key = (str(user.id), user.role, include_tables, report_days, business_today().isoformat())
     hit = _OVERVIEW_CACHE.get(key)
     if hit and datetime.now(timezone.utc).timestamp() - hit[0] < ttl:
         return hit[1]
@@ -375,31 +380,65 @@ def get_overview(db: Session, user: User, include_tables: bool = False, report_d
 
 def _build_overview(db: Session, user: User, include_tables: bool = False, report_days: int = OVERVIEW_SEND_REPORT_DAYS) -> dict:
     manager = _is_washing_manager(db, user)
-    configs = list(db.scalars(select(WashingConfig)))
-    configured_ids = [config.plant_id for config in configs]
-    plants_by_id = {
-        plant.id: plant for plant in db.scalars(select(Plant).where(Plant.id.in_(configured_ids)))
-    } if configured_ids else {}
     allowed_plant_ids = user_scoped_plant_ids(db, user) or set() if user.role == "Site Engineer" else set()
-    visible_configs = [
-        (plants_by_id[config.plant_id], config)
-        for config in configs
-        if config.plant_id in plants_by_id
-        and (manager or (user.role == "Site Engineer" and config.plant_id in allowed_plant_ids))
-    ]
-    visible_ids = [plant.id for plant, _config in visible_configs]
+
+    configured_plants = select(WashingConfig.plant_id)
+    table_counts_query = (
+        select(WashingTable.plant_id.label("plant_id"), func.count(WashingTable.id).label("table_count"))
+        .where(WashingTable.plant_id.in_(configured_plants))
+    )
+    latest_reports_query = (
+        select(
+            WashingDailyReport.plant_id.label("plant_id"),
+            func.max(WashingDailyReport.report_date).label("last_report_date"),
+        )
+        .where(WashingDailyReport.plant_id.in_(configured_plants))
+    )
+    if user.role == "Site Engineer":
+        table_counts_query = table_counts_query.where(WashingTable.plant_id.in_(allowed_plant_ids))
+        latest_reports_query = latest_reports_query.where(WashingDailyReport.plant_id.in_(allowed_plant_ids))
+    table_counts_subquery = table_counts_query.group_by(WashingTable.plant_id).subquery()
+    latest_reports_subquery = latest_reports_query.group_by(WashingDailyReport.plant_id).subquery()
+
+    plant_stmt = (
+        select(
+            Plant,
+            WashingConfig,
+            User.display_name,
+            func.coalesce(table_counts_subquery.c.table_count, 0),
+            latest_reports_subquery.c.last_report_date,
+        )
+        .outerjoin(WashingConfig, WashingConfig.plant_id == Plant.id)
+        .outerjoin(User, User.id == WashingConfig.assigned_user_id)
+        .outerjoin(table_counts_subquery, table_counts_subquery.c.plant_id == Plant.id)
+        .outerjoin(latest_reports_subquery, latest_reports_subquery.c.plant_id == Plant.id)
+    )
+    if user.role == "Site Engineer":
+        plant_stmt = plant_stmt.where(Plant.id.in_(allowed_plant_ids)).order_by(Plant.plant_name)
+    elif manager:
+        plant_stmt = plant_stmt.order_by(Plant.plant_name)
+    plant_config_rows = db.execute(plant_stmt).all() if manager or user.role == "Site Engineer" else []
+
+    visible_configs = []
     table_counts: dict[UUID, int] = {}
+    last_report_by_plant: dict[UUID, date] = {}
+    assignee_names: dict[UUID, str] = {}
+    pool: list[Plant] = []
+    for plant, config, assignee_name, table_count, last_report in plant_config_rows:
+        pool.append(plant)
+        if config is None or not (manager or (user.role == "Site Engineer" and plant.id in allowed_plant_ids)):
+            continue
+        visible_configs.append((plant, config))
+        table_counts[plant.id] = int(table_count or 0)
+        if last_report:
+            last_report_by_plant[plant.id] = last_report
+        if config.assigned_user_id and assignee_name:
+            assignee_names[config.assigned_user_id] = assignee_name
+
+    visible_ids = [plant.id for plant, _config in visible_configs]
     codes_by_plant: dict[UUID, list[str]] = {}
     reports_by_plant: dict[UUID, list[WashingDailyReport]] = {}
-    last_report_by_plant: dict[UUID, date] = {}
     if visible_ids:
-        # Only a count per plant (thousands of table rows are no longer loaded on every call).
-        table_counts = {
-            plant_id: count for plant_id, count in db.execute(
-                select(WashingTable.plant_id, func.count(WashingTable.id))
-                .where(WashingTable.plant_id.in_(visible_ids)).group_by(WashingTable.plant_id)
-            ).all()
-        }
         if include_tables:
             for plant_id, code, legacy_id in db.execute(
                 select(WashingTable.plant_id, WashingTable.table_code, WashingTable.legacy_id)
@@ -407,7 +446,7 @@ def _build_overview(db: Session, user: User, include_tables: bool = False, repor
                 .order_by(WashingTable.plant_id, WashingTable.table_code)
             ).all():
                 codes_by_plant.setdefault(plant_id, []).append(code or legacy_id)
-        report_cutoff = date.today() - timedelta(days=OVERVIEW_REPORT_DAYS)
+        report_cutoff = business_today() - timedelta(days=OVERVIEW_REPORT_DAYS)
         for report in db.scalars(
             select(WashingDailyReport).where(
                 WashingDailyReport.plant_id.in_(visible_ids),
@@ -416,24 +455,13 @@ def _build_overview(db: Session, user: User, include_tables: bool = False, repor
             .order_by(WashingDailyReport.plant_id, WashingDailyReport.report_date.desc(), WashingDailyReport.created_at.desc())
         ):
             reports_by_plant.setdefault(report.plant_id, []).append(report)
-        last_report_by_plant = {
-            plant_id: last for plant_id, last in db.execute(
-                select(WashingDailyReport.plant_id, func.max(WashingDailyReport.report_date))
-                .where(WashingDailyReport.plant_id.in_(visible_ids)).group_by(WashingDailyReport.plant_id)
-            ).all()
-        }
-    assignee_ids = {config.assigned_user_id for _plant, config in visible_configs if config.assigned_user_id}
-    assignee_names = {
-        assignee.id: assignee.display_name
-        for assignee in db.scalars(select(User).where(User.id.in_(assignee_ids)))
-    } if assignee_ids else {}
     visible: list[tuple[Plant, WashingConfig, int, list[WashingDailyReport]]] = []
     for plant, config in visible_configs:
         table_count = table_counts.get(plant.id, 0)
         if table_count:
             visible.append((plant, config, table_count, reports_by_plant.get(plant.id, [])))
 
-    today = date.today()
+    today = business_today()
     month = _month_key(today)
     start_month = today.replace(day=1)
     first_chart_month = start_month.replace(day=1)
@@ -688,13 +716,6 @@ def _build_overview(db: Session, user: User, include_tables: bool = False, repor
         },
     }
     configured_ids = {plant.id for plant, _config, _tables, _reports in visible}
-    if manager:
-        pool = list(db.scalars(select(Plant).order_by(Plant.plant_name)))
-    elif user.role == "Site Engineer":
-        scoped = user_scoped_plant_ids(db, user) or set()
-        pool = list(db.scalars(select(Plant).where(Plant.id.in_(scoped)).order_by(Plant.plant_name))) if scoped else []
-    else:
-        pool = []
     matrix = {"on_track": 0, "1d": 0, "3d": 0, "7d": 0}
     for row in plant_rows:
         if row["active"]:
@@ -761,7 +782,7 @@ def _ordered_codes(db: Session, plant_id: UUID) -> list[str]:
 
 
 def _validate_report_date(user: User, manager: bool, value: date) -> None:
-    today = date.today()
+    today = business_today()
     if value > today:
         raise HTTPException(422, "The report date cannot be in the future")
     if not manager and (today - value).days > MAX_BACKDATE_DAYS:
@@ -802,7 +823,7 @@ def create_daily_report(db: Session, user: User, payload: WashingDailyReportRequ
     ordered_codes = _ordered_codes(db, plant.id)
     if not set(payload.cleaned_table_codes).issubset(set(ordered_codes)):
         raise HTTPException(422, "A selected table is not registered to this plant")
-    report_date = payload.report_date or date.today()
+    report_date = payload.report_date or business_today()
     _validate_report_date(user, manager, report_date)
     month = _month_key(report_date)
     cycle_no = _next_open_cycle(db, plant.id, month)
@@ -1127,7 +1148,7 @@ def review_daily_report(db: Session, user: User, report_id: UUID, payload: Washi
 
 
 def check_missed_monthly_targets(db: Session, today: date | None = None) -> int:
-    current = today or date.today()
+    current = today or business_today()
     if current.day != 1:
         return 0
     previous = current.replace(day=1) - timedelta(days=1)
@@ -1171,7 +1192,7 @@ def check_missed_monthly_targets(db: Session, today: date | None = None) -> int:
 
 
 def check_weekly_compliance_alerts(db: Session, today: date | None = None) -> int:
-    current = today or date.today()
+    current = today or business_today()
     week_start = current - timedelta(days=6)
     week_key = f"{current.isocalendar().year}-W{current.isocalendar().week:02d}"
     notified = 0
@@ -1227,7 +1248,7 @@ def check_weekly_compliance_alerts(db: Session, today: date | None = None) -> in
 
 def check_washing_overdue(db: Session, today: date | None = None) -> int:
     """Alert when a plant is behind the month's cycle deadlines: once at 1, 3 and 7 days late (each level only once)."""
-    current = today or date.today()
+    current = today or business_today()
     month = _month_key(current)
     notified = 0
     for config in db.scalars(select(WashingConfig).with_for_update()):

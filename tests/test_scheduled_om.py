@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 
-from app.core.models import Equipment, Notification, OMTask, Plant, User, UserEquipmentAssignment, UserEquipmentTypeAssignment, UserPlantAssignment, WashingConfig, WashingHistory, WashingTable, Permit
+from app.core.timeutil import business_today
+from app.core.models import Equipment, Notification, OMTask, PMFollowUp, Plant, User, UserEquipmentAssignment, UserEquipmentTypeAssignment, UserPlantAssignment, WashingConfig, WashingHistory, WashingTable, Permit
 from tests.conftest import login_user
 
 
@@ -339,3 +340,45 @@ def test_ptw_or_loto_task_is_blocked_until_approved_and_closes_on_completion(cli
     assert completed.status_code == 200, completed.text
     db.expire_all()
     assert db.query(Permit).filter(Permit.permit_no == permit_no).one().status == 'Closed'
+
+
+def test_scheduled_task_list_batches_equipment_quantity_and_followup_reads(client, db):
+    plant = Plant(site_code="LATENCY01", plant_name="Latency Plant")
+    db.add(plant); db.flush()
+    expected_equipment = {}
+    tasks = []
+    for index in range(8):
+        equipment = Equipment(
+            plant_id=plant.id, equipment_code=f"LAT-INV-{index}", equipment_name=f"Latency Inverter {index}",
+            equipment_type="Inverter", status="active", quantity=2,
+        )
+        db.add(equipment); db.flush()
+        expected_equipment[f"WO-LAT-{index}"] = str(equipment.id)
+        tasks.append(OMTask(
+            work_order_no=f"WO-LAT-{index}", plant_id=plant.id, task_name=f"Latency check {index}",
+            task_type="Inverter", equipment_ref=equipment.equipment_code,
+            due_on=business_today() + timedelta(days=index), status="Scheduled",
+        ))
+    db.add(Equipment(
+        plant_id=plant.id, equipment_code="LAT-INV-RETIRED", equipment_name="Retired Latency Inverter",
+        equipment_type="Inverter", status="inactive", quantity=5,
+    ))
+    db.add_all(tasks); db.flush()
+    now = datetime.now(timezone.utc)
+    db.add_all([
+        PMFollowUp(task_id=tasks[0].id, at=now - timedelta(days=2), by_name="QA", how="Phone", outcome="Waiting", spoke_to="Earlier contact"),
+        PMFollowUp(task_id=tasks[0].id, at=now - timedelta(hours=1), by_name="QA", how="Phone", outcome="Waiting", spoke_to="Latest contact"),
+    ])
+    db.commit()
+    login_user(client, db, role="O&M Head", name="Latency Head", email="latency-head@example.com")
+
+    response = client.get("/api/scheduled/tasks")
+    assert response.status_code == 200, response.text
+    rows = {row["id"]: row for row in response.json()}
+    assert len(rows) == 8
+    assert all(row["plant"] == "Latency Plant" and row["quantity"] == 21 for row in rows.values())
+    assert {work_order: rows[work_order]["equipmentId"] for work_order in rows} == expected_equipment
+    assert rows["WO-LAT-0"]["last_follow_up"]["spoke_to"] == "Latest contact"
+
+    query_count = int(response.headers["server-timing"].split('desc="')[1].split()[0])
+    assert query_count <= 3, f"Task list used {query_count} database queries for 8 tasks"

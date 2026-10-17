@@ -50,7 +50,7 @@
    '<div class="field"><span class="lbl">Vendor name</span><input id="at-vn" class="inp" placeholder="e.g. VoltEdge OEM" value="'+text(ctx.vn||"")+'" oninput="atStore()"/></div>'+
    '<div class="field"><span class="lbl">Vendor contact</span><input id="at-vc" class="inp" placeholder="Phone / email" value="'+text(ctx.vc||"")+'" oninput="atStore()"/></div>'+
    '<div class="field"><span class="lbl">Expected vendor response time</span><input id="at-vr" class="inp" placeholder="e.g. 48h engineer mobilisation" value="'+text(ctx.vr||"")+'" oninput="atStore()"/></div>'+
-   '<div style="font-size:11px;color:var(--muted-foreground)">Ticket is tagged <b>Vendor-Dependent</b>; vendor response time is tracked separately.</div></div>'+
+   '<div style="font-size:12.5px;color:var(--muted-foreground)">Ticket is tagged <b>Vendor-Dependent</b>; vendor response time is tracked separately.</div></div>'+
    (t.severity==="Critical"?'<div style="font-size:12px;font-weight:600;color:var(--danger)">Critical severity — the assignee is alerted immediately in addition to the app notification.</div>':""),
    '<button class="btn o" onclick="closeModal()">Cancel</button><button class="btn p" onclick="assignTicket()">Assign &amp; notify</button>');
  }
@@ -183,7 +183,7 @@
    '<div class="row" style="gap:12px"><div class="field" style="flex:1"><span class="lbl">Start date</span><input id="td-start" class="inp" type="date" value="'+text(isoDay(t.occurred||t.created))+'"/></div>'+
    '<div class="field" style="flex:1"><span class="lbl">Deadline (ETC)</span><input id="td-etc" class="inp" type="date" value="'+text(isoDay(t.etc))+'"/></div></div>'+
    '<div class="field"><span class="lbl">Reason *</span><input id="td-reason" class="inp" maxlength="500" placeholder="e.g. Spare part arrives later"/></div>'+
-   '<div class="muted" style="font-size:11.5px;margin-top:8px">Logged on the ticket history with who changed it and why. Site Engineers cannot change ticket dates.</div>',
+   '<div class="muted" style="font-size:12.5px;margin-top:8px">Logged on the ticket history with who changed it and why. Site Engineers cannot change ticket dates.</div>',
    '<button class="btn o" onclick="closeModal()">Cancel</button><button class="btn p" onclick="ticketDatesSave(\''+text(t.id)+'\')">Save dates</button>');
  }
  window.ticketDatesSave=async function(id){

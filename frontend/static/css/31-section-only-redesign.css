@@ -1,6 +1,6 @@
 /* Section-only redesign. Deliberately no .sidebar, .topbar, .header, nav, or global body selectors. */
 /* Shared mockup palette within the three existing module roots. */
-.m26-issues.si,.wc-page,.pml{--s91-green:#0c5e2a;--s91-border:#e4e9e6;--s91-sub:#f2f5f3;--s91-text:#111814;--s91-muted:#69756f; color:var(--s91-text)}
+.m26-issues.si,.wc-page,.pml{--s91-green:#0c5e2a;--s91-border:#e4e9e6;--s91-sub:#f2f5f3;--s91-text:#111814;--s91-muted:#4F5B55; color:var(--s91-text)}
 /* Match section mockup: generous panels, light surfaces, compact view chips and data rows. */
 .m26-issues.si .si-head,.wc-page .wc-head,.pml .pml-heading{padding:18px 20px;background:#fff;border:1px solid var(--s91-border);border-radius:14px;gap:16px}
 .m26-issues.si .si-head h1,.wc-page .wc-head h1,.pml .pml-heading h2{font-size:21px;letter-spacing:-.02em;line-height:1.3}

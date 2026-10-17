@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import date
 
+from app.core.timeutil import business_today
 from app.core.models import (
     Notification,
     Plant,
@@ -146,8 +147,8 @@ def test_setup_cannot_reduce_table_count_after_reports(client, db):
     plant = _plant(db)
     _head, assignee = _setup_cycle_users(client, db, plant)
     db.add(WashingDailyReport(
-        plant_id=plant.id, cycle_month=date.today().strftime("%Y-%m"), cycle_no=1,
-        report_date=date.today(), job_status="Not done", tables_cleaned=0, reported_by="Field",
+        plant_id=plant.id, cycle_month=business_today().strftime("%Y-%m"), cycle_no=1,
+        report_date=business_today(), job_status="Not done", tables_cleaned=0, reported_by="Field",
     ))
     db.commit()
     head = db.query(User).filter_by(email="cycle-head-setup@example.com").one()
@@ -288,7 +289,7 @@ def test_overview_lists_unconfigured_plants_and_daily_status(client, db):
     assert [p["site_code"] for p in overview["unconfigured"]] == ["SPARE01"]
     assert set(overview["overdue_matrix"]) == {"on_track", "1d", "3d", "7d"}
     row = overview["plants"][0]
-    assert len(row["daily_status"]) == date.today().day and row["daily_status"][-1]["status"] in {"Not reported yet", "Awaiting review", "Confirmed", "Exception"}
+    assert len(row["daily_status"]) == business_today().day and row["daily_status"][-1]["status"] in {"Not reported yet", "Awaiting review", "Confirmed", "Exception"}
 
 
 def test_photo_kind_is_stored_for_before_and_after(client, db, monkeypatch):
@@ -361,7 +362,7 @@ def test_engineer_can_backdate_edit_and_delete_own_pending_report(client, db):
     _setup_cycle_users(client, db, plant)
     engineer = _engineer(client, db, plant)
     _act_as(engineer)
-    yesterday = date.today() - timedelta(days=1)
+    yesterday = business_today() - timedelta(days=1)
     made = client.post(f"{BASE}/daily-reports", json={
         "plant_id": str(plant.id), "job_status": "Done", "tables_cleaned": 1, "report_date": yesterday.isoformat(),
     })
@@ -370,7 +371,7 @@ def test_engineer_can_backdate_edit_and_delete_own_pending_report(client, db):
     assert body["report_date"] == yesterday.isoformat() and body["can_edit"] and body["can_delete"]
     future = client.post(f"{BASE}/daily-reports", json={
         "plant_id": str(plant.id), "job_status": "Done", "tables_cleaned": 1,
-        "report_date": (date.today() + timedelta(days=1)).isoformat(),
+        "report_date": (business_today() + timedelta(days=1)).isoformat(),
     })
     assert future.status_code == 422
     edited = client.patch(f"{BASE}/daily-reports/{body['id']}", json={"tables_cleaned": 3, "remarks": "fixed count"})
@@ -383,8 +384,8 @@ def test_engineer_can_backdate_edit_and_delete_own_pending_report(client, db):
 def test_head_changes_cycle_deadline_and_edits_reviewed_report(client, db):
     plant = _plant(db)
     head, _assignee = _setup_cycle_users(client, db, plant)
-    month = date.today().strftime("%Y-%m")
-    target = date.today().replace(day=28)
+    month = business_today().strftime("%Y-%m")
+    target = business_today().replace(day=28)
     _act_as(head)
     changed = client.patch(f"{BASE}/plants/{plant.id}/cycle-date", json={"month": month, "cycle_no": 1, "due_date": target.isoformat()})
     assert changed.status_code == 200, changed.text
@@ -393,17 +394,17 @@ def test_head_changes_cycle_deadline_and_edits_reviewed_report(client, db):
     row = next(p for p in overview["plants"] if p["plant_id"] == str(plant.id))
     assert row["cycles"][0]["due_date"] == target.isoformat() and row["cycles"][0]["due_overridden"] is True
     # outside the month is refused; reset restores the default
-    other_month = (date.today().replace(day=1) - __import__("datetime").timedelta(days=1)).isoformat()
+    other_month = (business_today().replace(day=1) - __import__("datetime").timedelta(days=1)).isoformat()
     assert client.patch(f"{BASE}/plants/{plant.id}/cycle-date", json={"month": month, "cycle_no": 1, "due_date": other_month}).status_code == 422
     reset = client.patch(f"{BASE}/plants/{plant.id}/cycle-date", json={"month": month, "cycle_no": 1, "due_date": None})
     assert reset.json()["due_dates"][0].endswith("-10")
 
     # O&M back-fills an older report (auto-confirmed), edits its date, then deletes it
-    old = (date.today().replace(day=1))
+    old = (business_today().replace(day=1))
     made = client.post(f"{BASE}/daily-reports", json={"plant_id": str(plant.id), "job_status": "Done", "tables_cleaned": 4, "report_date": old.isoformat()})
     assert made.status_code == 200, made.text
     assert made.json()["review_status"] == "Confirmed" and made.json()["cycle_completed"] is True
-    moved = client.patch(f"{BASE}/daily-reports/{made.json()['id']}", json={"report_date": old.replace(day=min(5, date.today().day)).isoformat()})
+    moved = client.patch(f"{BASE}/daily-reports/{made.json()['id']}", json={"report_date": old.replace(day=min(5, business_today().day)).isoformat()})
     assert moved.status_code == 200 and moved.json()["cycle_completed"] is True
     assert client.delete(f"{BASE}/daily-reports/{made.json()['id']}").status_code == 200
     row = next(p for p in client.get(f"{BASE}/overview").json()["plants"] if p["plant_id"] == str(plant.id))
@@ -437,7 +438,7 @@ def test_engineer_cannot_change_cycle_dates_or_confirmed_reports(client, db):
     _act_as(head)
     made = client.post(f"{BASE}/daily-reports", json={"plant_id": str(plant.id), "job_status": "Done", "tables_cleaned": 1})
     _act_as(engineer)
-    month = date.today().strftime("%Y-%m")
-    assert client.patch(f"{BASE}/plants/{plant.id}/cycle-date", json={"month": month, "cycle_no": 1, "due_date": date.today().isoformat()}).status_code == 403
+    month = business_today().strftime("%Y-%m")
+    assert client.patch(f"{BASE}/plants/{plant.id}/cycle-date", json={"month": month, "cycle_no": 1, "due_date": business_today().isoformat()}).status_code == 403
     assert client.patch(f"{BASE}/daily-reports/{made.json()['id']}", json={"tables_cleaned": 2}).status_code == 403
     assert client.delete(f"{BASE}/daily-reports/{made.json()['id']}").status_code == 403

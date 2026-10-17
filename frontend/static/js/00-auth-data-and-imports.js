@@ -6,7 +6,7 @@ const AUTH_IDENTITY={name:null,role:null};
 const S91_CODE_RESEND_SECONDS=60;
 
 function authSetupCard(title, detail){
-  document.getElementById("app").innerHTML = '<div style="min-height:100vh;display:grid;place-items:center;padding:24px;background:#F4F6F5;font-family:Inter,system-ui,sans-serif"><div style="width:min(520px,100%);background:#fff;border:1px solid #E4E9E6;border-radius:16px;padding:24px;box-shadow:0 12px 38px rgba(16,24,20,.10)"><div style="display:flex;align-items:center;gap:10px"><img src="/static/brand/solar91-emblem.png" height="34" alt=""><img src="/static/brand/solar91-wordmark.png" height="22" alt="SOLAR 91"></div><h2 style="margin:8px 0 8px;font-size:22px">'+title+'</h2><p style="margin:0;color:#69756F;line-height:1.55">'+detail+'</p></div></div>';
+  document.getElementById("app").innerHTML = '<div style="min-height:100vh;display:grid;place-items:center;padding:24px;background:#F4F6F5;font-family:Inter,system-ui,sans-serif"><div style="width:min(520px,100%);background:#fff;border:1px solid #E4E9E6;border-radius:16px;padding:24px;box-shadow:0 12px 38px rgba(16,24,20,.10)"><div style="display:flex;align-items:center;gap:10px"><img src="/static/brand/solar91-emblem.png" height="34" alt=""><img src="/static/brand/solar91-wordmark.png" height="22" alt="SOLAR 91"></div><h2 style="margin:8px 0 8px;font-size:22px">'+title+'</h2><p style="margin:0;color:#4F5B55;line-height:1.55">'+detail+'</p></div></div>';
 }
 async function ensureClerkReady(){
   if (AUTH_PROVIDER !== "clerk" || !window.S91_CONFIG?.clerkPublishableKey) {
@@ -267,8 +267,14 @@ async function authenticatedFetch(url, options){
 }
 
 /* ---------- helpers ---------- */
-const INITIAL_NOW=new Date(); let TODAY=INITIAL_NOW.toISOString().slice(0,10), NOW_ISO=INITIAL_NOW.toISOString(); const OM_HEAD="Arun Agarwal";
+/* Business calendar = Asia/Kolkata (UTC+05:30, no DST). toISOString() is UTC and rolls over 5.5 h late in India. */
+function s91BusinessDate(d){const t=(d instanceof Date?d:new Date()).getTime();if(!Number.isFinite(t))return "";return new Date(t+330*60000).toISOString().slice(0,10)}
+/* Calendar day of a stored value: plain dates pass through; timestamps with Z/offset become the IST business day. */
+function s91DayOf(value){const s=String(value||"");if(/^\d{4}-\d{2}-\d{2}$/.test(s))return s;if(/T\d{2}:\d{2}.*(Z|[+-]\d{2}:?\d{2})$/.test(s)){const d=new Date(s);if(!isNaN(d.getTime()))return s91BusinessDate(d)}return s.slice(0,10)}
+const INITIAL_NOW=new Date(); let TODAY=s91BusinessDate(INITIAL_NOW), NOW_ISO=INITIAL_NOW.toISOString(); const OM_HEAD="Arun Agarwal";
 const pad2=n=>String(n).padStart(2,"0");
+/* CSV/Excel formula-injection guard (OWASP): text starting with = + - @ or a control character is prefixed with an apostrophe so a spreadsheet shows it instead of running it. Plain numbers such as -5 stay numeric. */
+function s91CsvText(v){const s=String(v==null?"":v);return /^[=+\-@\t\r]/.test(s)&&!/^[+-]?\d+(\.\d+)?$/.test(s.trim())?"'"+s:s}
 function s91ValidDate(value){
  const s=String(value||"");
  if(!/^\d{4}-\d{2}-\d{2}$/.test(s))return false;
@@ -279,13 +285,16 @@ function s91ValidDate(value){
 }
 function fmtDate(iso){return iso?new Date(iso+"T00:00:00").toLocaleDateString("en-GB",{day:"2-digit",month:"short",year:"numeric"}):"—"}
 function fmtD(iso){return iso?new Date(iso+"T00:00:00").toLocaleDateString("en-GB",{day:"2-digit",month:"short"}):"—"}
-function addDays(iso,d){const x=new Date(iso+"T00:00:00");x.setDate(x.getDate()+d);return x.toISOString().slice(0,10)}
+/* Pure calendar arithmetic in UTC so the browser timezone cannot shift the result (IST returned day-1 before). */
+function addDays(iso,d){const p=String(iso||"").slice(0,10).split("-").map(Number);const x=new Date(Date.UTC(p[0],(p[1]||1)-1,(p[2]||1)+Math.round(Number(d)||0)));return isNaN(x.getTime())?String(iso||""):x.toISOString().slice(0,10)}
 function dayDiff(a,b){try{return Math.round((new Date(b+"T00:00:00")-new Date(a+"T00:00:00"))/86400000)}catch(e){return 0}}
 function money(v){return new Intl.NumberFormat("en-IN",{style:"currency",currency:"INR",maximumFractionDigits:0}).format(v)}
 let seq=1000; function uid(p){seq+=1;return p+"-"+seq}
 function stamp(){const d=new Date();return fmtD(TODAY)+", "+pad2(d.getHours())+":"+pad2(d.getMinutes())}
 function stampLong(){const d=new Date();return fmtDate(TODAY)+", "+pad2(d.getHours())+":"+pad2(d.getMinutes())}
 function stampISO(){const d=new Date();return TODAY+"T"+pad2(d.getHours())+":"+pad2(d.getMinutes())}
+/* Activity-log time: ISO timestamps with an offset are shown as a readable local date/time; legacy text stays as stored. */
+function s91LogAt(v){const s=String(v==null?"":v);return /T\d{2}:\d{2}.*(Z|[+-]\d{2}:?\d{2})$/.test(s)&&typeof fmtDT==="function"?fmtDT(s):s}
 function addHoursISO(iso,h){const hrs=Number(h);const d=new Date(iso);if(!iso||isNaN(d.getTime())||!Number.isFinite(hrs))return stampISO();d.setHours(d.getHours()+Math.round(hrs));if(isNaN(d.getTime()))return stampISO();const p=n=>String(n).padStart(2,"0");return d.getFullYear()+"-"+p(d.getMonth()+1)+"-"+p(d.getDate())+"T"+p(d.getHours())+":"+p(d.getMinutes())}
 function hrsBetween(a,b){const x=new Date(a),y=new Date(b);if(isNaN(x.getTime())||isNaN(y.getTime()))return NaN;return (y-x)/3600000}
 function fmtDT(s){if(!s)return"—";const d=new Date(s);if(isNaN(d.getTime()))return"—";return d.toLocaleDateString("en-GB",{day:"2-digit",month:"short"})+", "+d.toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit",hour12:false})}
@@ -296,7 +305,7 @@ const FREQ_MAP={Daily:1,Weekly:7,Monthly:30,Quarterly:91,"Half-yearly":182,Annua
 /* ---------- persistence: FastAPI + Supabase PostgreSQL ---------- */
 const PRE="s91v1_";
 const PKEYS=["plants","handovers","tasks","washing","washMeta","washPlant","schedScope","issues","inventory","movements","ptw","incidents","docs","vendors","rules","sla","audit","offlineQueue","serviceRequests","scada","scadaConfig","view","omTab","extSub","hoOpen","events","opsDate","plantId","_seq","plantEnrich","customPlantColumns","plantCustomValues"];
-const SERVER_STATE_KEYS=["plants","handovers","inventory","movements","ptw","incidents","docs","vendors","rules","sla","audit","offlineQueue","serviceRequests","events","opsDate","scada","scadaConfig","plantEnrich","customPlantColumns","plantCustomValues","_seq"];
+const SERVER_STATE_KEYS=["plants","handovers","inventory","movements","ptw","incidents","docs","vendors","rules","sla","audit","offlineQueue","serviceRequests","events","scada","scadaConfig","plantEnrich","customPlantColumns","plantCustomValues","_seq"];
 const UI_ONLY_KEYS=new Set(["view","omTab","extSub","hoOpen","plantId","washPlant","schedScope"]);
 function loadK(k,f){
   if(!UI_ONLY_KEYS.has(k)) return f;
@@ -307,7 +316,7 @@ function saveK(k,v){
   try{sessionStorage.setItem(PRE+k,JSON.stringify(v))}catch(e){}
 }
 function clearK(){try{Object.keys(sessionStorage).filter(k=>k.startsWith(PRE)).forEach(k=>sessionStorage.removeItem(k))}catch(e){}}
-async function apiFetch(url,opts){
+async function apiFetch(url,opts,latency){
   opts=Object.assign({},opts||{});opts.headers=Object.assign({"Accept":"application/json"},opts.headers||{});
   const token=await clerkToken();
   if(token)opts.headers["Authorization"]="Bearer "+token;
@@ -325,8 +334,15 @@ async function apiFetch(url,opts){
       else externalSignal.addEventListener("abort",abortFromCaller,{once:true});
     }
     const timeout=setTimeout(()=>controller.abort(),isRead?45000:60000);
-    try{return await fetch(url,{...opts,signal:controller.signal});}
-    finally{clearTimeout(timeout);if(externalSignal)externalSignal.removeEventListener("abort",abortFromCaller);}
+    const fetchStarted=latency&&typeof performance!=="undefined"?performance.now():0;
+    try{
+      const response=await fetch(url,{...opts,signal:controller.signal});
+      if(latency){latency.status=response.status;latency.serverTiming=response.headers.get("Server-Timing")||"";latency.contentLength=Number(response.headers.get("Content-Length"))||null}
+      return response;
+    }finally{
+      if(latency&&fetchStarted)latency.fetchMs+=performance.now()-fetchStarted;
+      clearTimeout(timeout);if(externalSignal)externalSignal.removeEventListener("abort",abortFromCaller);
+    }
   }
   let res;
   try{res=await attempt();}
@@ -352,6 +368,37 @@ async function apiFetch(url,opts){
     const err=new Error(detail);err.status=res.status;err.data=data;throw err;
   }
   return data;
+}
+
+// Opt-in browser sampling for separating Clerk/network/JSON time from the server's
+// Server-Timing values. It stays in memory, groups by API family, and never stores IDs,
+// query strings, payloads, tokens, or error messages.
+if(typeof window!=="undefined"){
+ const S91_LATENCY_SAMPLES=[];
+ const percentile=(values,pct)=>{const rows=values.filter(Number.isFinite).sort((a,b)=>a-b);return rows.length?Math.round(rows[Math.max(0,Math.ceil(rows.length*pct/100)-1)]*100)/100:null};
+ const metric=(header,name)=>{const match=String(header||"").match(new RegExp("(?:^|,\\s*)"+name+";dur=([0-9.]+)"));return match?Number(match[1]):null};
+ const routeFamily=url=>{
+  try{const parts=new URL(url,location.href).pathname.split("/").filter(Boolean);return parts[0]==="api"?"/api/"+(parts[1]||"root"):"/"+(parts[0]||"root")}
+  catch(e){return"unknown"}
+ };
+ const summarize=(rows,key)=>({p50:percentile(rows.map(row=>row[key]),50),p95:percentile(rows.map(row=>row[key]),95)});
+ window.Solar91Latency={
+  enabled:/[?&]s91_latency=1(?:&|$)/.test(String(location.search||"")),
+  enable(){this.enabled=true;return"Sampling enabled for this tab; call Solar91Latency.report() after reproducing the delay."},
+  disable(){this.enabled=false;return this.report()},
+  clear(){S91_LATENCY_SAMPLES.length=0},
+  report(){
+   const groups=new Map();
+   S91_LATENCY_SAMPLES.forEach(row=>{const key=row.method+" "+row.route;if(!groups.has(key))groups.set(key,[]);groups.get(key).push(row)});
+   return{sample_count:S91_LATENCY_SAMPLES.length,groups:[...groups.entries()].sort(([a],[b])=>a.localeCompare(b)).map(([route,rows])=>({route,samples:rows.length,failures:rows.filter(row=>row.failed).length,client_ms:summarize(rows,"clientMs"),fetch_ms:summarize(rows,"fetchMs"),server_total_ms:summarize(rows,"serverTotalMs"),server_app_ms:summarize(rows,"serverAppMs"),server_db_ms:summarize(rows,"serverDbMs"),content_length_bytes:summarize(rows,"contentLength")})),note:"Opt-in, in-memory browser samples; client time includes auth wait and JSON parsing, and content length is the response header value."}
+  }
+ };
+ const apiFetchCore=apiFetch;
+ apiFetch=async function(url,opts){
+  const monitor=window.Solar91Latency.enabled&&typeof performance!=="undefined"?{started:performance.now(),fetchMs:0,status:null,serverTiming:"",contentLength:null}:null;
+  try{return await apiFetchCore(url,opts,monitor)}
+  finally{if(monitor){const elapsed=performance.now()-monitor.started;S91_LATENCY_SAMPLES.push({route:routeFamily(url),method:String(opts&&opts.method||"GET").toUpperCase(),clientMs:elapsed,fetchMs:monitor.fetchMs,serverTotalMs:metric(monitor.serverTiming,"total"),serverAppMs:metric(monitor.serverTiming,"app"),serverDbMs:metric(monitor.serverTiming,"db"),contentLength:monitor.contentLength,failed:!monitor.status||monitor.status>=400});if(S91_LATENCY_SAMPLES.length>500)S91_LATENCY_SAMPLES.splice(0,S91_LATENCY_SAMPLES.length-500)}}
+ };
 }
 
 let _syncTimer=null,_syncing=false,_syncQueued=false,_lastServerState={},_syncRetryDelay=500;
@@ -544,6 +591,8 @@ const capStr=c=>xlNum(c)?c+" mW":"Not specified";
 const kWStr=v=>xlNum(v)?v.toLocaleString("en-IN",{maximumFractionDigits:2}):"—";
 /* Plant Registry AC/DC column — same value as kWStr but WITHOUT thousands separators (e.g. 1500 not 1,500). */
 const kWStrPlain=v=>xlNum(v)?String(Math.round(v*100)/100):"—";
+/* kW total shown as MW with up to 2 decimals (e.g. 123200 -> "123.2"). Units are written by the caller, never patched into the DOM afterwards. */
+const s91Mw=kw=>xlNum(kw)?(Math.round(kw/10)/100).toLocaleString("en-IN",{maximumFractionDigits:2}):"—";
 /* One source of truth for plant AC/DC capacity (kW). Same order everywhere (table, KPI totals, profile, export):
    value on the plant record (manual add/edit or import) > original Excel registry > legacy MW field. Plants added later
    are therefore counted, and totals always equal the sum of what the registry table shows. */
@@ -974,9 +1023,9 @@ function locationPreviewHtml(plant){
  if(!geo)return '<div style="padding:22px 10px;text-align:center;color:var(--muted-foreground);font-size:12.5px">Location unavailable — this plant has no registered coordinates yet.</div>';
  return '<div>'+
   '<div style="font-weight:700;font-size:14px">'+esc(plant.name||plant.id)+'</div>'+
-  '<div style="font-size:11.5px;color:var(--muted-foreground);margin-top:2px">Site Code: '+esc(plant.id)+(geo.city?' · '+esc(geo.city):'')+'</div>'+
+  '<div style="font-size:12.5px;color:var(--muted-foreground);margin-top:2px">Site Code: '+esc(plant.id)+(geo.city?' · '+esc(geo.city):'')+'</div>'+
   '<div style="margin-top:10px;border-radius:10px;overflow:hidden;border:1px solid var(--border)"><iframe src="'+satelliteEmbedUrl(geo)+'" style="width:100%;height:190px;border:0" loading="lazy" title="Registered plant location — satellite view"></iframe></div>'+
-  '<div class="row between" style="margin-top:10px;align-items:center"><span style="font-size:10.5px;color:var(--muted-foreground)">Registered geographic point · satellite view</span>'+
+  '<div class="row between" style="margin-top:10px;align-items:center"><span style="font-size:12px;color:var(--muted-foreground)">Registered geographic point · satellite view</span>'+
   '<a class="btn p sm" href="'+googleMapsUrl(geo)+'" target="_blank" rel="noopener">Open in Google Maps →</a></div>'+
   '</div>';
 }
@@ -988,12 +1037,12 @@ const PLANT_TABLE_COLUMNS=[
  {key:"project",label:"SPV / Project",visible:true,render:p=>esc(plantProject(p)||"—")},
  {key:"acCapacity",label:"AC CAPACITY (kW)",visible:true,render:p=>plantAcKw(p)!=null?kWStrPlain(plantAcKw(p)):"—"},
  {key:"dcCapacity",label:"DC CAPACITY (kWp) ",visible:true,render:p=>plantDcKw(p)!=null?kWStrPlain(plantDcKw(p)):capStr(p.capacity)},
- {key:"location",label:"Location",visible:true,render:p=>p.geo?'<button type="button" class="btn o sm" data-act="plantLocation" data-id="'+esc(p.id)+'">📍 View Location</button>':'<span style="font-size:11.5px;color:var(--muted-foreground)">— Not registered —</span>'},
+ {key:"location",label:"Location",visible:true,render:p=>p.geo?'<button type="button" class="btn o sm" data-act="plantLocation" data-id="'+esc(p.id)+'">📍 View Location</button>':'<span style="font-size:12.5px;color:var(--muted-foreground)">— Not registered —</span>'},
  {key:"district",label:"District",visible:true,render:p=>esc(p.district||(p.geo&&p.geo.city)||p.location||"—")},
  {key:"discom",label:"DISCOM",visible:true,render:p=>esc(p.discom||"—")},
  {key:"jenAenOffice",label:"JEN/AEN Office",visible:true,render:p=>'<span style="color:var(--muted-foreground)">—</span>'}, /* not in any import file yet — always blank */
  {key:"status",label:"Status",visible:true,render:p=>badge(plantHealth(p))},
- {key:"open",label:"Open",visible:true,render:p=>{const oi=openTk(S.issues).filter(t=>t.plant===p.name),crit=oi.filter(t=>t.severity==="Critical").length;return oi.length?("<b>"+oi.length+"</b>"+(crit?'<div style="font-size:11px;color:var(--muted-foreground)">'+crit+' critical</div>':"")):"0"}},
+ {key:"open",label:"Open",visible:true,render:p=>{const oi=openTk(S.issues).filter(t=>t.plant===p.name),crit=oi.filter(t=>t.severity==="Critical").length;return oi.length?("<b>"+oi.length+"</b>"+(crit?'<div style="font-size:12.5px;color:var(--muted-foreground)">'+crit+' critical</div>':"")):"0"}},
  {key:"critical",label:"Critical",visible:true,render:p=>{const oi=openTk(S.issues).filter(t=>t.plant===p.name);return oi.filter(t=>t.severity==="Critical").length||"—"}},
  {key:"engineer",label:"Engineer",visible:true,render:p=>{const eng=plantEngineer(p);return eng?'<span data-act="workWho" data-id="'+esc(eng)+'">'+esc(eng)+'</span>':"—"}},
  {key:"lastActivity",label:"Last activity",visible:true,render:p=>{const last=plantLastActivity(p);return last?fmtDT(last):"—"}},
@@ -1045,7 +1094,7 @@ function plantFormHtml(plant){
   fld("pf-name","Plant Name *",plant?plant.name:"",{ph:"e.g. ABC Solar Plant"})+
   fld("pf-code","Plant / Site Code *",plant?plant.id:"",{ph:"e.g. ABC-001",dis:isEdit})+
   '</div>'+
-  (isEdit?'<div style="font-size:10.5px;color:var(--muted-foreground);margin:-6px 0 10px">Site Code is locked once a plant exists — it keeps issues, tasks and history linked correctly.</div>':'')+
+  (isEdit?'<div style="font-size:12px;color:var(--muted-foreground);margin:-6px 0 10px">Site Code is locked once a plant exists — it keeps issues, tasks and history linked correctly.</div>':'')+
   '<div class="row" style="gap:12px">'+
   fld("pf-project","SPV / Project",plantProject(plant)||"")+
   fld("pf-district","District / District",plant&&plant.district||"")+
@@ -1064,7 +1113,7 @@ function plantFormHtml(plant){
   fld("pf-lng","Longitude",geo?geo.lng:"",{ph:"-180 to 180"})+
   '</div>'+
   '<div class="row" style="gap:10px;align-items:center;margin-top:2px"><button type="button" class="btn o sm" onclick="previewPlantFormLocation()">Preview on map</button>'+
-  '<span id="pf-locmsg" style="font-size:11.5px;color:var(--muted-foreground)">'+(geo?"Registered — source: "+(geo.source==="manual"?"manually entered":"imported"):"Not registered yet — optional, can be added later via Edit")+'</span></div>'+
+  '<span id="pf-locmsg" style="font-size:12.5px;color:var(--muted-foreground)">'+(geo?"Registered — source: "+(geo.source==="manual"?"manually entered":"imported"):"Not registered yet — optional, can be added later via Edit")+'</span></div>'+
   '<div id="pf-locpreview"></div>'+
   '</div>';
 }
@@ -1129,9 +1178,17 @@ async function saveAddPlant(){
   }
   return;
  }
+ if(window._s91SavingPlant)return;
+ window._s91SavingPlant=true;
+ try{
+  const saved=await apiFetch("/api/plants",{method:"POST",body:{site_code:rawCode,plant_name:name,project_company:p.project||null,district:p.district||null,discom:p.discom||null,location:city||null,latitude:geo?geo.lat:null,longitude:geo?geo.lng:null,dc_capacity_kw:xlNum(p.dcCapacitykW)?p.dcCapacitykW:null,ac_capacity_kw:xlNum(p.acCapacitykW)?p.acCapacitykW:null,commissioned_on:p.cod||null}});
+  p.id=saved.site_code||p.id;p.dbId=saved.id;p.source="database";p.active=saved.status!=="inactive";
+ }catch(err){toast("Plant was not saved: "+((err&&err.message)||"server error"));return}
+ finally{window._s91SavingPlant=false}
  S.plants.unshift(p);
- audit("Plants","Plant added manually — "+p.id+(name?" ("+name+")":""),OM_HEAD,"—","Registered");
- S.modal=null;S.tablePages.plants=1;persist();render();toast("Plant added — "+p.id+(geo?"":" (location can be added later via Edit)")+(SB.configured?" (offline — will not sync until Supabase is reachable)":""));
+ if(typeof _lastServerState!=="undefined"&&Array.isArray(_lastServerState.plants))_lastServerState.plants=[cloneStateValue(p)].concat(_lastServerState.plants);
+ audit("Plants","Plant added — "+p.id+(name?" ("+name+")":""),(AUTH_IDENTITY&&AUTH_IDENTITY.name)||OM_HEAD,"—","Registered");
+ S.modal=null;S.tablePages.plants=1;persist();render();toast("Plant added — "+p.id+(geo?"":" (location can be added later via Edit)"));
 }
 async function saveEditPlant(id){
  const plant=(S.plants||[]).find(z=>z.id===id);
@@ -1174,7 +1231,7 @@ async function saveEditPlant(id){
 }
 /* ---- UI helpers: chart tooltips, focus-safe search, generic list controls (search + filter + 6 per page) ---- */
 (function(){const st=document.createElement("style");
- st.textContent=".hit{fill:transparent;cursor:crosshair}.hit:hover{fill:rgba(34,197,94,.10)}#chart-tip{position:fixed;z-index:9999;pointer-events:none;background:#111814;color:#fff;font-size:11.5px;line-height:1.5;padding:7px 10px;border-radius:8px;max-width:260px;box-shadow:0 6px 20px rgba(0,0,0,.25);display:none;white-space:pre-line}";
+ st.textContent=".hit{fill:transparent;cursor:crosshair}.hit:hover{fill:rgba(34,197,94,.10)}#chart-tip{position:fixed;z-index:9999;pointer-events:none;background:#111814;color:#fff;font-size:12.5px;line-height:1.5;padding:7px 10px;border-radius:8px;max-width:260px;box-shadow:0 6px 20px rgba(0,0,0,.25);display:none;white-space:pre-line}";
  document.head.appendChild(st);
  const tip=document.createElement("div");tip.id="chart-tip";document.body.appendChild(tip);
  document.addEventListener("mousemove",e=>{const t=e.target.closest&&e.target.closest("[data-tip]");if(!t){tip.style.display="none";return}
@@ -1252,15 +1309,15 @@ function secRepData(tab){
  return{title:"Issues report — by plant",cols:["Plant","Tickets","Open","Critical (open)","SLA breaches","Closed","Status"],rows,facetName:"Status",facetIdx:6,textIdx:[0],sum:[["Tickets",S.issues.length],["Open",openTk(S.issues).length],["Critical open",openTk(S.issues).filter(isCriticalIssue).length],["SLA breaches",rows.reduce((s,r)=>s+r[4],0)]]}}
 function downloadSecRep(){const tab=S.repTab||"generation",d=secRepData(tab),k="rep_"+tab,st=(S.lf&&S.lf[k])||{q:"",f:"all"},q=st.q.trim().toLowerCase();
  const rows=d.rows.filter(r=>(!q||d.textIdx.map(i=>r[i]).join(" ").toLowerCase().includes(q))&&(st.f==="all"||r[d.facetIdx]===st.f));
- const csv=[[d.title]].concat([d.cols],rows.map(r=>r.slice(0,d.cols.length))).map(r=>r.map(c=>'"'+String(c==null?"":c).replace(/"/g,'""')+'"').join(",")).join("\r\n");
+ const csv=[[d.title]].concat([d.cols],rows.map(r=>r.slice(0,d.cols.length))).map(r=>r.map(c=>'"'+s91CsvText(c).replace(/"/g,'""')+'"').join(",")).join("\r\n");
  const a=document.createElement("a");a.href=URL.createObjectURL(new Blob(["\ufeff"+csv],{type:"text/csv;charset=utf-8"}));a.download="solar91-"+tab+"-report-"+TODAY+".csv";document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),800);
  audit("Reports","Downloaded "+d.title+" (3.10)",OM_HEAD);toast("Downloaded "+a.download)}
 function renderSecReports(){const tab=S.repTab||"generation",d=secRepData(tab),k="rep_"+tab;
  const lc=listCtl(k,d.rows.map(r=>({r})),{facet:x=>x.r[d.facetIdx],facetLabel:d.facetName,text:x=>d.textIdx.map(i=>x.r[i]).join(" "),ph:"Search "+(REP_TABS.find(t=>t[0]===tab)||[])[1]});
  const mo=tab==="generation"?'<div class="field" style="min-width:150px"><span class="lbl">Month</span><select class="inp" onchange="S.repMonth=this.value;S.tablePages.'+k+'=1;render()">'+xlMonthsList().map(m=>'<option value="'+m+'"'+((S.repMonth||XL_LAST.slice(0,7))===m?" selected":"")+'>'+XL_MON[+m.slice(5)-1]+" "+m.slice(0,4)+'</option>').join("")+'</select></div>':"";
- return '<div class="panel" style="padding:0"><div style="padding:16px 20px 0"><div class="row between wrap" style="gap:10px"><div><h2 style="font-size:15px;font-weight:700">'+esc(d.title)+'</h2><p style="font-size:11.5px;color:var(--muted-foreground);margin:3px 0 10px">Section reports · search, filter and page through the data · download the filtered view as CSV</p></div><div class="row" style="gap:8px;align-items:flex-end">'+mo+'<button class="btn p sm" onclick="downloadSecRep()">'+I.dl(13)+' Download CSV</button></div></div>'+
+ return '<div class="panel" style="padding:0"><div style="padding:16px 20px 0"><div class="row between wrap" style="gap:10px"><div><h2 style="font-size:15px;font-weight:700">'+esc(d.title)+'</h2><p style="font-size:12.5px;color:var(--muted-foreground);margin:3px 0 10px">Section reports · search, filter and page through the data · download the filtered view as CSV</p></div><div class="row" style="gap:8px;align-items:flex-end">'+mo+'<button class="btn p sm" onclick="downloadSecRep()">'+I.dl(13)+' Download CSV</button></div></div>'+
   '<div class="row wrap" style="gap:6px;margin-bottom:12px">'+REP_TABS.map(t=>'<button class="pill sev-pill'+(tab===t[0]?" active":"")+'" onclick="S.repTab=\''+t[0]+'\';render()">'+t[1]+'</button>').join("")+'</div>'+
-  '<div class="row wrap" style="gap:10px;margin-bottom:12px">'+d.sum.map(s=>'<div class="metric" style="flex:1;min-width:130px;padding:10px 12px"><div style="font-size:10.5px;color:var(--muted-foreground);text-transform:uppercase;letter-spacing:.04em">'+esc(s[0])+'</div><div style="font-size:17px;font-weight:700;margin-top:2px">'+esc(s[1])+'</div></div>').join("")+'</div></div>'+lc.bar+
+  '<div class="row wrap" style="gap:10px;margin-bottom:12px">'+d.sum.map(s=>'<div class="metric" style="flex:1;min-width:130px;padding:10px 12px"><div style="font-size:12px;color:var(--muted-foreground);text-transform:uppercase;letter-spacing:.04em">'+esc(s[0])+'</div><div style="font-size:17px;font-weight:700;margin-top:2px">'+esc(s[1])+'</div></div>').join("")+'</div></div>'+lc.bar+
   '<table><thead><tr>'+d.cols.map(c=>'<th>'+esc(c)+'</th>').join("")+'</tr></thead><tbody>'+(lc.rows.length?lc.rows.map(x=>'<tr>'+x.r.slice(0,d.cols.length).map((c,i)=>'<td'+(i===0?' style="font-weight:600"':'')+'>'+esc(c)+'</td>').join("")+'</tr>').join(""):'<tr><td colspan="'+d.cols.length+'" style="text-align:center;color:var(--muted-foreground);padding:18px">No records match the current search / filter.</td></tr>')+'</tbody></table>'+lc.pager+'</div>'}
 const CATEGORIES=["Documentation","Physical asset verification","Electrical safety","Spares & tools handover","Access & credentials","Manpower & site readiness"];
 const CAT_HINT={"Documentation":"As-built drawings, SLDs, O&M manuals, warranties, datasheets, insurance, statutory approvals.","Physical asset verification":"Inverter/module counts & serials, tracker confirmation, transformer/switchyard, CCTV, fencing, signage.","Electrical safety":"Earthing pits, DC/AC cable routing & labeling, protection relays, SCADA access.","Spares & tools handover":"Initial spares inventory received from EPC, tools/equipment left on site.","Access & credentials":"SCADA login, inverter portal, gate keys/access cards, local authority contacts.","Manpower & site readiness":"Security deployment, site office, safety signage, first-aid kit, PPE availability."};
@@ -1380,7 +1437,7 @@ const SITE_ENG_POOL=[]; /* Site Engineers only (not O&M team assignees) — driv
 function seedIssues(){return[]}
 function slaState(tk){if(tk.status==="Closed"||tk.status==="Resolved")return null;if(!tk.etc)return null;const left=hrsBetween(NOW_ISO,tk.etc);if(!Number.isFinite(left))return null;if(left<0)return"breach";if(isCriticalIssue(tk)&&left<=24)return"nearing";return null}
 function openTk(ts){return ts.filter(t=>t.status!=="Closed"&&t.status!=="Resolved")}
-function issueDay(t){const s=String(t.occurred||t.created||t.updated||"").slice(0,10);return /^\d{4}-\d{2}-\d{2}$/.test(s)?s:TODAY}
+function issueDay(t){const s=s91DayOf(t.occurred||t.created||t.updated||"");return /^\d{4}-\d{2}-\d{2}$/.test(s)?s:TODAY}
 function issueCreatedDay(t){const s=String(t.created||t.created_at||"").slice(0,10);return /^\d{4}-\d{2}-\d{2}$/.test(s)?s:null}
 function issueAgeDays(t){const d=issueDay(t);return d?Math.max(0,dayDiff(d,TODAY)):0}
 function ageBucket(t){const d=issueAgeDays(t);if(d<=1)return"0–1 days";if(d<=3)return"2–3 days";if(d<=7)return"4–7 days";if(d<=14)return"8–14 days";return"15+ days"}
@@ -1558,7 +1615,7 @@ function donutSlicePath(cx,cy,ro,ri,a0,a1){
 function issueClosedDay(t){if(t.closure&&t.closure.closedAt)return String(t.closure.closedAt).slice(0,10);if(t.status==="Resolved"||t.status==="Closed")return String(t.updated||t.created||"").slice(0,10)||null;return null}
 function issueTrendRows(days,list,from,to){
  const createdByDay=new Map(),closedByDay=new Map(),backlogClosuresByDay=new Map();
- let latest=s91ValidDate(TODAY)?TODAY:new Date().toISOString().slice(0,10);
+ let latest=s91ValidDate(TODAY)?TODAY:s91BusinessDate();
  (Array.isArray(list)?list:(S.issues||[])).forEach(t=>{
   if(!t||typeof t!=="object")return;
   const created=issueCreatedDay(t),closed=issueClosedDay(t);
@@ -1636,7 +1693,10 @@ function omHeadMoveTicket(id,next){
  render();
  toast("Ticket moved to "+next);
 }
-function issueQuickActs(t){const p=plantRec(t.plant),isHead=AUTH_IDENTITY.role==="O&M Head";let a='<div class="row" style="gap:4px;flex-wrap:wrap" onclick="event.stopPropagation()">';a+='<button class="btn g sm" data-act="issue" data-id="'+esc(t.id)+'">View</button>';if(isHead&&t.status!=="Closed"&&t.status!=="Resolved")a+='<button class="btn o sm" data-act="assignQuick" data-id="'+esc(t.id)+'">'+(t.assignee?"Reassign":"Assign")+'</button>';if(p)a+='<button class="btn g sm" data-act="plant" data-id="'+esc(p.id)+'">Plant</button>';return a+'</div>'}
+/* Row actions are handled by the page-level data-act listener, which acts on the innermost [data-act] (the button,
+   not the row). The wrapper used to call event.stopPropagation(), which blocked that listener: View, Assign and
+   Plant did nothing when clicked from issue rows. */
+function issueQuickActs(t){const p=plantRec(t.plant),isHead=AUTH_IDENTITY.role==="O&M Head";let a='<div class="row" style="gap:4px;flex-wrap:wrap" data-row-actions="1">';a+='<button class="btn g sm" data-act="issue" data-id="'+esc(t.id)+'">View</button>';if(isHead&&t.status!=="Closed"&&t.status!=="Resolved")a+='<button class="btn o sm" data-act="assignQuick" data-id="'+esc(t.id)+'">'+(t.assignee?"Reassign":"Assign")+'</button>';if(p)a+='<button class="btn g sm" data-act="plant" data-id="'+esc(p.id)+'">Plant</button>';return a+'</div>'}
 function setTrendDays(n){S.trendDays=n;render()}
 function seedESR(){return[]}
 function seedInventory(){return[]}

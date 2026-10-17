@@ -4,6 +4,7 @@ import uuid
 
 from sqlalchemy import event
 
+from app.core.timeutil import business_today
 from app.core.database import engine
 from app.core.models import Equipment, Plant, User, UserEquipmentTypeAssignment
 from app.plants.router import (
@@ -382,7 +383,7 @@ def test_equipment_warranty_filter_and_move_audit(client, db):
     ).json()
 
     exp = (
-        date.today() + timedelta(days=30)
+        business_today() + timedelta(days=30)
     ).isoformat()
 
     eq = client.post(

@@ -68,6 +68,37 @@ def test_superseded_equipment_read_can_be_aborted_without_retry():
     run=subprocess.run(['node','-e',script],cwd=ROOT,capture_output=True,text=True,timeout=10)
     assert run.returncode==0,run.stderr
 
+def test_opt_in_api_latency_sampler_records_safe_browser_and_server_timings():
+    script=textwrap.dedent(r'''
+      const fs=require('fs'),vm=require('vm'),assert=require('assert');
+      const s=fs.readFileSync('frontend/static/js/00-auth-data-and-imports.js','utf8');
+      const start=s.indexOf('async function apiFetch(');assert(start>=0);
+      let i=s.indexOf('{',start),depth=0,end=-1;
+      for(let j=i;j<s.length;j++){if(s[j]==='{')depth++;else if(s[j]==='}'&&--depth===0){end=j+1;break}}
+      assert(end>0);
+      const monitor=s.indexOf('// Opt-in browser sampling');
+      const monitorEnd=s.indexOf('\nlet _syncTimer',monitor);
+      assert(monitor>=0&&monitorEnd>monitor);
+      let now=0;
+      const sandbox={AbortController,FormData,URL,Map,Math,Number,String,Array,Promise,Set,location:{href:'https://solar91.example/'},
+        performance:{now:()=>++now},window:{},clerkToken:async()=>null,clearTimeout,setTimeout,
+        fetch:async()=>({status:200,ok:true,headers:{get:name=>name==='Server-Timing'?'app;dur=4, db;dur=2;desc="1 queries", total;dur=6':name==='Content-Length'?'256':null},json:async()=>({ok:true})})};
+      vm.createContext(sandbox);
+      vm.runInContext(s.slice(start,end)+'\n'+s.slice(monitor,monitorEnd),sandbox);
+      (async()=>{
+        sandbox.window.Solar91Latency.enable();
+        await sandbox.apiFetch('/api/issues/SECRET-RECORD?access_token=SECRET');
+        const report=sandbox.window.Solar91Latency.report();
+        assert.strictEqual(report.sample_count,1);
+        assert.strictEqual(report.groups[0].route,'GET /api/issues');
+        assert.strictEqual(report.groups[0].server_db_ms.p50,2);
+        assert.strictEqual(report.groups[0].content_length_bytes.p50,256);
+        assert(!JSON.stringify(report).includes('SECRET'));
+      })().catch(error=>{console.error(error);process.exitCode=1});
+    ''')
+    run=subprocess.run(['node','-e',script],cwd=ROOT,capture_output=True,text=True,timeout=10)
+    assert run.returncode==0,run.stderr
+
 def test_equipment_register_aborts_superseded_page_request():
     script=textwrap.dedent(r'''
       const fs=require('fs'),vm=require('vm'),assert=require('assert');

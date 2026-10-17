@@ -1,5 +1,6 @@
 from datetime import date, datetime, timedelta, timezone
 
+from app.core.timeutil import business_today
 from app.core.models import OMTask, PMDueChange, PMFollowUp, Plant, User
 from app.pmplan.followups import get_follow_up_state
 from tests.conftest import login_user
@@ -11,7 +12,7 @@ def _task(db, *, due_on=None, assignee_id=None):
     db.flush()
     task=OMTask(
         work_order_no="WO-FOLLOWUP",plant_id=plant.id,task_name="Clean inverter",
-        task_type="Inverter",frequency="Monthly",due_on=due_on or date.today()-timedelta(days=2),
+        task_type="Inverter",frequency="Monthly",due_on=due_on or business_today()-timedelta(days=2),
         status="Scheduled",assignee_user_id=assignee_id,assignee_text="Assignee",
     )
     db.add(task)
@@ -53,7 +54,7 @@ def test_head_and_assigned_assignee_can_log_followups(client,db):
     task=_task(db,assignee_id=assignee.id)
     body={
         "how":"Called","spoke_to":"Site engineer","outcome":"Blocked: waiting for parts",
-        "promised_on":(date.today()+timedelta(days=2)).isoformat(),"note":"Spare is on order",
+        "promised_on":(business_today()+timedelta(days=2)).isoformat(),"note":"Spare is on order",
     }
     response=client.post(f"/api/scheduled/tasks/{task.work_order_no}/followups",json=body)
     assert response.status_code==200,response.text
@@ -78,7 +79,7 @@ def test_followups_reject_out_of_scope_roles_and_past_promises(client,db):
     assert client.get(url).status_code==403
 
     login_user(client,db,role="O&M Head",name="Head",email="fu-head2@example.com")
-    past=client.post(url,json={**payload,"promised_on":(date.today()-timedelta(days=1)).isoformat()})
+    past=client.post(url,json={**payload,"promised_on":(business_today()-timedelta(days=1)).isoformat()})
     assert past.status_code==422
     bad_outcome=client.post(url,json={**payload,"outcome":"Something else"})
     assert bad_outcome.status_code==422
@@ -90,16 +91,16 @@ def test_followups_reject_out_of_scope_roles_and_past_promises(client,db):
 
 def test_overdue_due_date_moves_need_reason_and_are_recorded(client,db):
     login_user(client,db,role="O&M Head",name="Head",email="fu-due-head@example.com")
-    task=_task(db,due_on=date.today()-timedelta(days=2))
+    task=_task(db,due_on=business_today()-timedelta(days=2))
     url=f"/api/scheduled/tasks/{task.work_order_no}/schedule"
-    later=date.today()+timedelta(days=2)
+    later=business_today()+timedelta(days=2)
     missing=client.patch(url,json={"due_on":later.isoformat()})
     assert missing.status_code==422
     changed=client.patch(url,json={"due_on":later.isoformat(),"reason":"Waiting for shutdown","quantity":15})
     assert changed.status_code==200,changed.text
     due_change=db.query(PMDueChange).filter_by(task_id=task.id).one()
     assert due_change.reason=="Waiting for shutdown"
-    assert due_change.old_due==date.today()-timedelta(days=2) and due_change.new_due==later
+    assert due_change.old_due==business_today()-timedelta(days=2) and due_change.new_due==later
     assert changed.json()["task"]["quantity"]==15
 
 
@@ -109,7 +110,7 @@ def test_task_output_includes_quantity_lateness_and_follow_up_state(client,db):
     task.quantity=12
     db.add(PMFollowUp(
         task_id=task.id,by_user_id=head.id,by_name=head.display_name,how="Called",
-        outcome="Will finish by the promised date",promised_on=date.today()+timedelta(days=3),
+        outcome="Will finish by the promised date",promised_on=business_today()+timedelta(days=3),
         at=datetime.now(timezone.utc),
     ))
     db.commit()

@@ -3,52 +3,52 @@
 .m26-pm .m26-planner{padding:10px 12px !important}
 .m26-pl-head{margin-bottom:6px !important;gap:8px !important}
 .m26-pl-head h2{font-size:13px !important}
-.m26-pl-head .pl-sub{font-size:11px;color:var(--muted-foreground)}
-.m26-pl-head .nav button{padding:3px 9px !important;font-size:11px !important;border-radius:8px !important}
+.m26-pl-head .pl-sub{font-size:12.5px;color:var(--muted-foreground)}
+.m26-pl-head .nav button{padding:3px 9px !important;font-size:12.5px !important;border-radius:8px !important}
 .m26-planner .m26-wk-scroll{max-height:232px;overflow:auto;border-radius:10px;scrollbar-width:thin}
 .m26-planner .m26-wk{grid-template-columns:92px repeat(7,minmax(0,1fr)) !important;gap:3px !important;margin-bottom:3px !important}
 .m26-planner .m26-wk-scroll .m26-wk{min-width:600px !important}
 .m26-planner .m26-wk-scroll > .m26-wk:first-child{position:sticky;top:0;z-index:2;background:#fff;padding:1px 0 3px;margin-bottom:2px !important}
-.m26-planner .m26-wk .d{font-size:10.5px !important}
-.m26-planner .m26-wk .pl{font-size:11px !important;padding-top:4px !important;display:flex;align-items:center;gap:4px;min-width:0}
+.m26-planner .m26-wk .d{font-size:12px !important}
+.m26-planner .m26-wk .pl{font-size:12.5px !important;padding-top:4px !important;display:flex;align-items:center;gap:4px;min-width:0}
 .m26-planner .pm-plant-code{font-weight:800}
 .m26-planner .pm-plant-name{display:none}
 .m26-planner .m26-cell{min-height:24px !important;padding:2px !important;border-radius:6px !important}
-.m26-planner .m26-chip{font-size:10px !important;padding:2px 5px !important;margin-bottom:2px !important;border-radius:5px !important;line-height:1.25}
+.m26-planner .m26-chip{font-size:12px !important;padding:2px 5px !important;margin-bottom:2px !important;border-radius:5px !important;line-height:1.25}
 .m26-planner .m26-chip:hover{filter:brightness(.96);box-shadow:0 1px 4px rgba(16,24,20,.18)}
-.m26-planner .m26-more{font-size:9.5px !important;padding:1px 0 0 !important}
-.m26-planner .m26-legend{margin-top:6px !important;gap:10px !important;font-size:10px !important}
+.m26-planner .m26-more{font-size:11px !important;padding:1px 0 0 !important}
+.m26-planner .m26-legend{margin-top:6px !important;gap:10px !important;font-size:12px !important}
 .m26-planner.pl-hide .m26-wk-scroll,.m26-planner.pl-hide .m26-legend{display:none}
 .m26-planner.pl-hide .m26-pl-head{margin-bottom:0 !important}
 /* KPI + donut cards above the planner */
 .m26-kpi4{gap:8px !important;margin-bottom:8px !important}
 .m26-kpi{padding:9px 12px !important;border-radius:12px !important}
 .m26-kpi .n{font-size:20px !important;margin-top:2px !important}
-.m26-kpi .s{font-size:10.5px !important;margin-top:2px !important}
+.m26-kpi .s{font-size:12px !important;margin-top:2px !important}
 .m26-kpi.ring{gap:9px !important}
 .m26-ring{width:46px !important;height:46px !important}
-.m26-ring b{width:35px !important;height:35px !important;font-size:11px !important}
+.m26-ring b{width:35px !important;height:35px !important;font-size:12.5px !important}
 .m26-dnrow{gap:8px !important;margin-bottom:8px !important}
 .m26-dn{padding:9px 12px !important;border-radius:12px !important}
 .m26-dn-h{margin-bottom:4px !important}.m26-dn-h b{font-size:12.5px !important}
 .m26-dn-b{gap:10px !important}
 .m26-dn-b svg{width:78px !important;height:78px !important}
-.m26-dn-l{gap:3px !important;font-size:11.5px !important}
+.m26-dn-l{gap:3px !important;font-size:12.5px !important}
 /* equipment filter = compact chip rows, hidden until opened */
 .pm-scope-panel{padding:9px 12px !important}
 .pm-scope-panel.closed .pm-scope-section{display:none !important}
 .pm-scope-panel.closed .pm-scope-head{margin-bottom:0 !important}
 .pm-scope-panel .pm-scope-section{margin-top:5px !important;display:grid;grid-template-columns:150px minmax(0,1fr);gap:8px;align-items:start;padding-top:5px;border-top:1px dashed #E4E9E6}
 .pm-scope-panel .pm-scope-section > .row{margin:0 !important;flex-direction:column;align-items:flex-start !important;gap:2px}
-.pm-scope-panel .pm-scope-section h3{font-size:11px !important;margin:0}
-.pm-scope-panel .pm-scope-section .pill{font-size:9.5px !important;padding:1px 7px !important}
+.pm-scope-panel .pm-scope-section h3{font-size:12.5px !important;margin:0}
+.pm-scope-panel .pm-scope-section .pill{font-size:11px !important;padding:1px 7px !important}
 .pm-scope-panel .sched-scope-grid{display:flex !important;flex-wrap:wrap;gap:5px !important}
 .pm-scope-panel .pm-scope-card{display:inline-flex !important;grid-template-columns:none !important;align-items:center;gap:6px !important;width:auto !important;min-height:0 !important;padding:3px 9px 3px 4px !important;border-radius:999px !important}
-.pm-scope-panel .pm-scope-icon{width:20px !important;height:20px !important;font-size:10px !important;border-radius:50% !important}
-.pm-scope-panel .sched-scope-name{font-size:11.5px !important;white-space:nowrap}
+.pm-scope-panel .pm-scope-icon{width:20px !important;height:20px !important;font-size:12px !important;border-radius:50% !important}
+.pm-scope-panel .sched-scope-name{font-size:12.5px !important;white-space:nowrap}
 .pm-scope-panel .pm-scope-count{flex-direction:row !important;align-items:center !important;gap:4px !important}
 .pm-scope-panel .pm-scope-count > i{display:none !important}
-.pm-scope-panel .pm-scope-count > b{background:#EEF2EF;border-radius:99px;padding:0 6px;font-size:10px !important}
+.pm-scope-panel .pm-scope-count > b{background:#EEF2EF;border-radius:99px;padding:0 6px;font-size:12px !important}
 .pm-scope-panel .pm-scope-card.active .pm-scope-count > b{background:var(--primary);color:#fff}
 @media(max-width:700px){.pm-scope-panel .pm-scope-section{grid-template-columns:1fr}}
 /* Add PM tasks · calendar setup · heatmap */
@@ -65,7 +65,7 @@
 /* register + overdue: tighter and a little more lifted */
 .m26-pm #section-results{border-radius:14px;box-shadow:0 1px 2px rgba(16,24,20,.05),0 10px 24px rgba(16,24,20,.07)}
 .m26-pm #section-results h2,.m26-pm .pm-overdue-register h2{font-size:13.5px !important}
-.m26-pm #section-results p,.m26-pm .pm-overdue-register p{font-size:11px !important;margin-bottom:6px !important}
+.m26-pm #section-results p,.m26-pm .pm-overdue-register p{font-size:12.5px !important;margin-bottom:6px !important}
 .m26-pm .pm-group-table > tbody > .pm-group-row > td{padding:7px 12px !important;transition:background .12s}
 .m26-pm .pm-group-table > tbody > .pm-group-row:hover > td{background:#F3FAF5}
 .m26-pm .pm-group-table > tbody > .pm-group-row > td:first-child{border-left:3px solid var(--primary)}

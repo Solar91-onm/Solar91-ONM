@@ -35,20 +35,26 @@ def _authorize(user: User):
         raise HTTPException(403, "An approved operational role is required")
 
 
-def _issue_allowed(db: Session, user: User, issue: Issue, plant_ids: set[UUID] | None) -> bool:
+def _issue_allowed(db: Session, user: User, issue: Issue, plant_ids: set[UUID] | None,
+                   equipment_types: set[str] | None = None) -> bool:
     if issue.deleted_at is not None:
         return False
     if plant_ids is not None and issue.plant_id not in plant_ids:
         return False
     if user.role == "Assignee":
+        if equipment_types is not None:
+            return (issue.vertical or "").strip().casefold() in equipment_types
         return equipment_scope_matches(db, user, issue.plant_id, issue.equipment_id, issue.equipment_ref, issue.vertical)
     return True
 
 
-def _task_allowed(db: Session, user: User, task: OMTask, plant_ids: set[UUID] | None) -> bool:
+def _task_allowed(db: Session, user: User, task: OMTask, plant_ids: set[UUID] | None,
+                  equipment_types: set[str] | None = None) -> bool:
     if plant_ids is not None and task.plant_id not in plant_ids:
         return False
     if user.role == "Assignee":
+        if equipment_types is not None:
+            return (task.task_type or "").strip().casefold() in equipment_types
         return equipment_scope_matches(db, user, task.plant_id, None, task.equipment_ref, task.task_type)
     return True
 
@@ -72,7 +78,10 @@ def field_overview(
     not a falsely advertised complete, unbounded portfolio aggregate.
     """
     _authorize(user)
-    ids = user_scoped_plant_ids(db, user)
+    equipment_types = user_scoped_equipment_types(db, user) or set() if user.role == "Assignee" else None
+    # An Assignee's visible work is type-scoped. Avoid materializing every plant ID; the
+    # SQL filters below enforce the same type scope directly.
+    ids = (None if equipment_types else set()) if user.role == "Assignee" else user_scoped_plant_ids(db, user)
     if ids is not None and not ids:
         return {"role": user.role, "scope": "none", "plants": [], "issues": [], "tasks": [], "washing": [],
                 "summary": {"open_issues": 0, "critical_issues": 0, "due_tasks": 0, "overdue_tasks": 0, "washing_due": 0, "washing_overdue": 0, "upcoming_tasks": 0},
@@ -86,17 +95,16 @@ def field_overview(
         issue_stmt = issue_stmt.where(Issue.plant_id.in_(ids))
         task_stmt = task_stmt.where(OMTask.plant_id.in_(ids))
     if user.role == "Assignee":
-        types = user_scoped_equipment_types(db, user) or set()
-        # The equipment_ref fallback is evaluated after the bounded fetch.
-        issue_stmt = issue_stmt.where(func.lower(func.coalesce(Issue.vertical, "")).in_(types))
-        task_stmt = task_stmt.where(func.lower(func.coalesce(OMTask.task_type, "")).in_(types))
+        # Apply the assigned type filter in SQL and reuse its normalized scope below.
+        issue_stmt = issue_stmt.where(func.lower(func.coalesce(Issue.vertical, "")).in_(equipment_types))
+        task_stmt = task_stmt.where(func.lower(func.coalesce(OMTask.task_type, "")).in_(equipment_types))
     plants = list(db.scalars(plants_stmt))
     plant_names = {str(p.id): p.plant_name for p in plants}
     # Fetch the most recent 500 active issues rather than scanning unlimited historical records.
     issues = [row for row in db.scalars(issue_stmt.order_by(Issue.updated_at.desc()).limit(500))
-              if _issue_allowed(db, user, row, ids)]
+              if _issue_allowed(db, user, row, ids, equipment_types)]
     tasks = [row for row in db.scalars(task_stmt.order_by(OMTask.due_on.asc(), OMTask.created_at.desc()).limit(500))
-             if _task_allowed(db, user, row, ids)]
+             if _task_allowed(db, user, row, ids, equipment_types)]
     issues.sort(key=lambda t: (t.severity != "Critical", t.severity not in {"High", "Critical"},
                                t.etc_at.isoformat() if t.etc_at else "9999", t.ticket_no))
     tasks.sort(key=lambda t: (t.planned_due_on or t.due_on or date.max, t.work_order_no))
@@ -106,14 +114,11 @@ def field_overview(
     if ids is not None:
         wash_stmt = wash_stmt.where(WashingTable.plant_id.in_(ids))
     config_ids = set(db.scalars(select(WashingConfig.plant_id).where(WashingConfig.active.is_(True))))
-    washing_allowed = (user.role != "Assignee" or bool(user_scoped_equipment_types(db, user) and
-        WASHING_TYPE.casefold() in user_scoped_equipment_types(db, user)))
+    washing_allowed = user.role != "Assignee" or WASHING_TYPE.casefold() in equipment_types
     washing = []
     if washing_allowed:
         for table in db.scalars(wash_stmt.order_by(WashingTable.next_due_on.asc()).limit(500)):
             if table.plant_id not in config_ids:
-                continue
-            if user.role == "Assignee" and not equipment_scope_matches(db, user, table.plant_id, None, None, WASHING_TYPE):
                 continue
             due = table.rescheduled_to or table.next_due_on
             if due:

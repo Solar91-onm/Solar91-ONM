@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import date, timedelta
 from pathlib import Path
 
+from app.core.timeutil import business_today
 from app.core.models import (
     Plant,
     UserEquipmentTypeAssignment,
@@ -38,7 +39,7 @@ def test_engineer_reports_a_past_day_with_photos_and_head_or_assignee_confirm(cl
     plant = _plant(db)
     head, assignee = _setup_cycle_users(client, db, plant)
     engineer = _engineer(client, db, plant)
-    day = (date.today() - timedelta(days=3)).isoformat()
+    day = (business_today() - timedelta(days=3)).isoformat()
 
     report = client.post(f"{BASE}/daily-reports", json={
         "plant_id": str(plant.id), "job_status": "Done", "tables_cleaned": 2, "report_date": day,
@@ -92,7 +93,7 @@ def test_engineer_cannot_report_older_than_45_days_or_other_plants(client, db):
     plant = _plant(db)
     _setup_cycle_users(client, db, plant)
     _engineer(client, db, plant)
-    old = (date.today() - timedelta(days=46)).isoformat()
+    old = (business_today() - timedelta(days=46)).isoformat()
     assert client.post(f"{BASE}/daily-reports", json={"plant_id": str(plant.id), "job_status": "Done", "tables_cleaned": 1, "report_date": old}).status_code == 422
     other = Plant(site_code="OTHER01", plant_name="Other Plant")
     db.add(other)
@@ -105,7 +106,7 @@ def test_bootstrap_lite_keeps_scope_and_full_bootstrap_keeps_washing(client, db)
     table = WashingTable(legacy_id="WT-LITE-1", plant_id=plant.id, inverter_no=1, table_code="INV-01-T-01", legacy_payload={})
     db.add(table)
     db.flush()
-    db.add(WashingHistory(washing_table_id=table.id, event_type="wash", event_date=date.today(), actor="Tech", notes="n"))
+    db.add(WashingHistory(washing_table_id=table.id, event_type="wash", event_date=business_today(), actor="Tech", notes="n"))
     db.commit()
     login_user(client, db, role="O&M Head", name="Boot Head", email="boot-head@example.com")
     full = client.get("/api/bootstrap").json()
@@ -137,15 +138,19 @@ def test_overview_sends_recent_reports_by_default_and_full_window_on_request(cli
     _setup_cycle_users(client, db, plant)
     login_user(client, db, role="O&M Head", name="Window Head", email="window-head@example.com")
     for age in (1, 10, 60):
-        day = date.today() - timedelta(days=age)
+        day = business_today() - timedelta(days=age)
         db.add(WashingDailyReport(
             plant_id=plant.id, cycle_month=day.strftime("%Y-%m"), cycle_no=1, report_date=day, job_status="Done",
             tables_cleaned=1, cleaned_table_codes=[], reported_by="E", review_status="Confirmed",
         ))
     db.commit()
-    default = client.get(f"{BASE}/overview").json()
+    default_response = client.get(f"{BASE}/overview")
+    assert default_response.status_code == 200, default_response.text
+    default = default_response.json()
+    query_count = int(default_response.headers["server-timing"].split('desc="')[1].split()[0])
+    assert query_count <= 3, f"Washing overview used {query_count} database queries for one configured plant"
     assert sorted(r["report_date"] for r in default["reports"]) == sorted(
-        (date.today() - timedelta(days=a)).isoformat() for a in (1, 10))
+        (business_today() - timedelta(days=a)).isoformat() for a in (1, 10))
     full = client.get(f"{BASE}/overview?report_days=90").json()
     assert len(full["reports"]) == 3
     # figures are computed from the whole window either way
@@ -158,7 +163,7 @@ def test_pending_reports_are_always_sent_even_when_old(client, db):
     plant = _plant(db)
     _setup_cycle_users(client, db, plant)
     login_user(client, db, role="O&M Head", name="Pending Head", email="pending-head@example.com")
-    old = date.today() - timedelta(days=60)
+    old = business_today() - timedelta(days=60)
     db.add(WashingDailyReport(
         plant_id=plant.id, cycle_month=old.strftime("%Y-%m"), cycle_no=1, report_date=old, job_status="Done",
         tables_cleaned=1, cleaned_table_codes=[], reported_by="E", review_status="Pending",

@@ -71,10 +71,15 @@ class SupabaseStorage:
         url = f"{self.base}/object/authenticated/{quote(self.bucket, safe='')}/{quote(path, safe='/')}"
         try:
             response = get_storage_http_client().get(url, headers=self.headers)
-            response.raise_for_status()
-            return response.content, response.headers.get("content-type", "application/octet-stream")
         except httpx.HTTPError as exc:
-            raise HTTPException(404, "Photo evidence was not found") from exc
+            # Timeouts and connection failures are an outage, not missing evidence.
+            raise HTTPException(502, "Photo storage is temporarily unavailable. Please try again.") from exc
+        if response.status_code in {400, 404}:
+            # Supabase Storage answers a missing object with 400 or 404.
+            raise HTTPException(404, "Photo evidence was not found")
+        if response.status_code >= 400:
+            raise HTTPException(502, "Photo storage is temporarily unavailable. Please try again.")
+        return response.content, response.headers.get("content-type", "application/octet-stream")
 
     def remove(self, paths: list[str]) -> None:
         if not paths:

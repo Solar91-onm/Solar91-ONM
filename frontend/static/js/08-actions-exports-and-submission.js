@@ -304,7 +304,7 @@ function scheduledOpenEvidence(taskId,evId){
  const idx=ev.indexOf(e),prev=idx>0?ev[idx-1]:null,next=idx<ev.length-1?ev[idx+1]:null,can=scheduledCanEditEvidence(t);
  let box=document.getElementById('sched-photo-lightbox');if(!box){box=document.createElement('div');box.id='sched-photo-lightbox';box.className='cc-lbox';document.body.appendChild(box)}
  box.onclick=function(x){if(x.target===box)box.remove()};
- box.innerHTML='<div class="cc-lbox-inner"><button class="cc-lbox-close" onclick="document.getElementById(\'sched-photo-lightbox\').remove()">×</button><img src="'+e.url+'"/><div class="cc-lbox-meta"><div><b>'+esc(t.id)+'</b> · '+esc(t.plant)+' · '+esc(t.name)+'</div><div style="margin-top:6px"><b>'+esc(scheduledEvidenceLabel(e.kind))+'</b> · '+esc(e.at||'')+' · '+esc(e.by||'')+'</div>'+(e.note?'<div style="margin-top:4px"><b>Note:</b> '+esc(e.note)+'</div>':'')+'<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">'+(prev?'<button class="btn o sm" onclick="document.getElementById(\'sched-photo-lightbox\').remove();scheduledOpenEvidence(\''+esc(t.id)+'\',\''+esc(prev.id)+'\')">← Previous</button>':'')+(next?'<button class="btn o sm" onclick="document.getElementById(\'sched-photo-lightbox\').remove();scheduledOpenEvidence(\''+esc(t.id)+'\',\''+esc(next.id)+'\')">Next →</button>':'')+(can?'<button class="btn d sm" style="margin-left:auto" onclick="document.getElementById(\'sched-photo-lightbox\').remove();scheduledRemoveEvidence(\''+esc(t.id)+'\',\''+esc(e.id)+'\')">Remove photo</button>':'')+'<span style="font-size:11px;color:#9ca3af">Photo '+(idx+1)+' of '+ev.length+'</span></div></div></div>';
+ box.innerHTML='<div class="cc-lbox-inner"><button class="cc-lbox-close" onclick="document.getElementById(\'sched-photo-lightbox\').remove()">×</button><img src="'+e.url+'"/><div class="cc-lbox-meta"><div><b>'+esc(t.id)+'</b> · '+esc(t.plant)+' · '+esc(t.name)+'</div><div style="margin-top:6px"><b>'+esc(scheduledEvidenceLabel(e.kind))+'</b> · '+esc(e.at||'')+' · '+esc(e.by||'')+'</div>'+(e.note?'<div style="margin-top:4px"><b>Note:</b> '+esc(e.note)+'</div>':'')+'<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">'+(prev?'<button class="btn o sm" onclick="document.getElementById(\'sched-photo-lightbox\').remove();scheduledOpenEvidence(\''+esc(t.id)+'\',\''+esc(prev.id)+'\')">← Previous</button>':'')+(next?'<button class="btn o sm" onclick="document.getElementById(\'sched-photo-lightbox\').remove();scheduledOpenEvidence(\''+esc(t.id)+'\',\''+esc(next.id)+'\')">Next →</button>':'')+(can?'<button class="btn d sm" style="margin-left:auto" onclick="document.getElementById(\'sched-photo-lightbox\').remove();scheduledRemoveEvidence(\''+esc(t.id)+'\',\''+esc(e.id)+'\')">Remove photo</button>':'')+'<span style="font-size:12.5px;color:#9ca3af">Photo '+(idx+1)+' of '+ev.length+'</span></div></div></div>';
 }
 function scheduledBackfillLegacyEvidence(){ /* production evidence is loaded from Supabase Storage metadata */ }
 
@@ -620,7 +620,7 @@ function syncQueue(){S.offlineQueue=S.offlineQueue.map(q=>({...q,status:"Synced"
   ".viz-leg:hover{background:var(--surface-subtle)}"+
   ".viz-leg.on{background:var(--secondary)}"+
   ".viz-leg.on b{color:var(--secondary-foreground)}"+
-  ".viz-leg .pct{font-size:10.5px;color:var(--muted-foreground);margin-left:4px}"+
+  ".viz-leg .pct{font-size:12px;color:var(--muted-foreground);margin-left:4px}"+
   ".viz-ring-wrap svg{animation:ccFade .45s ease}"+
   "@keyframes ccFade{from{opacity:0}}"+
   ".ccbar{display:flex;align-items:center;gap:6px;flex-wrap:wrap}"+
@@ -682,7 +682,7 @@ function reportRowsExport(kind){
 function downloadReport(kind){
  const name=REPORT_DEFS.find(r=>r[0]===kind);
  const rows=reportRowsExport(kind);
- const csv=rows.map(r=>(Array.isArray(r)?r:[r]).map(c=>'"'+String(c==null?"":c).replace(/"/g,'""')+'"').join(",")).join("\r\n");
+ const csv=rows.map(r=>(Array.isArray(r)?r:[r]).map(c=>'"'+s91CsvText(c).replace(/"/g,'""')+'"').join(",")).join("\r\n");
  const blob=new Blob(["\ufeff"+csv],{type:"text/csv;charset=utf-8"});
  const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="solar91-"+kind+"-report-"+TODAY+".csv";
  document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),800);
@@ -727,8 +727,8 @@ function ccDonutOn(act,id){
   ".cc-hero-top{display:flex;align-items:center;gap:12px;flex-wrap:wrap;position:relative;z-index:1}"+
   ".cc-hero-mark{width:44px;height:44px;border-radius:12px;background:rgba(255,255,255,.14);display:grid;place-items:center;color:#FFD666;flex-shrink:0}"+
   ".cc-hero-title{font-size:18px;font-weight:800;letter-spacing:-.01em}"+
-  ".cc-hero-sub{font-size:11.5px;color:rgba(255,255,255,.72);margin-top:2px}"+
-  ".cc-hero-pill{display:inline-flex;align-items:center;gap:7px;font-size:11.5px;font-weight:700;padding:6px 12px;border-radius:999px;background:rgba(255,255,255,.13);border:1px solid rgba(255,255,255,.22)}"+
+  ".cc-hero-sub{font-size:12.5px;color:rgba(255,255,255,.72);margin-top:2px}"+
+  ".cc-hero-pill{display:inline-flex;align-items:center;gap:7px;font-size:12.5px;font-weight:700;padding:6px 12px;border-radius:999px;background:rgba(255,255,255,.13);border:1px solid rgba(255,255,255,.22)}"+
   ".cc-hero-dot{width:8px;height:8px;border-radius:99px;background:#4ADE80;animation:pulse 1.8s infinite}"+
   ".cc-hero-actions{margin-left:auto;display:flex;gap:8px}"+
   ".cc-hero-actions .btn{background:#fff;color:#0B2B1D;border:none}"+
@@ -737,11 +737,11 @@ function ccDonutOn(act,id){
   ".cc-hstat{background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.15);border-radius:14px;padding:10px 14px;transition:background .15s}"+
   ".cc-hstat:hover{background:rgba(255,255,255,.16)}"+
   ".cc-hstat[data-act]{cursor:pointer}"+
-  ".cc-hstat span{font-size:9.5px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:rgba(255,255,255,.65)}"+
+  ".cc-hstat span{font-size:11px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:rgba(255,255,255,.65)}"+
   ".cc-hstat b{display:block;font-size:23px;font-weight:800;letter-spacing:-.02em;margin-top:3px}"+
   ".cc-bento{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:14px}"+
   ".cc-ops-overview{color:#fff;background:linear-gradient(118deg,#0B2B1D 0%,#0E5A32 55%,#168447 100%);border:0;box-shadow:0 12px 28px rgba(11,43,29,.18)}"+
-  ".cc-ops-overview h2{font-size:15px;font-weight:800}.cc-ops-overview>div:first-child p{font-size:11.5px;color:rgba(255,255,255,.72);margin:3px 0 0}"+
+  ".cc-ops-overview h2{font-size:15px;font-weight:800}.cc-ops-overview>div:first-child p{font-size:12.5px;color:rgba(255,255,255,.72);margin:3px 0 0}"+
   ".cc-dashboard-filters{display:flex;flex-direction:column;gap:12px;padding:14px 16px!important;background:linear-gradient(140deg,#fff 0%,#F4FBF6 100%)}"+
   ".cc-filter-heading{display:flex;align-items:center;gap:9px;font-size:12px;font-weight:800;color:#174B2D}"+
   ".cc-filter-heading i{display:grid;width:28px;height:28px;place-items:center;border-radius:9px;background:#E3F5E9;color:#0C5E2A;font-style:normal}"+
@@ -753,8 +753,8 @@ function ccDonutOn(act,id){
   ".cc-work-overview>section:before{content:\"\";position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--queue-accent)}"+
   ".cc-work-overview>section:first-child{--queue-accent:#F97316}.cc-work-overview>section:nth-child(2){--queue-accent:#16A34A}.cc-work-overview>section:nth-child(3){--queue-accent:#E8A629}"+
   ".cc-ops-head{display:flex;align-items:center;justify-content:space-between;gap:10px;min-height:42px}"+
-  ".cc-ops-title{font-size:11px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:#18271D}"+
-  ".cc-ops-sub{font-size:11px;color:#69756F;margin-top:3px}"+
+  ".cc-ops-title{font-size:12.5px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:#18271D}"+
+  ".cc-ops-sub{font-size:12.5px;color:#4F5B55;margin-top:3px}"+
   ".cc-solar-spark{display:grid;width:34px;height:34px;place-items:center;border-radius:11px;background:#FFF4D6;color:#B87905;font-size:20px;box-shadow:inset 0 0 0 1px #F5E4B5}"+
   ".cc-ops-overview .btn.o{background:#fff;color:#14532D;border:1px solid #D8E7DD;white-space:nowrap}"+
   ".cc-ops-overview .btn.o:hover{background:#EFF9F2;border-color:#A8D4B6}"+
@@ -767,16 +767,16 @@ function ccDonutOn(act,id){
   ".cc-ops-arc{cursor:pointer;transition:filter .15s,opacity .15s}.cc-ops-arc:hover{filter:brightness(1.12)}.cc-ops-arc:focus{outline:none;filter:brightness(1.18)}"+
   ".cc-ops-donut>div{position:relative;z-index:2;display:flex;flex-direction:column;align-items:center}"+
   ".cc-ops-donut b{font-size:25px;font-weight:800;line-height:1;letter-spacing:-.04em;color:#17231B}"+
-  ".cc-ops-donut span{margin-top:5px;font-size:9px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:#78847D}"+
+  ".cc-ops-donut span{margin-top:5px;font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:#78847D}"+
   ".cc-ops-legend{display:grid;gap:9px;min-width:0}"+
-  ".cc-ops-legend>div,.cc-ops-legend>button{display:grid;grid-template-columns:9px minmax(0,1fr) auto;gap:8px;align-items:center;font-size:11px;color:#617067}"+
+  ".cc-ops-legend>div,.cc-ops-legend>button{display:grid;grid-template-columns:9px minmax(0,1fr) auto;gap:8px;align-items:center;font-size:12.5px;color:#617067}"+
   ".cc-ops-legend>button{width:100%;padding:2px 4px;margin:-2px -4px;border:0;border-radius:7px;background:transparent;text-align:left;cursor:pointer;font:inherit}.cc-ops-legend>button:hover,.cc-ops-legend>button:focus-visible{background:#F0F7F2;outline:none}"+
   ".cc-ops-legend i{width:8px;height:8px;border-radius:50%;background:var(--legend-color);box-shadow:0 0 0 3px rgba(16,80,35,.10)}"+
   ".cc-ops-legend b{font-size:15px;color:#1C2A21;font-variant-numeric:tabular-nums}"+
-  ".cc-ops-foot{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-top:14px;padding-top:11px;border-top:1px solid #E7EEE9;font-size:10.5px;color:#69756F}"+
+  ".cc-ops-foot{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-top:14px;padding-top:11px;border-top:1px solid #E7EEE9;font-size:12px;color:#4F5B55}"+
   ".cc-drill-filter{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;padding:10px 14px;margin:0 12px 10px;border:1px solid #CDE5D4;border-radius:10px;background:#F1FAF3;color:#28563A;font-size:12px;scroll-margin-top:82px}"+
   "#section-results{scroll-margin-top:82px}"+
-  ".cc-ops-foot strong{color:#263B2D;font-size:11px}"+
+  ".cc-ops-foot strong{color:#263B2D;font-size:12.5px}"+
   "@media(max-width:1120px){.cc-work-overview{grid-template-columns:repeat(2,minmax(0,1fr))}.cc-work-overview>section:last-child{grid-column:1/-1}.cc-work-overview>section:last-child .cc-ops-content{grid-template-columns:132px minmax(0,1fr)}}"+
   "@media(max-width:900px){.cc-filter-controls{grid-template-columns:repeat(2,minmax(0,1fr))}}"+
   "@media(max-width:640px){.cc-work-overview{grid-template-columns:1fr}.cc-ops-head{align-items:flex-start;flex-direction:column}.cc-ops-overview .btn.o{white-space:normal}.cc-ops-content{grid-template-columns:108px minmax(0,1fr);gap:13px}.cc-ops-donut{width:104px;height:104px}.cc-ops-donut:before{inset:11px}.cc-filter-controls{grid-template-columns:minmax(0,1fr)}.cc-filter-chips{gap:5px}}"+
@@ -786,16 +786,16 @@ function ccDonutOn(act,id){
   ".cc-kpi2 .cc-wm{position:absolute;right:-10px;top:-12px;opacity:.07}"+
   ".cc-kpi2 .cc-top{display:flex;align-items:center;gap:10px}"+
   ".cc-kpi2 .cc-ico2{width:38px;height:38px;border-radius:11px;display:grid;place-items:center;flex-shrink:0}"+
-  ".cc-kpi2 .cc-lab2{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--muted-foreground)}"+
+  ".cc-kpi2 .cc-lab2{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--muted-foreground)}"+
   ".cc-kpi2 .cc-val2{font-size:28px;font-weight:800;letter-spacing:-.02em;line-height:1}"+
-  ".cc-kpi2 .cc-note2{font-size:11px;color:var(--muted-foreground)}"+
+  ".cc-kpi2 .cc-note2{font-size:12.5px;color:var(--muted-foreground)}"+
   ".cc-kpi2.kpi-click{cursor:pointer}"+
   ".cc-kpi2.kpi-click:hover{transform:translateY(-3px);border-color:var(--primary);box-shadow:0 16px 34px rgba(22,163,74,.18)}"+
   ".cc-kpi2.kpi-active{border-color:var(--primary);box-shadow:0 0 0 3px rgba(22,163,74,.15),0 14px 30px rgba(22,163,74,.14)}"+
-  ".cc-kpi2 .cc-onbadge{position:absolute;top:10px;right:12px;background:var(--secondary);color:var(--secondary-foreground);font-size:8.5px;font-weight:800;letter-spacing:.06em;padding:2px 7px;border-radius:999px}"+
+  ".cc-kpi2 .cc-onbadge{position:absolute;top:10px;right:12px;background:var(--secondary);color:var(--secondary-foreground);font-size:10.5px;font-weight:800;letter-spacing:.06em;padding:2px 7px;border-radius:999px}"+
   ".cc-load2{display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:9px;font-size:12px;cursor:pointer;margin:0 -8px;transition:background .12s}"+
   ".cc-load2:hover{background:var(--surface-subtle)}"+
-  ".cc-load2 .av3{width:24px;height:24px;border-radius:99px;background:var(--secondary);border:1px solid #BFE5CC;color:var(--secondary-foreground);display:grid;place-items:center;font-size:9px;font-weight:700;flex-shrink:0}"+
+  ".cc-load2 .av3{width:24px;height:24px;border-radius:99px;background:var(--secondary);border:1px solid #BFE5CC;color:var(--secondary-foreground);display:grid;place-items:center;font-size:11px;font-weight:700;flex-shrink:0}"+
   ".cc-load2 .nm3{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}"+
   ".prio-stack2{display:flex;height:12px;border-radius:99px;overflow:hidden;background:var(--muted)}"+
   ".prio-stack2 i{display:block;cursor:pointer;min-width:0;transition:filter .15s}"+
@@ -859,7 +859,7 @@ function ccSideCard(issues){
   if(loads.length)inner+='<div style="margin-top:12px;border-top:1px solid var(--border);padding-top:10px"><div class="kpi-label" style="margin-bottom:4px">Open workload</div>'+
    loads.map(([a,n])=>'<div class="cc-load2" data-act="'+(a==='__un'?'ccChip':'workWho')+'" data-id="'+(a==='__un'?'Unassigned':esc(a))+'" data-tip="Click to view"><span class="av3">'+esc(ccIni(a==='__un'?'—':a))+'</span><span class="nm3">'+(a==='__un'?'<span class="badge b-danger">Unassigned</span>':esc(a))+'</span><b>'+n+'</b></div>').join("")+'</div>';
  }else inner=emptyState("No issues in filter","Priority mix and workload appear when issues exist.");
- return '<div class="panel sp3"><h2 style="font-size:14px;font-weight:700">Priority &amp; workload</h2><p style="font-size:11.5px;color:var(--muted-foreground);margin:3px 0 12px">Click anything to filter</p>'+inner+'</div>';
+ return '<div class="panel sp3"><h2 style="font-size:14px;font-weight:700">Priority &amp; workload</h2><p style="font-size:12.5px;color:var(--muted-foreground);margin:3px 0 12px">Click anything to filter</p>'+inner+'</div>';
 }
 /* DARK HERO — portfolio status banner (real data) */
 function ccHero(plants,open,overdue,health,mW){
@@ -874,7 +874,7 @@ function ccHero(plants,open,overdue,health,mW){
  return '<div class="cc-hero">'+
   '<div class="cc-hero-top">'+
   '<span class="cc-hero-mark">'+I.sun(22)+'</span>'+
-  '<div><div class="cc-hero-title">SOLAR 91<sup style="font-size:9px;font-weight:700;vertical-align:super;color:#FFD666;margin-left:2px">™</sup> — Portfolio Operations</div></div>'+
+  '<div><div class="cc-hero-title">SOLAR 91<sup style="font-size:11px;font-weight:700;vertical-align:super;color:#FFD666;margin-left:2px">™</sup> — Portfolio Operations</div></div>'+
   '<span class="cc-hero-pill"><span class="cc-hero-dot" style="background:'+stCol+'"></span>'+stTxt+'</span>'+
   (actions?'<div class="cc-hero-actions">'+actions+'</div>':"")+'</div>'+
   '<div class="cc-hero-stats">'+
@@ -963,14 +963,17 @@ function renderDashboard(){
  h+='<div class="panel no-stick" style="padding:0"><div style="padding:14px 16px 0"><div class="row between wrap"><div><h2 style="font-size:15px;font-weight:700">Needs attention</h2><p style="font-size:12px;color:var(--muted-foreground);margin:3px 0 10px">Critical and overdue issues first</p></div>'+(canOpenIssues?'<button class="btn g sm" data-act="go" data-id="issues">All issues</button>':"")+'</div></div>';
  if(!attnRows.length)h+=emptyState("No critical issues","Nothing overdue or unassigned in the current filter.");
  else{h+='<div style="overflow-x:auto"><table class="dense"><thead><tr><th>Plant</th><th>Issue</th><th>Equipment / maker</th><th>Priority</th><th>Age</th><th>Assignee</th><th>Status</th></tr></thead><tbody>'+
-  attnRows.slice(0,12).map(t=>{const p=plantRec(t.plant);return '<tr class="click" data-act="issue" data-id="'+esc(t.id)+'" title="Open issue"><td><div style="font-weight:600">'+(p?esc(p.name):esc(t.plant||"—"))+'</div><div style="font-size:10.5px;color:var(--muted-foreground)">'+(p?esc(p.id):"")+'</div></td><td><div style="font-weight:600">'+esc(t.id)+'</div><div style="font-size:10.5px;color:var(--muted-foreground)">'+esc(t.vertical)+'</div></td><td>'+esc(t.equip||"—")+(t.maker?'<div style="font-size:10.5px;color:var(--muted-foreground)">'+esc(t.maker)+'</div>':'')+'</td><td>'+badge(t.severity)+'</td><td class="nowrap">'+esc(ageBucket(t))+'</td><td>'+(t.assignee?esc(t.assignee):'<span style="color:var(--danger);font-weight:600">Unassigned</span>')+'</td><td>'+badge(t.status)+(isOverdueIssue(t)?' '+badge("Overdue"):"")+'</td></tr>'}).join("")+'</tbody></table></div>';}
+  attnRows.slice(0,12).map(t=>{const p=plantRec(t.plant);return '<tr class="click" data-act="issue" data-id="'+esc(t.id)+'" title="Open issue"><td><div style="font-weight:600">'+(p?esc(p.name):esc(t.plant||"—"))+'</div><div style="font-size:12px;color:var(--muted-foreground)">'+(p?esc(p.id):"")+'</div></td><td><div style="font-weight:600">'+esc(t.id)+'</div><div style="font-size:12px;color:var(--muted-foreground)">'+esc(t.vertical)+'</div></td><td>'+esc(t.equip||"—")+(t.maker?'<div style="font-size:12px;color:var(--muted-foreground)">'+esc(t.maker)+'</div>':'')+'</td><td>'+badge(t.severity)+'</td><td class="nowrap">'+esc(ageBucket(t))+'</td><td>'+(t.assignee?esc(t.assignee):'<span style="color:var(--danger);font-weight:600">Unassigned</span>')+'</td><td>'+badge(t.status)+(isOverdueIssue(t)?' '+badge("Overdue"):"")+'</td></tr>'}).join("")+'</tbody></table></div>';}
  h+='</div>';
  return h;
 }
 
 
 /* 1 · Operations date — remove the forward-only lock */
-function setOpsDate(v){if(!v)return;S.opsDate=v;TODAY=v;NOW_ISO=v+"T15:00";persist();render();toast("Operations date set to "+fmtDate(v)+" — overdue / SLA calculations refreshed.")}
+/* View-as-of date for this browser tab only. It is never saved to the server, so other users keep the real date. */
+function setOpsDate(v){if(!v||!s91ValidDate(v))return;const live=v===s91BusinessDate();S.opsDate=v;S._opsDateOverride=!live;TODAY=v;NOW_ISO=live?new Date().toISOString():v+"T15:00";render();toast(live?"Showing today's operations.":"Viewing operations as of "+fmtDate(v)+" in this tab only. Other users are not affected; reload to return to today.")}
+/* Keep "today" and "now" current in long-open tabs (midnight IST rollover, live SLA countdowns). */
+setInterval(function(){if(typeof S==="undefined"||S._opsDateOverride)return;NOW_ISO=new Date().toISOString();const d=s91BusinessDate();if(d&&d!==TODAY){TODAY=d;S.opsDate=d;if(!S.modal&&typeof render==="function")render()}},60000);
 
 /* 2 · Equipment dropdown — washing setup + equipment already used on
       tickets (so it's never empty), plus friendlier label */
@@ -1100,8 +1103,8 @@ function renderIssues(){
  issueRows.forEach(t=>{const p=plantRec(t.plant),sla=slaState(t);
   const age=issueAgeDays(t),ageClass=age>14?"old":age>7?"aging":"fresh";
   h+='<tr class="click oi-issue-row oi-priority-'+esc(t.severity||"other").toLowerCase()+' '+(S.flashId===t.id?' flash-new':'')+'" data-rid="'+esc(t.id)+'" data-act="issue" data-id="'+esc(t.id)+'"><td class="oi-ticket-cell" style="border-left:3px solid '+(priorityColors[t.severity]||"#ccc")+'"><b>'+esc(t.id)+'</b></td>'+
-  '<td><div style="font-weight:500">'+esc(p?p.id:t.plant)+'</div><div style="font-size:10.5px;color:var(--muted-foreground)">'+esc(p?p.name:"")+'</div></td>'+
-  '<td>'+esc(t.equip||"—")+(t.maker?'<div style="font-size:10.5px;color:var(--muted-foreground)">'+esc(t.maker)+'</div>':'')+'</td>'+
+  '<td><div style="font-weight:500">'+esc(p?p.id:t.plant)+'</div><div style="font-size:12px;color:var(--muted-foreground)">'+esc(p?p.name:"")+'</div></td>'+
+  '<td>'+esc(t.equip||"—")+(t.maker?'<div style="font-size:12px;color:var(--muted-foreground)">'+esc(t.maker)+'</div>':'')+'</td>'+
   '<td>'+esc(t.vertical)+'</td><td class="oi-priority-cell">'+badge(t.severity)+'</td><td class="nowrap"><span class="oi-age '+ageClass+'">'+age+'d</span><small class="oi-age-bucket">'+esc(ageBucket(t))+'</small></td>'+
   '<td>'+(t.assignee?'<span class="oi-assignee"><i aria-hidden="true">'+esc(ccIni(t.assignee))+'</i><span data-act="workWho" data-id="'+esc(t.assignee)+'">'+esc(t.assignee)+'</span></span>':'<span class="oi-unassigned">Unassigned</span>')+'</td>'+
   '<td>'+badge(t.status)+(sla==="breach"?" "+badge("Overdue"):"")+etcLabel(t)+'</td><td class="oi-action-cell"><div class="oi-row-actions">'+issueQuickActs(t)+'</div></td></tr>';});
@@ -1158,14 +1161,14 @@ function issueSpark(rows){
   '<path class="cc-line" d="'+ccSmooth(P("o"))+'" fill="none" stroke="#DC4C3E" stroke-width="2.4"/>'+
   '<path class="cc-line" d="'+ccSmooth(P("c"))+'" fill="none" stroke="#16A34A" stroke-width="2.4"/>'+
   dots("o")+dots("c")+labels+hits+'</svg>'+
-  '<div class="row" style="gap:14px;justify-content:flex-end;font-size:11px;color:var(--muted-foreground);margin-top:6px"><span class="row" style="gap:5px"><span class="dot" style="width:8px;height:8px;background:#DC4C3E"></span>Created</span><span class="row" style="gap:5px"><span class="dot" style="width:8px;height:8px;background:#16A34A"></span>Resolved</span><span class="row" style="gap:5px"><span class="dot" style="width:8px;height:8px;background:#3B82F6"></span>Open backlog</span><span class="muted">click a day to focus</span></div></div>';
+  '<div class="row" style="gap:14px;justify-content:flex-end;font-size:12.5px;color:var(--muted-foreground);margin-top:6px"><span class="row" style="gap:5px"><span class="dot" style="width:8px;height:8px;background:#DC4C3E"></span>Created</span><span class="row" style="gap:5px"><span class="dot" style="width:8px;height:8px;background:#16A34A"></span>Resolved</span><span class="row" style="gap:5px"><span class="dot" style="width:8px;height:8px;background:#3B82F6"></span>Open backlog</span><span class="muted">click a day to focus</span></div></div>';
 }
 
 /* ── DONUT v2 — rounded segments with gaps (every view) ── */
 function vizDonut(title,slices,opts){
  opts=opts||{};
  const total=slices.reduce((s,x)=>s+(x.n||0),0),cx=88,cy=88,r=64,wd=15,C=2*Math.PI*r;
- let h='<div><h2 style="font-size:14px;font-weight:700">'+title+'</h2><p style="font-size:11.5px;color:var(--muted-foreground);margin:3px 0 12px">'+(opts.note||"Click a segment to filter")+'</p>';
+ let h='<div><h2 style="font-size:14px;font-weight:700">'+title+'</h2><p style="font-size:12.5px;color:var(--muted-foreground);margin:3px 0 12px">'+(opts.note||"Click a segment to filter")+'</p>';
  if(!total)return h+emptyState(opts.empty||"No records","Nothing to chart in the current filter.")+'</div>';
  const anySel=slices.some(s=>s.n&&s.act&&ccDonutOn(s.act,s.id));
  let acc=0,circ="";
@@ -1200,8 +1203,8 @@ function rankBars(rows,act,color){
   ".cc-toast .tico{width:34px;height:34px;border-radius:10px;display:grid;place-items:center;flex-shrink:0}"+
   ".cc-toast .tc{min-width:0;flex:1;padding-right:4px}"+
   ".cc-toast .tt{font-size:12.5px;font-weight:700;line-height:1.3}"+
-  ".cc-toast .tm{font-size:11.5px;color:var(--muted-foreground);margin-top:2px;line-height:1.45;word-wrap:break-word}"+
-  ".cc-toast .tts{font-size:10px;color:var(--muted-foreground);margin-top:5px}"+
+  ".cc-toast .tm{font-size:12.5px;color:var(--muted-foreground);margin-top:2px;line-height:1.45;word-wrap:break-word}"+
+  ".cc-toast .tts{font-size:12px;color:var(--muted-foreground);margin-top:5px}"+
   ".cc-toast .tts b{color:var(--primary)}"+
   ".cc-toast .tx{border:0;background:none;color:var(--muted-foreground);cursor:pointer;font-size:15px;line-height:1;padding:2px 0 0 6px;flex-shrink:0}"+
   ".cc-toast .tx:hover{color:var(--danger)}"+
@@ -1285,7 +1288,7 @@ function renderWork(){
  const mix=[{label:"Active",id:"active",n:assigned,color:"#3B82F6",act:""},{label:"Overdue",id:"overdue",n:overdue.length,color:"#DC4C3E",act:""},{label:"Resolved",id:"resolved",n:resolved.length,color:"#16A34A",act:""}];
  if(!who){
   const loadBars=loads.filter(r=>r.assigned||r.overdue).map(r=>({label:r.name,id:r.name,n:r.assigned}));
-  h+='<div class="kgrid" style="grid-template-columns:1.1fr .9fr;align-items:stretch"><div class="panel"><h2 style="font-size:14px;font-weight:700">Engineer workload</h2><p style="font-size:11.5px;color:var(--muted-foreground);margin:3px 0 10px">Open assigned issues · click a bar to open that engineer only</p>'+rankBars(loadBars,"workWho","#0F9F8C")+'</div><div class="panel">'+vizDonut("Overdue vs active",mix,{center:"tickets",note:"Assigned open work vs overdue vs resolved",empty:"No assigned work yet"})+'</div></div>';
+  h+='<div class="kgrid" style="grid-template-columns:1.1fr .9fr;align-items:stretch"><div class="panel"><h2 style="font-size:14px;font-weight:700">Engineer workload</h2><p style="font-size:12.5px;color:var(--muted-foreground);margin:3px 0 10px">Open assigned issues · click a bar to open that engineer only</p>'+rankBars(loadBars,"workWho","#0F9F8C")+'</div><div class="panel">'+vizDonut("Overdue vs active",mix,{center:"tickets",note:"Assigned open work vs overdue vs resolved",empty:"No assigned work yet"})+'</div></div>';
  }else{
   h+='<div class="panel" style="max-width:420px">'+vizDonut("Overdue vs active",mix,{center:"tickets",note:"Only "+esc(who)+" — issues assigned to this engineer",empty:"No assigned work for this engineer"})+'</div>';
  }
@@ -1303,7 +1306,7 @@ function renderWork(){
    '<div class="row wrap" style="gap:6px">'+[["open","Open ("+open.length+")"],["all","All ("+src.length+")"]].map(([id,l])=>'<button class="pill sev-pill'+(mode===id?" active":"")+'" onclick="S.workIssueMode=\''+id+'\';render()">'+l+'</button>').join("")+'</div></div></div>';
   if(rows.length)h+='<div style="overflow-x:auto"><table class="dense"><thead><tr><th>Issue</th><th>Plant</th><th>Priority</th><th>Status</th><th>Age</th><th>Action</th></tr></thead><tbody>'+
    rows.map(t=>{const sla=slaState(t);
-    return '<tr class="click" data-act="issue" data-id="'+esc(t.id)+'"><td style="font-weight:600">'+esc(t.id)+'<div style="font-size:10.5px;color:var(--muted-foreground)">'+esc(t.vertical)+'</div></td><td>'+esc(t.plant)+'</td><td>'+badge(t.severity)+'</td><td>'+badge(t.status)+(sla==="breach"?" "+badge("Overdue"):"")+'</td><td class="nowrap" style="'+(sla==="breach"?"color:var(--danger);font-weight:700":"")+'">'+esc(ageBucket(t))+'</td><td>'+issueQuickActs(t)+'</td></tr>'}).join("")+'</tbody></table></div>';
+    return '<tr class="click" data-act="issue" data-id="'+esc(t.id)+'"><td style="font-weight:600">'+esc(t.id)+'<div style="font-size:12px;color:var(--muted-foreground)">'+esc(t.vertical)+'</div></td><td>'+esc(t.plant)+'</td><td>'+badge(t.severity)+'</td><td>'+badge(t.status)+(sla==="breach"?" "+badge("Overdue"):"")+'</td><td class="nowrap" style="'+(sla==="breach"?"color:var(--danger);font-weight:700":"")+'">'+esc(ageBucket(t))+'</td><td>'+issueQuickActs(t)+'</td></tr>'}).join("")+'</tbody></table></div>';
   else h+=emptyState("No "+(mode==="open"?"open ":"")+"issues for this engineer","Switch to All, or assign work from the issue register.");
   h+='</div>';
   /* person detail — SCHEDULED TASKS */
@@ -1315,8 +1318,8 @@ function renderWork(){
     if(t.status==="Scheduled")a+='<button class="btn o sm" onclick="startTask(\''+t.id+'\')">Start</button>';
     if(t.status==="In Progress")a+='<button class="btn p sm" onclick="openModal(\'complete\',{id:\''+t.id+'\'})">Complete</button>';
     a+='<button class="btn g sm" onclick="openModal(\'reassignTask\',{id:\''+t.id+'\'})">Reassign</button></div>';
-    return '<tr class="click" onclick="if(!event.target.closest(\'button\'))openModal(\'taskDetail\',{id:\''+t.id+'\'})"><td style="font-weight:500;min-width:180px">'+esc(t.name)+'<div style="font-size:10.5px;color:var(--muted-foreground)">'+esc(t.type)+' · '+t.freq+'</div></td>'+
-    '<td><div>'+esc(t.plant)+'</div><div style="font-size:10.5px;color:var(--muted-foreground)">'+esc(t.equip)+'</div></td>'+
+    return '<tr class="click" onclick="if(!event.target.closest(\'button\'))openModal(\'taskDetail\',{id:\''+t.id+'\'})"><td style="font-weight:500;min-width:180px">'+esc(t.name)+'<div style="font-size:12px;color:var(--muted-foreground)">'+esc(t.type)+' · '+t.freq+'</div></td>'+
+    '<td><div>'+esc(t.plant)+'</div><div style="font-size:12px;color:var(--muted-foreground)">'+esc(t.equip)+'</div></td>'+
     '<td class="nowrap">'+fmtD(t.due)+(od>0?'<div class="flag" style="color:var(--danger)">overdue '+od+'d</div>':'')+'</td>'+
     '<td>'+badge(tvs(t))+'</td><td>'+a+'</td></tr>'}).join("")+'</tbody></table></div>';
   else h+=emptyState("No Preventive Maintenance tasks for this engineer","Tasks assigned to "+esc(who)+" appear here.");
@@ -1450,7 +1453,7 @@ function renderDataHub(){
   const H=S.impHeaders||[];
   const found=spec.map.filter(m=>m.slice(1).some(a=>H.indexOf(a)>=0));
   const missing=spec.req[0][0].filter?spec.req[0][0]:spec.req[0][0];
-  matchInfo='<div style="font-size:11.5px;color:var(--muted-foreground);margin-top:8px">Matched columns: '+(found.length?found.map(m=>'<b style="color:var(--secondary-foreground)">'+esc(m[0])+'</b>').join(", "):"—")+' · rows: <b>'+S.impRows.length+'</b></div>';
+  matchInfo='<div style="font-size:12.5px;color:var(--muted-foreground);margin-top:8px">Matched columns: '+(found.length?found.map(m=>'<b style="color:var(--secondary-foreground)">'+esc(m[0])+'</b>').join(", "):"—")+' · rows: <b>'+S.impRows.length+'</b></div>';
  }
  return '<div class="ops-page ops-data"><div class="ops-page-head"><div><div class="kpi-label">SOLAR OPERATIONS · DATA CONTROL</div><h1>Data / Imports</h1><p>Review operational records and import validated CSV data into the live application.</p></div><span class="ops-page-status"><i></i>FastAPI → Supabase</span></div>'+
   '<div class="ops-data-metrics">'+kpiTile("Plants",S.plants.length,"live register","var(--foreground)",'data-act="go" data-id="plants"')+kpiTile("Issues",S.issues.length,"live tickets","var(--info)",'data-act="kpi" data-id="open"')+kpiTile("Handovers",S.handovers.length,"project intake","var(--foreground)","")+kpiTile("Database persistence","On","Connected source","var(--success)","")+'</div>'+
@@ -1520,9 +1523,9 @@ function ccOpenIssuesPanel(){
   '<div style="overflow-x:auto"><table class="dense"><thead><tr><th>Issue</th><th>Plant</th><th>Equipment / maker</th><th>Priority</th><th>Age</th><th>Assignee</th><th>Status</th><th>Action</th></tr></thead><tbody>'+
   rows.map(t=>{const p=plantRec(t.plant);
    return '<tr class="click" data-act="issue" data-id="'+esc(t.id)+'">'+
-   '<td style="font-weight:600">'+esc(t.id)+'<div style="font-size:10.5px;color:var(--muted-foreground)">'+esc(t.vertical)+'</div></td>'+
-   '<td><div style="font-weight:500">'+esc(t.plant)+'</div><div style="font-size:10.5px;color:var(--muted-foreground)">'+(p?esc(p.id):"")+'</div></td>'+
-   '<td>'+esc(t.equip||"—")+(t.maker?'<div style="font-size:10.5px;color:var(--muted-foreground)">'+esc(t.maker)+'</div>':'')+'</td>'+
+   '<td style="font-weight:600">'+esc(t.id)+'<div style="font-size:12px;color:var(--muted-foreground)">'+esc(t.vertical)+'</div></td>'+
+   '<td><div style="font-weight:500">'+esc(t.plant)+'</div><div style="font-size:12px;color:var(--muted-foreground)">'+(p?esc(p.id):"")+'</div></td>'+
+   '<td>'+esc(t.equip||"—")+(t.maker?'<div style="font-size:12px;color:var(--muted-foreground)">'+esc(t.maker)+'</div>':'')+'</td>'+
    '<td>'+badge(t.severity)+'</td>'+
    '<td class="nowrap" style="'+(isOverdueIssue(t)?"color:var(--danger);font-weight:700":"")+'">'+esc(ageBucket(t))+'</td>'+
    '<td>'+(t.assignee?esc(t.assignee):'<span style="color:var(--danger);font-weight:600">Unassigned</span>')+'</td>'+
@@ -1630,7 +1633,7 @@ function ccCloseDialog(id){
   '<button class="btn" style="border:none;color:var(--muted-foreground)" onclick="document.getElementById(\'cc-close-ovl\').remove()">'+I.x(18)+'</button></div>'+
   '<div class="modal-b"><div class="field" style="margin:0"><span class="lbl">Closure remarks — why is this ticket being closed? (optional)</span>'+
   '<textarea id="dc-rem" class="txt" rows="3" placeholder="e.g. Duplicate of another ticket / resolved on call / not reproducible…"></textarea></div>'+
-  '<div style="font-size:11.5px;color:var(--muted-foreground);margin-top:10px">Recorded in ticket history as a direct close. Reopen stays available.</div></div>'+
+  '<div style="font-size:12.5px;color:var(--muted-foreground);margin-top:10px">Recorded in ticket history as a direct close. Reopen stays available.</div></div>'+
   '<div class="modal-f"><button class="btn o" onclick="document.getElementById(\'cc-close-ovl\').remove()">Cancel</button>'+
   '<button class="btn p" onclick="ccDirectClose(\''+esc(t.id)+'\')">'+I.check(13)+' Confirm close</button></div></div>';
  document.body.appendChild(o);
@@ -1781,47 +1784,9 @@ console.log("[CC TYPE FIX v2] loaded OK");
 })();
 
 
-console.log("[CC MW v2] loaded OK");
-(function(){
- if(window._ccmw2)return;window._ccmw2=true;
- var app=document.getElementById("app");if(!app)return;
- function fmt(n){var v=Math.round(n*100)/100;var s=v>=100?v.toFixed(1):v.toFixed(2);s=s.replace(/\.?0+$/,"");return s===""?"0":s}
- function isNum(t){return /^[\d,]+(\.\d+)?$/.test(String(t||"").trim())}
- function toNum(t){return parseFloat(String(t).replace(/,/g,""))}
- var BOX=".metric,.viz-kpi,.cc-kpi2,.cc-hstat,.status-circle-card,.ring-card";
- function fixBoxes(){
-  var conts=app.querySelectorAll(BOX);
-  for(var a=0;a<conts.length;a++){
-   var box=conts[a];
-   /* text inside the box: "2520 kW" → "2.52 MW", "(kW)" → "(MW)" */
-   var w=document.createTreeWalker(box,NodeFilter.SHOW_TEXT,null),list=[];
-   while(w.nextNode())list.push(w.currentNode);
-   var found=false;
-   for(var i=0;i<list.length;i++){
-    var node=list[i],t=node.nodeValue;
-    if(!t||!/\bkW\b/i.test(t))continue;
-    found=true;
-    var m=t.match(/(\d[\d,]*(?:\.\d+)?)\s*\/\s*(\d[\d,]*(?:\.\d+)?)\s*\bkW\b/i);
-    if(m){node.nodeValue=t.replace(m[0],fmt(toNum(m[1])/1000)+" / "+fmt(toNum(m[2])/1000)+" MW");continue}
-    m=t.match(/(\d[\d,]*(?:\.\d+)?)\s*\bkW\b/i);
-    if(m){node.nodeValue=t.replace(m[0],fmt(toNum(m[1])/1000)+" MW");continue}
-    node.nodeValue=t.replace(/\bkW\b/gi,"MW");
-   }
-   if(!found)continue;
-   /* label said (kW) → divide the plain numeric value beside it */
-   var vals=box.querySelectorAll(".v,.kpi-value,.cc-val2,.viz-ring-hole b");
-   for(var v=0;v<vals.length;v++){
-    var el=vals[v],t=(el.textContent||"").trim();
-    if(!isNum(t))continue;
-    var num=toNum(t);if(!isFinite(num))continue;
-    if(el.childNodes.length===1&&el.firstChild.nodeType===3)el.firstChild.nodeValue=fmt(num/1000);
-    else el.textContent=fmt(num/1000);
-   }
-  }
- }
- new MutationObserver(function(){try{fixBoxes()}catch(e){}}).observe(app,{childList:true,subtree:true});
- setTimeout(function(){try{fixBoxes()}catch(e){}},60);
-})();
+/* "CC MW v2" removed (Oct 2026): it rewrote rendered numbers in place ("kW" -> "MW", value / 1000) after every
+   DOM change, which mixed units (DC label kWp beside an MW value) and could divide any tile whose note said kW.
+   Capacity tiles now render their own units (s91Mw in 00-auth-data-and-imports.js). */
 
 console.log("[CC LINKFIX] loaded OK");
 function ccLinkPlants(){

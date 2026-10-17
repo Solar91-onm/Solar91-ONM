@@ -32,7 +32,7 @@
     "}",
 
     /* LIVE pill — trim the padding */
-    ".topbar .live-pill{padding:0 9px!important;font-size:10.5px!important}",
+    ".topbar .live-pill{padding:0 9px!important;font-size:12px!important}",
 
     /* Role switcher — a bit tighter */
     "#cc-role-switch{"+

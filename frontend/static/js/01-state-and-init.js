@@ -77,19 +77,21 @@ async function init(){
   S.customPlantColumns=S.customPlantColumns||[];S.plantCustomValues=S.plantCustomValues||{};S.plantEnrich=S.plantEnrich||{};
   if(!S.view||!["dashboard","plants","plant","work","performance","reports","data","settings","equipment","om-module"].includes(S.view))S.view="dashboard";
   s91NormalizeRows();
-  S.opsDate=S.opsDate||new Date().toISOString().slice(0,10);TODAY=S.opsDate;NOW_ISO=TODAY+"T15:00";
+  S.opsDate=s91ValidDate(S.opsDate)?S.opsDate:s91BusinessDate();S._opsDateOverride=false;TODAY=S.opsDate;NOW_ISO=new Date().toISOString();
   S.issF=Object.assign(blankIssF(),S.issF||{});["from","to"].forEach(k=>{const v=S.issF[k];if(v&&!s91ValidDate(v))S.issF[k]=""});S.scada={...SCADA_DEFAULT,...(S.scada||{})};
   S.issues=S.issues.map(t=>{const severity=normalizeIssueSeverity(t.severity),etc=t.etc&&!isNaN(new Date(t.etc).getTime())?t.etc:addHoursISO(t.created||stampISO(),etcHrs(severity));return Object.assign({},t,{severity,vertical:VERT_MIGRATE[t.vertical]||t.vertical,etc})});
   S.handovers=S.handovers.map(h=>({...h,location:h.location||"",projectType:h.projectType||"",items:(h.items||[]).map(i=>({...i,instructions:i.instructions||""}))}));
   setLastServerState(stateSnapshot());
-  await refreshTeamPool();
   if(typeof s91ApplyRoute==="function")s91ApplyRoute(true);
   bindUi();render();
+  // The Overview does not depend on team-picker options. Load them in parallel with
+  // first paint so a slow users/assignees endpoint cannot hold the whole portal open.
+  void refreshTeamPool();
   if(typeof s91SyncRoute==="function")s91SyncRoute(true);
   if(S.view==="equipment"&&typeof m26EqLoadPage==="function")m26EqLoadPage(false);
  }catch(e){
   if(String(e.message).includes("Authentication required"))return;
-  console.error(e);document.getElementById("app").innerHTML='<div style="max-width:720px;margin:80px auto;padding:24px;font-family:Inter,system-ui;border:1px solid #E4E9E6;border-radius:14px;background:#fff"><h2>Solar91 could not load</h2><p style="color:#69756F">The FastAPI backend or database is unavailable. Production data is not falling back to browser storage.</p><pre style="white-space:pre-wrap">'+esc(e.message)+'</pre><button onclick="location.reload()" style="padding:9px 14px">Retry</button></div>';
+  console.error(e);document.getElementById("app").innerHTML='<div style="max-width:720px;margin:80px auto;padding:24px;font-family:Inter,system-ui;border:1px solid #E4E9E6;border-radius:14px;background:#fff"><h2>Solar91 could not load</h2><p style="color:#4F5B55">The FastAPI backend or database is unavailable. Production data is not falling back to browser storage.</p><pre style="white-space:pre-wrap">'+esc(e.message)+'</pre><button onclick="location.reload()" style="padding:9px 14px">Retry</button></div>';
  }
 }
 /* typing in search boxes: update state now, repaint once the person pauses (keeps typing smooth) */
@@ -157,7 +159,7 @@ function toggleEquipFree(prefix){const sel=document.getElementById(prefix+"-equi
 function pickedEquip(prefix){const sel=document.getElementById(prefix+"-equip-sel"),free=document.getElementById(prefix+"-equip-free");if(sel&&sel.value!=="__other")return sel.value;const inp=free&&(free.value!==undefined?free:free.querySelector("input"));return(inp&&inp.value.trim())||"—"}
 function vendorStats(v){const rows=S.issues.filter(t=>t.vendor&&t.vendor.name===v.name);const closed=rows.filter(t=>t.status==="Closed"&&t.closure&&t.closure.closedAt);const met=closed.filter(t=>new Date(t.closure.closedAt)<=new Date(t.etc)).length;return{jobs:rows.length,closed:closed.length,onTime:closed.length?Math.round(100*met/closed.length):null}}
 function slaLive(c){const issues=S.issues.filter(t=>(c.project==="All Plants"||t.plant===c.project)&&t.created),hrs=t=>{const n=Number(c[String(t.severity||"").toLowerCase()]);return Number.isFinite(n)&&n>0?n:etcHrs(t.severity)},due=t=>addHoursISO(t.created,hrs(t));const closed=issues.filter(t=>t.status==="Closed"&&t.closure&&t.closure.closedAt);const met=closed.filter(t=>new Date(t.closure.closedAt)<=new Date(due(t))).length;const openBreach=issues.filter(t=>t.status!=="Closed"&&t.status!=="Resolved"&&new Date(NOW_ISO)>new Date(due(t))).length;const washRows=S.washing.filter(t=>c.project==="All Plants"||t.plant===c.project);const wf=Number(c.washDays)||0;const washBreaches=wf?washRows.filter(t=>daysSince(t)>wf).length:0;const total=closed.length;return{breach:openBreach+washBreaches>0,issueBreaches:openBreach,washBreaches,metPct:total?Math.round(100*met/total):null}}
-function wizardGo(prefix,step){document.querySelectorAll(".wiz-"+prefix).forEach(x=>x.style.display="none");const el=document.querySelector(".wiz-"+prefix+"[data-step='"+step+"']");if(el)el.style.display="block";document.querySelectorAll("[data-wiz-final='"+prefix+"']").forEach(x=>x.style.display=step>=3?"inline-flex":"none")}
+function wizardGo(prefix,step){if(prefix==="ticket"&&step===2&&typeof s91TkEquipRefresh==="function"){const pick=document.getElementById("tk-equip-pick");if(pick&&!pick.value)s91TkEquipRefresh()}document.querySelectorAll(".wiz-"+prefix).forEach(x=>x.style.display="none");const el=document.querySelector(".wiz-"+prefix+"[data-step='"+step+"']");if(el)el.style.display="block";document.querySelectorAll("[data-wiz-final='"+prefix+"']").forEach(x=>x.style.display=step>=3?"inline-flex":"none")}
 function allNotifs(){const out=(S.events||[]).map(eventNotif);
  {const nr=S.plants.filter(p=>XL_BY[p.id]&&p.genDate&&p.genDate<XL_LAST);if(nr.length)out.push({id:"xl-nr",title:nr.length+" plant"+(nr.length===1?"":"s")+" not reporting on "+xlFmtD(XL_LAST),meta:nr.slice(0,3).map(p=>p.id+" (last "+xlFmtD(p.genDate)+")").join(", ")+(nr.length>3?" +"+(nr.length-3)+" more":"")+" · Excel DGR"});
   const lo=S.plants.map(p=>({p,m:xlPlantMtd(p.id)})).filter(z=>z.m&&z.m.pct!=null&&z.m.days>=3&&z.m.pct<90).sort((a,b)=>a.m.pct-b.m.pct);

@@ -80,7 +80,7 @@
     "#cc-role-switch:focus{border-color:var(--primary)!important;box-shadow:0 0 0 3px rgba(22,163,74,.13)!important}",
 
     /* live pill — subtle but correct height */
-    ".topbar .live-pill{height:32px;padding:0 12px!important;display:inline-flex!important;align-items:center!important;font-size:11px!important}",
+    ".topbar .live-pill{height:32px;padding:0 12px!important;display:inline-flex!important;align-items:center!important;font-size:12.5px!important}",
 
     /* ---- ICON BUTTONS (both bells, gear) ---- */
     ".topbar .icon-btn,"+
@@ -139,7 +139,7 @@
       "border-radius:999px!important;"+
       "background:var(--danger)!important;"+
       "color:#fff!important;"+
-      "font-size:10px!important;font-weight:800!important;"+
+      "font-size:12px!important;font-weight:800!important;"+
       "display:grid;place-items:center;"+
       "padding:0 5px!important;"+
       "border:2px solid #fff!important;"+
@@ -188,7 +188,7 @@
     /* ---- YELLOW WORKFLOW FLAG ---- */
     ".cc-wf-flag{"+
       "display:inline-flex!important;align-items:center;gap:5px!important;"+
-      "font-size:10.5px!important;font-weight:700!important;"+
+      "font-size:12px!important;font-weight:700!important;"+
       "padding:3px 9px!important;border-radius:999px!important;"+
       "background:linear-gradient(135deg,#fef3c7,#fde68a)!important;"+
       "color:#7c2d12!important;"+
@@ -211,7 +211,7 @@
     ".filter-panel .field .lbl{"+
       "color:#4b5b52!important;"+
       "font-weight:700!important;"+
-      "font-size:11px!important;"+
+      "font-size:12.5px!important;"+
       "text-transform:uppercase;"+
       "letter-spacing:.04em"+
     "}",
@@ -226,7 +226,7 @@
     ".content .panel .row.wrap .field .lbl{"+
       "color:#4b5b52;"+
       "font-weight:700;"+
-      "font-size:11px;"+
+      "font-size:12.5px;"+
       "text-transform:uppercase;"+
       "letter-spacing:.04em"+
     "}",
@@ -244,7 +244,7 @@
     "}",
     ".search-result{padding:11px 16px!important}",
     ".search-result b{font-size:12.5px!important}",
-    ".search-result span{font-size:11px!important}",
+    ".search-result span{font-size:12.5px!important}",
 
     /* avatar block a touch cleaner */
     ".topbar .tb-av{width:38px!important;height:38px!important;font-size:12px!important}",

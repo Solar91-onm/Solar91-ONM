@@ -203,7 +203,7 @@
             return '<option value="'+xesc(n)+'"'+(n===current?' selected':'')+'>'+xesc(n)+'</option>';
           }).join("")+
         '</select>'+
-        '<span style="font-size:10.5px;color:var(--muted-foreground);margin-top:2px;display:block">'+
+        '<span style="font-size:12px;color:var(--muted-foreground);margin-top:2px;display:block">'+
           'Takes precedence over the derived assignment (most tickets on this plant). Clear it to fall back to auto.'+
         '</span>'+
       '</div>'+
@@ -362,7 +362,7 @@
     var wrap = document.createElement("div");
     wrap.style.cssText = "display:flex;align-items:center;gap:6px;margin-right:6px";
     wrap.innerHTML =
-      '<span style="font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted-foreground);white-space:nowrap">Test role</span>'+
+      '<span style="font-size:12px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted-foreground);white-space:nowrap">Test role</span>'+
       '<select id="cc-role-switch" class="inp" style="width:170px" onchange="ccSwitchRole(this.value)">'+
         ROLES.map(function(r){
           return '<option value="'+xesc(r)+'"'+(r===getRole()?' selected':'')+'>'+xesc(r)+'</option>';
@@ -486,9 +486,9 @@
      ================================================================ */
   var style = document.createElement("style");
   style.textContent = [
-    '.cc-wf-btn{font-size:10.5px;font-weight:700;padding:2px 7px;border-radius:6px;cursor:pointer;font-family:inherit;line-height:1.4}',
+    '.cc-wf-btn{font-size:12px;font-weight:700;padding:2px 7px;border-radius:6px;cursor:pointer;font-family:inherit;line-height:1.4}',
     '.cc-wf-btn:hover{filter:brightness(.95)}',
-    '.cc-wf-flag{display:inline-flex;align-items:center;gap:4px;font-size:10.5px;font-weight:700;padding:2px 7px;border-radius:6px;background:var(--warning-soft);color:var(--warning-strong);border:1px solid #fcd34d;white-space:nowrap}',
+    '.cc-wf-flag{display:inline-flex;align-items:center;gap:4px;font-size:12px;font-weight:700;padding:2px 7px;border-radius:6px;background:var(--warning-soft);color:var(--warning-strong);border:1px solid #fcd34d;white-space:nowrap}',
     '.cc-wf-flag.seen{background:var(--info-soft);color:var(--info);border-color:#bfdbfe}',
     '#cc-role-switch{background:var(--surface-subtle);font-size:12px;padding:6px 8px}'
   ].join("");
@@ -597,7 +597,7 @@
       return '<label class="row" style="gap:10px;font-size:13px;font-weight:500;padding:10px 4px;border-bottom:1px solid var(--border);cursor:pointer;align-items:flex-start">'+
         '<input type="checkbox" name="cc-upd-target" value="'+xesc(tgt.key)+'" data-name="'+xesc(tgt.name)+'" checked style="margin-top:3px"/>'+
         '<div><div style="font-weight:600">'+xesc(tgt.name)+'</div>'+
-        '<div style="font-size:11px;color:var(--muted-foreground);margin-top:1px">'+xesc(tgt.role)+'</div></div>'+
+        '<div style="font-size:12.5px;color:var(--muted-foreground);margin-top:1px">'+xesc(tgt.role)+'</div></div>'+
       '</label>';
     }).join("");
 
@@ -616,12 +616,12 @@
         '<button class="btn" style="border:none;color:var(--muted-foreground)" onclick="document.getElementById(\'cc-upd-ovl\').remove()">'+closeIc+'</button>'+
         '</div>'+
         '<div class="modal-b">'+
-          '<div style="font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--muted-foreground);margin-bottom:6px">Who should we ask?</div>'+
+          '<div style="font-size:12.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--muted-foreground);margin-bottom:6px">Who should we ask?</div>'+
           rowsHtml +
           '<div class="field" style="margin-top:16px"><span class="lbl">Message (optional)</span>'+
             '<textarea id="cc-upd-msg" class="txt" rows="2" placeholder="e.g. Client chasing — any progress on the fan replacement?"></textarea>'+
           '</div>'+
-          '<div style="font-size:11.5px;color:var(--muted-foreground);margin-top:10px;line-height:1.5">'+
+          '<div style="font-size:12.5px;color:var(--muted-foreground);margin-top:10px;line-height:1.5">'+
             'Each recipient gets a notification. The request is logged in the ticket thread and clears automatically when a progress note is posted.'+
           '</div>'+
         '</div>'+

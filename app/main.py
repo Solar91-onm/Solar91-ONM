@@ -13,7 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from sqlalchemy import text
 from fastapi.encoders import jsonable_encoder
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.exc import SQLAlchemyError
@@ -21,6 +21,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from app.audit.router import router as audit_router
 from app.field.router import router as field_router
 from app.auth.router import router as auth_router
+from app.core.assets import asset_hash, build_info, version_static_urls
 from app.core.config import get_settings
 from app.imports.router import router as imports_router
 from app.issues.router import router as issues_router
@@ -45,6 +46,8 @@ SETUP_SCRIPT_TIMEOUT_SECONDS = 60
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    info = build_info(app.version, settings.app_env)
+    logger.info("Solar91 starting version=%s commit=%s frontend_bundle=%s", info["app_version"], info["commit_short"] or "unknown", info["frontend_bundle"])
     if settings.app_env == "production":
         app.state.bootstrap_task = asyncio.create_task(_run_deploy_setup())
         app.state.bootstrap_ready = False
@@ -89,8 +92,8 @@ app.add_middleware(
     allow_origins=settings.origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
-    allow_headers=["Content-Type", "Authorization", "X-Request-ID"],
-    expose_headers=["X-Request-ID", "Server-Timing"],
+    allow_headers=["Content-Type", "Authorization", "X-Request-ID", "Rndr-Id"],
+    expose_headers=["X-Request-ID", "Rndr-Id", "Server-Timing"],
 )
 
 # Compress big responses (the 740 KB page shrinks to roughly 130 KB) so pages load fast on site-office mobile networks.
@@ -98,7 +101,7 @@ app.add_middleware(GZipMiddleware,minimum_size=1000)
 
 @app.middleware("http")
 async def require_bootstrap(request: Request, call_next):
-    if settings.app_env == "production" and not app.state.bootstrap_ready and request.url.path not in {"/health", "/health/ready"}:
+    if settings.app_env == "production" and not app.state.bootstrap_ready and request.url.path not in {"/health", "/health/ready", "/health/version"}:
         return JSONResponse(status_code=503,content={"status":"initializing"})
     return await call_next(request)
 
@@ -110,7 +113,14 @@ async def security_headers(request: Request, call_next):
     response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
     response.headers.setdefault("Permissions-Policy", "camera=(self), microphone=(), geolocation=()")
     if request.url.path.startswith("/static/"):
-        response.headers.setdefault("Cache-Control", "public, max-age=0, must-revalidate" if request.url.path.endswith((".js", ".html")) else "public, max-age=3600")
+        # The portal page links every asset as /static/...?v=<content hash>. A request carrying the current
+        # hash can be cached for a year (a changed file gets a new URL); anything else is revalidated.
+        version = request.query_params.get("v")
+        current = asset_hash(request.url.path[len("/static/"):]) if version else None
+        response.headers.setdefault(
+            "Cache-Control",
+            "public, max-age=31536000, immutable" if version and version == current else "public, max-age=0, must-revalidate",
+        )
     if settings.app_env == "production":
         response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
     if request.url.path == "/":
@@ -248,18 +258,23 @@ app.include_router(users_invites_router)
 
 @app.get("/",include_in_schema=False)
 def index(request:Request):
-    return templates.TemplateResponse(
+    info = build_info(app.version, settings.app_env)
+    html = templates.get_template("index.html").render(
         request=request,
-        name="index.html",
-        context={
-            "auth_provider": "clerk",
-            "clerk_publishable_key": settings.clerk_publishable_key,
-            "clerk_frontend_api": settings.clerk_frontend_api,
-        },
+        auth_provider="clerk",
+        clerk_publishable_key=settings.clerk_publishable_key,
+        clerk_frontend_api=settings.clerk_frontend_api,
+        build_id=(info["commit_short"] or "local") + "." + info["frontend_bundle"],
     )
+    return HTMLResponse(version_static_urls(html))
 
 @app.get("/health",tags=["System"])
 def health(): return {"status":"ok","app":settings.app_name,"environment":settings.app_env}
+
+@app.get("/health/version",tags=["System"])
+def version():
+    """Which code is running: compare ``commit`` with GitHub and ``frontend_bundle`` with scripts/asset_version.py."""
+    return build_info(app.version, settings.app_env)
 
 @app.get("/manifest.webmanifest",include_in_schema=False)
 def manifest():

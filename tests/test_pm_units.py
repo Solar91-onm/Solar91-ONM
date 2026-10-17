@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 
+from app.core.timeutil import business_today
 from app.core.models import Notification, OMTask, PMTemplate, PMUnitConfig, Plant, User, UserEquipmentTypeAssignment
 from app.pmplan.units import day_plan, distribute, run_daily
 from tests.conftest import login_user
@@ -15,7 +16,7 @@ def _plant(db, code="KRN_01", name="Kerli"):
 
 def _body(**over):
     b = {"equipment_type": "Inverter", "task_name": "Inverter service", "frequency": "Monthly", "safety": "—", "est_hours": 2,
-         "plants": ["KRN_01"], "start_date": date.today().isoformat(), "assignees": [], "per_unit": True}
+         "plants": ["KRN_01"], "start_date": business_today().isoformat(), "assignees": [], "per_unit": True}
     b.update(over)
     return b
 
@@ -34,7 +35,7 @@ def test_units_spread_over_days(client, db):
     res = client.post("/api/pm-plan/tasks", json=_body(total_units=10, units_per_day=2)).json()
     assert res["count"] == 10 and res["days"] == 5
     rows = db.query(OMTask).order_by(OMTask.unit_no).all()
-    today = date.today()
+    today = business_today()
     assert [(t.unit_no, t.due_on) for t in rows[:4]] == [(1, today), (2, today), (3, today + timedelta(days=1)), (4, today + timedelta(days=1))]
     assert rows[-1].due_on == today + timedelta(days=4) and rows[-1].cycle_day == 5
     assert {t.cycle_id for t in rows} and len({t.cycle_id for t in rows}) == 1 and rows[0].total_units == 10
@@ -94,20 +95,20 @@ def test_missed_units_roll_and_escalate(client, db):
     login_user(client, db, role="O&M Head")
     p = _plant(db)
     db.add(PMUnitConfig(plant_id=p.id, equipment_type="Inverter", total_units=6, units_per_day=2)); db.commit()
-    start = date.today() - timedelta(days=8)           # a cycle that began 8 days ago: days 1..3 = -8,-7,-6
+    start = business_today() - timedelta(days=8)           # a cycle that began 8 days ago: days 1..3 = -8,-7,-6
     client.post("/api/pm-plan/tasks", json=_body(start_date=start.isoformat()))
     rows = {t.unit_no: t for t in db.query(OMTask).all()}
     rows[1].status = "Completed"; db.commit()           # unit 1 done; unit 2 (due -5) and later ones are all overdue
-    out = run_daily(db, date.today())
+    out = run_daily(db, business_today())
     db.expire_all()
     rows = {t.unit_no: t for t in db.query(OMTask).all()}
-    today = date.today()
+    today = business_today()
     assert out["rolled"] == 5 and out["escalated"] >= 1
     # missed units go to the front of today's capacity (2/day): 2,3 today, 4,5 tomorrow, 6 the day after
     assert [rows[n].due_on for n in (2, 3, 4, 5, 6)] == [today, today, today + timedelta(days=1), today + timedelta(days=1), today + timedelta(days=2)]
     assert rows[2].missed_days == 8 and rows[2].rolled_count == 1 and rows[2].planned_due_on == start
     assert rows[6].missed_days == 6                        # stored for reporting, original plan date kept
-    again = run_daily(db, date.today())                    # idempotent
+    again = run_daily(db, business_today())                    # idempotent
     assert again["rolled"] == 0
     assert db.query(Notification).filter(Notification.event_type.in_(["pm_late_1d", "pm_late_3d", "pm_critical_7d"])).count() >= 1
 
@@ -117,11 +118,11 @@ def test_reminders_three_days_before_and_on_due_date(client, db):
     _plant(db)
     a = User(auth_provider="t", external_subject="asha", email="asha@example.com", display_name="Asha", role="Assignee", is_active=True); db.add(a); db.flush()
     db.add(UserEquipmentTypeAssignment(user_id=a.id, equipment_type="Inverter")); db.commit()
-    response = client.post("/api/pm-plan/tasks", json=_body(per_unit=False, assignees=["Asha"], start_date=(date.today() + timedelta(days=3)).isoformat()))
+    response = client.post("/api/pm-plan/tasks", json=_body(per_unit=False, assignees=["Asha"], start_date=(business_today() + timedelta(days=3)).isoformat()))
     assert response.status_code == 200, response.text
-    assert run_daily(db, date.today())["advance"] == 1
-    assert run_daily(db, date.today() + timedelta(days=3))["due_today"] == 1
-    assert run_daily(db, date.today() + timedelta(days=3))["due_today"] == 0       # already sent for this due date
+    assert run_daily(db, business_today())["advance"] == 1
+    assert run_daily(db, business_today() + timedelta(days=3))["due_today"] == 1
+    assert run_daily(db, business_today() + timedelta(days=3))["due_today"] == 0       # already sent for this due date
     assert db.query(Notification).filter(Notification.event_type.in_(["pm_due_soon", "pm_due_today"])).count() == 2
 
 

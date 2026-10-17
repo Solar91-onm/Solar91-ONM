@@ -19,8 +19,8 @@
     return '<div class="s91-field-head"><div><span class="s91-field-strap">FIELD OPERATIONS · LIVE WORKLIST</span><h2>'+(role()==='Site Engineer'?'My Site — Today’s Work':'Daily Field Work')+'</h2><p>'+escapeText(data.scope==='one-plant'?(data.plants[0]?.name||'Assigned plant'):data.scope==='assigned-types'?'Assigned equipment across plants':'Portfolio overview')+' · Site engineers report field activity; the O&M team manages assignment and closure.</p></div><button class="s91-field-refresh" type="button" data-field-refresh>Refresh live work</button></div>'+ 
       '<div class="s91-field-metrics">'+metric('Active issues',s.open_issues)+metric('Critical issues',s.critical_issues)+metric('PM due / today',s.due_tasks)+metric('PM overdue',s.overdue_tasks)+'</div>'+ 
       '<div class="s91-field-cols"><div class="s91-field-list"><h3>Open site issues</h3>'+(data.issues?.length?data.issues.map(issue).join(''):'<div class="s91-field-empty">No open site issues in your assigned scope.</div>')+'</div><div class="s91-field-list"><h3>Scheduled maintenance</h3>'+(data.tasks?.length?data.tasks.map(task).join(''):'<div class="s91-field-empty">No scheduled maintenance pending in your scope.</div>')+'</div></div>'+
-      (data.limited?'<p style="font-size:11px;color:#936b20">Worklist is limited to the newest records. Use the full register to see everything.</p>':'')+
-      (canRecord()?'<p style="font-size:11px;color:#687969;margin:12px 0 0">Field notes are saved against the real issue and audit trail. Assignment, resolution and closure remain with authorized O&amp;M personnel.</p>':'');
+      (data.limited?'<p style="font-size:12.5px;color:#936b20">Worklist is limited to the newest records. Use the full register to see everything.</p>':'')+
+      (canRecord()?'<p style="font-size:12.5px;color:#687969;margin:12px 0 0">Field notes are saved against the real issue and audit trail. Assignment, resolution and closure remain with authorized O&amp;M personnel.</p>':'');
   }
 
   function paint() {
