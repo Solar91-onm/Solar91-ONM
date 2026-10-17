@@ -44,7 +44,7 @@
     if(kind==="ticket"){
       html=anchor(html,'<section class="issue-updates">','<section class="issue-updates" data-s91-ref-section="updates">');
       html=anchor(html,'<div style="font-size:12.5px;font-weight:600;margin-bottom:6px">Work log','<div data-s91-ref-section="worklog" style="font-size:12.5px;font-weight:600;margin-bottom:6px">Work log');
-      html=anchor(html,'<div style="font-size:11.5px;color:var(--muted-foreground);margin:10px 0">📎','<div data-s91-ref-section="photos" style="font-size:11.5px;color:var(--muted-foreground);margin:10px 0">📎');
+      html=anchor(html,'<div style="font-size:12.5px;color:var(--muted-foreground);margin:10px 0">📎','<div data-s91-ref-section="photos" style="font-size:12.5px;color:var(--muted-foreground);margin:10px 0">📎');
       html=anchor(html,'<div class="issue-workflow"','<div data-s91-ref-section="overview" class="issue-workflow"');
     }else if(kind==="washing"){
       html=anchor(html,'<div class="wc-cycles">','<div class="wc-cycles" data-s91-ref-section="progress">');

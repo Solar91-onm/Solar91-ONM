@@ -11,6 +11,7 @@ from openpyxl.worksheet.datavalidation import DataValidation
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.core.spreadsheet import neutralise_formulas
 from app.core.models import AuditLog, Plant, User, UserPlantAssignment, WashingConfig, WashingDailyReport, WashingHistory, WashingTable
 from app.core.security import WASHING_TYPE, user_scoped_plant_ids
 from app.plants.codes import find_plant_by_code, normalize_site_code, plant_code_index
@@ -126,6 +127,7 @@ def _workbook_bytes(db: Session, plants: list[Plant], *, include_setup: bool) ->
     weekly_target.add(f"E2:E{MAX_IMPORT_ROWS + 1}")
     active.add(f"F2:F{MAX_IMPORT_ROWS + 1}")
     assignee.add(f"D2:D{MAX_IMPORT_ROWS + 1}")
+    neutralise_formulas(workbook)
     buffer = io.BytesIO()
     workbook.save(buffer)
     return buffer.getvalue()

@@ -44,7 +44,7 @@
   border:1px solid rgba(255,255,255,.8);box-shadow:0 8px 22px rgba(0,60,30,.14)}
 .s91-hbrand img{height:30px;width:auto;display:block}
 .s91-hbrand .w{height:22px}
-.s91-hbrand small{font-size:10px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;color:var(--gd);padding-left:10px;border-left:1px solid #cfe3d6}
+.s91-hbrand small{font-size:12px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;color:var(--gd);padding-left:10px;border-left:1px solid #cfe3d6}
 .s91-pill{display:flex;width:max-content;gap:8px;align-items:center;padding:7px 14px;border-radius:99px;
   background:rgba(255,255,255,.85);color:var(--gd);font-weight:700;font-size:13px;box-shadow:0 4px 14px rgba(0,0,0,.08)}
 .s91-copy h1{margin:18px 0 12px;font-size:clamp(26px,2.75vw,40px);line-height:1.1;letter-spacing:-.03em;font-weight:800;color:#0e2c1c}
@@ -68,7 +68,7 @@
 .s91-curve svg{display:block;overflow:visible}
 .s91-curve .line{stroke-dasharray:300;animation:s91Draw 7s ease-in-out infinite}
 .s91-curve .area{animation:s91Fade 7s ease-in-out infinite}
-.s91-curve .cap{display:flex;align-items:center;gap:7px;font-size:11px;font-weight:700;color:#3d6350;letter-spacing:.02em}
+.s91-curve .cap{display:flex;align-items:center;gap:7px;font-size:12.5px;font-weight:700;color:#3d6350;letter-spacing:.02em}
 .s91-curve .blip{width:7px;height:7px;border-radius:50%;background:#F59E0B;animation:s91Ping2 1.8s ease-out infinite}
 .s91-curve .orb{position:absolute;left:16px;top:10px;width:10px;height:10px;border-radius:50%;background:#F59E0B;
   box-shadow:0 0 12px 4px rgba(245,158,11,.7);offset-path:path('M0 54 C40 54 60 6 100 6 S160 54 200 54');animation:s91Orb 7s ease-in-out infinite}

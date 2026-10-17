@@ -7,6 +7,7 @@ from uuid import UUID
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.core.timeutil import business_now
 from app.core.models import (
     NotificationPreference,
     OMTask,
@@ -394,7 +395,7 @@ def send_pm_alerts(db: Session, today: date, now: datetime | None = None) -> dic
         ):
             result["promise_missed"] += 1
 
-    now = now or datetime.now()
+    now = now or business_now()
     if now.weekday() == 0 and now.hour >= 8:
         late_groups = [(task, members, due, key) for task, members, due, key in groups if due and due < today]
         week = (today - timedelta(days=today.weekday())).isoformat()

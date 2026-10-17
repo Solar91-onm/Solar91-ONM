@@ -66,6 +66,30 @@ def test_assignee_issue_list_is_scoped_by_equipment_type_across_plants(client, d
     assert ok.status_code == 201, ok.text
 
 
+def test_assignee_bootstrap_issue_scope_query_count_stays_flat_as_issues_grow(client, db):
+    plant=Plant(site_code='EQ-BATCH',plant_name='Batched Scope Plant')
+    user=login_user(client,db,role='Assignee',name='Batched Owner',email='batch-scope@example.com')
+    db.add(plant);db.flush()
+    equipment=Equipment(plant_id=plant.id,equipment_code='INV-BATCH',equipment_name='Batched inverter',equipment_type='Inverter',status='active')
+    db.add(equipment);db.add(UserEquipmentTypeAssignment(user_id=user.id,equipment_type='Inverter'));db.flush()
+    db.add(Issue(ticket_no='EQ-BATCH-000',plant_id=plant.id,equipment_id=equipment.id,equipment_ref='INV-BATCH',
+                 description='Synthetic scope check',severity='Medium'))
+    db.commit()
+
+    def bootstrap_query_count():
+        response=client.get('/api/bootstrap?lite=1')
+        assert response.status_code==200,response.text
+        rows=response.json()['state']['issues']
+        assert all(row['id'].startswith('EQ-BATCH-') for row in rows)
+        return int(response.headers['server-timing'].split('desc="')[1].split()[0])
+
+    small_count=bootstrap_query_count()
+    db.add_all([Issue(ticket_no=f'EQ-BATCH-{n:03d}',plant_id=plant.id,equipment_id=equipment.id,
+                      equipment_ref='INV-BATCH',description='Synthetic scope check',severity='Medium') for n in range(1,13)])
+    db.commit()
+    assert bootstrap_query_count()==small_count
+
+
 def test_issue_workflow_assignment_scope_and_close_permission(client, db):
     plant = Plant(site_code='ISS01', plant_name='Issue Plant')
     db.add(plant); db.commit()

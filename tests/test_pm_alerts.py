@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, timedelta, timezone
 
+from app.core.timeutil import business_today
 from app.core.models import (
     Notification,
     NotificationPreference,
@@ -301,7 +302,7 @@ def test_weekly_summary_is_optional_and_fixed_to_monday_morning(db):
 def test_task_output_marks_jobs_critical_after_seven_days(client, db):
     login_user(client, db, role="O&M Head", email="pm-critical-head@example.com")
     plant = _plant(db, code="PMCRITICAL")
-    task = _task(db, plant, date.today() - timedelta(days=7), None)
+    task = _task(db, plant, business_today() - timedelta(days=7), None)
     db.commit()
 
     response = client.get("/api/scheduled/tasks")

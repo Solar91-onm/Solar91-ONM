@@ -64,8 +64,8 @@
       return '<label class="row" style="gap:10px;font-size:13px;font-weight:500;padding:11px 4px;border-bottom:1px solid var(--border);cursor:pointer;align-items:flex-start">'+
         '<input type="checkbox" name="cc-upd-target" value="'+xesc(tgt.key)+'" data-name="'+xesc(tgt.name)+'"'+(checked?' checked':'')+' style="margin-top:3px"/>'+
         '<div style="flex:1;min-width:0">'+
-          '<div style="font-weight:700'+(tgt.primary?';color:#1e40af':'')+'">'+xesc(tgt.name)+(tgt.primary?' <span style="font-size:9.5px;font-weight:800;letter-spacing:.06em;background:#dbeafe;color:#1e40af;padding:1px 6px;border-radius:999px;vertical-align:middle;margin-left:4px">SITE</span>':'')+'</div>'+
-          '<div style="font-size:11px;color:var(--muted-foreground);margin-top:2px">'+xesc(tgt.role)+'</div>'+
+          '<div style="font-weight:700'+(tgt.primary?';color:#1e40af':'')+'">'+xesc(tgt.name)+(tgt.primary?' <span style="font-size:11px;font-weight:800;letter-spacing:.06em;background:#dbeafe;color:#1e40af;padding:1px 6px;border-radius:999px;vertical-align:middle;margin-left:4px">SITE</span>':'')+'</div>'+
+          '<div style="font-size:12.5px;color:var(--muted-foreground);margin-top:2px">'+xesc(tgt.role)+'</div>'+
         '</div>'+
       '</label>';
     }).join("");
@@ -85,12 +85,12 @@
         '<button class="btn" style="border:none;color:var(--muted-foreground)" onclick="document.getElementById(\'cc-upd-ovl\').remove()">'+closeIc+'</button>'+
         '</div>'+
         '<div class="modal-b">'+
-          '<div style="font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--muted-foreground);margin-bottom:6px">Who should we ask?</div>'+
+          '<div style="font-size:12.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--muted-foreground);margin-bottom:6px">Who should we ask?</div>'+
           rowsHtml +
           '<div class="field" style="margin-top:16px"><span class="lbl">Message (optional)</span>'+
             '<textarea id="cc-upd-msg" class="txt" rows="2" placeholder="e.g. What\'s the site status — part arrived?"></textarea>'+
           '</div>'+
-          '<div style="font-size:11.5px;color:var(--muted-foreground);margin-top:10px;line-height:1.5">'+
+          '<div style="font-size:12.5px;color:var(--muted-foreground);margin-top:10px;line-height:1.5">'+
             'They\'ll get a bell notification and a full-screen ring on their device if logged in. The flag clears automatically when they post a progress note.'+
           '</div>'+
         '</div>'+
@@ -484,9 +484,9 @@
         '<input type="checkbox" name="cc-upd-target" value="'+xesc(tgt.key)+'" data-name="'+xesc(tgt.name)+'"'+(checked?' checked':'')+' style="margin-top:3px"/>'+
         '<div style="flex:1;min-width:0">'+
           '<div style="font-weight:700">'+xesc(tgt.name)+
-            (tgt.primary?' <span style="font-size:9.5px;font-weight:800;letter-spacing:.06em;background:#dbeafe;color:#1e40af;padding:1px 6px;border-radius:999px;vertical-align:middle;margin-left:4px">SITE</span>':'')+
+            (tgt.primary?' <span style="font-size:11px;font-weight:800;letter-spacing:.06em;background:#dbeafe;color:#1e40af;padding:1px 6px;border-radius:999px;vertical-align:middle;margin-left:4px">SITE</span>':'')+
           '</div>'+
-          '<div style="font-size:11px;color:var(--muted-foreground);margin-top:2px">'+xesc(tgt.role)+'</div>'+
+          '<div style="font-size:12.5px;color:var(--muted-foreground);margin-top:2px">'+xesc(tgt.role)+'</div>'+
         '</div>'+
       '</label>';
     }).join("");
@@ -506,12 +506,12 @@
         '<button class="btn" style="border:none;color:var(--muted-foreground)" onclick="document.getElementById(\'cc-upd-ovl\').remove()">'+closeIc+'</button>'+
         '</div>'+
         '<div class="modal-b">'+
-          '<div style="font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--muted-foreground);margin-bottom:6px">Who should we ask?</div>'+
+          '<div style="font-size:12.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--muted-foreground);margin-bottom:6px">Who should we ask?</div>'+
           rowsHtml+
           '<div class="field" style="margin-top:16px"><span class="lbl">Message (optional)</span>'+
             '<textarea id="cc-upd-msg" class="txt" rows="2" placeholder="e.g. What\'s the site status — part arrived?"></textarea>'+
           '</div>'+
-          '<div style="font-size:11.5px;color:var(--muted-foreground);margin-top:10px;line-height:1.5">'+
+          '<div style="font-size:12.5px;color:var(--muted-foreground);margin-top:10px;line-height:1.5">'+
             'They get a bell notification and a full-screen ring if logged in. The flag clears when they post a progress note.'+
           '</div>'+
         '</div>'+

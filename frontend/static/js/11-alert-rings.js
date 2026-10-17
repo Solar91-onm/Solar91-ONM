@@ -282,7 +282,7 @@
     '.cc-ring-bell{position:relative;font-size:18px;line-height:1}',
     '.cc-ring-bell.ringing{background:var(--danger-soft)!important;color:var(--danger)!important}',
     '.cc-ring-bell.ringing::after{content:"";position:absolute;inset:-2px;border-radius:inherit;border:2px solid var(--danger);animation:ccRingPulse 1.4s ease-out infinite;pointer-events:none}',
-    '.cc-ring-count{position:absolute;top:0;right:0;min-width:15px;height:15px;border-radius:999px;background:var(--danger);color:#fff;font-size:9px;font-weight:800;place-items:center;padding:0 3px}',
+    '.cc-ring-count{position:absolute;top:0;right:0;min-width:15px;height:15px;border-radius:999px;background:var(--danger);color:#fff;font-size:11px;font-weight:800;place-items:center;padding:0 3px}',
     '@keyframes ccRingPulse{0%{transform:scale(1);opacity:.9}100%{transform:scale(1.6);opacity:0}}',
 
     /* full-screen ring overlay */
@@ -306,7 +306,7 @@
     '.cc-ring-btn:active{transform:scale(.98)}',
     '.cc-ring-btn .cc-ring-ico{font-size:28px;flex-shrink:0}',
     '.cc-ring-btn b{display:block;font-size:15px;font-weight:800;letter-spacing:.02em}',
-    '.cc-ring-btn small{display:block;font-size:11.5px;font-weight:500;color:var(--muted-foreground);margin-top:2px}',
+    '.cc-ring-btn small{display:block;font-size:12.5px;font-weight:500;color:var(--muted-foreground);margin-top:2px}',
     '.cc-ring-btn.primary{background:linear-gradient(135deg,#16A34A,#15803d);border-color:#15803d;color:#fff}',
     '.cc-ring-btn.primary small{color:rgba(255,255,255,.82)}',
     '.cc-ring-btn.primary:hover{box-shadow:0 10px 24px rgba(22,163,74,.35)}',

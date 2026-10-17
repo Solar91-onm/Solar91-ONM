@@ -68,12 +68,12 @@ def test_collection_revisions_are_independent_and_return_scoped_conflicts(client
     first = client.put(
         "/api/state/sync",
         json={
-            "collection_revisions": {"opsDate": 0},
-            "state": {"opsDate": "2026-10-14"},
+            "collection_revisions": {"customPlantColumns": 0},
+            "state": {"customPlantColumns": [{"key": "feeder", "label": "Feeder"}]},
         },
     )
     assert first.status_code == 200, first.text
-    assert first.json()["collection_revisions"] == {"opsDate": 1}
+    assert first.json()["collection_revisions"] == {"customPlantColumns": 1}
 
     independent = client.put(
         "/api/state/sync",
@@ -88,16 +88,16 @@ def test_collection_revisions_are_independent_and_return_scoped_conflicts(client
     stale = client.put(
         "/api/state/sync",
         json={
-            "collection_revisions": {"opsDate": 0},
-            "state": {"opsDate": "2026-10-15"},
+            "collection_revisions": {"customPlantColumns": 0},
+            "state": {"customPlantColumns": [{"key": "stale", "label": "Stale"}]},
         },
     )
     assert stale.status_code == 409
-    assert stale.json()["detail"]["changed_collections"] == {"opsDate": 1}
+    assert stale.json()["detail"]["changed_collections"] == {"customPlantColumns": 1}
 
-    latest = client.get("/api/state/collections?keys=opsDate").json()
-    assert latest["state"]["opsDate"] == "2026-10-14"
-    assert latest["collection_revisions"] == {"opsDate": 1}
+    latest = client.get("/api/state/collections?keys=customPlantColumns").json()
+    assert latest["state"]["customPlantColumns"] == [{"key": "feeder", "label": "Feeder"}]
+    assert latest["collection_revisions"] == {"customPlantColumns": 1}
 
 
 def test_legacy_sync_does_not_write_tasks_issues_or_washing(client, db):
@@ -125,7 +125,7 @@ def test_legacy_sync_does_not_write_tasks_issues_or_washing(client, db):
 def test_twenty_parallel_collection_writes_do_not_conflict_globally(client, db):
     login_user(client, db)
     values = {
-        "opsDate": "2026-10-14",
+        "schedScope": "all",
         "scadaConfig": {},
         "plantEnrich": {},
         "customPlantColumns": [],

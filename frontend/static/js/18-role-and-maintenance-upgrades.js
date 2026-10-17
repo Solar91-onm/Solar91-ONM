@@ -28,8 +28,9 @@
       a.style.display=allowed.some(function(x){return txt===x||txt.indexOf(x)===0})?"":"none";
     });
     document.querySelectorAll(".mnav > div").forEach(function(d){
-      var txt=(d.textContent||"").trim();
-      var map={Home:"Command Center",Plants:"Plants",Issues:"Site Issues",Planned:"Preventive Maintenance",Work:"Work / Assignments",Reports:"Reports"};
+      var txt=(d.textContent||"").replace(/\d+/g,"").trim();
+      if(txt==="More"){d.style.display="";return}
+      var map={Home:"Command Center","My Plant":"Command Center",Plants:"Plants",Issues:"Site Issues",Preventive:"Preventive Maintenance",Planned:"Preventive Maintenance",Work:"Work / Assignments",Reports:"Reports"};
       var lab=map[txt]||txt;
       d.style.display=allowed.some(function(x){return lab===x||lab.indexOf(x)===0})?"":"none";
     });
@@ -55,9 +56,9 @@
 (function(){
  const css=document.createElement("style");css.textContent=
   '.sched-photo-card{border:1px solid #bfe5cc;background:linear-gradient(135deg,#fff,#f3fff7);border-radius:13px;padding:13px;margin:10px 0 12px;box-shadow:0 4px 14px rgba(12,94,42,.05)}'+
-  '.sched-photo-card.compact{padding:10px}.sched-photo-title{font-size:12.5px;font-weight:800;color:var(--foreground);display:flex;align-items:center;gap:7px;flex-wrap:wrap}.sched-photo-sub{font-size:10.8px;color:var(--muted-foreground);margin-top:3px}.sched-photo-proof{font-size:10.8px;font-weight:700;color:var(--primary);white-space:nowrap}'+
-  '.sched-photo-grid{display:flex;gap:7px;flex-wrap:wrap;margin-top:10px}.sched-photo-thumb{width:92px;padding:0;border:1px solid var(--border);border-radius:9px;background:#fff;overflow:hidden;cursor:pointer;text-align:left;box-shadow:0 2px 8px rgba(16,24,20,.05)}.sched-photo-thumb:hover{border-color:var(--primary);transform:translateY(-1px)}.sched-photo-thumb img{width:92px;height:66px;display:block;object-fit:cover}.sched-photo-thumb span{display:block;padding:5px 6px;font-size:9.5px;font-weight:700;color:var(--muted-foreground);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.sched-photo-more{display:grid;place-items:center;min-width:64px;height:66px;border:1px dashed var(--border);border-radius:9px;color:var(--muted-foreground);font-size:10px;font-weight:700;margin-top:0}'+
-  '.sched-photo-actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}.sched-photo-upload{position:relative;overflow:hidden;cursor:pointer}.sched-photo-upload input{position:absolute;inset:0;opacity:0;cursor:pointer;font-size:0}.sched-photo-empty{font-size:11px;color:var(--muted-foreground);padding:12px 0 2px}.sched-photo-readonly{font-size:11px;color:var(--muted-foreground);margin-top:8px}.active-sched-thumb .sched-photo-grid{margin-top:4px}.active-sched-thumb .sched-photo-thumb{width:36px}.active-sched-thumb .sched-photo-thumb img{width:36px;height:30px}.active-sched-thumb .sched-photo-thumb span{display:none}.active-sched-thumb .sched-photo-more{height:30px;min-width:34px}'+
+  '.sched-photo-card.compact{padding:10px}.sched-photo-title{font-size:12.5px;font-weight:800;color:var(--foreground);display:flex;align-items:center;gap:7px;flex-wrap:wrap}.sched-photo-sub{font-size:12px;color:var(--muted-foreground);margin-top:3px}.sched-photo-proof{font-size:12px;font-weight:700;color:var(--primary);white-space:nowrap}'+
+  '.sched-photo-grid{display:flex;gap:7px;flex-wrap:wrap;margin-top:10px}.sched-photo-thumb{width:92px;padding:0;border:1px solid var(--border);border-radius:9px;background:#fff;overflow:hidden;cursor:pointer;text-align:left;box-shadow:0 2px 8px rgba(16,24,20,.05)}.sched-photo-thumb:hover{border-color:var(--primary);transform:translateY(-1px)}.sched-photo-thumb img{width:92px;height:66px;display:block;object-fit:cover}.sched-photo-thumb span{display:block;padding:5px 6px;font-size:11px;font-weight:700;color:var(--muted-foreground);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.sched-photo-more{display:grid;place-items:center;min-width:64px;height:66px;border:1px dashed var(--border);border-radius:9px;color:var(--muted-foreground);font-size:12px;font-weight:700;margin-top:0}'+
+  '.sched-photo-actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}.sched-photo-upload{position:relative;overflow:hidden;cursor:pointer}.sched-photo-upload input{position:absolute;inset:0;opacity:0;cursor:pointer;font-size:0}.sched-photo-empty{font-size:12.5px;color:var(--muted-foreground);padding:12px 0 2px}.sched-photo-readonly{font-size:12.5px;color:var(--muted-foreground);margin-top:8px}.active-sched-thumb .sched-photo-grid{margin-top:4px}.active-sched-thumb .sched-photo-thumb{width:36px}.active-sched-thumb .sched-photo-thumb img{width:36px;height:30px}.active-sched-thumb .sched-photo-thumb span{display:none}.active-sched-thumb .sched-photo-more{height:30px;min-width:34px}'+
   '@media(max-width:700px){.sched-photo-thumb{width:78px}.sched-photo-thumb img{width:78px;height:58px}.sched-photo-proof{white-space:normal;width:100%}.sched-photo-actions .btn{flex:1;justify-content:center;min-width:120px}}';
  document.head.appendChild(css);
 })();
@@ -199,7 +200,7 @@
        '<div class="field"><span class="lbl">Safety requirement</span><select id="pst-safety" class="inp"><option>—</option><option>PTW required</option><option>LOTO required</option><option>PTW + LOTO required</option></select></div>'+
        '<div class="field"><span class="lbl">SOP reference</span><input id="pst-sop" class="inp" placeholder="Auto-default if blank"/></div>'+
       '</div>'+
-      '<div style="font-size:11px;color:var(--muted-foreground);margin-top:4px">Creator: <b>'+esc(S.currentUser||OM_HEAD)+'</b> · '+esc(S._roleLabel||S.currentRole||"O&M Head")+' · Site Engineer cannot create this task.</div>'+
+      '<div style="font-size:12.5px;color:var(--muted-foreground);margin-top:4px">Creator: <b>'+esc(S.currentUser||OM_HEAD)+'</b> · '+esc(S._roleLabel||S.currentRole||"O&M Head")+' · Site Engineer cannot create this task.</div>'+
     '</div>';
     return modal("Add Preventive Maintenance task — by problem","Choose the same problem category used in Site Issues, then convert it into recurring planned work",body,
       '<button class="btn o" onclick="closeModal()">Cancel</button><button id="rev12-create-problem-task" class="btn p" onclick="createProblemScheduledTask()">'+I.plus(14)+'Create Preventive Maintenance task</button>',true);
@@ -231,7 +232,7 @@
   render=function(){oldRender.apply(this,arguments);try{rev12FixCreatorUi()}catch(e){console.warn("[REV12 creator UI]",e)}setTimeout(function(){try{rev12FixCreatorUi()}catch(e){}},90)};
 
   const st=document.createElement("style");
-  st.textContent='.rev12-preview{display:flex;gap:6px;flex-wrap:wrap;border:1px solid var(--border);background:var(--surface-subtle);border-radius:10px;padding:9px}.rev12-check{font-size:10.5px;background:#fff;border:1px solid var(--border);border-radius:999px;padding:4px 8px;color:var(--foreground)}@media(max-width:700px){.rev12-problem-task-modal .kgrid{grid-template-columns:1fr!important}#rev12-add-problem-task{width:100%;justify-content:center}}';
+  st.textContent='.rev12-preview{display:flex;gap:6px;flex-wrap:wrap;border:1px solid var(--border);background:var(--surface-subtle);border-radius:10px;padding:9px}.rev12-check{font-size:12px;background:#fff;border:1px solid var(--border);border-radius:999px;padding:4px 8px;color:var(--foreground)}@media(max-width:700px){.rev12-problem-task-modal .kgrid{grid-template-columns:1fr!important}#rev12-add-problem-task{width:100%;justify-content:center}}';
   document.head.appendChild(st);
 })();
 
@@ -346,7 +347,7 @@
     /* exact mobile module whitelist */
     document.querySelectorAll(".mnav > div").forEach(function(d){
       var txt=(d.textContent||"").replace(/\d+/g,"").trim();
-      d.style.display=(txt==="Home"||txt==="Issues"||txt==="Preventive")?"":"none";
+      d.style.display=(txt==="Home"||txt==="My Plant"||txt==="Issues"||txt==="Preventive"||txt==="More")?"":"none";
     });
 
     /* plant control must show only own plant */

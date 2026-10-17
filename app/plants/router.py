@@ -15,6 +15,7 @@ from openpyxl import Workbook, load_workbook
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
+from app.core.spreadsheet import neutralise_formulas
 from app.core.config import get_settings
 from app.core.database import get_db
 from app.core.models import (
@@ -391,7 +392,7 @@ def equipment_import_template(db:Annotated[Session,Depends(get_db)],user:Annotat
     wb=Workbook(); ws=wb.active; ws.title="Equipment"
     ws.append(["plant","equipment_code","equipment_name","equipment_type","maker","model","serial_number","status","discom","feeder_or_gss","rating","capacity_kw","quantity","location_in_plant","manufacture_year","commissioned_on","warranty_start","warranty_end","amc_vendor","amc_end","supplier","purchase_order_no","criticality","notes","in_charge_user_id","last_service_on","next_service_due"])
     ws.append(["SITE-01","INV-01","Inverter 1","Inverter","Sungrow","SG110CX","SN-001","active","DISCOM","11kV Feeder","110 kW",110,1,"Block B","2025","2025-01-15","2025-01-15","2030-01-14","","","Supplier","PO-001","High","", "","2026-09-01","2026-10-01"])
-    out=io.BytesIO(); wb.save(out); out.seek(0)
+    neutralise_formulas(wb); out=io.BytesIO(); wb.save(out); out.seek(0)
     return StreamingResponse(out,media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",headers={"Content-Disposition":"attachment; filename=equipment-register-template.xlsx"})
 
 
@@ -431,5 +432,5 @@ def export_equipment(
     for row,out in zip(rows,details):
         plant=plants_by_id.get(row.plant_id)
         ws.append([plant.site_code if plant else "",row.discom,row.equipment_code,row.equipment_name,row.equipment_type,row.maker,row.model,row.serial_number,row.status,out["in_charge_name"],", ".join(out["type_owners"]),row.rating,float(row.capacity_kw) if row.capacity_kw is not None else None,row.quantity,row.location_in_plant,row.manufacture_year,row.commissioned_on,row.warranty_start,row.warranty_end,row.amc_vendor,row.amc_end,row.supplier,row.purchase_order_no,row.criticality,row.last_service_on,row.next_service_due,row.notes])
-    bio=io.BytesIO(); wb.save(bio); bio.seek(0)
+    neutralise_formulas(wb); bio=io.BytesIO(); wb.save(bio); bio.seek(0)
     return StreamingResponse(bio,media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",headers={"Content-Disposition":"attachment; filename=equipment-register.xlsx"})

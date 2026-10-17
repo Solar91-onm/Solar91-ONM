@@ -10,11 +10,19 @@ def test_new_nav_bundle_served_and_revalidated(client):
     html=client.get("/")
     assert html.status_code==200
     assert html.headers.get("cache-control")=="no-store"
-    assert "35-navigation-recovery.js?v=20261013-stability-r2" in html.text
+    import re
+    from app.core.assets import asset_hash
+    current=asset_hash("js/35-navigation-recovery.js")
+    assert re.fullmatch(r"[0-9a-f]{12}",current)
+    assert f"35-navigation-recovery.js?v={current}" in html.text
     asset=client.get("/static/js/35-navigation-recovery.js")
     assert asset.status_code==200
     assert "must-revalidate" in asset.headers.get("cache-control","")
     assert "__s91StabilityGuard" in asset.text
+    versioned=client.get(f"/static/js/35-navigation-recovery.js?v={current}")
+    assert "immutable" in versioned.headers.get("cache-control","")
+    stale=client.get("/static/js/35-navigation-recovery.js?v=20261013-stability-r2")
+    assert "must-revalidate" in stale.headers.get("cache-control","")
 
 
 def test_supabase_public_config_not_secret_in_example():

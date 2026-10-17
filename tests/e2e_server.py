@@ -13,6 +13,7 @@ os.environ["APP_ENV"] = "test"
 from fastapi import HTTPException, Request
 from sqlalchemy import select
 from datetime import date, timedelta
+from app.core.timeutil import business_today
 from app.core.database import Base, SessionLocal, engine
 from app.core.models import User, UserEquipmentTypeAssignment, Plant, UserPlantAssignment, Issue, OMTask
 from app.core.security import get_current_user
@@ -51,7 +52,7 @@ with SessionLocal() as db:
                      vertical="Inverter",severity="High",status="Open"))
     if not db.scalar(select(OMTask).where(OMTask.work_order_no=="QA-PM-1")):
         db.add(OMTask(work_order_no="QA-PM-1",plant_id=plant.id,task_name="Monthly inverter inspection",
-                      task_type="Inverter",status="Scheduled",due_on=date.today()+timedelta(days=1)))
+                      task_type="Inverter",status="Scheduled",due_on=business_today()+timedelta(days=1)))
     db.commit()
 
 def browser_test_user(request: Request):

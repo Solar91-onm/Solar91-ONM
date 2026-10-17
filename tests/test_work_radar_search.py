@@ -2,6 +2,7 @@
 from datetime import date, datetime, timedelta
 from uuid import UUID
 from zoneinfo import ZoneInfo
+from app.core.timeutil import business_today
 from app.core.models import User, UserEquipmentTypeAssignment, UserPlantAssignment, WashingConfig, WashingTable, WashingDailyReport, Equipment, Issue, OMTask
 from tests import conftest
 from tests.test_field_desk import fixture_data
@@ -9,7 +10,7 @@ from tests.test_field_desk import fixture_data
 
 def test_washing_worklist_distinguishes_tables_from_equipment(client, db):
     head, engineer, plants = fixture_data(client, db)
-    today = date.today()
+    today = business_today()
     for i, p in enumerate(plants):
         plant_id = UUID(p['id'])
         db.add(WashingConfig(plant_id=plant_id, active=True))

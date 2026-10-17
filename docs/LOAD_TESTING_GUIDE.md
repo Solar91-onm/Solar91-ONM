@@ -30,6 +30,18 @@ The script prints per-table counts and the output database path. Use these fixtu
 
 These are 50-repeat, single-process SQLite query microbenchmarks on one workstation; they exclude HTTP, authentication, writes, uploads, PostgreSQL and concurrent users. The issue page p95 rises with the dataset, though remains milliseconds in this local fixture. Do not use these values as production API latency or capacity evidence.
 
+## Authenticated API latency benchmark
+
+`scripts/benchmark_api_latency.py --scale 1|5|10 --runs 10..200` builds a fresh SQLite database inside a temporary directory, seeds the synthetic scale profile, authenticates as its synthetic Assignee, and measures nine read endpoints through FastAPI TestClient. It does not accept a database URL or a target host. The output includes p50/p95 client wall time, `Server-Timing` app/DB/total, query count, decoded response bytes, and HTTP status/error count. The 10x profile is large; use 10 samples for that profile to avoid repeatedly serializing its full bootstrap payload.
+
+```powershell
+python .\scripts\benchmark_api_latency.py --scale 1 --runs 20
+python .\scripts\benchmark_api_latency.py --scale 5 --runs 20
+python .\scripts\benchmark_api_latency.py --scale 10 --runs 10
+```
+
+This is a warmed, single-process local API benchmark. Client wall time includes TestClient and response decompression, not an actual browser/network; it excludes live PostgreSQL, Render cold starts, browser rendering, Storage and concurrent users. API timing results and dataset sizes are recorded in `docs/SCALABILITY_AUDIT.md`.
+
 ## Prerequisites
 
 - A dedicated Render staging service and isolated Supabase staging database/bucket.

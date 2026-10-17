@@ -2,6 +2,36 @@
 /* ================================================================
    MODALS
    ================================================================ */
+/* Registered equipment a ticket points at (by id, then by code/name at the same plant). */
+function s91IssueEquipment(t){
+ const rows=S.equipment||[],ref=String(t&&t.equip||"").trim().toLowerCase();
+ let e=t&&t.equipmentId?rows.find(x=>String(x.id)===String(t.equipmentId)):null;
+ if(!e&&ref&&ref!=="—"){const p=plantRec(t.plant);e=rows.find(x=>(!p||String(x.plant_id)===String(p.dbId))&&[x.equipment_code,x.equipment_name].some(v=>String(v||"").trim().toLowerCase()===ref))}
+ return e||null;
+}
+function s91IssueEquipmentLabel(t){
+ const e=s91IssueEquipment(t);
+ if(e)return [e.equipment_name,e.equipment_code].filter(Boolean).filter((v,i,a)=>a.indexOf(v)===i).join(" · ");
+ const ref=String(t&&t.equip||"").trim();return ref&&ref!=="—"?ref:"Not specified";
+}
+/* Raise-issue wizard: pick the exact registered unit so one ticket is raised for one asset. */
+function s91TkPlantName(){const sel=document.getElementById("tk-plant");return (AUTH_IDENTITY.role==="Site Engineer"&&S._sePlant)||(sel?sel.value:"")||((S.plants||[])[0]||{}).name||""}
+function s91TkEquipOptionsHtml(plantName,vertical){
+ const plant=(S.plants||[]).find(p=>p.name===plantName);
+ const rows=(S.equipment||[]).filter(e=>plant&&String(e.plant_id)===String(plant.dbId)&&String(e.status||"active").toLowerCase()!=="inactive");
+ const same=rows.filter(e=>!vertical||String(e.equipment_type||"").toLowerCase()===String(vertical).toLowerCase());
+ const list=(same.length?same:rows).slice().sort((a,b)=>String(a.equipment_code||a.equipment_name).localeCompare(String(b.equipment_code||b.equipment_name),undefined,{numeric:true}));
+ return '<option value="">'+(list.length?'Select the unit with the problem ('+list.length+' registered)':'No registered equipment at this plant')+'</option>'+
+  list.map(e=>'<option value="'+esc(e.id)+'">'+esc([e.equipment_code,e.equipment_name].filter(Boolean).join(" · ")+(e.serial_number?" · S/N "+e.serial_number:""))+'</option>').join("")+
+  '<option value="__other">Not in the register (type the reference below)</option>';
+}
+function s91TkEquipRefresh(){const pick=document.getElementById("tk-equip-pick");if(pick)pick.innerHTML=s91TkEquipOptionsHtml(s91TkPlantName(),(document.getElementById("tk-vert")||{}).value||"")}
+function s91TkEquipPicked(id){
+ const e=(S.equipment||[]).find(x=>String(x.id)===String(id)),set=(k,v)=>{const el=document.getElementById(k);if(el)el.value=v==null?"":v};
+ if(!e){if(id==="__other"){set("tk-equip","");const el=document.getElementById("tk-equip");if(el)el.focus()}return}
+ set("tk-equip",e.equipment_code||e.equipment_name||"");set("tk-serial",e.serial_number||"");set("tk-maker",e.maker||"");set("tk-supplier",e.supplier||"");
+ const v=document.getElementById("tk-vert");if(v&&e.equipment_type&&[...v.options].some(o=>o.value===e.equipment_type)&&v.value!==e.equipment_type){v.value=e.equipment_type;if(typeof updIssueAssignees==="function")updIssueAssignees()}
+}
 function modal(title,sub,body,foot,wide){
  return '<div class="overlay" onclick="if(event.target===this)closeModal()"><div class="modal '+(wide?"wide":"")+'">'+
   '<div class="modal-h"><div><h3 style="font-size:16px;font-weight:600;margin:0">'+title+'</h3>'+(sub?'<p style="font-size:12px;color:var(--muted-foreground);margin:4px 0 0">'+sub+'</p>':'')+'</div>'+
@@ -74,7 +104,7 @@ function renderModal(){
   '<div style="flex:1" class="field"><span class="lbl">Assignee</span><select id="ai-who" class="inp">'+ASSIGNEE_NAMES.map(n=>'<option>'+n+'</option>').join("")+'</select></div></div>'+
   '<div class="field"><span class="lbl">Due date</span><input id="ai-due" class="inp" type="date" value="'+addDays(TODAY,5)+'"/></div>'+
   '<div class="field"><span class="lbl">Instructions / notes for assignee</span><textarea id="ai-instructions" class="txt" rows="2" placeholder="Work instructions, safety precautions, or acceptance criteria…"></textarea></div>'+
-  '<div style="font-size:11.5px;color:var(--muted-foreground)">Attachment requirement follows priority: Critical items require photo/document proof before review submission. Assignee is notified on assignment.</div>',
+  '<div style="font-size:12.5px;color:var(--muted-foreground)">Attachment requirement follows priority: Critical items require photo/document proof before review submission. Assignee is notified on assignment.</div>',
   '<button class="btn o" onclick="closeModal()">Cancel</button><button class="btn p" onclick="addItem()">Add &amp; assign item</button>');
  /* --- evidence --- */
  if(m==="evidence")return modal("Upload evidence — Step 1.3","Photos, scanned documents, meter readings, signed forms — attached directly against the checklist item",
@@ -99,8 +129,8 @@ function renderModal(){
    return modal("Final approval — gate locked (Step 1.4)","Final approval unlocks only when every checklist item is Completed (or N/A with justification)",
     '<div class="row wrap" style="gap:8px;margin-bottom:12px">'+Object.entries(bySt).map(e=>badge(e[0]+" · "+e[1])).join("")+'</div>'+
     '<div style="border:1px solid var(--border);border-radius:10px;max-height:220px;overflow-y:auto">'+openItems.slice(0,10).map(it=>'<div class="row between" style="padding:8px 12px;border-bottom:1px solid var(--border);font-size:12px;gap:10px"><span>'+esc(it.title)+'</span>'+badge(ITEM_ST[it.status])+'</div>').join("")+
-    (openItems.length>10?'<div style="padding:8px 12px;font-size:11px;color:var(--muted-foreground)">+ '+(openItems.length-10)+' more open items</div>':'')+'</div>'+
-    '<div style="font-size:11.5px;color:var(--muted-foreground);margin-top:12px">Progress: '+prog.done+'/'+prog.total+' — '+prog.pct+'%</div>',
+    (openItems.length>10?'<div style="padding:8px 12px;font-size:12.5px;color:var(--muted-foreground)">+ '+(openItems.length-10)+' more open items</div>':'')+'</div>'+
+    '<div style="font-size:12.5px;color:var(--muted-foreground);margin-top:12px">Progress: '+prog.done+'/'+prog.total+' — '+prog.pct+'%</div>',
     '<button class="btn o" onclick="closeModal()">Close</button>');
   }
   return modal("Final approval — consolidated summary (Step 1.4)",esc(h.name)+" · "+h.handoverId+" · all documents, photos and sign-offs reviewed",
@@ -125,8 +155,8 @@ function renderModal(){
     .map(r=>'<div class="row between" style="gap:16px;padding:8px 0;border-bottom:1px solid var(--border);font-size:13px"><span style="color:var(--muted-foreground)">'+r[0]+'</span><span style="font-weight:500;text-align:right">'+esc(r[1])+'</span></div>').join("")+
    CATEGORIES.map(c=>{const its=h.items.filter(i=>i.category===c);return its.length?'<div class="row between" style="padding:7px 0;border-bottom:1px solid var(--border);font-size:12.5px"><span style="color:var(--muted-foreground)">'+c+'</span><span>'+its.filter(counted).length+'/'+its.length+' closed</span></div>':""}).join("")+
    (h.approval&&h.approval.remarks?'<div style="padding:8px 0;font-size:12.5px"><b>Remarks/conditions:</b> '+esc(h.approval.remarks)+'</div>':'')+
-   '<div class="row between" style="gap:24px;margin-top:22px"><div style="flex:1;border-top:2px solid var(--foreground);padding-top:6px;font-size:11.5px;color:var(--muted-foreground)">'+(h.approval?esc(h.approval.approver):"—")+'<br>Approver · e-signature confirmed</div>'+
-   '<div style="flex:1;border-top:2px solid var(--foreground);padding-top:6px;font-size:11.5px;color:var(--muted-foreground)">'+(h.certificate?h.certificate.at:(h.approval?h.approval.signedAt:"—"))+'<br>Approval timestamp (audit record)</div></div></div>',
+   '<div class="row between" style="gap:24px;margin-top:22px"><div style="flex:1;border-top:2px solid var(--foreground);padding-top:6px;font-size:12.5px;color:var(--muted-foreground)">'+(h.approval?esc(h.approval.approver):"—")+'<br>Approver · e-signature confirmed</div>'+
+   '<div style="flex:1;border-top:2px solid var(--foreground);padding-top:6px;font-size:12.5px;color:var(--muted-foreground)">'+(h.certificate?h.certificate.at:(h.approval?h.approval.signedAt:"—"))+'<br>Approval timestamp (audit record)</div></div></div>',
    '<button class="btn o" onclick="window.print()">Print / save as PDF</button><button class="btn p" onclick="closeModal()">Close</button>',true);
  }
  if(m==="taskDetail"){
@@ -138,7 +168,7 @@ function renderModal(){
    '<div style="font-size:12.5px;font-weight:600;margin-bottom:6px">Execution checklist</div><div class="col" style="gap:5px;margin-bottom:12px">'+(subs.length?subs.map(s=>'<div class="row" style="gap:8px;font-size:12px"><span class="dot" style="width:8px;height:8px;background:'+(t.completion&&t.completion.sub.includes(s)?"var(--success)":"var(--status-slate)")+'"></span>'+esc(s)+'</div>').join(""):'<span class="muted">No sub-steps configured.</span>')+'</div>'+
    (t.completion?'<div class="bn-info banner" style="margin-bottom:10px"><b>Completion evidence</b> — '+fmtD(t.completion.date)+' · '+scheduledEvidenceCount(t)+' photo(s) · '+esc(t.completion.readings)+' · '+esc(t.completion.remarks)+' · parts '+esc(t.completion.parts||'—')+(t.completion.anomaly?' · anomaly flagged':'')+'</div>':'<div class="bn-warn banner" style="margin-bottom:10px">No completion submitted yet. Upload one Before photo before work and one After photo when the work is complete.</div>')+
    scheduledEvidenceSection(t,false)+
-   '<div style="font-size:12.5px;font-weight:600;margin:12px 0 6px">Activity</div><div class="col">'+(t.log&&t.log.length?t.log.map(l=>'<div class="row" style="gap:8px;align-items:flex-start;padding:7px 0;border-bottom:1px solid var(--border);font-size:12px"><span class="history-dot"></span><div>'+esc(typeof pmDisplayTaskActivity==="function"?pmDisplayTaskActivity(l.text):l.text)+'<div class="muted" style="font-size:10.5px">'+esc(l.actor)+' · '+esc(l.at)+'</div></div></div>').join(""):'<span class="muted" style="font-size:12px">No activity recorded.</span>')+'</div>',
+   '<div style="font-size:12.5px;font-weight:600;margin:12px 0 6px">Activity</div><div class="col">'+(t.log&&t.log.length?t.log.map(l=>'<div class="row" style="gap:8px;align-items:flex-start;padding:7px 0;border-bottom:1px solid var(--border);font-size:12px"><span class="history-dot"></span><div>'+esc(typeof pmDisplayTaskActivity==="function"?pmDisplayTaskActivity(l.text):l.text)+'<div class="muted" style="font-size:12px">'+esc(l.actor)+' · '+esc(s91LogAt(l.at))+'</div></div></div>').join(""):'<span class="muted" style="font-size:12px">No activity recorded.</span>')+'</div>',
    '<div class="row" style="gap:7px;justify-content:flex-end;flex-wrap:wrap">'+(t.status==="Scheduled"?'<button class="btn o sm" onclick="closeModal();startTask(\''+t.id+'\')">Start</button>':"")+(t.status==="In Progress"?'<button class="btn p sm" onclick="closeModal();openModal(\'complete\',{id:\''+t.id+'\'})">Complete</button>':"")+(scheduledAdmin()?'<button class="btn g sm" onclick="closeModal();openModal(\'reassignTask\',{id:\''+t.id+'\'})">Reassign</button>':"")+'<button class="btn o sm" onclick="closeModal()">Close</button></div>',true);
  }
  /* --- newTask --- */
@@ -150,7 +180,7 @@ function renderModal(){
  /* --- importCSV --- */
  if(m==="importCSV")return modal("Upload pre-built schedule (2.1.1)","Excel/CSV template with columns: task, plant, type, frequency, assignee, start_date. PM work is assigned by plant and category, not to an individual unit.",
   '<div style="border:1px dashed var(--border);border-radius:10px;padding:24px;text-align:center;background:var(--surface-subtle)">'+I.ftext(26)+
-  '<div style="font-weight:600;font-size:13px;margin-top:6px">Choose maintenance_schedule.xlsx or .csv</div><input id="csv-file" class="inp" type="file" accept=".xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv" style="margin-top:12px"/><div style="font-size:11px;color:var(--muted-foreground);margin-top:3px">Only rows in the selected file are imported. Duplicate work is not generated from hidden sample data.</div></div>',
+  '<div style="font-weight:600;font-size:13px;margin-top:6px">Choose maintenance_schedule.xlsx or .csv</div><input id="csv-file" class="inp" type="file" accept=".xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv" style="margin-top:12px"/><div style="font-size:12.5px;color:var(--muted-foreground);margin-top:3px">Only rows in the selected file are imported. Duplicate work is not generated from hidden sample data.</div></div>',
   '<button class="btn o" onclick="closeModal()">Cancel</button><button class="btn p" onclick="importCSV()">Import schedule</button>');
  /* --- complete --- */
  if(m==="complete"){
@@ -176,12 +206,12 @@ function renderModal(){
   return modal("Bulk entry — inverter washed today (2.2.2)","Mark multiple tables as washed in one action — per-table date-stamped records are still stored",
    '<div class="row" style="gap:12px"><div style="flex:1" class="field"><span class="lbl">Inverter</span><select id="bw-inv" class="inp">'+invs.map(i=>'<option value="'+i+'">INV-'+pad2(i)+' — all tables</option>').join("")+'</select></div>'+
    '<div style="flex:1" class="field"><span class="lbl">Logged by</span><select id="bw-by" class="inp">'+team.map(n=>'<option>'+esc(n)+'</option>').join("")+'</select></div></div>'+
-   '<div style="font-size:11.5px;color:var(--muted-foreground)">Date stamp: '+fmtDate(TODAY)+' · tables already washed today are skipped.</div>',
+   '<div style="font-size:12.5px;color:var(--muted-foreground)">Date stamp: '+fmtDate(TODAY)+' · tables already washed today are skipped.</div>',
    '<button class="btn o" onclick="closeModal()">Cancel</button><button class="btn p" onclick="bulkWash()">Log all tables washed</button>');}
  if(m==="washLog"){const t=S.washing.find(x=>x.id===ctx.id);if(!t)return modal("Log wash","This table is no longer in the washing register.",'<div class="bn-info banner">Refresh the register and try again.</div>','<button class="btn o" onclick="closeModal()">Close</button>');const crew=((S.washMeta[t.plant]||{}).team||[]);const team=crew.length?crew:["—"];
   return modal("Log table washed today — "+t.tableId,esc(t.plant)+" · one dated record will be attached to this table",
    '<div class="field"><span class="lbl">Completed by</span><select id="wl-by" class="inp">'+team.map(n=>'<option>'+esc(n)+'</option>').join("")+'</select></div>'+
-   '<div style="font-size:11.5px;color:var(--muted-foreground)">Date stamp: '+fmtDate(TODAY)+' · the selected crew member is used in person-wise productivity and the audit history.</div>',
+   '<div style="font-size:12.5px;color:var(--muted-foreground)">Date stamp: '+fmtDate(TODAY)+' · the selected crew member is used in person-wise productivity and the audit history.</div>',
    '<button class="btn o" onclick="closeModal()">Cancel</button><button class="btn p" onclick="saveWashTableLog()">Log wash</button>');}
     /* --- exception --- */
  if(m==="exception"){const t=S.washing.find(x=>x.id===ctx.id);
@@ -191,22 +221,22 @@ function renderModal(){
    '<div class="field"><span class="lbl">Reason code</span><select id="ex-reason" class="inp">'+EXC_REASONS.map(r=>'<option>'+r+'</option>').join("")+'</select></div>'+
    '<div class="field"><span class="lbl">Logged by</span><select id="ex-by" class="inp">'+team.map(n=>'<option>'+esc(n)+'</option>').join("")+'</select></div>'+
    '<div class="field"><span class="lbl">Notes (free text, especially for \u2018Other\u2019)</span><input id="ex-notes" class="inp" placeholder="Details…"/></div>'+
-   '<div style="font-size:11.5px;color:var(--muted-foreground)">Exceptions are recorded distinctly from "missed/pending" so they don\u2019t count negatively against team efficiency metrics, but remain visible for transparency. Rain skips are auto-flagged <b>"Pending — Rescheduled"</b> with the next available date suggested.</div>',
+   '<div style="font-size:12.5px;color:var(--muted-foreground)">Exceptions are recorded distinctly from "missed/pending" so they don\u2019t count negatively against team efficiency metrics, but remain visible for transparency. Rain skips are auto-flagged <b>"Pending — Rescheduled"</b> with the next available date suggested.</div>',
    '<button class="btn o" onclick="closeModal()">Cancel</button><button class="btn p" onclick="logException()">Log exception</button>');}
  /* --- washHistory --- */
  if(m==="washHistory"){const t=S.washing.find(x=>x.id===ctx.id);if(!t)return modal("Cleaning history","This table is no longer in the washing register.",'<div class="bn-info banner">Refresh the register and try again.</div>','<button class="btn o" onclick="closeModal()">Close</button>');const d=daysSince(t);
   return modal("Cleaning history — "+t.tableId+" (2.2.4)",esc(t.plant)+" · full timeline of wash dates, skip/exception dates, and days-since-last-wash counter",
    '<div class="row" style="gap:10px;margin-bottom:12px;align-items:center">'+badge(d<10?"On track":d<=15?"Attention":"Overdue")+'<b style="font-size:13px">Days since last wash: '+(d===999?"never":d)+'</b></div>'+
    '<div class="col">'+t.history.slice().reverse().map(hh=>'<div class="row" style="gap:10px;align-items:flex-start;padding:8px 0;border-bottom:1px solid var(--border)"><span class="history-dot" style="background:'+(hh.type==="wash"?"var(--success)":"var(--info)")+'"></span>'+
-    '<div style="font-size:12.5px"><b>'+(hh.type==="wash"?"Washed":"Exception — "+esc(hh.reason||"Other"))+'</b><div style="font-size:11px;color:var(--muted-foreground)">'+fmtDate(hh.date)+' · by '+esc(hh.by||"Unknown")+'</div>'+
-    (hh.notes?'<div style="margin-top:4px;font-size:11.5px">'+esc(hh.notes)+'</div>':"")+
-    (hh.type==="exception"&&(hh.rescheduledTo||(hh.reason==="Rain"&&t.rescheduledTo&&hh.date===TODAY))?'<div style="margin-top:4px;font-size:11.5px;color:var(--warning-strong)">Rescheduled to '+fmtDate(hh.rescheduledTo||t.rescheduledTo)+'</div>':"")+'</div></div>').join("")+'</div>',
+    '<div style="font-size:12.5px"><b>'+(hh.type==="wash"?"Washed":"Exception — "+esc(hh.reason||"Other"))+'</b><div style="font-size:12.5px;color:var(--muted-foreground)">'+fmtDate(hh.date)+' · by '+esc(hh.by||"Unknown")+'</div>'+
+    (hh.notes?'<div style="margin-top:4px;font-size:12.5px">'+esc(hh.notes)+'</div>':"")+
+    (hh.type==="exception"&&(hh.rescheduledTo||(hh.reason==="Rain"&&t.rescheduledTo&&hh.date===TODAY))?'<div style="margin-top:4px;font-size:12.5px;color:var(--warning-strong)">Rescheduled to '+fmtDate(hh.rescheduledTo||t.rescheduledTo)+'</div>':"")+'</div></div>').join("")+'</div>',
    '<button class="btn o" onclick="closeModal()">Close</button>');}
  /* --- washScheduleImport --- */
  if(m==="washScheduleImport")return modal("Upload washing schedule (2.2.1)","Excel/CSV columns: plant, table_id, inverter, secondary_inverter (optional), frequency_days, next_due, crew (optional)",
   '<div style="border:1px dashed var(--border);border-radius:10px;padding:22px;text-align:center;background:var(--surface-subtle)">'+I.ftext(26)+
   '<div style="font-weight:600;font-size:13px;margin-top:6px">Choose washing_schedule.xlsx or .csv</div><input id="wash-schedule-file" class="inp" type="file" accept=".xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv" style="margin-top:12px"/>'+
-  '<div style="font-size:11px;color:var(--muted-foreground);margin-top:5px">Rows can create/update table mappings. A table may include a secondary inverter when it is physically split between two inverters.</div></div>',
+  '<div style="font-size:12.5px;color:var(--muted-foreground);margin-top:5px">Rows can create/update table mappings. A table may include a secondary inverter when it is physically split between two inverters.</div></div>',
   '<button class="btn o" onclick="closeModal()">Cancel</button><button class="btn p" onclick="importWashSchedule()">Import washing schedule</button>');
  /* --- washSetup --- */
  if(m==="washSetup"){const opt=n=>'<option value="">—</option>'+SITE_ENG_POOL.map(x=>'<option'+(x===n?' selected':'')+'>'+esc(x)+'</option>').join("");
@@ -216,8 +246,8 @@ function renderModal(){
    '<button class="btn o" onclick="closeModal()">Cancel</button><button class="btn p" onclick="saveWashSetup()">Create tables</button>');}
  /* --- plantDetail (Excel DGR data) --- */
  if(m==="plantDetail"){const p=S.plants.find(z=>z.id===ctx.id);if(!p)return"";
-  const x=XL_BY[p.id],hasX=!!(x&&x.latest),mt=xlPlantMtd(p.id),sm="font-size:11px;color:var(--muted-foreground)";
-  const kv=(k,v,s)=>'<div class="metric" style="flex:1;min-width:130px;padding:10px 12px"><div style="font-size:10.5px;color:var(--muted-foreground);text-transform:uppercase;letter-spacing:.04em">'+k+'</div><div style="font-size:17px;font-weight:700;margin-top:2px">'+v+'</div>'+(s?'<div style="'+sm+'">'+s+'</div>':'')+'</div>';
+  const x=XL_BY[p.id],hasX=!!(x&&x.latest),mt=xlPlantMtd(p.id),sm="font-size:12.5px;color:var(--muted-foreground)";
+  const kv=(k,v,s)=>'<div class="metric" style="flex:1;min-width:130px;padding:10px 12px"><div style="font-size:12px;color:var(--muted-foreground);text-transform:uppercase;letter-spacing:.04em">'+k+'</div><div style="font-size:17px;font-weight:700;margin-top:2px">'+v+'</div>'+(s?'<div style="'+sm+'">'+s+'</div>':'')+'</div>';
   const openI=openTk(S.issues).filter(t=>t.plant===p.name).length,openT=S.tasks.filter(t=>t.plant===p.name&&t.status!=="Completed").length,wt=S.washing.filter(t=>t.plant===p.name),wOk=wt.filter(t=>daysSince(t)<=((S.washMeta[p.name]||{}).freq||14)).length;
   let body='<div class="row wrap" style="gap:10px;margin-bottom:12px">'+
    kv("DC capacity (kWp)",plantDcKw(p)!=null?kWStrPlain(plantDcKw(p)):capStr(p.capacity),"Plant registry")+
@@ -240,8 +270,8 @@ function renderModal(){
    '<button class="btn o" onclick="closeModal()">Cancel</button><button class="btn p" onclick="saveWashFreq()">Save schedule</button>');}
  /* --- newTicket --- */
  if(m==="newTicket"){return modal("Raise issue ticket (2.3.1)","Step-by-step issue capture · Ticket ID and timestamp are generated only when you submit",
-  '<div class="wiz-ticket" data-step="1"><div class="pill pillsm b-info" style="margin-bottom:12px">Step 1 of 3 · Plant & issue context</div><div class="field"><span class="lbl">Plant code</span><select id="tk-plant" class="inp">'+S.plants.map((p,i)=>'<option value="'+esc(p.name)+'"'+(i===0?' selected':'')+'>'+esc(p.id||p.name)+'</option>').join("")+'</select></div><div class="row" style="justify-content:flex-end"><button class="btn p" onclick="wizardGo(&quot;ticket&quot;,2)">Next</button></div></div>'+
-  '<div class="wiz-ticket" data-step="2" style="display:none"><div class="pill pillsm b-info" style="margin-bottom:12px">Step 2 of 3 · Classification</div><div class="field"><span class="lbl">Issue vertical / category</span><select id="tk-vert" class="inp" onchange="updIssueAssignees()">'+VERTICALS.map(v=>'<option>'+v+'</option>').join("")+'</select></div><div class="field"><span class="lbl">Equipment / component reference</span><input id="tk-equip" class="inp" maxlength="255" placeholder="e.g. INV-03, transformer, pump, or equipment code"/></div><div class="field"><span class="lbl">Serial number</span><input id="tk-serial" class="inp" placeholder="Issue or equipment serial number"/></div><div class="field"><span class="lbl">Supplier</span><input id="tk-supplier" class="inp" placeholder="Supplier / vendor name"/></div><div class="field"><span class="lbl">Maker / manufacturer (if known)</span><input id="tk-maker" class="inp" placeholder="e.g. Sungrow, Waaree"/></div><div class="field"><span class="lbl">Occurrence date</span><input id="tk-occurred" class="inp" type="date" value="'+TODAY+'"/></div><div class="row between"><button class="btn o" onclick="wizardGo(&quot;ticket&quot;,1)">Back</button><button class="btn p" onclick="wizardGo(&quot;ticket&quot;,3)">Next</button></div></div>'+
+  '<div class="wiz-ticket" data-step="1"><div class="pill pillsm b-info" style="margin-bottom:12px">Step 1 of 3 · Plant & issue context</div><div class="field"><span class="lbl">Plant code</span><select id="tk-plant" class="inp" onchange="s91TkEquipRefresh()">'+S.plants.map((p,i)=>'<option value="'+esc(p.name)+'"'+(i===0?' selected':'')+'>'+esc(p.id||p.name)+'</option>').join("")+'</select></div><div class="row" style="justify-content:flex-end"><button class="btn p" onclick="wizardGo(&quot;ticket&quot;,2)">Next</button></div></div>'+
+  '<div class="wiz-ticket" data-step="2" style="display:none"><div class="pill pillsm b-info" style="margin-bottom:12px">Step 2 of 3 · Classification</div><div class="field"><span class="lbl">Issue vertical / category</span><select id="tk-vert" class="inp" onchange="updIssueAssignees();s91TkEquipRefresh()">'+VERTICALS.map(v=>'<option>'+v+'</option>').join("")+'</select></div><div class="field"><span class="lbl">Registered equipment</span><select id="tk-equip-pick" class="inp" onchange="s91TkEquipPicked(this.value)">'+s91TkEquipOptionsHtml(s91TkPlantName(),VERTICALS[0])+'</select><small class="muted">Choose one unit. The ticket is raised for that unit only.</small></div><div class="field"><span class="lbl">Equipment / component reference</span><input id="tk-equip" class="inp" maxlength="255" placeholder="e.g. INV-03, transformer, pump, or equipment code"/></div><div class="field"><span class="lbl">Serial number</span><input id="tk-serial" class="inp" placeholder="Issue or equipment serial number"/></div><div class="field"><span class="lbl">Supplier</span><input id="tk-supplier" class="inp" placeholder="Supplier / vendor name"/></div><div class="field"><span class="lbl">Maker / manufacturer (if known)</span><input id="tk-maker" class="inp" placeholder="e.g. Sungrow, Waaree"/></div><div class="field"><span class="lbl">Occurrence date</span><input id="tk-occurred" class="inp" type="date" value="'+TODAY+'"/></div><div class="row between"><button class="btn o" onclick="wizardGo(&quot;ticket&quot;,1)">Back</button><button class="btn p" onclick="wizardGo(&quot;ticket&quot;,3)">Next</button></div></div>'+
   '<div class="wiz-ticket" data-step="3" style="display:none"><div class="pill pillsm b-info" style="margin-bottom:12px">Step 3 of 3 · Priority & details</div><div class="row" style="gap:12px"><div class="field" style="flex:1"><span class="lbl">Severity / Priority</span><select id="tk-sev" class="inp" onchange="updEtc()"><option>Critical</option><option selected>Medium</option><option>Low</option></select></div><div class="field" style="flex:1"><span class="lbl">Expected Time to Close (ETC)</span><input id="tk-etc" class="inp" type="datetime-local" value="'+addHoursISO(stampISO(),etcHrs("Medium"))+'"/></div></div><div class="field"><span class="lbl">Issue details</span><textarea id="tk-desc" class="txt" rows="3" placeholder="Describe the actual issue observed"></textarea></div><div class="row" style="gap:12px"><div class="field" style="flex:1"><span class="lbl">Evidence photos (up to 10)</span><input id="tk-photos" class="inp" type="file" accept="image/jpeg,image/png,image/webp" multiple onchange="showIssuePhotoSelection(this)"/><small id="tk-photo-count" class="muted">No photos selected</small></div><div class="field" style="flex:1"><span class="lbl">Assign to Assignee (optional)</span><select id="tk-assignee" class="inp">'+issueAssigneeOptions()+'</select></div></div><div class="row"><button class="btn o" onclick="wizardGo(&quot;ticket&quot;,2)">Back</button></div></div>',
   '<button class="btn o" onclick="closeModal()">Cancel</button><button data-wiz-final="ticket" style="display:none" class="btn p" onclick="createTicket()">Create ticket</button>');}
  /* --- editTicket --- */
@@ -263,30 +293,31 @@ function renderModal(){
   if(isHead)acts+=b("Edit details","openModal('editTicket',{id:'"+t.id+"'})","o");
   if(isHead&&t.dbId)acts+=b("Move to Deleted","s91ConfirmDeleteIssue('"+esc(t.id)+"')","d");
   acts+='<button class="btn o sm" onclick="closeModal()">Close</button>';
-  return modal(t.id+" — "+t.vertical+(t.sub?" · "+t.sub:""),esc(siteLabel)+" · "+esc(t.equip),
+  const eqRec=s91IssueEquipment(t),eqLabel=s91IssueEquipmentLabel(t);
+  return modal(t.id+" — "+t.vertical+(t.sub?" · "+t.sub:""),esc(siteLabel)+" · "+esc(eqLabel),
    issueWorkflowHtml(t)+'<div class="row wrap" style="gap:8px;margin:10px 0 12px">'+badge(t.status==="Pending Vendor"?"Pending Parts/Vendor":t.status)+badge(t.severity)+
    (sla==="breach"?badge("Overdue"):"")+(sla==="nearing"?badge("Nearing ETC"):"")+(t.vendor?badge("Pending Vendor"):"")+'</div>'+
    '<div class="kgrid" style="grid-template-columns:repeat(3,1fr);gap:12px;font-size:12.5px;margin-bottom:12px">'+
-   '<div><div class="k" style="font-size:10.5px;font-weight:600;text-transform:uppercase;color:var(--muted-foreground)">Issue ID</div>'+esc(t.id)+'</div>'+
-   '<div><div class="k" style="font-size:10.5px;font-weight:600;text-transform:uppercase;color:var(--muted-foreground)">Plant code / site</div>'+esc(siteLabel)+'</div>'+
-   '<div><div class="k" style="font-size:10.5px;font-weight:600;text-transform:uppercase;color:var(--muted-foreground)">Supplier</div>'+esc(t.supplier||"—")+'</div>'+
-   '<div><div class="k" style="font-size:10.5px;font-weight:600;text-transform:uppercase;color:var(--muted-foreground)">Equipment</div>'+esc(t.equip||"—")+'</div>'+
-   '<div><div class="k" style="font-size:10.5px;font-weight:600;text-transform:uppercase;color:var(--muted-foreground)">Serial number</div>'+esc(t.serialNumber||"—")+'</div>'+
-   '<div><div class="k" style="font-size:10.5px;font-weight:600;text-transform:uppercase;color:var(--muted-foreground)">Maker</div>'+esc(t.maker||"—")+'</div>'+
-   '<div><div class="k" style="font-size:10.5px;font-weight:600;text-transform:uppercase;color:var(--muted-foreground)">Issue type</div>'+esc(t.vertical)+'</div>'+
-   '<div><div class="k" style="font-size:10.5px;font-weight:600;text-transform:uppercase;color:var(--muted-foreground)">Occurrence</div>'+fmtDT(t.occurred||t.created)+'</div>'+
-   '<div><div style="font-size:10.5px;font-weight:600;text-transform:uppercase;color:var(--muted-foreground)">Created</div>'+fmtDT(t.created)+'</div>'+
-   '<div><div style="font-size:10.5px;font-weight:600;text-transform:uppercase;color:var(--muted-foreground)">Age</div>'+esc(ageBucket(t))+'</div>'+
-   '<div><div style="font-size:10.5px;font-weight:600;text-transform:uppercase;color:var(--muted-foreground)">ETC</div>'+fmtDT(t.etc)+'</div>'+
-   '<div><div style="font-size:10.5px;font-weight:600;text-transform:uppercase;color:var(--muted-foreground)">Assignee</div>'+(t.assignee?esc(t.assignee):'<span style="color:var(--danger);font-weight:600">Unassigned</span>')+'</div>'+
-   '<div><div style="font-size:10.5px;font-weight:600;text-transform:uppercase;color:var(--muted-foreground)">Priority</div>'+esc(t.severity)+'</div></div>'+
+   '<div><div class="k" style="font-size:12px;font-weight:600;text-transform:uppercase;color:var(--muted-foreground)">Issue ID</div>'+esc(t.id)+'</div>'+
+   '<div><div class="k" style="font-size:12px;font-weight:600;text-transform:uppercase;color:var(--muted-foreground)">Plant code / site</div>'+esc(siteLabel)+'</div>'+
+   '<div><div class="k" style="font-size:12px;font-weight:600;text-transform:uppercase;color:var(--muted-foreground)">Supplier</div>'+esc(t.supplier||"—")+'</div>'+
+   '<div><div class="k" style="font-size:12px;font-weight:600;text-transform:uppercase;color:var(--muted-foreground)">Equipment</div>'+esc(eqLabel)+(eqRec&&eqRec.equipment_type?'<div class="muted" style="font-size:12.5px">'+esc(eqRec.equipment_type)+'</div>':'')+'</div>'+
+   '<div><div class="k" style="font-size:12px;font-weight:600;text-transform:uppercase;color:var(--muted-foreground)">Serial number</div>'+esc(t.serialNumber||(eqRec&&eqRec.serial_number)||"—")+'</div>'+
+   '<div><div class="k" style="font-size:12px;font-weight:600;text-transform:uppercase;color:var(--muted-foreground)">Maker</div>'+esc(t.maker||(eqRec&&eqRec.maker)||"—")+'</div>'+
+   '<div><div class="k" style="font-size:12px;font-weight:600;text-transform:uppercase;color:var(--muted-foreground)">Issue type</div>'+esc(t.vertical)+'</div>'+
+   '<div><div class="k" style="font-size:12px;font-weight:600;text-transform:uppercase;color:var(--muted-foreground)">Occurrence</div>'+fmtDT(t.occurred||t.created)+'</div>'+
+   '<div><div style="font-size:12px;font-weight:600;text-transform:uppercase;color:var(--muted-foreground)">Created</div>'+fmtDT(t.created)+'</div>'+
+   '<div><div style="font-size:12px;font-weight:600;text-transform:uppercase;color:var(--muted-foreground)">Age</div>'+esc(ageBucket(t))+'</div>'+
+   '<div><div style="font-size:12px;font-weight:600;text-transform:uppercase;color:var(--muted-foreground)">ETC</div>'+fmtDT(t.etc)+'</div>'+
+   '<div><div style="font-size:12px;font-weight:600;text-transform:uppercase;color:var(--muted-foreground)">Assignee</div>'+(t.assignee?esc(t.assignee):'<span style="color:var(--danger);font-weight:600">Unassigned</span>')+'</div>'+
+   '<div><div style="font-size:12px;font-weight:600;text-transform:uppercase;color:var(--muted-foreground)">Priority</div>'+esc(t.severity)+'</div></div>'+
    '<div style="font-size:12.5px;margin-bottom:10px"><b>Description:</b> '+esc(t.desc)+'</div>'+
    (t.vendor?'<div class="bn-warn banner" style="margin-bottom:10px"><b>Vendor-Dependent</b> — '+esc(t.vendor.name)+' · '+esc(t.vendor.contact)+' · expected vendor response: '+esc(t.vendor.expected)+' (tracked separately)</div>':'')+
-   '<div style="font-size:11.5px;color:var(--muted-foreground);margin:10px 0">📎 '+evidence.length+' of 10 evidence photos'+
+   '<div style="font-size:12.5px;color:var(--muted-foreground);margin:10px 0">📎 '+evidence.length+' of 10 evidence photos'+
     (evidence.length?'<div class="row wrap" style="gap:6px;margin-top:7px">'+evidence.map((e,i)=>'<button type="button" class="btn o sm" onclick="openIssueEvidence(\''+esc(t.id)+'\',\''+esc(e.id)+'\')">Photo '+(i+1)+(e.name?' · '+esc(e.name):"")+'</button>').join("")+'</div>':"")+
     (canUploadPhotos&&evidence.length<10&&t.dbId?'<label class="btn o sm" style="position:relative;overflow:hidden;margin-top:8px">Add photos<input type="file" accept="image/jpeg,image/png,image/webp" multiple style="position:absolute;inset:0;opacity:0;cursor:pointer" onchange="uploadMoreIssuePhotos(\''+esc(t.id)+'\',this)"/></label>':"")+'</div>'+
    (progress.length?'<div style="font-size:12.5px;font-weight:600;margin-bottom:6px">Work log — spare parts and time spent</div><div class="col">'+progress.map(p=>'<div class="row" style="gap:10px;align-items:flex-start;padding:8px 0;border-bottom:1px solid var(--border)"><span class="history-dot"></span>'+
-    '<div style="font-size:12px">'+esc(p.note)+'<div style="font-size:11px;color:var(--muted-foreground)">Parts: '+esc(p.parts)+' · '+p.hrs+' hrs · '+fmtDT(p.at)+'</div></div></div>').join("")+'</div>':'')+
+    '<div style="font-size:12px">'+esc(p.note)+'<div style="font-size:12.5px;color:var(--muted-foreground)">Parts: '+esc(p.parts)+' · '+p.hrs+' hrs · '+fmtDT(p.at)+'</div></div></div>').join("")+'</div>':'')+
    (t.closure?'<div style="border:1px solid var(--success);background:var(--success-soft);border-radius:10px;padding:12px;font-size:12px;margin-top:10px"><b>Closure details</b>'+
     '<div style="margin-top:6px"><b>Root cause:</b> '+esc(t.closure.rootCause)+'</div><div><b>Corrective action taken:</b> '+esc(t.closure.corrective)+'</div>'+
     '<div style="margin-top:4px">📎 '+t.closure.photos+' photo(s) of fix · actual time-to-close <b>'+t.closure.resolutionHrs+' hrs</b> · resolved '+fmtDT(t.closure.closedAt)+'</div>'+
@@ -295,8 +326,8 @@ function renderModal(){
    '<section class="issue-updates"><div class="issue-updates-heading"><div><h4>Ticket updates</h4><p>Messages, photos and status changes are saved to this ticket.</p></div><button type="button" class="btn o sm" onclick="refreshIssueActivity(\''+esc(t.id)+'\')">Refresh</button></div>'+
     issueActivityHtml(t)+
     (canMessage&&t.dbId?'<div class="issue-message-form"><label class="lbl" for="issue-message">Message to the ticket team</label><textarea id="issue-message" class="txt" rows="3" maxlength="4000" placeholder="Share an update, question, or site observation…"></textarea><div class="issue-message-actions"><label class="btn o sm" style="position:relative;overflow:hidden">Attach photos<input id="issue-message-photos" type="file" accept="image/jpeg,image/png,image/webp" multiple style="position:absolute;inset:0;opacity:0;cursor:pointer" onchange="showIssueMessagePhotoSelection(this)"/></label><small id="issue-message-photo-count" class="muted">Photos optional · '+Math.max(0,10-evidence.length)+' remaining</small><button type="button" class="btn p sm" onclick="sendIssueMessage(\''+esc(t.id)+'\')">Send update</button></div></div>':'')+
-   '</section>'+
-   '<div class="row" style="gap:8px;flex-wrap:wrap;justify-content:flex-end">'+acts+'</div>',true);}
+   '</section>',
+   '<div class="row" style="gap:8px;flex-wrap:wrap;justify-content:flex-end">'+acts+'</div>');}
  /* --- assign --- */
  if(m==="assign"){const t=S.issues.find(x=>x.id===ctx.id);
   return modal("Assign & triage — "+t.id+" (2.3.2)","Assign to a specific team member (or vendor/OEM support for warranty issues) responsible for resolution",
@@ -307,7 +338,7 @@ function renderModal(){
    '<div class="field"><span class="lbl">Vendor name</span><input id="at-vn" class="inp" placeholder="e.g. VoltEdge OEM"/></div>'+
    '<div class="field"><span class="lbl">Vendor contact</span><input id="at-vc" class="inp" placeholder="Phone / email"/></div>'+
    '<div class="field"><span class="lbl">Expected vendor response time</span><input id="at-vr" class="inp" placeholder="e.g. 48h engineer mobilisation"/></div>'+
-   '<div style="font-size:11px;color:var(--muted-foreground)">Ticket is tagged <b>Vendor-Dependent</b>; vendor response time is tracked separately.</div></div>'+
+   '<div style="font-size:12.5px;color:var(--muted-foreground)">Ticket is tagged <b>Vendor-Dependent</b>; vendor response time is tracked separately.</div></div>'+
    (t.severity==="Critical"?'<div style="font-size:12px;font-weight:600;color:var(--danger)">☎ Critical severity — assignee gets an immediate call/SMS alert in addition to the app notification.</div>':''),
    '<button class="btn o" onclick="closeModal()">Cancel</button><button class="btn p" onclick="assignTicket()">Assign &amp; notify</button>');}
     /* --- progress --- */
@@ -322,7 +353,7 @@ function renderModal(){
    '<div class="field"><span class="lbl">Root cause *</span><textarea id="rs-root" class="txt" rows="2" placeholder="What caused the issue?"></textarea></div>'+
    '<div class="field"><span class="lbl">Corrective action taken *</span><textarea id="rs-act" class="txt" rows="2" placeholder="What was done to fix it?"></textarea></div>'+
    '<div class="field"><span class="lbl">Photo evidence of the fix *</span><input id="rs-photos" class="inp" type="file" accept="image/jpeg,image/png,image/webp" multiple onchange="showResolutionPhotoSelection(this)"/><small id="rs-photo-count" class="muted">Attach at least one fix photo · '+Math.max(0,10-(t.evidence||[]).length)+' remaining</small></div>'+
-   '<div style="font-size:11.5px;color:var(--muted-foreground)">Actual time-to-close is calculated and stored from ticket creation through resolution. Time already logged in work updates: '+spent+' hrs. An O&amp;M Head must verify and formally close this ticket, or reopen it if the issue recurs.</div>',
+   '<div style="font-size:12.5px;color:var(--muted-foreground)">Actual time-to-close is calculated and stored from ticket creation through resolution. Time already logged in work updates: '+spent+' hrs. An O&amp;M Head must verify and formally close this ticket, or reopen it if the issue recurs.</div>',
    '<button class="btn o" onclick="closeModal()">Cancel</button><button class="btn p" onclick="resolveTicket()">Submit for review</button>');}
  /* --- verify --- */
  if(m==="verify"){const t=S.issues.find(x=>x.id===ctx.id);const met=t.closure&&new Date(t.closure.closedAt)<=new Date(t.etc);
@@ -342,7 +373,7 @@ function renderModal(){
   '<div class="field"><span class="lbl">Vendor name</span><input id="nv-name" class="inp"/></div><div class="row" style="gap:12px"><div class="field" style="flex:1"><span class="lbl">Type</span><select id="nv-type" class="inp"><option>OEM service partner</option><option>Washing contractor</option><option>Security agency</option><option>Other</option></select></div><div class="field" style="flex:1"><span class="lbl">Scope</span><input id="nv-scope" class="inp" placeholder="Plants / services covered"/></div></div><div class="field"><span class="lbl">SLA / service commitment</span><input id="nv-sla" class="inp" placeholder="e.g. 48h mobilisation"/></div><div class="field"><span class="lbl">Contract end</span><input id="nv-end" class="inp" type="date"/></div>',
   '<button class="btn o" onclick="closeModal()">Cancel</button><button class="btn p" onclick="createVendor()">Add vendor</button>');
  if(m==="newDocument")return modal("Add document (3.6)","Store a document record with optional expiry; reminders are derived from the actual expiry date.",
-  '<div class="field"><span class="lbl">Document name</span><input id="nd-name" class="inp"/></div><div class="row" style="gap:12px"><div class="field" style="flex:1"><span class="lbl">Type</span><input id="nd-type" class="inp" placeholder="Warranty / Certificate / Manual"/></div><div class="field" style="flex:1"><span class="lbl">Plant</span><select id="nd-plant" class="inp"><option>Portfolio</option>'+S.plants.map(p=>'<option>'+esc(p.name)+'</option>').join("")+'</select></div></div><div class="row" style="gap:12px"><div class="field" style="flex:1"><span class="lbl">Owner</span><input id="nd-owner" class="inp" value="'+OM_HEAD+'"/></div><div class="field" style="flex:1"><span class="lbl">Expiry date (optional)</span><input id="nd-exp" class="inp" type="date"/></div></div><div class="field"><span class="lbl">File</span><input id="nd-file" class="inp" type="file"/><span class="muted" style="font-size:10.5px">Document metadata is persisted in Supabase PostgreSQL. Binary document-file storage is not enabled for this module in the current production build.</span></div>',
+  '<div class="field"><span class="lbl">Document name</span><input id="nd-name" class="inp"/></div><div class="row" style="gap:12px"><div class="field" style="flex:1"><span class="lbl">Type</span><input id="nd-type" class="inp" placeholder="Warranty / Certificate / Manual"/></div><div class="field" style="flex:1"><span class="lbl">Plant</span><select id="nd-plant" class="inp"><option>Portfolio</option>'+S.plants.map(p=>'<option>'+esc(p.name)+'</option>').join("")+'</select></div></div><div class="row" style="gap:12px"><div class="field" style="flex:1"><span class="lbl">Owner</span><input id="nd-owner" class="inp" value="'+OM_HEAD+'"/></div><div class="field" style="flex:1"><span class="lbl">Expiry date (optional)</span><input id="nd-exp" class="inp" type="date"/></div></div><div class="field"><span class="lbl">File</span><input id="nd-file" class="inp" type="file"/><span class="muted" style="font-size:12px">Document metadata is persisted in Supabase PostgreSQL. Binary document-file storage is not enabled for this module in the current production build.</span></div>',
   '<button class="btn o" onclick="closeModal()">Cancel</button><button class="btn p" onclick="createDocument()">Add document</button>');
  if(m==="newSLA")return modal("Add SLA contract (3.13)","Targets are configuration only; breach status is derived from actual tickets/washing and Operations date.",
   '<div class="field"><span class="lbl">Contract name</span><input id="ns-name" class="inp" placeholder="O&M SLA"/></div><div class="field"><span class="lbl">Plant scope</span><select id="ns-plant" class="inp"><option>All Plants</option>'+S.plants.map(p=>'<option>'+esc(p.name)+'</option>').join("")+'</select></div><div class="row" style="gap:8px"><div class="field" style="flex:1"><span class="lbl">Critical (hrs)</span><input id="ns-c" type="number" class="inp" value="24"/></div><div class="field" style="flex:1"><span class="lbl">Medium</span><input id="ns-m" type="number" class="inp" value="120"/></div><div class="field" style="flex:1"><span class="lbl">Low</span><input id="ns-l" type="number" class="inp" value="240"/></div></div><div class="field"><span class="lbl">Washing frequency (days, optional)</span><input id="ns-w" type="number" min="0" class="inp" placeholder="e.g. 12"/></div>',
@@ -371,17 +402,17 @@ function renderModal(){
  const style=document.createElement("style");
  style.textContent=
   ".issue-workflow{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:6px;margin:4px 0 14px}"+
-  ".issue-workflow-step{min-width:0;display:flex;align-items:center;gap:6px;color:var(--muted-foreground);font-size:10px}"+
-  ".issue-workflow-step span{width:20px;height:20px;flex:0 0 20px;border-radius:50%;display:grid;place-items:center;background:var(--surface-subtle);border:1px solid var(--border);font-size:10px}"+
+  ".issue-workflow-step{min-width:0;display:flex;align-items:center;gap:6px;color:var(--muted-foreground);font-size:12px}"+
+  ".issue-workflow-step span{width:20px;height:20px;flex:0 0 20px;border-radius:50%;display:grid;place-items:center;background:var(--surface-subtle);border:1px solid var(--border);font-size:12px}"+
   ".issue-workflow-step b{font-weight:550;line-height:1.2}.issue-workflow-step.done span{color:var(--success);border-color:var(--success)}"+
   ".issue-workflow-step.active{color:var(--foreground)}.issue-workflow-step.active span{background:var(--primary);border-color:var(--primary);color:#fff}"+
   ".issue-updates{margin-top:18px;padding:14px;border:1px solid var(--border);border-radius:12px;background:var(--surface-subtle)}"+
   ".issue-updates-heading,.issue-message-actions{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}"+
-  ".issue-updates-heading h4{font-size:14px;margin:0}.issue-updates-heading p{font-size:11px;color:var(--muted-foreground);margin:3px 0 0}"+
+  ".issue-updates-heading h4{font-size:14px;margin:0}.issue-updates-heading p{font-size:12.5px;color:var(--muted-foreground);margin:3px 0 0}"+
   ".issue-activity-list{display:grid;gap:0;margin:12px 0}.issue-activity-item{display:grid;grid-template-columns:12px minmax(0,1fr);gap:10px;padding:9px 0;border-bottom:1px solid var(--border)}"+
-  ".issue-activity-dot{width:8px;height:8px;margin:5px 0 0 2px;border-radius:50%;background:var(--primary)}.issue-activity-heading{display:flex;justify-content:space-between;gap:10px;font-size:12px}.issue-activity-heading span,.issue-activity-by{font-size:10.5px;color:var(--muted-foreground)}"+
-  ".issue-activity-note{font-size:12px;white-space:pre-wrap;margin-top:5px}.issue-activity-status{font-size:11px;font-weight:650;margin-top:5px}.issue-activity-empty{font-size:12px;color:var(--muted-foreground);padding:14px 0}"+
+  ".issue-activity-dot{width:8px;height:8px;margin:5px 0 0 2px;border-radius:50%;background:var(--primary)}.issue-activity-heading{display:flex;justify-content:space-between;gap:10px;font-size:12px}.issue-activity-heading span,.issue-activity-by{font-size:12px;color:var(--muted-foreground)}"+
+  ".issue-activity-note{font-size:12px;white-space:pre-wrap;margin-top:5px}.issue-activity-status{font-size:12.5px;font-weight:650;margin-top:5px}.issue-activity-empty{font-size:12px;color:var(--muted-foreground);padding:14px 0}"+
   ".issue-message-form{border-top:1px solid var(--border);padding-top:12px}.issue-message-form .txt{margin:6px 0 8px}.issue-message-actions{justify-content:flex-start}.issue-message-actions small{flex:1}"+
-  "@media(max-width:650px){.issue-workflow{grid-template-columns:repeat(3,minmax(0,1fr));row-gap:10px}.issue-workflow-step{font-size:9px}.issue-activity-heading{flex-direction:column;gap:2px}}";
+  "@media(max-width:650px){.issue-workflow{grid-template-columns:repeat(3,minmax(0,1fr));row-gap:10px}.issue-workflow-step{font-size:11px}.issue-activity-heading{flex-direction:column;gap:2px}}";
  document.head.appendChild(style);
 })();

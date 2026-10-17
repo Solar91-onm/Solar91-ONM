@@ -197,12 +197,12 @@
       '<img src="'+ev.url+'"/>'+
       '<div class="cc-lbox-meta">'+
         '<div><b>'+xesc(t.id)+'</b> · '+xesc(t.plant||"")+' · '+xesc(t.vertical||"")+'</div>'+
-        '<div style="margin-top:6px"><b>Kind:</b> '+xesc(ev.kind)+' · <b>At:</b> '+xesc(ev.at)+' · <b>By:</b> '+xesc(ev.by)+'</div>'+
+        '<div style="margin-top:6px"><b>Kind:</b> '+xesc(ev.kind)+' · <b>At:</b> '+xesc(s91LogAt(ev.at))+' · <b>By:</b> '+xesc(ev.by)+'</div>'+
         (ev.note?'<div style="margin-top:4px"><b>Note:</b> '+xesc(ev.note)+'</div>':'')+
         '<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">'+
           (prev?'<button class="btn o sm" onclick="document.getElementById(\'cc-lbox\').remove();ccOpenLightbox(\''+xesc(t.id)+'\',\''+xesc(prev.id)+'\')">← '+xesc(prev.kind)+'</button>':'')+
           (next?'<button class="btn o sm" onclick="document.getElementById(\'cc-lbox\').remove();ccOpenLightbox(\''+xesc(t.id)+'\',\''+xesc(next.id)+'\')">'+xesc(next.kind)+' →</button>':'')+
-          '<span style="font-size:11px;color:#9ca3af;margin-left:auto">Photo '+(idx+1)+' of '+t.evidence.length+'</span>'+
+          '<span style="font-size:12.5px;color:#9ca3af;margin-left:auto">Photo '+(idx+1)+' of '+t.evidence.length+'</span>'+
         '</div>'+
       '</div></div>';
   };
@@ -225,16 +225,16 @@
     '.cc-breach-bar .btn.o{background:rgba(255,255,255,.14);border-color:rgba(255,255,255,.3);color:#fff}',
     '.cc-breach-bar .btn.o:hover{background:rgba(255,255,255,.22);border-color:#fff;color:#fff}',
     '.cc-views-strip{display:flex;align-items:center;gap:8px;flex-wrap:wrap}',
-    '.cc-sla{display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:700;padding:3px 7px;border-radius:6px;font-variant-numeric:tabular-nums;white-space:nowrap}',
+    '.cc-sla{display:inline-flex;align-items:center;gap:4px;font-size:12.5px;font-weight:700;padding:3px 7px;border-radius:6px;font-variant-numeric:tabular-nums;white-space:nowrap}',
     '.cc-sla.s{background:var(--success-soft);color:var(--success)}',
     '.cc-sla.w{background:var(--warning-soft);color:var(--warning-strong)}',
     '.cc-sla.d{background:var(--danger-soft);color:var(--danger)}',
     '.cc-sla.m{background:var(--muted);color:var(--muted-foreground)}',
-    '.cc-proof{display:inline-flex;align-items:center;gap:4px;font-size:10.5px;font-weight:700;padding:2px 6px;border-radius:999px;white-space:nowrap}',
+    '.cc-proof{display:inline-flex;align-items:center;gap:4px;font-size:12px;font-weight:700;padding:2px 6px;border-radius:999px;white-space:nowrap}',
     '.cc-proof.s{background:var(--success-soft);color:var(--success)}',
     '.cc-proof.w{background:var(--warning-soft);color:var(--warning-strong)}',
     '.cc-proof.d{background:var(--danger-soft);color:var(--danger)}',
-    '.cc-chronic{display:inline-flex;align-items:center;gap:3px;font-size:10px;font-weight:700;padding:1px 6px;border-radius:999px;background:#fef3c7;color:#92400e;border:1px solid #fcd34d}',
+    '.cc-chronic{display:inline-flex;align-items:center;gap:3px;font-size:12px;font-weight:700;padding:1px 6px;border-radius:999px;background:#fef3c7;color:#92400e;border:1px solid #fcd34d}',
     '.cc-thumbs{display:inline-flex;gap:3px;align-items:center;vertical-align:middle}',
     '.cc-thumb{width:22px;height:22px;border-radius:5px;object-fit:cover;border:1px solid var(--border);cursor:pointer;flex-shrink:0;transition:transform .12s,border-color .12s}',
     '.cc-thumb:hover{transform:scale(1.15);border-color:var(--primary)}',
@@ -246,7 +246,7 @@
     '.cc-lbox-close{position:absolute;top:10px;right:10px;width:32px;height:32px;border-radius:999px;background:rgba(0,0,0,.6);color:#fff;border:1px solid rgba(255,255,255,.2);cursor:pointer;display:grid;place-items:center;font-size:16px}',
     '.cc-lbox-close:hover{background:var(--danger);border-color:var(--danger)}',
     '.cc-quicktmpl{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}',
-    '.cc-quicktmpl button{font-size:11px;padding:4px 10px;border-radius:999px;border:1px solid var(--border);background:#fff;cursor:pointer;color:var(--muted-foreground);font-weight:600;font-family:inherit}',
+    '.cc-quicktmpl button{font-size:12.5px;padding:4px 10px;border-radius:999px;border:1px solid var(--border);background:#fff;cursor:pointer;color:var(--muted-foreground);font-weight:600;font-family:inherit}',
     '.cc-quicktmpl button:hover{border-color:var(--primary);color:var(--primary);background:var(--secondary)}',
     '.cc-batch-bar{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);z-index:1200;background:#0b0f0d;color:#fff;padding:10px 16px;border-radius:12px;box-shadow:0 16px 40px rgba(0,0,0,.4);display:flex;align-items:center;gap:12px;font-size:12.5px}',
     '.cc-batch-bar .btn{background:rgba(255,255,255,.14);color:#fff;border-color:rgba(255,255,255,.25)}',
@@ -280,7 +280,7 @@
     }
     if((t.evidence||[]).length && !tds[0].querySelector(".cc-thumbs")){
       var ev = t.evidence.slice(0,4);
-      var more = t.evidence.length>4 ? '<span style="font-size:10px;color:var(--muted-foreground);margin-left:3px">+'+(t.evidence.length-4)+'</span>' : '';
+      var more = t.evidence.length>4 ? '<span style="font-size:12px;color:var(--muted-foreground);margin-left:3px">+'+(t.evidence.length-4)+'</span>' : '';
       tds[0].insertAdjacentHTML("beforeend",
         '<div style="margin-top:4px"><span class="cc-thumbs" onclick="event.stopPropagation()">'+
         ev.map(function(e){
@@ -402,8 +402,8 @@
     return '<div class="cc-today">'+
       '<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">'+
         '<div><h3>☀️ Today · '+xesc(todayStr)+'</h3>'+
-        '<div style="font-size:11.5px;color:rgba(255,255,255,.72);margin-top:2px">Your attention list — click to jump straight to it</div></div>'+
-        '<span style="background:rgba(255,255,255,.13);border:1px solid rgba(255,255,255,.22);color:#fff;font-size:11px;font-weight:700;padding:5px 11px;border-radius:999px">LIVE</span>'+
+        '<div style="font-size:12.5px;color:rgba(255,255,255,.72);margin-top:2px">Your attention list — click to jump straight to it</div></div>'+
+        '<span style="background:rgba(255,255,255,.13);border:1px solid rgba(255,255,255,.22);color:#fff;font-size:12.5px;font-weight:700;padding:5px 11px;border-radius:999px">LIVE</span>'+
       '</div>'+
       '<div class="cc-tgrid">'+
         items.map(function(it){
@@ -436,7 +436,7 @@
     if(!step2 || step2.querySelector(".cc-quicktmpl")) return;
     var div = document.createElement("div");
     div.className = "cc-quicktmpl";
-    div.innerHTML = '<span style="font-size:11px;color:var(--muted-foreground);width:100%;font-weight:600;margin-bottom:2px">Quick templates — 1 click fills category, severity &amp; description</span>'+
+    div.innerHTML = '<span style="font-size:12.5px;color:var(--muted-foreground);width:100%;font-weight:600;margin-bottom:2px">Quick templates — 1 click fills category, severity &amp; description</span>'+
       CC_TEMPLATES.map(function(t){
         return '<button type="button" onclick="ccApplyTemplate(\''+xesc(t.vert)+'\',\''+xesc(t.sub)+'\',\''+xesc(t.sev)+'\',\''+xesc(t.desc)+'\')">'+xesc(t.label)+'</button>';
       }).join("");
@@ -457,7 +457,7 @@
     panel.style.cssText = "border:1px solid var(--border);border-radius:12px;padding:14px;margin-top:14px;background:var(--surface-subtle)";
     panel.innerHTML = '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:10px;flex-wrap:wrap">'+
         '<div><div style="font-size:13px;font-weight:700">📎 Evidence ('+ev.length+')</div>'+
-        '<div style="font-size:11px;color:var(--muted-foreground);margin-top:2px">Real photos with metadata — replaces WhatsApp</div></div>'+
+        '<div style="font-size:12.5px;color:var(--muted-foreground);margin-top:2px">Real photos with metadata — replaces WhatsApp</div></div>'+
         '<div style="display:flex;gap:6px;flex-wrap:wrap">'+
           '<button class="btn p sm" onclick="event.stopPropagation();ccAddPhotoQuick(\''+xesc(t.id)+'\',\'before\')">📷 Before</button>'+
           '<button class="btn o sm" onclick="event.stopPropagation();ccAddPhotoQuick(\''+xesc(t.id)+'\',\'after\')">📷 After fix</button>'+

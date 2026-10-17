@@ -150,7 +150,7 @@
   function tplModal(){
     const list=S._pmTpl||[],ed=(S._pmTpl||[]).find(x=>x.id===S.pmEditId)||null;
     const ev=(k,d)=>ed&&ed[k]!=null?esc(ed[k]):(d||"");
-    const rows=list.map(t=>'<tr><td>'+esc(t.equipment_type)+'</td><td><b>'+esc(t.task_name)+'</b>'+(t.checks&&t.checks.length?'<div class="muted" style="font-size:11px">'+t.checks.length+' reading(s) to record</div>':'')+'</td><td>'+esc(t.frequency)+'</td><td>'+(t.est_hours!=null?t.est_hours+" h":"—")+'</td><td>'+(t.units_per_day?t.units_per_day+"/day":"—")+'</td><td>'+esc(t.safety)+'</td><td style="white-space:nowrap">'+
+    const rows=list.map(t=>'<tr><td>'+esc(t.equipment_type)+'</td><td><b>'+esc(t.task_name)+'</b>'+(t.checks&&t.checks.length?'<div class="muted" style="font-size:12.5px">'+t.checks.length+' reading(s) to record</div>':'')+'</td><td>'+esc(t.frequency)+'</td><td>'+(t.est_hours!=null?t.est_hours+" h":"—")+'</td><td>'+(t.units_per_day?t.units_per_day+"/day":"—")+'</td><td>'+esc(t.safety)+'</td><td style="white-space:nowrap">'+
       (isPlanner()?'<button class="btn o sm" onclick="pmAssignOpen(\''+t.id+'\')">Assign to plants</button> ':'')+
       (isHead()?'<button class="btn o sm" onclick="pmTplEdit(\''+t.id+'\')">Edit</button> <button class="btn o sm" onclick="pmTplDelete(\''+t.id+'\')">Delete</button>':'')+'</td></tr>').join("");
     const table=list.length?'<div style="overflow:auto;max-height:260px"><table><thead><tr><th>Type</th><th>Task</th><th>Frequency</th><th>Time</th><th>Units/day</th><th>Safety</th><th></th></tr></thead><tbody>'+rows+'</tbody></table></div>':'<div class="muted" style="padding:12px 0">No templates yet. Add one below, or upload an Excel plan.</div>';
@@ -199,7 +199,7 @@
     if(!t){setTimeout(()=>{S.modal="pmTemplates";render()},0);return ""}
     const plants=(S.plants||[]).map(p=>'<label style="display:flex;gap:6px;align-items:center;font-size:12.5px"><input type="checkbox" class="pa-pl" value="'+esc(p.name)+'"/> '+esc(p.name)+'</label>').join("");
     const body='<div class="bn-info banner"><b>'+esc(t.task_name)+'</b> · '+esc(t.equipment_type)+' · '+esc(t.frequency)+'</div>'+
-      '<div class="field"><span class="lbl">Plants <a href="#" onclick="pmAssignAll(true);return false" style="margin-left:8px;font-size:11px">select all</a> <a href="#" onclick="pmAssignAll(false);return false" style="margin-left:6px;font-size:11px">clear</a></span><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:6px;max-height:200px;overflow:auto;border:1px solid var(--border);border-radius:10px;padding:10px">'+plants+'</div></div>'+
+      '<div class="field"><span class="lbl">Plants <a href="#" onclick="pmAssignAll(true);return false" style="margin-left:8px;font-size:12.5px">select all</a> <a href="#" onclick="pmAssignAll(false);return false" style="margin-left:6px;font-size:12.5px">clear</a></span><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:6px;max-height:200px;overflow:auto;border:1px solid var(--border);border-radius:10px;padding:10px">'+plants+'</div></div>'+
       '<div class="kgrid" style="grid-template-columns:1fr 1fr;gap:12px">'+
        '<div class="field"><span class="lbl">Assignee(s) — hold Ctrl/Cmd for several; each plant gets one assignee, plants are shared between them</span><select id="pa-assignees" class="inp" multiple size="4">'+TEAM_POOL.map(n=>'<option>'+esc(n)+'</option>').join("")+'</select></div>'+
        '<div><div class="field"><span class="lbl">First due date</span><input id="pa-due" class="inp" type="date" value="'+addDays(TODAY,3)+'"/></div>'+
@@ -284,7 +284,7 @@
     let tasks=S.tasks||[];if(S.schedScope&&S.schedScope!=="all")tasks=tasks.filter(t=>t.plant===S.schedScope);
     const gs=window.pmUnitDays(tasks);if(!gs.length)return "";
     const rows=gs.slice(0,8).map(x=>{const ds=Object.keys(x.days).sort();
-      return '<div style="padding:10px 0;border-top:1px solid var(--border)"><div class="row between wrap" style="gap:8px"><div><b>'+esc(x.type)+'</b> · '+esc(x.plant)+'<div class="muted" style="font-size:11.5px">'+x.n+' of '+x.total+' units open · '+ds.length+' day(s)'+(x.missed?' · <span style="color:var(--danger)">'+x.missed+' delayed unit(s) rolled</span>':'')+'</div></div></div>'+
+      return '<div style="padding:10px 0;border-top:1px solid var(--border)"><div class="row between wrap" style="gap:8px"><div><b>'+esc(x.type)+'</b> · '+esc(x.plant)+'<div class="muted" style="font-size:12.5px">'+x.n+' of '+x.total+' units open · '+ds.length+' day(s)'+(x.missed?' · <span style="color:var(--danger)">'+x.missed+' delayed unit(s) rolled</span>':'')+'</div></div></div>'+
         '<div class="row wrap" style="gap:6px;margin-top:6px">'+ds.map((d,i)=>'<span class="pill pillsm '+(d<TODAY?'b-danger':d===TODAY?'b-warning':'b-info')+'">Day '+(i+1)+' · '+fmtD(d)+' · '+x.days[d]+' unit'+(x.days[d]===1?'':'s')+'</span>').join("")+'</div></div>'}).join("");
     return '<div class="panel" id="pm-unit-days"><div class="pm-section-heading"><div><h2>Daily PM workload</h2><p>Planned unit counts by day, plant, and equipment type</p></div><span>'+gs.length+' cycle(s)</span></div>'+rows+'</div>';
   }

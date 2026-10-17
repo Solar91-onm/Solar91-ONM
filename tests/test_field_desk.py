@@ -2,6 +2,7 @@
 from datetime import date, timedelta
 from uuid import UUID
 
+from app.core.timeutil import business_today
 from app.core.models import AuditLog, Issue, IssueHistory, OMTask, Plant, User, UserEquipmentTypeAssignment, UserPlantAssignment
 from tests.conftest import login_user
 from tests import conftest
@@ -19,9 +20,9 @@ def fixture_data(client, db):
                                                     'vertical':'Inverter','severity':'Critical' if i==0 else 'Medium'})
         assert resp.status_code==201, resp.text
     db.add(OMTask(work_order_no='FIELD-PM-1',plant_id=UUID(plants[0]['id']),task_name='Check inverter',
-                  task_type='Inverter',status='Scheduled',due_on=date.today()-timedelta(days=2)))
+                  task_type='Inverter',status='Scheduled',due_on=business_today()-timedelta(days=2)))
     db.add(OMTask(work_order_no='FIELD-PM-2',plant_id=UUID(plants[1]['id']),task_name='Inspect module',
-                  task_type='Module',status='Scheduled',due_on=date.today()+timedelta(days=3)))
+                  task_type='Module',status='Scheduled',due_on=business_today()+timedelta(days=3)))
     db.commit()
     engineer=User(auth_provider='test',external_subject='field-engineer',email='field-engineer@example.com',
                   display_name='Field Engineer',role='Site Engineer',is_active=True)
@@ -94,3 +95,28 @@ def test_closed_tickets_reject_field_updates_and_no_unassigned_site_leak(client,
     db.query(UserPlantAssignment).filter_by(user_id=engineer.id).delete();db.commit()
     empty=client.get('/api/field/overview').json()
     assert empty['scope']=='none' and empty['plants']==[] and empty['issues']==[]
+
+
+def test_assignee_field_overview_query_count_does_not_grow_with_work_rows(client,db):
+    head,_,plants=fixture_data(client,db)
+    assignee=User(auth_provider='test',external_subject='field-batch-assignee',email='batch@example.com',
+                  display_name='Batch Assignee',role='Assignee',is_active=True)
+    db.add(assignee);db.flush()
+    db.add(UserEquipmentTypeAssignment(user_id=assignee.id,equipment_type='Inverter'));db.commit()
+    conftest._CURRENT_USER=db.get(User,assignee.id)
+
+    def request_query_count():
+        response=client.get('/api/field/overview?limit=50')
+        assert response.status_code==200,response.text
+        return int(response.headers['server-timing'].split('desc="')[1].split()[0])
+
+    small_count=request_query_count()
+    plant_id=UUID(plants[0]['id'])
+    db.add_all([Issue(ticket_no=f'BATCH-{n:04d}',plant_id=plant_id,vertical='Inverter',
+                      description='Synthetic field issue',severity='Medium',status='Open') for n in range(12)])
+    db.add_all([OMTask(work_order_no=f'BATCH-PM-{n:04d}',plant_id=plant_id,task_name='Synthetic PM',
+                       task_type='Inverter',status='Scheduled',due_on=business_today()) for n in range(12)])
+    db.commit()
+    large_count=request_query_count()
+    assert large_count==small_count
+    assert large_count<=12

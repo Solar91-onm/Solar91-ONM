@@ -109,6 +109,30 @@ class IssueService:
         self.db.add(UserEquipmentTypeAssignment(user_id=target.id,equipment_type=canonical))
         self.db.add(AuditLog(user_id=actor.id,actor_name=actor.display_name,action="Equipment scope added while assigning a ticket",module="Issues",entity_type="user",entity_id=str(target.id),after_state={"equipment_type":canonical,"assignee":target.display_name}))
 
+    DUPLICATE_WINDOW_SECONDS = 120
+
+    def _recent_duplicate(self, user: User, payload: dict) -> Issue | None:
+        """The creator's newest ticket if it is identical and was raised moments ago (double submit)."""
+        latest = self.db.scalar(
+            select(Issue).where(Issue.created_by == user.id, Issue.deleted_at.is_(None))
+            .order_by(Issue.created_at.desc()).limit(1)
+        )
+        if latest is None or latest.created_at is None:
+            return None
+        created = latest.created_at if latest.created_at.tzinfo else latest.created_at.replace(tzinfo=timezone.utc)
+        if (datetime.now(timezone.utc) - created).total_seconds() > self.DUPLICATE_WINDOW_SECONDS:
+            return None
+        def norm(value):
+            return " ".join(str(value or "").split()).casefold()
+        same = (
+            latest.plant_id == payload.get("plant_id")
+            and latest.equipment_id == payload.get("equipment_id")
+            and norm(latest.equipment_ref) == norm(payload.get("equipment_ref"))
+            and norm(latest.vertical) == norm(payload.get("vertical"))
+            and norm(latest.description) == norm(payload.get("description"))
+        )
+        return latest if same else None
+
     def create(self,data:IssueCreate,user:User):
         payload = data.model_dump()
         assigned_to = payload.pop("assigned_to", None)
@@ -129,6 +153,11 @@ class IssueService:
         assignee = self._resolve_assignee(assigned_to, None) if assigned_to else None
         if assignee:
             self._ensure_assignee_scope(assignee, user, plant_id, equipment_id, payload.get("equipment_ref"), payload.get("vertical"))
+        if auto_number:
+            duplicate = self._recent_duplicate(user, payload)
+            if duplicate is not None:
+                # A repeated click or resubmission of the same form returns the ticket that was already saved.
+                return duplicate
         row = None
         for attempt in range(6):
             if auto_number:

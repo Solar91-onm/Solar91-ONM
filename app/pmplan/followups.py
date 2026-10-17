@@ -6,6 +6,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.timeutil import business_today
 from app.core.models import OMTask, PMFollowUp
 
 FOLLOW_UP_OUTCOMES = {
@@ -22,7 +23,7 @@ def get_follow_up_state(
     latest_loaded: bool = False,
 ) -> str:
     """Return none, missed, promised, old, or ok for the latest contact."""
-    today = today or date.today()
+    today = today or business_today()
     if latest is None and not latest_loaded:
         latest = db.scalar(
             select(PMFollowUp)

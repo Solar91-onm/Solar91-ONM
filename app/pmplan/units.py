@@ -20,6 +20,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.timeutil import business_today, log_stamp
 from app.core.models import OMTask, PMUnitConfig
 
 ADVANCE_DAYS = 3
@@ -55,7 +56,7 @@ def next_cycle_id(cycle_id: str | None) -> str | None:
 
 
 def _stamp(text: str) -> dict[str, str]:
-    return {"at": datetime.now().isoformat(), "text": text, "actor": "System"}
+    return {"at": log_stamp(), "text": text, "actor": "System"}
 
 
 def roll_missed_units(db: Session, today: date) -> int:
@@ -142,7 +143,7 @@ def send_reminders_and_escalations(db: Session, today: date, now: datetime | Non
 
 def run_daily(db: Session, today: date | None = None, now: datetime | None = None) -> dict[str, Any]:
     """Idempotent: safe to run many times a day (rolling only acts on units due before today; notifications dedupe)."""
-    today = today or date.today()
+    today = today or business_today()
     rolled = roll_missed_units(db, today)
     sent = send_reminders_and_escalations(db, today, now)
     db.commit()

@@ -47,7 +47,7 @@ table,.metric .v,.cc26-stat .v,.kpi-value,.oi-kpis *,.cc26-n,.cc26-n2,.side-badg
 /* ---- 6. Badges & pills: same height, same weight ---- */
 .badge{line-height:1.2;font-weight:700;letter-spacing:.01em}
 .pill{line-height:1.2}
-.pillsm{padding:4px 10px;font-size:11px}
+.pillsm{padding:4px 10px;font-size:12.5px}
 
 /* ---- 7. Sidebar links (not the brand block) ---- */
 .side-link{transition:background-color .15s,color .15s;position:relative}

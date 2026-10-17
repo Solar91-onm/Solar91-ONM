@@ -299,10 +299,10 @@ function renderServices(){
   h+='<div class="panel" style="padding:0"><div style="padding:16px 20px 0"><h2 style="font-size:15px;font-weight:600">Extra service requests</h2><p style="font-size:12px;color:var(--muted-foreground);margin:3px 0 12px">Estimate → approval → vendor assignment → execution → verification, with full history</p></div>';
   const lcR=listCtl("esr",S.serviceRequests,{facet:r=>r.status,facetLabel:"Status",text:r=>[r.id,r.project,r.category,r.provider,r.owner,r.status].join(" "),ph:"Search request, project or vendor"});h+=lcR.bar;
   h+='<table><thead><tr><th>Request</th><th>Project · category</th><th>Priority</th><th>Vendor / owner</th><th>Estimate</th><th>Progress</th><th>Status</th><th>Actions</th></tr></thead><tbody>';
-  lcR.rows.forEach(r=>{h+='<tr><td><div style="font-weight:600">'+r.id+'</div><div style="font-size:11px;color:var(--muted-foreground)">target '+fmtD(r.target)+'</div></td>'+
-   '<td><div>'+esc(r.project)+'</div><div style="font-size:11px;color:var(--muted-foreground)">'+r.category+'</div></td><td>'+badge(r.priority)+'</td>'+
-   '<td><div>'+esc(r.provider)+'</div><div style="font-size:11px;color:var(--muted-foreground)">owner '+esc(r.owner)+'</div></td><td>'+money(r.estimate)+'</td>'+
-   '<td style="min-width:110px"><div style="font-size:11px;margin-bottom:4px">'+r.progress+'%</div><div class="prog"><div style="width:'+r.progress+'%;background:'+(r.progress===100?"var(--success)":"var(--primary)")+'"></div></div></td><td>'+badge(r.status)+'</td><td><div class="row" style="gap:5px;flex-wrap:wrap">';
+  lcR.rows.forEach(r=>{h+='<tr><td><div style="font-weight:600">'+r.id+'</div><div style="font-size:12.5px;color:var(--muted-foreground)">target '+fmtD(r.target)+'</div></td>'+
+   '<td><div>'+esc(r.project)+'</div><div style="font-size:12.5px;color:var(--muted-foreground)">'+r.category+'</div></td><td>'+badge(r.priority)+'</td>'+
+   '<td><div>'+esc(r.provider)+'</div><div style="font-size:12.5px;color:var(--muted-foreground)">owner '+esc(r.owner)+'</div></td><td>'+money(r.estimate)+'</td>'+
+   '<td style="min-width:110px"><div style="font-size:12.5px;margin-bottom:4px">'+r.progress+'%</div><div class="prog"><div style="width:'+r.progress+'%;background:'+(r.progress===100?"var(--success)":"var(--primary)")+'"></div></div></td><td>'+badge(r.status)+'</td><td><div class="row" style="gap:5px;flex-wrap:wrap">';
    if(r.status==="Approval Pending")h+='<button class="btn p sm" onclick="approveESR(\''+r.id+'\')">'+I.check(12)+'Approve</button><button class="btn d sm" onclick="changeESR(\''+r.id+'\')">Changes</button>';
    if(["In Progress","Assigned"].includes(r.status)&&r.progress<100)h+='<button class="btn o sm" onclick="bumpESR(\''+r.id+'\')">+25%</button>';
    if(["In Progress","Assigned"].includes(r.status)&&r.progress>=100)h+='<button class="btn o sm" onclick="verifyESR(\''+r.id+'\')">'+I.bcheck(12)+'Verify</button>';
@@ -316,19 +316,19 @@ function renderServices(){
   const lcS=listCtl("inv",S.inventory,{facet:s=>s.qty<s.min?"Low stock":"In stock",facetLabel:"Stock",text:s=>[s.item,s.cat,s.plant,s.store].join(" "),ph:"Search item, category or plant"});h+=lcS.bar;
   h+='<table><thead><tr><th>Item</th><th>Category</th><th>Plant / store</th><th>Stock</th><th>Min</th><th>Status</th><th>Action</th></tr></thead><tbody>';
   lcS.rows.forEach(s=>{const isLow=s.qty<s.min;
-   h+='<tr><td style="font-weight:500">'+esc(s.item)+'</td><td>'+s.cat+'</td><td><div>'+esc(s.plant)+'</div><div style="font-size:11px;color:var(--muted-foreground)">'+s.store+'</div></td>'+
+   h+='<tr><td style="font-weight:500">'+esc(s.item)+'</td><td>'+s.cat+'</td><td><div>'+esc(s.plant)+'</div><div style="font-size:12.5px;color:var(--muted-foreground)">'+s.store+'</div></td>'+
    '<td><b>'+s.qty+'</b> '+s.unit+'</td><td>'+s.min+'</td><td>'+(isLow?badge("Critical"):badge("Available"))+(s.onOrder?'<div style="margin-top:3px">'+badge("Ordered")+'</div>':'')+'</td>'+
    '<td>'+(isLow?'<button class="btn o sm" onclick="reorder(\''+s.id+'\')">'+(s.onOrder?"Receive reorder":"Raise reorder")+'</button>':"—")+'</td></tr>';});
   h+='</tbody></table>'+lcS.pager+'</div>';
   h+='<div class="panel" style="padding:0"><div style="padding:16px 20px 0"><h2 style="font-size:15px;font-weight:600">Stock movements</h2><p style="font-size:12px;color:var(--muted-foreground);margin:3px 0 12px">Auto-deducted when spares are used against Issue tickets or Preventive Maintenance tasks</p></div>';
   const lcM=listCtl("mov",S.movements,{text:m=>[m.item,m.ref,m.by,m.note].join(" "),ph:"Search item, record or note"});h+=lcM.bar;
   h+='<table><thead><tr><th>When</th><th>Item</th><th>Qty</th><th>Linked record</th><th>By</th><th>Note</th></tr></thead><tbody>';
-  lcM.rows.forEach(m=>{h+='<tr><td class="nowrap">'+m.at+'</td><td>'+esc(m.item)+'</td><td><b style="color:'+(m.qty<0?"var(--danger)":"var(--success)")+'">'+(m.qty>0?"+":"")+m.qty+'</b></td><td>'+esc(m.ref)+'</td><td>'+esc(m.by)+'</td><td style="font-size:11.5px;color:var(--muted-foreground)">'+esc(m.note)+'</td></tr>';});
+  lcM.rows.forEach(m=>{h+='<tr><td class="nowrap">'+m.at+'</td><td>'+esc(m.item)+'</td><td><b style="color:'+(m.qty<0?"var(--danger)":"var(--success)")+'">'+(m.qty>0?"+":"")+m.qty+'</b></td><td>'+esc(m.ref)+'</td><td>'+esc(m.by)+'</td><td style="font-size:12.5px;color:var(--muted-foreground)">'+esc(m.note)+'</td></tr>';});
   h+='</tbody></table>'+lcM.pager+'</div>';
  }
  if(sub==="performance"){
   h+='<div class="bn-info banner"><b>Performance data (3.3)</b> — The Excel DGR provides generation, capacity and PV Syst targets. PR, availability and alarm feeds are not in the workbook, so they show — until SCADA is connected. MTD vs PV Syst covers '+xlFmtD(XL_LAST.slice(0,7)+"-01")+' – '+xlFmtDY(XL_LAST)+'.</div>';
-  const lcQ=listCtl("perf",S.plants,{size:8,facet:p=>{const m=xlPlantMtd(p.id);return m&&m.pct!=null?(m.pct>=100?"≥ 100% of PV Syst":m.pct>=90?"90 – 99%":"< 90%"):"No PV Syst target"},facetLabel:"MTD vs PV Syst",text:p=>p.name+" "+p.id,ph:"Search plant or site code",pad:"0 0 12px"});h+='<div class="panel">'+lcQ.bar+'<div class="kgrid" style="grid-template-columns:repeat(4,1fr)">'+lcQ.rows.map(p=>{const m=xlPlantMtd(p.id);return '<div class="metric"><div style="font-size:12px;font-weight:600">'+esc(p.name)+'</div><div style="font-size:11px;color:var(--muted-foreground);margin:2px 0 8px">'+capStr(p.capacity)+' · '+esc(p.id)+'</div>'+
+  const lcQ=listCtl("perf",S.plants,{size:8,facet:p=>{const m=xlPlantMtd(p.id);return m&&m.pct!=null?(m.pct>=100?"≥ 100% of PV Syst":m.pct>=90?"90 – 99%":"< 90%"):"No PV Syst target"},facetLabel:"MTD vs PV Syst",text:p=>p.name+" "+p.id,ph:"Search plant or site code",pad:"0 0 12px"});h+='<div class="panel">'+lcQ.bar+'<div class="kgrid" style="grid-template-columns:repeat(4,1fr)">'+lcQ.rows.map(p=>{const m=xlPlantMtd(p.id);return '<div class="metric"><div style="font-size:12px;font-weight:600">'+esc(p.name)+'</div><div style="font-size:12.5px;color:var(--muted-foreground);margin:2px 0 8px">'+capStr(p.capacity)+' · '+esc(p.id)+'</div>'+
    '<div class="col" style="gap:4px;font-size:12px"><div class="row between"><span class="muted">PR</span><b>'+xlPct(p.pr)+'</b></div>'+
    '<div class="row between"><span class="muted">Availability</span><b>'+xlPct(p.availability)+'</b></div><div class="row between"><span class="muted">Alarms</span><b>'+(p.alarms||"—")+'</b></div><div class="row between"><span class="muted">MTD vs PV Syst</span><b>'+(m&&m.pct!=null?m.pct+"%":"—")+'</b></div></div></div>'}).join("")+'</div>'+lcQ.pager+'</div>';
   const totPM=EQUIP_MTB.reduce((s,e)=>s+e.pm,0),totCM=EQUIP_MTB.reduce((s,e)=>s+e.cm,0);
@@ -341,7 +341,7 @@ function renderServices(){
   h+='<table><thead><tr><th>Equipment type</th><th>MTBF</th><th>MTTR</th><th>Failures (90d)</th><th>PM hrs</th><th>CM hrs</th><th>CM share</th></tr></thead><tbody>';
   EQUIP_MTB.forEach(e=>{const cm=Math.round(100*e.cm/(e.pm+e.cm));
    h+='<tr><td style="font-weight:500">'+e.type+'</td><td><b>'+(e.mtbf>=1000?(e.mtbf/24).toFixed(0)+" d":e.mtbf+" h")+'</b></td><td><b>'+(e.mttr>=48?(e.mttr/24).toFixed(1)+" d":e.mttr+" h")+'</b></td><td>'+e.fl+'</td><td>'+e.pm+'</td><td>'+e.cm+'</td>'+
-   '<td style="min-width:130px"><div class="prog"><div style="width:'+cm+'%;background:'+(cm>50?"var(--danger)":cm>35?"var(--warning)":"var(--success)")+'"></div></div><div style="font-size:10.5px;color:var(--muted-foreground);margin-top:3px">'+cm+'% CM</div></td></tr>';});
+   '<td style="min-width:130px"><div class="prog"><div style="width:'+cm+'%;background:'+(cm>50?"var(--danger)":cm>35?"var(--warning)":"var(--success)")+'"></div></div><div style="font-size:12px;color:var(--muted-foreground);margin-top:3px">'+cm+'% CM</div></td></tr>';});
   h+='</tbody></table></div>';
  }
  if(sub==="safety"){
@@ -351,9 +351,9 @@ function renderServices(){
    '<button class="btn p sm" onclick="openModal(\'incident\')">+ Report incident / near-miss</button></div></div>';
   const lcP=listCtl("ptw",S.ptw,{facet:p=>p.status,facetLabel:"Status",text:p=>[p.id,p.task,p.plant,p.type,p.hazard,p.requestedBy].join(" "),ph:"Search permit, task or plant"});h+=lcP.bar;
   h+='<table><thead><tr><th>PTW</th><th>Task</th><th>Type / hazard</th><th>LOTO</th><th>Validity</th><th>Status</th><th>Actions</th></tr></thead><tbody>';
-  lcP.rows.forEach(p=>{h+='<tr><td style="font-weight:600">'+p.id+'</td><td><div style="font-weight:500">'+esc(p.task)+'</div><div style="font-size:11px;color:var(--muted-foreground)">'+esc(p.plant)+' · by '+esc(p.requestedBy)+'</div></td>'+
-   '<td>'+p.type+'<div style="font-size:11px;color:var(--muted-foreground)">'+esc(p.hazard)+'</div></td><td>'+(p.loto?badge("Critical"):"—")+'</td>'+
-   '<td style="font-size:11.5px" class="nowrap">'+fmtDT(p.validFrom)+'<br>→ '+fmtDT(p.validTo)+'</td><td>'+badge(p.status)+'</td><td><div class="row" style="gap:5px;flex-wrap:wrap">';
+  lcP.rows.forEach(p=>{h+='<tr><td style="font-weight:600">'+p.id+'</td><td><div style="font-weight:500">'+esc(p.task)+'</div><div style="font-size:12.5px;color:var(--muted-foreground)">'+esc(p.plant)+' · by '+esc(p.requestedBy)+'</div></td>'+
+   '<td>'+p.type+'<div style="font-size:12.5px;color:var(--muted-foreground)">'+esc(p.hazard)+'</div></td><td>'+(p.loto?badge("Critical"):"—")+'</td>'+
+   '<td style="font-size:12.5px" class="nowrap">'+fmtDT(p.validFrom)+'<br>→ '+fmtDT(p.validTo)+'</td><td>'+badge(p.status)+'</td><td><div class="row" style="gap:5px;flex-wrap:wrap">';
    if(p.status==="Pending Approval")h+='<button class="btn o sm" onclick="approvePTW(\''+p.id+'\',true)">'+I.fsig(12)+'Approve</button><button class="btn d sm" onclick="approvePTW(\''+p.id+'\',false)">Reject</button>';
    if(p.status==="Approved")h+='<button class="btn g sm" onclick="closePTW(\''+p.id+'\')">Close permit</button>';
    h+='</div></td></tr>';});
@@ -362,12 +362,12 @@ function renderServices(){
   h+='<div class="panel"><h2 style="font-size:15px;font-weight:600">Safety incidents &amp; near-misses</h2><p style="font-size:12px;color:var(--muted-foreground);margin:3px 0 10px">Separate register from equipment Issues</p>';
   const lcI=listCtl("inc",S.incidents,{size:3,facet:x=>x.severity,facetLabel:"Severity",text:x=>[x.id,x.type,x.desc,x.plant,x.by].join(" "),ph:"Search incident",pad:"0 0 10px"});h+=lcI.bar;
   lcI.rows.forEach(i=>{h+='<div style="border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:10px"><div class="row between wrap" style="gap:6px"><b style="font-size:12.5px">'+i.id+' · '+i.type+'</b>'+badge(i.severity)+'</div>'+
-   '<div style="font-size:12px;margin-top:4px">'+esc(i.desc)+'</div><div style="font-size:11px;color:var(--muted-foreground);margin-top:4px">'+esc(i.plant)+' · '+i.at+' · by '+esc(i.by)+'</div>'+
-   '<div style="font-size:11.5px;margin-top:4px;color:var(--success)"><b>Corrective:</b> '+esc(i.action)+'</div></div>';});
+   '<div style="font-size:12px;margin-top:4px">'+esc(i.desc)+'</div><div style="font-size:12.5px;color:var(--muted-foreground);margin-top:4px">'+esc(i.plant)+' · '+i.at+' · by '+esc(i.by)+'</div>'+
+   '<div style="font-size:12.5px;margin-top:4px;color:var(--success)"><b>Corrective:</b> '+esc(i.action)+'</div></div>';});
   h+=lcI.pager+'</div>';
   h+='<div class="panel"><h2 style="font-size:15px;font-weight:600">Statutory compliance watchlist</h2><p style="font-size:12px;color:var(--muted-foreground);margin:3px 0 10px">Fire safety, electrical certificates, insurance — renewal reminders via 3.8</p>';
   const expSoon=S.docs.filter(d=>d.expires&&dayDiff(TODAY,d.expires)<=30);
-  h+=expSoon.length?expSoon.map(d=>'<div class="row between" style="padding:8px 0;border-bottom:1px solid var(--border);font-size:12.5px;gap:8px"><div><div>'+esc(d.name)+'</div><div style="font-size:11px;color:var(--muted-foreground)">'+esc(d.plant)+'</div></div>'+badge(dayDiff(TODAY,d.expires)+"d left")+'</div>').join(""):'<div style="font-size:12px;color:var(--muted-foreground)">Nothing inside 30 days.</div>';
+  h+=expSoon.length?expSoon.map(d=>'<div class="row between" style="padding:8px 0;border-bottom:1px solid var(--border);font-size:12.5px;gap:8px"><div><div>'+esc(d.name)+'</div><div style="font-size:12.5px;color:var(--muted-foreground)">'+esc(d.plant)+'</div></div>'+badge(dayDiff(TODAY,d.expires)+"d left")+'</div>').join(""):'<div style="font-size:12px;color:var(--muted-foreground)">Nothing inside 30 days.</div>';
   h+='<div style="font-size:12px;color:var(--muted-foreground);margin-top:10px">Quarterly audit checklist (fire safety, electrical certificates, PTW compliance) exports in the Monthly compliance pack (3.10).</div></div></div>';
  }
  if(sub==="documents"){
@@ -385,19 +385,19 @@ function renderServices(){
   h+='<div class="panel"><div class="row between wrap"><div><h2 style="font-size:15px;font-weight:600">Vendor &amp; contractor management (3.7)</h2><p style="font-size:12px;color:var(--muted-foreground);margin:3px 0 12px">Third-party vendors — washing contractors, security agencies, OEM service partners — with SLAs, contracts and performance ratings. Feeds Vendor-Dependent tagging on Issues (2.3.2).</p></div><button class="btn p sm" onclick="openModal(&quot;newVendor&quot;)">+ Add vendor</button></div>';
   const lcV=listCtl("ven",S.vendors,{size:4,facet:v=>v.type,facetLabel:"Type",text:v=>[v.name,v.type,v.scope].join(" "),ph:"Search vendor or scope",pad:"0 0 12px"});h+=lcV.bar;
   h+='<div class="kgrid" style="grid-template-columns:repeat(2,1fr)">';
-  lcV.rows.forEach(v=>{const vs=vendorStats(v),on=vs.onTime;h+='<div class="metric"><div class="row between wrap" style="gap:6px"><div><div style="font-weight:700;font-size:13.5px">'+esc(v.name)+'</div><div style="font-size:11px;color:var(--muted-foreground)">'+v.type+' · '+esc(v.scope)+'</div></div></div>'+
+  lcV.rows.forEach(v=>{const vs=vendorStats(v),on=vs.onTime;h+='<div class="metric"><div class="row between wrap" style="gap:6px"><div><div style="font-weight:700;font-size:13.5px">'+esc(v.name)+'</div><div style="font-size:12.5px;color:var(--muted-foreground)">'+v.type+' · '+esc(v.scope)+'</div></div></div>'+
    '<div class="col" style="gap:4px;margin-top:10px;font-size:12px"><div class="row between"><span class="muted">SLA</span><b>'+esc(v.sla||"—")+'</b></div>'+
    '<div class="row between"><span class="muted">Contract end</span><b>'+(v.contractEnd?fmtDate(v.contractEnd):"—")+'</b></div><div class="row between"><span class="muted">Vendor tickets</span><b>'+vs.jobs+'</b></div>'+
    '<div class="row between"><span class="muted">On-time (closed tickets)</span><b style="color:'+(on==null?"var(--muted-foreground)":on>=85?"var(--success)":"var(--danger)")+'">'+(on==null?"—":on+"%")+'</b></div>'+
    '<div class="prog"><div style="width:'+(on==null?0:on)+'%;background:'+(on!=null&&on>=85?"var(--success)":"var(--danger)")+'"></div></div></div>'+
-   (on!=null&&on<85?'<div style="font-size:11px;color:var(--warning-strong);font-weight:600;margin-top:8px">⚠ Derived from actual vendor-linked ticket ETC performance</div>':'')+'</div>';});
+   (on!=null&&on<85?'<div style="font-size:12.5px;color:var(--warning-strong);font-weight:600;margin-top:8px">⚠ Derived from actual vendor-linked ticket ETC performance</div>':'')+'</div>';});
   h+='</div>'+lcV.pager+'</div>';
  }
  if(sub==="rules"){
   h+='<div class="panel" style="padding:0"><div style="padding:16px 20px 0"><h2 style="font-size:15px;font-weight:600">Notification &amp; escalation engine (3.8)</h2><p style="font-size:12px;color:var(--muted-foreground);margin:3px 0 12px">Configurable rules across all modules — channel (app/SMS/email/call), recipients by role, escalation tiers by time elapsed. Powers every alert in the bell. The live alerts you see in the bell (SLA breaches, task escalations, washing compliance, low stock, document expiry) are generated by these rules.</p></div>';
   h+='<table><thead><tr><th></th><th>Event</th><th>Channel</th><th>Recipients</th><th>Escalation tiers</th></tr></thead><tbody>';
   S.rules.forEach(r=>{h+='<tr><td><button onclick="toggleRule(\''+r.id+'\')" style="width:34px;height:19px;border-radius:999px;background:'+(r.on?"var(--success)":"var(--input)")+';border:none;cursor:pointer;position:relative"><span style="position:absolute;top:2px;left:'+(r.on?17:2)+'px;width:15px;height:15px;border-radius:999px;background:#fff;transition:.15s"></span></button></td>'+
-   '<td style="font-weight:500">'+esc(r.event)+'</td><td>'+r.channel+'</td><td>'+esc(r.to)+'</td><td style="font-size:11.5px;color:var(--muted-foreground)">'+esc(r.tiers)+'</td></tr>';});
+   '<td style="font-weight:500">'+esc(r.event)+'</td><td>'+r.channel+'</td><td>'+esc(r.to)+'</td><td style="font-size:12.5px;color:var(--muted-foreground)">'+esc(r.tiers)+'</td></tr>';});
   h+='</tbody></table></div>';
  }
  if(sub==="roles"){
@@ -412,7 +412,7 @@ function renderServices(){
    ["Weekly client report — per plant","Weekly Mon 08:00","Client / asset owners","Wash compliance, PM adherence, issue summary with SLA status"],
    ["Monthly O&M compliance pack","Monthly 1st","All clients","Scheduled compliance, washing, incidents, PR vs target"],
    ["Handover status digest","Weekly Fri 16:00","O&M Head","Pending handovers, blocked items, escalations"]].forEach(r=>{
-   h+='<div class="row between wrap" style="border:1px solid var(--border);border-radius:10px;padding:12px 14px;gap:10px"><div><div style="font-weight:600;font-size:13px">'+r[0]+'</div><div style="font-size:11px;color:var(--muted-foreground)">'+r[1]+' → '+r[2]+' · '+r[3]+'</div></div>'+
+   h+='<div class="row between wrap" style="border:1px solid var(--border);border-radius:10px;padding:12px 14px;gap:10px"><div><div style="font-weight:600;font-size:13px">'+r[0]+'</div><div style="font-size:12.5px;color:var(--muted-foreground)">'+r[1]+' → '+r[2]+' · '+r[3]+'</div></div>'+
     '<button class="btn o sm" onclick="toast(\''+esc(r[0])+' — generated &amp; emailed to '+esc(r[2])+'.\')">Run now</button></div>';});
   h+='</div></div>';
  }
@@ -421,7 +421,7 @@ function renderServices(){
   h+='<div class="kgrid" style="grid-template-columns:1fr 1fr;align-items:start">';
   h+='<div class="panel"><div class="row between" style="margin-bottom:10px"><h2 style="font-size:15px;font-weight:600">Sync queue — today</h2><button class="btn p sm" onclick="syncQueue()">Sync now</button></div>';
   S.offlineQueue.forEach(q=>{h+='<div class="row" style="gap:10px;align-items:flex-start;padding:9px 0;border-bottom:1px solid var(--border)"><span class="dot" style="background:'+(q.status==="Queued"?"var(--warning)":"var(--success)")+';margin-top:5px"></span>'+
-   '<div style="flex:1;font-size:12.5px">'+esc(q.action)+'<div style="font-size:11px;color:var(--muted-foreground);margin-top:2px">'+esc(q.user)+' · '+q.at+' · '+badge(q.status)+'</div></div></div>';});
+   '<div style="flex:1;font-size:12.5px">'+esc(q.action)+'<div style="font-size:12.5px;color:var(--muted-foreground);margin-top:2px">'+esc(q.user)+' · '+q.at+' · '+badge(q.status)+'</div></div></div>';});
   h+='</div><div class="panel"><h2 style="font-size:15px;font-weight:600">Field capabilities</h2><div class="col" style="gap:9px;font-size:12.5px;margin-top:8px">'+
    '<div>🪣 <b>Washing:</b> per-table &amp; bulk entry with date stamps; rain exceptions with reason codes</div>'+
    '<div>🔧 <b>Preventive Maintenance:</b> start tasks, submit completion with sub-steps, readings &amp; photos</div>'+
@@ -432,7 +432,7 @@ function renderServices(){
  if(sub==="audit"){
   h+='<div class="panel" style="padding:0"><div style="padding:16px 20px 0"><h2 style="font-size:15px;font-weight:600">Immutable audit trail (3.12)</h2><p style="font-size:12px;color:var(--muted-foreground);margin:3px 0 12px">Every status change, assignment, approval and edit across Handover, Preventive Maintenance, Washing and Issues — with user, timestamp, and before/after values — for accountability and dispute resolution.</p></div>';
   h+='<table><thead><tr><th>When</th><th>Module</th><th>Event</th><th>User</th><th>Before → After</th></tr></thead><tbody>';
-  S.audit.forEach(a=>{const moduleName=a.module==="Scheduled O&M"?"Preventive Maintenance":a.module;h+='<tr><td class="nowrap">'+a.at+'</td><td>'+badge("Internal")+' '+esc(moduleName)+'</td><td>'+esc(a.text)+'</td><td>'+esc(a.user)+'</td><td style="font-size:11.5px;color:var(--muted-foreground)">'+esc(a.before)+' → <b>'+esc(a.after)+'</b></td></tr>';});
+  S.audit.forEach(a=>{const moduleName=a.module==="Scheduled O&M"?"Preventive Maintenance":a.module;h+='<tr><td class="nowrap">'+a.at+'</td><td>'+badge("Internal")+' '+esc(moduleName)+'</td><td>'+esc(a.text)+'</td><td>'+esc(a.user)+'</td><td style="font-size:12.5px;color:var(--muted-foreground)">'+esc(a.before)+' → <b>'+esc(a.after)+'</b></td></tr>';});
   h+='</tbody></table></div>';
  }
  if(sub==="contracts"){
@@ -440,9 +440,9 @@ function renderServices(){
   if(breaches.length)h+='<div class="bn-danger banner"><b>Contract breach watch ('+breaches.length+')</b> — '+breaches.map(s=>esc(s.project)+" · "+esc(s.name||s.term||"SLA")).join(" · ")+'. Compliance is tracked against the actual contract, not just internal targets.</div>';
   h+='<div class="panel" style="padding:0"><div style="padding:16px 20px 0"><div class="row between wrap"><div><h2 style="font-size:15px;font-weight:600">SLA &amp; contract management (3.13)</h2><p style="font-size:12px;color:var(--muted-foreground);margin:3px 0 12px">O&amp;M contract terms mapped to actual ticket ETC and washing records using the selected Operations date.</p></div><button class="btn p sm" onclick="openModal(&quot;newSLA&quot;)">+ Add SLA contract</button></div></div>';
   h+='<table><thead><tr><th>Plant</th><th>Contract</th><th>Resolution targets</th><th>Washing</th><th>Live status</th><th>Actual ticket compliance</th></tr></thead><tbody>';
-  S.sla.forEach(c=>{const live=slaLive(c);h+='<tr><td>'+esc(c.project)+'</td><td style="font-weight:500">'+esc(c.name||"O&M SLA")+'</td><td style="font-size:11.5px">Critical '+(c.critical||24)+'h · Medium '+(c.medium||120)+'h · Low '+(c.low||240)+'h</td><td>'+(c.washDays?esc(c.washDays)+" days":"—")+'</td>'+
-   '<td>'+(live.breach?badge("Breached"):badge("Compliant"))+'<div class="muted" style="font-size:10.5px;margin-top:3px">'+live.issueBreaches+' ticket · '+live.washBreaches+' wash breach(es)</div></td>'+
-   '<td style="min-width:120px">'+(live.metPct==null?'—':'<div style="font-size:11px;margin-bottom:4px"><b>'+live.metPct+'%</b></div><div class="prog"><div style="width:'+live.metPct+'%;background:'+(live.metPct>=90?"var(--success)":live.metPct>=75?"var(--warning)":"var(--danger)")+'"></div></div>')+'</td></tr>';});
+  S.sla.forEach(c=>{const live=slaLive(c);h+='<tr><td>'+esc(c.project)+'</td><td style="font-weight:500">'+esc(c.name||"O&M SLA")+'</td><td style="font-size:12.5px">Critical '+(c.critical||24)+'h · Medium '+(c.medium||120)+'h · Low '+(c.low||240)+'h</td><td>'+(c.washDays?esc(c.washDays)+" days":"—")+'</td>'+
+   '<td>'+(live.breach?badge("Breached"):badge("Compliant"))+'<div class="muted" style="font-size:12px;margin-top:3px">'+live.issueBreaches+' ticket · '+live.washBreaches+' wash breach(es)</div></td>'+
+   '<td style="min-width:120px">'+(live.metPct==null?'—':'<div style="font-size:12.5px;margin-bottom:4px"><b>'+live.metPct+'%</b></div><div class="prog"><div style="width:'+live.metPct+'%;background:'+(live.metPct>=90?"var(--success)":live.metPct>=75?"var(--warning)":"var(--danger)")+'"></div></div>')+'</td></tr>';});
   h+='</tbody></table></div>';
  }
  if(sub==="weather"){
@@ -450,9 +450,9 @@ function renderServices(){
   h+='<div class="kgrid" style="grid-template-columns:repeat(2,1fr)">';
   if(!WEATHER.length)h+='<div style="grid-column:1/-1;font-size:12px;color:var(--muted-foreground);padding:8px">No weather feed connected — connect a forecast provider to pre-flag washing exceptions.</div>';
   WEATHER.forEach(w=>{const rd=w.f.findIndex(r=>r>=60);
-   h+='<div class="metric"><div class="row between" style="align-items:center"><div style="font-weight:700;font-size:13.5px">'+esc(w.plant)+'</div><span style="font-size:11px;color:var(--muted-foreground)">Today: '+w.today+'</span></div>';
-   h+='<div class="row" style="gap:5px;margin-top:10px">'+w.f.map((r,i)=>'<div style="flex:1;text-align:center;border:1px solid var(--border);border-radius:8px;padding:6px 2px;background:'+(r>=60?"var(--info-soft)":r>=30?"var(--warning-soft)":"var(--card)")+'"><div style="font-size:10px;color:var(--muted-foreground)">D+'+(i+1)+'</div><div style="font-size:11px;font-weight:600;color:'+(r>=60?"var(--info)":r>=30?"var(--warning-strong)":"var(--muted-foreground)")+'">'+r+'%</div></div>').join("")+'</div>';
-   h+=rd>-1?'<div style="font-size:11.5px;margin-top:8px;color:var(--info);font-weight:600">🌧 Rain likely D+'+(rd+1)+' ('+w.f[rd]+'%) — washing crews pre-warned; rain exceptions will auto-suggest reschedule instead of counting as misses.</div>':'<div style="font-size:11.5px;margin-top:8px;color:var(--success);font-weight:600">Clear window — good week to clear red-zone washing backlog.</div>';
+   h+='<div class="metric"><div class="row between" style="align-items:center"><div style="font-weight:700;font-size:13.5px">'+esc(w.plant)+'</div><span style="font-size:12.5px;color:var(--muted-foreground)">Today: '+w.today+'</span></div>';
+   h+='<div class="row" style="gap:5px;margin-top:10px">'+w.f.map((r,i)=>'<div style="flex:1;text-align:center;border:1px solid var(--border);border-radius:8px;padding:6px 2px;background:'+(r>=60?"var(--info-soft)":r>=30?"var(--warning-soft)":"var(--card)")+'"><div style="font-size:12px;color:var(--muted-foreground)">D+'+(i+1)+'</div><div style="font-size:12.5px;font-weight:600;color:'+(r>=60?"var(--info)":r>=30?"var(--warning-strong)":"var(--muted-foreground)")+'">'+r+'%</div></div>').join("")+'</div>';
+   h+=rd>-1?'<div style="font-size:12.5px;margin-top:8px;color:var(--info);font-weight:600">🌧 Rain likely D+'+(rd+1)+' ('+w.f[rd]+'%) — washing crews pre-warned; rain exceptions will auto-suggest reschedule instead of counting as misses.</div>':'<div style="font-size:12.5px;margin-top:8px;color:var(--success);font-weight:600">Clear window — good week to clear red-zone washing backlog.</div>';
    h+='</div>';});
   h+='</div></div>';
  }

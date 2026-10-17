@@ -34,14 +34,14 @@
     '<div class="field"><span class="lbl">Estimated time</span><input id="pe-dur" class="inp" value="'+esc(t.duration||"")+'" placeholder="e.g. 2 hrs"/></div></div>'+
    '<div class="field"><span class="lbl">How to do it</span><textarea id="pe-sop" class="inp" rows="3">'+esc(t.sop||"")+'</textarea></div>'+
    (n?'<label class="row" style="gap:8px;align-items:flex-start;background:var(--muted);border-radius:10px;padding:10px 12px;font-size:12.5px;cursor:pointer"><input id="pe-all" type="checkbox" style="margin-top:3px"/><span><b>Apply to the other '+n+' open task'+(n>1?"s":"")+' with the same name</b> ('+esc(t.type||"same equipment")+', other plants / units).<br><span class="muted">Frequency, assignee, safety, how-to and time are copied. Their due dates move by the same number of days as this one.</span></span></label>':'<div class="muted" style="font-size:12px">No other open task has the same name and equipment type.</div>')+
-   '<div class="muted" style="font-size:11.5px;margin-top:8px">Every change is logged on the task and in the audit trail. Completed tasks are never changed.</div>',
+   '<div class="muted" style="font-size:12.5px;margin-top:8px">Every change is logged on the task and in the audit trail. Completed tasks are never changed.</div>',
    '<button class="btn o" style="margin-right:auto;color:#B42318;border-color:#F3C9C4" onclick="pmDelete(\''+t.id+'\')">Delete task</button><button class="btn o" onclick="closeModal()">Cancel</button><button class="btn p" onclick="pmEditSave()">Save changes</button>');
   if(!dateOnly)return html;
   /* an Assignee moves the start date and deadline only: other fields are shown read-only, Delete is hidden */
   return html.replace(/id="pe-(name|freq|who|safe|dur|sop)"/g,'id="pe-$1" disabled')
    .replace(/<button class="btn o" style="margin-right:auto;[^>]*>Delete task<\/button>/,'')
    .replace('<div class="field"><span class="lbl">Start date</span>','<div class="field" style="grid-column:1/-1"><span class="muted" style="font-size:12px">You can change the start date and deadline. Other details are managed by the O&amp;M Head.</span></div><div class="field"><span class="lbl">Start date</span>')
-   .replace('<div class="muted" style="font-size:11.5px;margin-top:8px">Every change','<div class="field" style="margin-top:8px"><span class="lbl">Reason (required if you move an overdue job later)</span><input id="pe-reason" class="inp" placeholder="e.g. Rain delay"/></div><div class="muted" style="font-size:11.5px;margin-top:8px">Every change');
+   .replace('<div class="muted" style="font-size:12.5px;margin-top:8px">Every change','<div class="field" style="margin-top:8px"><span class="lbl">Reason (required if you move an overdue job later)</span><input id="pe-reason" class="inp" placeholder="e.g. Rain delay"/></div><div class="muted" style="font-size:12.5px;margin-top:8px">Every change');
  }
  window.pmEditSave=async function(){
   const id=(S.modalCtx||{}).id,t=(S.tasks||[]).find(x=>x.id===id);if(!t)return;
@@ -76,7 +76,7 @@
    '<div class="grid2" style="display:grid;grid-template-columns:1fr 1fr;gap:12px">'+
     '<div class="field"><span class="lbl">Number of units</span><input id="pu-total" class="inp" type="number" min="1" max="500" value="'+ctx.total+'"/></div>'+
     '<div class="field"><span class="lbl">Maximum units per day</span><input id="pu-perday" class="inp" type="number" min="1" max="500" value="'+ctx.perDay+'"/></div></div>'+
-   '<div class="muted" style="font-size:11.5px;margin-top:8px">Completed work cannot be removed. Changes are recorded in the task log and audit trail.</div>',
+   '<div class="muted" style="font-size:12.5px;margin-top:8px">Completed work cannot be removed. Changes are recorded in the task log and audit trail.</div>',
    '<button class="btn o" onclick="closeModal()">Cancel</button><button class="btn p" onclick="pmUnitPlanSave()">Save daily workload</button>');
  }
  window.pmUnitPlanSave=async function(){
