@@ -25,7 +25,7 @@ SDK_STUB='''window.Clerk={load:async()=>{},session:{getToken:async()=>"isolated-
 def main():
     with tempfile.TemporaryDirectory(prefix="solar91-browser-") as td:
         db_file=Path(td)/"smoke.sqlite3"
-        env={**os.environ,"SOLAR91_E2E_TEST_MODE":"1","APP_ENV":"test",
+        env={**os.environ,"SOLAR91_E2E_TEST_MODE":"1","APP_ENV":"test","DEBUG":"false",
              "DATABASE_URL":"sqlite:///"+db_file.as_posix(),
              "SUPABASE_URL":"https://example.invalid",
              "CLERK_PUBLISHABLE_KEY":"pk_test_c2lsdmVyLWV3ZS0yOS5jbGVyay5hY2NvdW50cy5kZXYk",

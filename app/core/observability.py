@@ -41,6 +41,19 @@ def install_query_counter(engine) -> None:
         elif starts:
             starts.pop()
 
+    @event.listens_for(engine, "handle_error")
+    def _error(exception_context):  # noqa: ANN001
+        # after_cursor_execute is not called for failed SQL. Keep the pooled connection's
+        # timer stack balanced so its next request cannot inherit a stale start time.
+        conn = exception_context.connection
+        starts = conn.info.get("solar91_t0") if conn is not None else None
+        if starts:
+            started = starts.pop()
+            stats = _stats.get()
+            if stats is not None:
+                stats["queries"] += 1
+                stats["db_ms"] += (time.perf_counter() - started) * 1000.0
+
 
 def _request_id(request) -> str:
     incoming = request.headers.get("x-request-id", "")
@@ -67,7 +80,15 @@ def make_timing_middleware(slow_ms: int):
                 )
             return response
         except Exception as exc:  # logged, then re-raised unchanged so error handling is not hidden
-            logger.error("request_failed id=%s method=%s path=%s error=%s", rid, request.method, path, type(exc).__name__)
+            route = request.scope.get("route")
+            template = getattr(route, "path", None) or "unmatched"
+            logger.error(
+                "request_failed id=%s method=%s route=%s error=%s",
+                rid,
+                request.method,
+                template,
+                type(exc).__name__,
+            )
             raise
         finally:
             _stats.reset(token)

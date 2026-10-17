@@ -87,3 +87,11 @@ Measured on a synthetic SQLite database (not production; 40 plants, 10,000 washi
 Added: `app/core/observability.py` sets `X-Request-ID` and `Server-Timing` (total ms, database ms, query count) and logs `slow_or_failed_request` lines for requests slower than `SLOW_REQUEST_MS` (default 1000) or with status 500+. Credentials, query strings and bodies are never logged. `DB_POOL_TIMEOUT_SECONDS` and `DB_POOL_PRE_PING` (default true, unchanged behaviour) are now configurable.
 
 Not implemented (needs a decision or a schema change): an idempotency key for washing report submissions. A time-window duplicate check was tried and removed because it would swallow a legitimate second report with the same count.
+
+### Addendum 2026-10-17: request-timing edge cases
+
+- Failed SQL statements now clear their per-connection timer in SQLAlchemy's `handle_error` event. Without this cleanup, a pooled connection could carry a stale start time into a later request and report misleading database duration/query counts.
+- Exception logs use the matched route template (or `unmatched`) rather than a raw URL path, avoiding accidental disclosure of path values.
+- CORS allows `X-Request-ID` on preflight requests and exposes `X-Request-ID` and `Server-Timing` to approved browser origins.
+- The isolated browser smoke pins `DEBUG=false` in its child process so an unrelated host environment value cannot prevent the test server from starting.
+- Verification on 2026-10-17: all 316 pytest cases passed; the focused observability file passed 9 tests; the isolated browser smoke passed; all 40 frontend JavaScript files passed `node --check`. No Render, Supabase, production data, or network service was used.

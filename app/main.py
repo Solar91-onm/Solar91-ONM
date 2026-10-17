@@ -84,7 +84,14 @@ app=FastAPI(
     lifespan=lifespan,
 )
 app.state.bootstrap_ready = settings.app_env != "production"
-app.add_middleware(CORSMiddleware,allow_origins=settings.origins,allow_credentials=True,allow_methods=["GET","POST","PATCH","PUT","DELETE","OPTIONS"],allow_headers=["Content-Type","Authorization"])
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.origins,
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization", "X-Request-ID"],
+    expose_headers=["X-Request-ID", "Server-Timing"],
+)
 
 # Compress big responses (the 740 KB page shrinks to roughly 130 KB) so pages load fast on site-office mobile networks.
 app.add_middleware(GZipMiddleware,minimum_size=1000)

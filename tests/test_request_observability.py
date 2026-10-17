@@ -3,11 +3,15 @@ from __future__ import annotations
 import logging
 from datetime import date
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
 
+from app.core.database import engine
 from app.core.models import Plant, WashingHistory, WashingTable
-from app.core.observability import make_timing_middleware
+from app.core.observability import _stats, make_timing_middleware
 from tests.conftest import login_user
 
 
@@ -61,6 +65,56 @@ def test_failed_requests_are_logged_and_still_raise(caplog):
     assert response.status_code == 500
     text = " ".join(record.getMessage() for record in caplog.records)
     assert "error=RuntimeError" in text and "secret internal detail" not in text
+
+
+def test_failed_request_logs_route_template_instead_of_path_values(caplog):
+    mini = FastAPI()
+    mini.middleware("http")(make_timing_middleware(10_000))
+
+    @mini.get("/api/private/{record_id}")
+    def fail(record_id: str):
+        raise RuntimeError("failed")
+
+    with caplog.at_level(logging.ERROR, logger="solar91.request"):
+        response = TestClient(mini, raise_server_exceptions=False).get("/api/private/SECRET-RECORD-ID")
+    assert response.status_code == 500
+    messages = " ".join(record.getMessage() for record in caplog.records)
+    assert "route=/api/private/{record_id}" in messages
+    assert "SECRET-RECORD-ID" not in messages
+
+
+def test_failed_sql_does_not_leave_stale_query_timer_on_pooled_connection():
+    stats = {"queries": 0, "db_ms": 0.0}
+    token = _stats.set(stats)
+    try:
+        with engine.connect() as connection:
+            with pytest.raises(SQLAlchemyError):
+                connection.execute(text("SELEC invalid_sql"))
+            connection.execute(text("SELECT 1"))
+            assert connection.info.get("solar91_t0") == []
+    finally:
+        _stats.reset(token)
+
+    assert stats["queries"] == 2
+
+
+def test_cors_exposes_request_timing_headers_and_allows_request_id(client, db):
+    login_user(client, db, role="O&M Head", name="CORS Head", email="cors-head@example.com")
+    origin = "http://localhost:8000"
+    preflight = client.options(
+        "/api/bootstrap?lite=1",
+        headers={
+            "Origin": origin,
+            "Access-Control-Request-Method": "GET",
+            "Access-Control-Request-Headers": "x-request-id",
+        },
+    )
+    assert preflight.status_code == 200
+    assert "x-request-id" in preflight.headers["access-control-allow-headers"].lower()
+
+    response = client.get("/api/bootstrap?lite=1", headers={"Origin": origin})
+    exposed = response.headers["access-control-expose-headers"].lower()
+    assert "x-request-id" in exposed and "server-timing" in exposed
 
 
 def test_washing_bootstrap_rows_keep_their_exact_shape(client, db):
