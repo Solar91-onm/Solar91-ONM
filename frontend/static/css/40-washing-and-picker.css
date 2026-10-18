@@ -134,6 +134,35 @@ button.wx-tile:hover{transform:translateY(-2px);box-shadow:0 10px 24px rgba(16,3
 .wx-past{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-top:12px;background:var(--wx-warn-bg);border:1px solid color-mix(in srgb,var(--wx-warn) 35%,transparent);border-radius:12px;padding:10px 12px}
 .wx-past b{display:block;font-size:13px}.wx-past span{font-size:12px;color:var(--wx-mut)}
 
+/* cycle sheet (Record washing): every day of a cycle on one table */
+.wx-cpick{display:flex;gap:6px;margin:6px 0 8px;flex-wrap:wrap}
+.wx-cpick button{display:flex;flex-direction:column;align-items:flex-start;gap:1px;border:1px solid var(--wx-line);background:var(--wx-bg);border-radius:10px;padding:6px 12px;font:inherit;color:var(--wx-ink);cursor:pointer;min-width:120px}
+.wx-cpick button b{font-size:13px}.wx-cpick button span{font-size:11.5px;color:var(--wx-mut)}
+.wx-cpick button.on{border-color:var(--wx-pri);box-shadow:inset 0 0 0 1px var(--wx-pri);background:var(--wx-soft)}
+.wx-review{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px}
+.wx-sheet{max-height:min(56vh,620px)}
+.wx-sheet .wc-compact{min-width:680px}
+.wx-sheet select.wx-in{max-width:132px}
+.wx-sheet td{vertical-align:middle}
+.wx-sheet td:first-child{white-space:nowrap}
+.wx-sheet td:nth-child(4){min-width:110px}
+.wx-sheet td:nth-child(5){white-space:nowrap}
+.wx-sheet .wc-compact td,.wx-sheet .wc-compact th{padding:6px 8px}
+.wx-srow.edit td{background:var(--wx-bg)}
+.wx-srow.wx-blank td{color:var(--wx-mut)}
+.wx-srow.focus td{background:var(--wx-water-bg)}
+.wx-in{height:32px;width:100%;min-width:0;border:1px solid var(--wx-line);border-radius:8px;padding:0 8px;font:inherit;font-size:13px;color:var(--wx-ink);background:var(--wx-soft)}
+.wx-in:focus{outline:2px solid var(--wx-pri);outline-offset:0;background:var(--wx-bg)}
+.wx-num{max-width:78px;font-weight:700}
+.wx-pics{white-space:nowrap}.wx-pics small{display:block;font-size:11px;color:var(--wx-warn)}
+.wx-pic{display:inline-flex;align-items:center;height:28px;border:1px dashed var(--wx-line);border-radius:8px;padding:0 7px;margin-right:3px;font-size:12px;font-weight:700;color:var(--wx-mut);cursor:pointer}
+.wx-pic.on{border-style:solid;border-color:var(--wx-ok);color:var(--wx-ok);background:var(--wx-ok-bg)}
+.wx-nd{color:var(--wx-warn);font-weight:700}
+.wx-by{display:block;font-size:11px;color:var(--wx-mut);margin-top:2px}
+.wx-run{font-weight:800;color:var(--wx-ink);text-align:right}
+.wx-over{color:var(--wx-crit)}
+.wx-sheet-foot{position:sticky;bottom:0;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-top:10px;padding:10px 12px;border:1px solid var(--wx-line);border-radius:12px;background:var(--wx-bg);font-size:13px;box-shadow:0 -4px 14px rgba(0,0,0,.05)}
+
 /* ---------- searchable plant picker ---------- */
 select.pp-select{cursor:pointer}
 select.pp-open{outline:2px solid var(--wx-pri);outline-offset:1px}

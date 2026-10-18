@@ -197,6 +197,7 @@
   groups.push(['Site issues','#DC4C3E',[atPlant('How many open issues?'),atPlant('Overdue issues'),'Open issues by status this week','Open issues by status last week']]);
   groups.push(['Preventive maintenance','#16A34A',[atPlant('Overdue PM tasks'),atPlant('Open PM tasks')]]);
   if(wash)groups.push(['Washing','#0891B2',['Washing pending review','Tables cleaned today','Tables cleaned yesterday']]);
+  groups.push(['Quick searches','#7C3AED',[atPlant('Critical open issues'),atPlant('Unassigned issues'),atPlant('Inverter faults'),atPlant('Issues pending parts'),atPlant('Overdue maintenance')]]);
   return groups;
  }
  function snapshot(){
@@ -230,12 +231,38 @@
  function recordCard(r){
   const m=MOD[r.module]||['Record','#64748B','•'],ref=r.ticket||(!isUuid(r.id)?r.id:'');
   const meta=[r.plant?esc91(r.plant)+(r.site_code?' · '+esc91(r.site_code):''):'',r.assignee?'👤 '+esc91(r.assignee):'',r.reporter?'Reported by '+esc91(r.reporter):'',r.due?'📅 '+esc91(r.due):''].filter(Boolean).join('<i>·</i>');
-  return '<button type="button" class="cp-rec" style="--m:'+m[1]+'" data-s91-record-kind="'+esc91(r.module)+'" data-s91-record-id="'+esc91(r.id)+'" data-s91-record-ticket="'+esc91(r.ticket||'')+'" data-s91-record-plant="'+esc91(r.plant||'')+'"><span class="cp-rec-ico" aria-hidden="true">'+m[2]+'</span><span class="cp-rec-main"><span class="cp-rec-top"><em>'+m[0]+'</em>'+(ref?'<b>'+esc91(ref)+'</b>':'')+(r.status?'<span class="cp-st '+statusTone(r.status)+'">'+esc91(r.status)+'</span>':'')+'</span><strong>'+esc91(r.title||r.equipment||'View record')+'</strong>'+(meta?'<small>'+meta+'</small>':'')+'</span><span class="cp-rec-go" aria-hidden="true">›</span></button>';
+  return '<button type="button" class="cp-rec" style="--m:'+m[1]+'" data-cp-text="'+esc91([ref,r.title,r.plant,r.site_code,r.status,r.severity,r.assignee,r.equipment].filter(Boolean).join(' ').toLowerCase())+'" data-s91-record-kind="'+esc91(r.module)+'" data-s91-record-id="'+esc91(r.id)+'" data-s91-record-ticket="'+esc91(r.ticket||'')+'" data-s91-record-plant="'+esc91(r.plant||'')+'"><span class="cp-rec-ico" aria-hidden="true">'+m[2]+'</span><span class="cp-rec-main"><span class="cp-rec-top"><em>'+m[0]+'</em>'+(ref?'<b>'+esc91(ref)+'</b>':'')+(r.status?'<span class="cp-st '+statusTone(r.status)+'">'+esc91(r.status)+'</span>':'')+(r.severity?'<span class="cp-sev '+esc91(String(r.severity).toLowerCase())+'">'+esc91(r.severity)+'</span>':'')+(r.overdue?'<span class="cp-st bad">Overdue</span>':'')+'</span><strong>'+esc91(r.title||r.equipment||'View record')+'</strong>'+(meta?'<small>'+meta+'</small>':'')+'</span><span class="cp-rec-go" aria-hidden="true">›</span></button>';
+ }
+ /* ---- search refinement: applied filters, one-tap facets with counts, sort and an in-result filter ---- */
+ const FKIND={modules:['module',{issues:'Issues',pm:'Maintenance',washing:'Washing',plants:'Plants',equipment:'Equipment'}],severities:['severity',null],statuses:['status',{active:'Open',overdue:'Overdue',unassigned:'Unassigned',assigned:'Assigned',acknowledged:'Acknowledged','in progress':'In progress','pending vendor':'Pending parts',resolved:'Resolved',closed:'Closed',completed:'Completed',scheduled:'Scheduled'}]};
+ const flabel=(kind,v)=>{const map=(FKIND[kind]||[])[1];return map&&map[v]||v};
+ function describeFilters(f){
+  const parts=[];
+  if((f.statuses||[]).length)parts.push(f.statuses.map(v=>flabel('statuses',v).toLowerCase()).join(' & '));
+  if((f.severities||[]).length)parts.push(f.severities.join('/').toLowerCase());
+  parts.push((f.modules||[]).map(v=>flabel('modules',v).toLowerCase()).join(' and ')||'records');
+  let t=parts.join(' ');if((f.terms||[]).length)t+=' matching “'+f.terms.join(' ')+'”';if(f.plant)t+=' at '+f.plant.name;return t;
+ }
+ function refineHtml(x,i){
+  const f=x.filters;if(!f)return '';
+  const chip=(kind,v,label)=>'<button type="button" class="cp-fchip on" data-cp-drop="'+i+'|'+kind+'|'+esc91(v)+'" title="Remove this filter">'+esc91(label)+' <b aria-hidden="true">×</b></button>';
+  const applied=[].concat((f.modules||[]).map(v=>chip('modules',v,flabel('modules',v))),(f.statuses||[]).map(v=>chip('statuses',v,flabel('statuses',v))),(f.severities||[]).map(v=>chip('severities',v,v)),f.plant?[chip('plant',f.plant.site_code,f.plant.name)]:[],(f.terms||[]).map(v=>chip('terms',v,'“'+v+'”')));
+  const fc=x.facets||{},add=(kind,group,label,v,n)=>'<button type="button" class="cp-fchip" data-cp-add="'+i+'|'+kind+'|'+esc91(v)+'">'+esc91(label)+' <span>'+n+'</span></button>';
+  const offers=[];
+  if(!(f.modules||[]).length)Object.entries(fc.module||{}).forEach(([v,n])=>offers.push(add('modules','module',flabel('modules',v),v,n)));
+  Object.entries(fc.status||{}).filter(([v])=>!(f.statuses||[]).includes(v)).forEach(([v,n])=>offers.push(add('statuses','status',flabel('statuses',v),v,n)));
+  if(!(f.severities||[]).length)Object.entries(fc.severity||{}).forEach(([v,n])=>offers.push(add('severities','severity',v,v,n)));
+  if(!f.plant)Object.entries(fc.plant||{}).slice(0,5).forEach(([v,n])=>offers.push(add('plant','plant',v,v,n)));
+  const sort=x.sort||'relevance',sorts=[['relevance','Best match'],['priority','Priority'],['due','Due date'],['recent','Recent']];
+  return '<div class="cp-layer cp-refine"><div class="cp-layer-h">Refine</div>'+
+   (applied.length?'<div class="cp-fchips">'+applied.join('')+'</div>':'')+
+   (offers.length&&(x.records||[]).length>1?'<div class="cp-fchips cp-offer">'+offers.slice(0,12).join('')+'</div>':'')+
+   ((x.records||[]).length>1?'<div class="cp-refine-row"><label class="cp-within"><span aria-hidden="true">⌕</span><input data-cp-within="'+i+'" placeholder="Filter these results…" aria-label="Filter these results"></label><div class="cp-sort" role="group" aria-label="Sort results">'+sorts.map(([k,l])=>'<button type="button" class="'+(k===sort?'on':'')+'" aria-pressed="'+(k===sort)+'" data-cp-sort="'+i+'|'+k+'">'+l+'</button>').join('')+'</div></div>':'')+'</div>';
  }
  function answerCard(x,i){
   if(x.who==='user')return '<div class="cp-q"><span>'+esc91(x.text)+'</span></div>';
   const time=Number.isFinite(x.when)?new Date(x.when).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}):'';
-  if(/^Checking permitted live records/.test(x.text))return '<article class="cp-a cp-loading" aria-busy="true"><div class="cp-a-top"><span class="cp-orb sm"></span><span>Searching the records your role can access…</span></div><i class="cp-sk"></i><i class="cp-sk w70"></i><i class="cp-sk w45"></i></article>';
+  if(/^Checking permitted live records|^Refining…/.test(x.text))return '<article class="cp-a cp-loading" aria-busy="true"><div class="cp-a-top"><span class="cp-orb sm"></span><span>Searching the records your role can access…</span></div><i class="cp-sk"></i><i class="cp-sk w70"></i><i class="cp-sk w45"></i></article>';
   if(x.error)return '<article class="cp-a cp-err"><div class="cp-a-top"><span class="cp-orb sm"></span><span>Live data unavailable · '+time+'</span></div><p class="cp-text">'+esc91(x.text)+'</p>'+(x.q?'<div class="cp-follow"><button type="button" data-s91-question="'+esc91(x.q)+'">↻ Try again</button></div>':'')+'</article>';
   if(!x.q&&!x.records?.length&&!x.summary)return '<article class="cp-a"><p class="cp-text">'+esc91(x.text).replace(/\n/g,'<br>')+'</p></article>';
   const recs=x.records||[],all=assistant.expandedRecs&&assistant.expandedRecs[i],shown=all?recs:recs.slice(0,4);
@@ -247,7 +274,8 @@
    '<p class="cp-text">'+esc91(x.text).replace(/\n/g,'<br>')+'</p>'+
    (x.narration?'<div class="cp-ai"><b>✦ AI context</b><p>'+esc91(x.narration)+'</p></div>':'')+
    (bd.length?'<div class="cp-layer"><div class="cp-layer-h">Breakdown</div><div class="cp-bars">'+bd.map(b=>{const v=Number(b.value)||0;return '<div class="cp-bar"><span>'+esc91(b.label)+'</span><i><b style="width:'+Math.max(v?6:0,Math.round(100*v/bdMax))+'%"></b></i><strong>'+esc91(b.value)+'</strong></div>'}).join('')+'</div></div>':'')+
-   (recs.length?'<div class="cp-layer"><div class="cp-layer-h">Supporting records <b>'+recs.length+(x.limited?'+':'')+'</b></div><div class="cp-recs">'+shown.map(recordCard).join('')+'</div>'+(recs.length>4?'<button type="button" class="cp-more" data-cp-more="'+i+'">'+(all?'Show fewer':'Show all '+recs.length+' records')+'</button>':'')+'</div>':'')+
+   refineHtml(x,i)+
+   (recs.length?'<div class="cp-layer"><div class="cp-layer-h">Supporting records <b>'+recs.length+(x.limited?'+':'')+'</b></div><div class="cp-recs">'+recs.map((r,k)=>k<shown.length?recordCard(r):recordCard(r).replace('class="cp-rec"','class="cp-rec cp-extra"')).join('')+'</div>'+(recs.length>4?'<button type="button" class="cp-more" data-cp-more="'+i+'">'+(all?'Show fewer':'Show all '+recs.length+' records')+'</button>':'')+'</div>':'')+
    '<div class="cp-actions">'+(x.action?'<button type="button" class="cp-primary" data-s91-assist-go="'+x.action.join(':')+'">Open filtered register ↗</button>':'')+'<button type="button" data-cp-copy="'+i+'">Copy answer</button></div>'+
    (follows.length?'<div class="cp-follow"><span>Go deeper</span>'+follows.map(f=>'<button type="button" data-s91-question="'+esc91(f)+'">'+esc91(f)+'</button>').join('')+'</div>':'')+
    (x.source?'<small class="cp-src">'+esc91(x.source)+(x.limited?' · more records exist; open the register for the full list':'')+'</small>':'')+
@@ -272,8 +300,8 @@
    '<div class="cp-head-tools">'+(assistant.log.length?'<button type="button" data-cp-new title="Start a new conversation" aria-label="New conversation">✎</button>':'')+'<button type="button" data-cp-wide title="'+(assistant.wide?'Narrow':'Widen')+' panel" aria-label="'+(assistant.wide?'Narrow':'Widen')+' panel">'+(assistant.wide?'⇥':'⇤')+'</button><button type="button" data-s91-assist="close" aria-label="Close assistant">×</button></div></header>'+
    '<div class="cp-context"><label><span>Focus</span><select data-cp-plant aria-label="Focus suggestions on a plant">'+opts+'</select></label><span class="cp-badge">● Live</span></div>'+
    '<div class="s91-assistant-conversation cp-body" aria-live="polite">'+conv+'</div>'+
-   '<form id="s91-assistant-form" class="cp-composer"><input id="s91-assistant-query" maxlength="300" aria-label="Ask an operations question" placeholder="Ask about issues, maintenance, washing, a plant or a ticket…" autocomplete="off"'+(assistant.busy?' disabled':'')+'><button type="submit" aria-label="Ask"'+(assistant.busy?' disabled':'')+'>'+(assistant.busy?'<span class="gx-spin" aria-hidden="true"></span>':'↑')+'</button></form>'+
-   '<p class="cp-foot">Tip: add a plant name or site code, e.g. “overdue issues at '+esc91((plants[0]&&plants[0].id)||'QA02')+'”. Answers never change data; edits happen in the module.</p></section>';
+   '<div id="cp-suggest-slot" class="cp-suggest-slot"></div><form id="s91-assistant-form" class="cp-composer"><input id="s91-assistant-query" maxlength="300" aria-label="Ask an operations question" placeholder="Search or ask: critical inverter issues at a plant, a ticket number…" autocomplete="off"'+(assistant.busy?' disabled':'')+'><button type="submit" aria-label="Ask"'+(assistant.busy?' disabled':'')+'>'+(assistant.busy?'<span class="gx-spin" aria-hidden="true"></span>':'↑')+'</button></form>'+
+   '<p class="cp-foot">Search with plain words: “critical inverter issues at '+esc91((plants[0]&&plants[0].id)||'QA02')+'”, “overdue maintenance”, “unassigned issues”, or a ticket number. Then refine with one tap. Answers never change data.</p></section>';
  }
  function assistantRoot(){let root=document.getElementById('s91-assistant-root');if(!root){root=document.createElement('div');root.id='s91-assistant-root';document.body.append(root)}return root}
  function drawAssistant(){syncAssistantUser();const root=assistantRoot();root.hidden=!document.querySelector('#app .shell');
@@ -332,6 +360,7 @@
     /\b(wash\w*|clean\w*|tables?)\b/i.test(expanded)?['washing',/pending|review|confirm/i.test(expanded)?'review':'late']:null;
    assistant.log[position]={who:'bot',text:result.answer||'No matching saved record was found.',records:result.records||[],
      summary:result.summary||null,breakdown:result.breakdown||[],source:result.source||'',narration:result.narration||'',limited:!!result.limited||(result.records||[]).length>8,
+     filters:result.filters||null,facets:result.facets||null,partial:!!result.partial,
      action:recordAction,q:expanded,when:Date.now()};
    saveAssistantHistory(assistant.log);
   }catch(error){
@@ -343,6 +372,44 @@
     assistant.busy=false;drawAssistant();document.getElementById('s91-assistant-query')?.focus({preventScroll:true});
    }
   }
+ }
+ async function refine(i,patch){
+  const x=assistant.log[i];if(!x||!x.filters||assistant.busy)return;
+  const f=JSON.parse(JSON.stringify(x.filters)),sort=patch.sort||x.sort||'relevance';
+  if(patch.drop){const [kind,v]=patch.drop;if(kind==='plant')f.plant=null;else f[kind]=(f[kind]||[]).filter(y=>y!==v)}
+  if(patch.add){const [kind,v]=patch.add;if(kind==='plant')f.plant={site_code:v,name:v};else if(!(f[kind]||[]).includes(v))f[kind]=(f[kind]||[]).concat([v])}
+  const params=new URLSearchParams({q:(f.terms||[]).join(' '),limit:'40',sort});
+  if((f.modules||[]).length)params.set('module',f.modules.join(','));
+  if((f.severities||[]).length)params.set('severity',f.severities.join(','));
+  if((f.statuses||[]).length)params.set('status',f.statuses.join(','));
+  if(f.plant)params.set('plant',f.plant.site_code);
+  const requestUserId=assistantUserId();
+  assistant.busy=true;const prior=x;assistant.log[i]={who:'bot',text:'Refining…',when:Date.now()};drawAssistant();
+  try{
+   const r=await apiFetch('/api/field/search?'+params.toString());
+   if(assistantUserId()!==requestUserId)return;
+   const fl=r.filters||f,count=r.total||0;
+   assistant.log[i]=Object.assign({},prior,{text:count?'Showing '+count+(r.limited?'+':'')+' '+describeFilters(fl)+'.'+(r.partial?' No record matched every word, so the closest matches are shown first.':''):'No '+describeFilters(fl)+' found in your approved scope. Remove a filter to widen the search.',
+    records:r.records||[],filters:fl,facets:r.facets||{},partial:!!r.partial,limited:!!r.limited,sort,summary:{label:'Matching records',value:count},breakdown:[],narration:'',when:Date.now(),
+    source:'Permission-scoped operational search · '+new Date().toLocaleString()});
+   assistant.expandedRecs=Object.assign({},assistant.expandedRecs,{[i]:false});
+  }catch(error){assistant.log[i]=prior;if(typeof toast==='function')toast('Could not refine the results ('+(error.message||'connection error')+').')}
+  finally{assistant.busy=false;saveAssistantHistory(assistant.log);drawAssistant()}
+ }
+ /* instant suggestions while typing: tickets, work orders and plants already loaded for this user */
+ function suggestions(text){
+  const t=String(text||'').trim().toLowerCase();if(t.length<2||!hasAppState())return [];
+  const out=[],hit=(...v)=>v.some(x=>String(x||'').toLowerCase().includes(t));
+  (S.issues||[]).filter(x=>hit(x.id,x.desc,x.vertical,x.equip)).slice(0,4).forEach(x=>out.push({kind:'issues',id:x.dbId||x.id,ticket:x.id,plant:x.plant,label:x.id+' · '+(x.desc||x.vertical||''),sub:(x.plant||'')+(x.status?' · '+x.status:'')}));
+  (S.tasks||[]).filter(x=>hit(x.id,x.name)).slice(0,2).forEach(x=>out.push({kind:'pm',id:x.id,ticket:'',plant:x.plant,label:x.id+' · '+(x.name||''),sub:x.plant||''}));
+  (S.plants||[]).filter(x=>hit(x.id,x.name)).slice(0,2).forEach(x=>out.push({kind:'plant',label:(x.id?x.id+' · ':'')+x.name,sub:'Ask about this plant',q:'Open issues at '+x.name}));
+  return out.slice(0,6);
+ }
+ function suggestHtml(text){
+  const list=suggestions(text);if(!list.length)return '';
+  return '<div class="cp-suggest" role="listbox" aria-label="Suggestions">'+list.map(sg=>sg.kind==='plant'
+   ?'<button type="button" role="option" data-s91-question="'+esc91(sg.q)+'"><span class="cp-sg-ico">☀</span><span><b>'+esc91(sg.label)+'</b><small>'+esc91(sg.sub)+'</small></span></button>'
+   :'<button type="button" role="option" data-s91-record-kind="'+sg.kind+'" data-s91-record-id="'+esc91(sg.id)+'" data-s91-record-ticket="'+esc91(sg.ticket)+'" data-s91-record-plant="'+esc91(sg.plant||'')+'"><span class="cp-sg-ico">'+(sg.kind==='issues'?'⚠':'🛠')+'</span><span><b>'+esc91(String(sg.label).slice(0,70))+'</b><small>'+esc91(sg.sub)+'</small></span></button>').join('')+'<p>Press Enter to search all records</p></div>';
  }
  function openAssistantRecord(kind,id,plant,ticket){
   assistant.open=false;drawAssistant();
@@ -365,8 +432,24 @@
   if(e.target.closest('[data-cp-wide]')){assistant.wide=!assistant.wide;drawAssistant();return}
   const more=e.target.closest('[data-cp-more]');if(more){const i=Number(more.dataset.cpMore);assistant.expandedRecs=assistant.expandedRecs||{};assistant.expandedRecs[i]=!assistant.expandedRecs[i];const c=document.querySelector('.cp-body'),top=c?c.scrollTop:0;drawAssistant();const n=document.querySelector('.cp-body');if(n)n.scrollTop=top;return}
   const copy=e.target.closest('[data-cp-copy]');if(copy){const x=assistant.log[Number(copy.dataset.cpCopy)];if(x){const lines=[x.text].concat(x.summary&&x.summary.value!=null?[x.summary.label+': '+x.summary.value]:[]).concat((x.breakdown||[]).map(b=>'- '+b.label+': '+b.value)).concat((x.records||[]).map(r=>'- '+[r.ticket||(!isUuid(r.id)?r.id:''),r.title,r.plant,r.status].filter(Boolean).join(' · ')));try{navigator.clipboard.writeText(lines.join('\n')).then(()=>{if(typeof toast==='function')toast('Answer copied')},()=>{if(typeof toast==='function')toast('Copy is not available in this browser')})}catch(err){if(typeof toast==='function')toast('Copy is not available in this browser')}}return}
+  const drop=e.target.closest('[data-cp-drop]');if(drop){const [i,kind,v]=drop.dataset.cpDrop.split('|');refine(Number(i),{drop:[kind,v]});return}
+  const addf=e.target.closest('[data-cp-add]');if(addf){const [i,kind,v]=addf.dataset.cpAdd.split('|');refine(Number(i),{add:[kind,v]});return}
+  const sortb=e.target.closest('[data-cp-sort]');if(sortb){const [i,k]=sortb.dataset.cpSort.split('|');refine(Number(i),{sort:k});return}
   const go=e.target.closest('[data-s91-assist-go]');if(go){const [kind,queue]=go.dataset.s91AssistGo.split(':');assistant.open=false;drawAssistant();window.s91OpenQueue(kind,queue);return}
  });
+ document.addEventListener('input',e=>{
+  const el=e.target;if(!el||!el.matches)return;
+  if(el.matches('[data-cp-within]')){
+   /* filter the answer's records in place (all of them, not only the first four) */
+   const card=el.closest('.cp-a'),t=el.value.trim().toLowerCase();if(!card)return;let shown=0;
+   card.querySelectorAll('.cp-rec').forEach(c=>{const ok=!t||(c.dataset.cpText||'').includes(t);c.hidden=!ok;c.classList.toggle('cp-force',!!t&&ok);if(ok)shown++});
+   card.classList.toggle('cp-filtering',!!t);const n=card.querySelector('.cp-within-n');if(n)n.remove();
+   if(t)el.closest('.cp-refine-row').insertAdjacentHTML('afterend','<small class="cp-within-n">'+shown+' of '+card.querySelectorAll('.cp-rec').length+' shown</small>');
+   return;
+  }
+  if(el.id==='s91-assistant-query'){const box=document.getElementById('cp-suggest-slot');if(box)box.innerHTML=suggestHtml(el.value)}
+ });
+ document.addEventListener('focusout',e=>{if(e.target&&e.target.id==='s91-assistant-query')setTimeout(()=>{const box=document.getElementById('cp-suggest-slot');if(box&&!box.contains(document.activeElement))box.innerHTML=''},150)});
  document.addEventListener('change',e=>{if(!e.target.matches||!e.target.matches('[data-cp-plant]'))return;assistant.focus=e.target.value||'all';drawAssistant()});
  document.addEventListener('submit',e=>{if(e.target.id!=='s91-assistant-form')return;e.preventDefault();ask(document.getElementById('s91-assistant-query')?.value)});
  document.addEventListener('keydown',e=>{if(e.key==='Escape'&&document.getElementById('s91-report-root'))document.getElementById('s91-report-root').remove();else if(e.key==='Escape'&&assistant.open){assistant.open=false;drawAssistant()}});

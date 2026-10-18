@@ -1,0 +1,103 @@
+/* Site Issues — compact, layered register (Oct 2026).
+   Presentation only: every row action, injected button and handler stays as it is.
+   Rows are one compact line; secondary actions appear on hover/focus on pointer devices (always shown on touch). */
+
+/* ---------- page header: layered band like the ticket and washing overlays ---------- */
+#app .content .m26-issues.si .si-head{position:relative;overflow:hidden;background:linear-gradient(118deg,#0B4F2C 0%,#0E6B47 52%,#0F7C77 100%);border:0;border-radius:18px;padding:20px 22px;color:#fff;box-shadow:0 14px 34px -18px rgba(8,60,36,.55);align-items:center}
+#app .content .m26-issues.si .si-head::after{content:"";position:absolute;right:-60px;top:-80px;width:280px;height:280px;border-radius:50%;background:radial-gradient(circle,rgba(255,255,255,.14),rgba(255,255,255,0) 68%);pointer-events:none}
+#app .content .m26-issues.si .si-head h1{color:#fff;font-size:24px;margin:2px 0 4px}
+#app .content .m26-issues.si .si-head p,#app .content .m26-issues.si .si-head .kpi-label{color:rgba(255,255,255,.78)}
+#app .content .m26-issues.si .si-head .kpi-label{letter-spacing:.12em}
+#app .content .m26-issues.si .si-head-r{position:relative;z-index:1;flex-wrap:wrap}
+#app .content .m26-issues.si .si-live{background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.22);color:#fff;backdrop-filter:blur(6px)}
+#app .content .m26-issues.si .si-live small{color:rgba(255,255,255,.72)}
+#app .content .m26-issues.si .si-head .btn.o{background:rgba(255,255,255,.1);border-color:rgba(255,255,255,.34);color:#fff}
+#app .content .m26-issues.si .si-head .btn.o:hover{background:rgba(255,255,255,.18)}
+#app .content .m26-issues.si .si-head .oi-raise-button{background:#fff;color:#0B4F2C;border-color:#fff;box-shadow:0 8px 20px -10px rgba(0,0,0,.45)}
+#app .content .m26-issues.si .si-head .oi-raise-button:hover{background:#ECFDF3}
+
+/* ---------- search / filter bar and summary cards ---------- */
+#app .m26-issues.si .si-bar{border-radius:16px;box-shadow:0 1px 2px rgba(16,40,24,.04)}
+#app .m26-issues.si .si-chip{transition:background .12s,border-color .12s,color .12s}
+#app .m26-issues.si .si-dns{gap:12px}
+#app .m26-issues.si .si-dn{position:relative;border-radius:16px;overflow:hidden;transition:box-shadow .15s,transform .15s}
+#app .m26-issues.si .si-dn::before{content:"";position:absolute;left:0;right:0;top:0;height:3px;background:linear-gradient(90deg,#DC4C3E,#3B82F6 55%,#94A3B8)}
+#app .m26-issues.si .si-dn:nth-child(2)::before{background:linear-gradient(90deg,#3B82F6,#6675D9 40%,#0F9F8C 75%,#16A34A)}
+#app .m26-issues.si .si-dn:nth-child(3)::before{background:linear-gradient(90deg,#16A34A,#DC4C3E 60%,#94A3B8)}
+#app .m26-issues.si .si-dn:hover{box-shadow:0 12px 28px -18px rgba(16,40,24,.35);transform:translateY(-1px)}
+#app .m26-issues.si .si-tri2{border-radius:16px}
+#app .m26-issues.si .si-tbl{border-radius:16px;overflow:hidden;box-shadow:0 1px 2px rgba(16,40,24,.04)}
+
+/* ---------- register rows: one compact line each ---------- */
+#app .m26-issues .si-t th{padding:9px 12px;font-size:11.5px}
+#app .m26-issues .si-t td{padding:9px 12px;border-bottom:1px solid var(--idk-line)}
+#app .m26-issues .si-t tr.si-r td{transition:background .12s}
+#app .m26-issues .si-t tr.si-r:hover td{background:color-mix(in srgb,var(--idk-pri) 5%,var(--idk-bg))}
+#app .m26-issues .si-t tr.si-r.od td{background:color-mix(in srgb,#DC4C3E 5%,var(--idk-bg))}
+#app .m26-issues .si-t .si-id{font-size:13.5px;white-space:nowrap}
+#app .m26-issues .si-t .si-id small{font-size:12px}
+#app .m26-issues .si-t .si-desc{max-width:320px;font-size:12.5px;margin-top:2px}
+/* the countdown repeats "ETC in …" from the status column: keep it only when it needs attention */
+#app .m26-issues .si-t tr td .cc-sla.s,#app .m26-issues .si-t tr td .cc-sla.m{display:none}
+#app .m26-issues .si-t tr td>div[style*="margin-top:4px"]{margin-top:3px!important}
+#app .m26-issues .si-t tr td>div[style*="margin-top:4px"]:not(:has(.cc-sla.w,.cc-sla.d,.cc-chronic,.cc-wf-seen-tag)){display:none!important}
+#app .m26-issues .si-t .cc-sla{font-size:11px;padding:1px 8px;border-radius:999px}
+#app .m26-issues .si-t td .si-sub{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:150px}
+#app .m26-issues .si-t td>div[style*="font-weight:600"]{white-space:nowrap}
+#app .m26-issues .si-t .si-av{white-space:nowrap;gap:7px}
+#app .m26-issues .si-t .si-av i{width:24px;height:24px;font-size:11px}
+#app .m26-issues .si-t .si-pri{white-space:nowrap}
+/* status column: status chip on top, ETC and proof as one quiet line beneath */
+#app .m26-issues .si-t tr.si-r td .badge{display:block;width:max-content}
+#app .m26-issues .si-t tr.si-r td .oi-etc{display:inline-block;margin-top:3px;font-size:11.5px}
+#app .m26-issues .si-t tr.si-r td .cc-proof{display:inline-flex;align-items:center;gap:3px;margin-left:6px;font-size:11px;padding:0 6px;border-radius:999px;vertical-align:middle}
+
+/* ---------- action rail: View is the row itself ---------- */
+#app .m26-issues .si-t td.oi-action-cell{width:112px;min-width:112px;padding-right:30px;position:relative;white-space:nowrap}
+#app .m26-issues .si-t tr.si-r .oi-row-actions button[data-act="issue"]{display:none!important}
+#app .m26-issues .si-t tr.si-r td.oi-action-cell::after{content:"›";position:absolute;right:11px;top:50%;transform:translateY(-52%);font-size:20px;line-height:1;color:var(--idk-mut);transition:transform .12s,color .12s}
+#app .m26-issues .si-t tr.si-r:hover td.oi-action-cell::after{color:var(--idk-pri);transform:translate(2px,-52%)}
+#app .m26-issues .si-t td.oi-action-cell .btn{min-height:27px;padding:3px 10px;font-size:12px;border-radius:8px;box-shadow:none;white-space:nowrap}
+#app .m26-issues .si-t td.oi-action-cell .btn.cc-wf-ask,#app .m26-issues .si-t td.oi-action-cell .btn.cc-ask-site{background:color-mix(in srgb,#F59E0B 10%,var(--idk-bg));border-color:color-mix(in srgb,#F59E0B 40%,var(--idk-line));color:#92400E}
+#app .m26-issues .si-t td.oi-action-cell .btn.si-act-main{background:var(--idk-pri);border-color:var(--idk-pri);color:#fff;font-weight:700}
+#app .m26-issues .si-t tr.si-r td.oi-action-cell .row{flex-wrap:wrap!important;max-width:none!important;gap:4px}
+/* pointer devices: the rail floats over the row's right edge, so it never widens the table. The main action
+   (Assign on an unassigned ticket) stays nearest the edge; the others slide in on hover or keyboard focus. */
+@media (hover:hover) and (pointer:fine){
+ #app .m26-issues .si-t tr.si-r td.oi-action-cell .oi-row-actions{position:absolute;right:28px;top:50%;transform:translateY(-50%);z-index:2}
+ #app .m26-issues .si-t tr.si-r td.oi-action-cell .row{flex-direction:row-reverse!important;flex-wrap:nowrap!important;padding:4px;border-radius:11px;transition:background .14s,box-shadow .14s}
+ #app .m26-issues .si-t tr.si-r td.oi-action-cell .btn:not(.si-act-main){opacity:0;pointer-events:none;transform:translateX(6px);transition:opacity .14s,transform .14s}
+ #app .m26-issues .si-t tr.si-r:hover td.oi-action-cell .row,#app .m26-issues .si-t tr.si-r:focus-within td.oi-action-cell .row{background:var(--idk-bg);box-shadow:0 6px 20px -8px rgba(16,40,24,.35),0 0 0 1px var(--idk-line)}
+ #app .m26-issues .si-t tr.si-r:hover td.oi-action-cell .btn,#app .m26-issues .si-t tr.si-r:focus-within td.oi-action-cell .btn{opacity:1;pointer-events:auto;transform:none}
+}
+/* grouped rows (several tickets on the same plant + equipment) */
+#app .m26-issues .si-t tr.si-g td{padding:9px 12px}
+#app .m26-issues .si-t tr.si-g td.oi-action-cell .oi-row-actions{display:flex;flex-wrap:wrap;gap:4px;justify-content:flex-end}
+
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) #app .m26-issues .si-t td.oi-action-cell .btn.cc-wf-ask,:root:not([data-theme="light"]) #app .m26-issues .si-t td.oi-action-cell .btn.cc-ask-site{color:#FCD34D}}
+:root[data-theme="dark"] #app .m26-issues .si-t td.oi-action-cell .btn.cc-wf-ask,:root[data-theme="dark"] #app .m26-issues .si-t td.oi-action-cell .btn.cc-ask-site{color:#FCD34D}
+
+/* ---------- raise-issue wizard: step indicator and guide ---------- */
+.tk-steps{list-style:none;display:flex;align-items:center;gap:0;margin:0 0 16px;padding:0;counter-reset:none}
+.tk-steps li{display:flex;align-items:center;gap:8px;flex:1;min-width:0;font-size:12.5px;font-weight:700;color:var(--idk-mut)}
+.tk-steps li:not(:last-child)::after{content:"";flex:1;height:2px;margin:0 10px;border-radius:2px;background:var(--idk-line)}
+.tk-steps li.done:not(:last-child)::after{background:var(--idk-pri)}
+.tk-steps li i{flex:none;display:grid;place-items:center;width:26px;height:26px;border-radius:50%;font-style:normal;font-size:12px;border:2px solid var(--idk-line);background:var(--idk-bg);color:var(--idk-mut)}
+.tk-steps li.on{color:var(--idk-ink)}
+.tk-steps li.on i{border-color:var(--idk-pri);color:var(--idk-pri);box-shadow:0 0 0 4px color-mix(in srgb,var(--idk-pri) 14%,transparent)}
+.tk-steps li.done i{background:var(--idk-pri);border-color:var(--idk-pri);color:#fff}
+.tk-steps li span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tk-guide{margin:4px 0 14px;padding:12px 14px;border-radius:14px;background:linear-gradient(120deg,color-mix(in srgb,var(--idk-pri) 7%,var(--idk-bg)),color-mix(in srgb,#2563EB 6%,var(--idk-bg)));border:1px solid var(--idk-line);font-size:12.5px;color:var(--idk-ink)}
+.tk-guide b{display:block;font-size:13px;margin-bottom:6px}
+.tk-guide ol{margin:0;padding:0;list-style:none;display:grid;gap:5px}
+.tk-guide li{color:var(--idk-mut)}
+.tk-guide li span{display:inline-block;min-width:78px;font-weight:700;color:var(--idk-ink)}
+.tk-guide small{display:block;margin-top:8px;color:var(--idk-mut)}
+.wiz-ticket .field{margin-bottom:12px}
+
+@media(max-width:720px){
+ #app .content .m26-issues.si .si-head{padding:16px;border-radius:14px}
+ #app .content .m26-issues.si .si-head h1{font-size:21px}
+ .tk-steps li span{display:none}
+ .tk-steps li.on span{display:inline}
+}

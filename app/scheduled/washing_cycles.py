@@ -9,7 +9,7 @@ from fastapi import HTTPException
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
-from app.core.timeutil import business_today
+from app.core.timeutil import BUSINESS_TZ, business_today
 from app.core.config import get_settings
 from app.core.models import AuditLog, Notification, Plant, User, UserEquipmentTypeAssignment, WashingConfig, WashingDailyReport, WashingHistory, WashingTable
 from app.core.security import WASHING_TYPE, assignee_has_type, user_scoped_plant_ids
@@ -19,11 +19,14 @@ from app.scheduled.schemas import (
     WashingDailyReportRequest,
     WashingReportReviewRequest,
     WashingReportUpdateRequest,
+    WashingBulkConfirmRequest,
     WashingSetupRequest,
+    WashingSheetRequest,
 )
 
 MONTHLY_CYCLE_TARGET = 3
 MAX_BACKDATE_DAYS = 45  # how far back a Site Engineer may enter a missed report
+PHOTO_REQUIRED_DAYS = 3  # days entered within 3 days of the work need before/after photos; older back-filled days do not
 OVERVIEW_REPORT_DAYS = 90  # the overview sends reports from the last 90 days (plus every report still awaiting review)
 OVERVIEW_CACHE_SECONDS = 20
 OVERVIEW_SEND_REPORT_DAYS = 35  # reports sent to the browser by default (this month + a little); ?report_days=90 sends the full window
@@ -239,8 +242,31 @@ def _notify_wash(
     )
 
 
-def _report_out(report: WashingDailyReport, plant: Plant, viewer: User, config: WashingConfig, manager: bool = False) -> dict:
+def _is_backfilled(report: WashingDailyReport) -> bool:
+    """A day entered PHOTO_REQUIRED_DAYS or more after it happened (a back-filled sheet row). Before/after photos
+    are rarely available for those, so confirming one does not require them; the reviewer sees it flagged."""
+    created = report.created_at or datetime.now(timezone.utc)
+    if created.tzinfo is None:
+        created = created.replace(tzinfo=timezone.utc)
+    return (created.astimezone(BUSINESS_TZ).date() - report.report_date).days >= PHOTO_REQUIRED_DAYS
+
+
+def _photos_required(report: WashingDailyReport, total_tables: int) -> bool:
+    return report.job_status == "Done" and report.tables_cleaned < total_tables and not _is_backfilled(report)
+
+
+def _missing_photo_kinds(report: WashingDailyReport, total_tables: int) -> list[str]:
+    """Photo kinds still needed before this report can be confirmed (empty when none are required)."""
+    if not _photos_required(report, total_tables):
+        return []
+    kinds = {str(entry.get("kind", "")).lower() for entry in (report.evidence or []) if isinstance(entry, dict)}
+    return [kind for kind in ("before", "after") if kind not in kinds]
+
+
+def _report_out(report: WashingDailyReport, plant: Plant, viewer: User, config: WashingConfig, manager: bool = False, total_tables: int | None = None) -> dict:
     can_review = report.review_status == "Pending" and report.reported_by_id != viewer.id and _can_review_washing(viewer, config)
+    table_total = total_tables if total_tables is not None else int(config.tables_per_cycle or 0)
+    backfilled = _is_backfilled(report)
     return {
         "id": str(report.id),
         "plant_id": str(plant.id),
@@ -272,6 +298,8 @@ def _report_out(report: WashingDailyReport, plant: Plant, viewer: User, config: 
         "can_delete": manager or (report.reported_by_id == viewer.id and report.review_status in ("Pending", "Rejected")),
         "has_before": any(e.get("kind") == "before" for e in (report.evidence or []) if isinstance(e, dict)),
         "has_after": any(e.get("kind") == "after" for e in (report.evidence or []) if isinstance(e, dict)),
+        "backfilled": backfilled,
+        "photos_required": report.job_status == "Done" and not backfilled and (not table_total or report.tables_cleaned < table_total),
     }
 
 
@@ -691,7 +719,7 @@ def _build_overview(db: Session, user: User, include_tables: bool = False, repor
         # Every report still feeds the figures above; only recent ones (and any awaiting review) are sent to the browser.
         for report in reports:
             if report.report_date >= send_cutoff or report.review_status == "Pending":
-                reports_out.append(_report_out(report, plant, user, config, manager))
+                reports_out.append(_report_out(report, plant, user, config, manager, table_count))
 
     completed_rows = db.execute(
         select(
@@ -837,11 +865,13 @@ def _next_open_cycle(db: Session, plant_id: UUID, month: str, exclude_report_id:
     return max(done, default=0) + 1
 
 
-def create_daily_report(db: Session, user: User, payload: WashingDailyReportRequest) -> dict:
+def _locked_report_plant(db: Session, user: User, plant_id: UUID) -> tuple[Plant, WashingConfig, bool, int]:
+    """Who may submit daily washing reports for a plant; locks the plant's washing config so concurrent
+    submissions for the same plant run one after another (no duplicate days, correct cycle numbers)."""
     manager = _is_washing_manager(db, user)
     if user.role != "Site Engineer" and not manager:
         raise HTTPException(403, "Only a Site Engineer can submit a daily washing report; the O&M team reviews it")
-    plant = _plant_for_id(db, payload.plant_id)
+    plant = _plant_for_id(db, plant_id)
     config = db.scalar(select(WashingConfig).where(WashingConfig.plant_id == plant.id).with_for_update())
     if not config:
         raise HTTPException(409, "Washing has not been set up for this plant")
@@ -849,32 +879,30 @@ def create_daily_report(db: Session, user: User, payload: WashingDailyReportRequ
     total_tables = _plant_table_count(db, plant.id, config)
     if total_tables < 1:
         raise HTTPException(409, "Washing has not been set up for this plant")
-    if payload.job_status == "Done" and payload.tables_cleaned == 0:
-        raise HTTPException(422, "Enter at least one cleaned table for a Done report")
-    report_date = payload.report_date or business_today()
+    return plant, config, manager, total_tables
+
+
+def _add_report(
+    db: Session, user: User, plant: Plant, manager: bool, total_tables: int, *,
+    report_date: date, job_status: str, tables_cleaned: int, exception_reason: str | None,
+    remarks: str | None, cleaned_codes: list[str] | None = None,
+) -> tuple[WashingDailyReport, bool]:
+    """Create one daily report (no commit, no notification). Returns the report and whether it completed a cycle."""
     _validate_report_date(user, manager, report_date)
     month = _month_key(report_date)
     cycle_no = _next_open_cycle(db, plant.id, month)
-    current_rows = list(db.scalars(select(WashingDailyReport).where(
-        WashingDailyReport.plant_id == plant.id,
-        WashingDailyReport.cycle_month == month,
-        WashingDailyReport.cycle_no == cycle_no,
-        WashingDailyReport.review_status.in_(["Pending", "Confirmed"]),
-    )))
     # Teams only report HOW MANY tables they cleaned that day. The plant's number is a target, never a limit,
     # so nothing is rejected for being above or below it and no individual tables are tracked.
-    cleaned_codes = list(payload.cleaned_table_codes)
-
     report = WashingDailyReport(
         plant_id=plant.id,
         cycle_month=month,
         cycle_no=cycle_no,
         report_date=report_date,
-        job_status=payload.job_status,
-        tables_cleaned=payload.tables_cleaned,
-        cleaned_table_codes=cleaned_codes,
-        remarks=(payload.remarks or "").strip() or None,
-        exception_reason=payload.exception_reason,
+        job_status=job_status,
+        tables_cleaned=tables_cleaned,
+        cleaned_table_codes=list(cleaned_codes or []),
+        remarks=(remarks or "").strip() or None,
+        exception_reason=exception_reason,
         reported_by_id=user.id,
         reported_by=user.display_name,
     )
@@ -890,7 +918,26 @@ def create_daily_report(db: Session, user: User, payload: WashingDailyReportRequ
     cycle_completed = False
     if report.review_status == "Confirmed":
         cycle_completed = _refresh_cycle_completion(db, plant.id, month, cycle_no, total_tables)
-    else:
+    db.add(AuditLog(
+        user_id=user.id, actor_name=user.display_name, action="Submitted daily washing report",
+        module="Washing", entity_type="washing_daily_report", entity_id=str(report.id),
+        metadata_json={"plant": plant.site_code, "cycle_month": month, "cycle_no": cycle_no, "report_date": report_date.isoformat(), "job_status": report.job_status, "tables_cleaned": report.tables_cleaned, "exception_reason": report.exception_reason, "cycle_completed": cycle_completed},
+    ))
+    return report, cycle_completed
+
+
+def create_daily_report(db: Session, user: User, payload: WashingDailyReportRequest) -> dict:
+    plant, config, manager, total_tables = _locked_report_plant(db, user, payload.plant_id)
+    if payload.job_status == "Done" and payload.tables_cleaned == 0:
+        raise HTTPException(422, "Enter at least one cleaned table for a Done report")
+    report, _cycle_completed = _add_report(
+        db, user, plant, manager, total_tables,
+        report_date=payload.report_date or business_today(), job_status=payload.job_status,
+        tables_cleaned=payload.tables_cleaned, exception_reason=payload.exception_reason,
+        remarks=payload.remarks, cleaned_codes=payload.cleaned_table_codes,
+    )
+    cycle_no = report.cycle_no
+    if report.review_status != "Confirmed":
         _notify_wash(
             db, plant, config,
             event_type="washing_daily_report",
@@ -903,13 +950,59 @@ def create_daily_report(db: Session, user: User, payload: WashingDailyReportRequ
             dedupe_key=f"washing-report:{report.id}",
             extra_user_ids=[user.id],
         )
-    db.add(AuditLog(
-        user_id=user.id, actor_name=user.display_name, action="Submitted daily washing report",
-        module="Washing", entity_type="washing_daily_report", entity_id=str(report.id),
-        metadata_json={"plant": plant.site_code, "cycle_month": month, "cycle_no": cycle_no, "report_date": report_date.isoformat(), "job_status": report.job_status, "tables_cleaned": report.tables_cleaned, "exception_reason": report.exception_reason, "cycle_completed": cycle_completed},
-    ))
     db.commit()
-    return _report_out(report, plant, user, config, manager)
+    return _report_out(report, plant, user, config, manager, total_tables)
+
+
+def _day_label(value: date) -> str:
+    return f"{value.day} {value.strftime('%b')}"
+
+
+def create_sheet_reports(db: Session, user: User, payload: WashingSheetRequest) -> dict:
+    """Save several days of one plant's cycle sheet in one go. All days are saved or none is.
+    A Site Engineer's days wait for O&M confirmation and raise ONE review notification for the whole sheet;
+    the O&M Head / a washing Assignee saves them as confirmed, like a single O&M entry."""
+    plant, config, manager, total_tables = _locked_report_plant(db, user, payload.plant_id)
+    entries = sorted(payload.entries, key=lambda entry: entry.report_date)
+    dates = [entry.report_date for entry in entries]
+    if len(set(dates)) != len(dates):
+        raise HTTPException(422, "Each date can appear only once in a washing sheet")
+    for value in dates:
+        _validate_report_date(user, manager, value)
+    taken = sorted(set(db.scalars(select(WashingDailyReport.report_date).where(
+        WashingDailyReport.plant_id == plant.id,
+        WashingDailyReport.report_date.in_(dates),
+        WashingDailyReport.review_status.in_(["Pending", "Confirmed"]),
+    ))))
+    if taken:
+        raise HTTPException(409, "Already reported for " + ", ".join(_day_label(value) for value in taken) + ". Edit those days instead of adding them again.")
+    created: list[WashingDailyReport] = []
+    for entry in entries:
+        report, _completed = _add_report(
+            db, user, plant, manager, total_tables,
+            report_date=entry.report_date, job_status=entry.job_status, tables_cleaned=entry.tables_cleaned,
+            exception_reason=entry.exception_reason, remarks=entry.remarks,
+        )
+        created.append(report)
+    pending = [report for report in created if report.review_status == "Pending"]
+    if pending:
+        done = [report for report in pending if report.job_status == "Done"]
+        not_done = len(pending) - len(done)
+        cycles = sorted({report.cycle_no for report in pending})
+        span = _day_label(pending[0].report_date) if len(pending) == 1 else f"{_day_label(pending[0].report_date)} – {_day_label(pending[-1].report_date)}"
+        _notify_wash(
+            db, plant, config,
+            event_type="washing_daily_report",
+            title=f"Washing sheet awaiting review — Cycle {', '.join(str(n) for n in cycles)}",
+            message=(f"{user.display_name} filled {len(pending)} day{'s' if len(pending) != 1 else ''} ({span}): "
+                     f"{sum(report.tables_cleaned for report in done)} tables cleaned"
+                     + (f", {not_done} day{'s' if not_done != 1 else ''} not done" if not_done else "")
+                     + ". Review required."),
+            dedupe_key=f"washing-sheet:{pending[0].id}",
+            extra_user_ids=[user.id],
+        )
+    db.commit()
+    return {"saved": len(created), "reports": [_report_out(report, plant, user, config, manager, total_tables) for report in created]}
 
 
 def _load_report_for_change(db: Session, user: User, report_id: UUID):
@@ -990,7 +1083,7 @@ def update_daily_report(db: Session, user: User, report_id: UUID, payload: Washi
         metadata_json={"plant": plant.site_code, "before": before, "after": {"report_date": new_date.isoformat(), "tables_cleaned": tables, "job_status": status, "exception_reason": reason, "cycle_no": cycle_no, "cycle_month": new_month}},
     ))
     db.commit()
-    return _report_out(report, plant, user, config, manager)
+    return _report_out(report, plant, user, config, manager, total_tables)
 
 
 def delete_daily_report(db: Session, user: User, report_id: UUID) -> dict:
@@ -1090,17 +1183,22 @@ def _pattern_out(config: WashingConfig) -> dict | None:
 
 def month_cycles(db: Session, user: User, plant_id: UUID, month: str) -> dict:
     """One plant's three cycles for any month (past months included): planned dates, defaults, and what was done."""
-    plant = _plant_for_id(db, plant_id)
-    config = db.scalar(select(WashingConfig).where(WashingConfig.plant_id == plant.id))
+    # plant and its washing setup in one round trip (this endpoint backs the cycle sheet and is called often)
+    found = db.execute(select(Plant, WashingConfig).outerjoin(WashingConfig, WashingConfig.plant_id == Plant.id)
+                       .where(Plant.id == plant_id)).first()
+    if found is None:
+        _plant_for_id(db, plant_id)  # raises the usual "not found" error
+    plant, config = found
     if not config:
         raise HTTPException(409, "Washing has not been set up for this plant")
     _require_plant_access(db, user, plant, config)
     first = _parse_month(month)
     table_count = _plant_table_count(db, plant.id, config)
-    reports = list(db.scalars(select(WashingDailyReport).where(
+    month_reports = list(db.scalars(select(WashingDailyReport).where(
         WashingDailyReport.plant_id == plant.id, WashingDailyReport.cycle_month == month,
-        WashingDailyReport.review_status.in_(("Pending", "Confirmed")),
-    ).order_by(WashingDailyReport.report_date)))
+    ).order_by(WashingDailyReport.report_date, WashingDailyReport.created_at)))
+    reports = [r for r in month_reports if r.review_status in ("Pending", "Confirmed")]
+    manager = _is_washing_manager(db, user)
     starts, dues = _cycle_start_dates(first, config.cycle_overrides), _cycle_due_dates(first, config.cycle_overrides)
     default_starts, default_dues = _default_start_dates(first), _default_due_dates(first)
     specific = (config.cycle_overrides or {}).get(month) or {}
@@ -1126,7 +1224,10 @@ def month_cycles(db: Session, user: User, plant_id: UUID, month: str) -> dict:
     return {
         "plant_id": str(plant.id), "plant": plant.plant_name, "site_code": plant.site_code, "month": month,
         "first_day": first.isoformat(), "last_day": first.replace(day=last).isoformat(), "table_count": table_count,
-        "cycles": cycles, "pattern": _pattern_out(config), "can_edit": _is_washing_manager(db, user),
+        "cycles": cycles, "pattern": _pattern_out(config), "can_edit": manager,
+        # every report of the month (rejected ones included) so the cycle sheet can show each day on one row
+        "reports": [_report_out(r, plant, user, config, manager, table_count) for r in month_reports],
+        "today": today.isoformat(),
     }
 
 
@@ -1192,21 +1293,10 @@ def review_daily_report(db: Session, user: User, report_id: UUID, payload: Washi
     if report.review_status != "Pending":
         raise HTTPException(409, "This washing report has already been reviewed")
     total_tables = _plant_table_count(db, plant.id, config)
-    if payload.decision == "Confirm" and report.job_status == "Done":
-        if report.tables_cleaned < total_tables:
-            evidence_kinds = {
-                str(entry.get("kind", "")).lower()
-                for entry in (report.evidence or [])
-                if isinstance(entry, dict)
-            }
-            missing = {"before", "after"} - evidence_kinds
-            if missing:
-                ordered = [kind for kind in ("before", "after") if kind in missing]
-                labels = " and ".join(ordered)
-                raise HTTPException(
-                    409,
-                    f"Upload {labels} cleaning photo evidence before confirming this report",
-                )
+    if payload.decision == "Confirm":
+        missing = _missing_photo_kinds(report, total_tables)
+        if missing:
+            raise HTTPException(409, f"Upload {' and '.join(missing)} cleaning photo evidence before confirming this report")
     if payload.decision == "Confirm":
         report.review_status = "Confirmed"
     else:
@@ -1263,7 +1353,90 @@ def review_daily_report(db: Session, user: User, report_id: UUID, payload: Washi
             extra_user_ids=[report.reported_by_id] if report.reported_by_id else [],
         )
     db.commit()
-    return _report_out(report, plant, user, config, True)
+    return _report_out(report, plant, user, config, True, total_tables)
+
+
+def confirm_sheet_reports(db: Session, user: User, payload: WashingBulkConfirmRequest) -> dict:
+    """Confirm several pending days of one plant at once (all or nothing), with the same rules as a single
+    confirmation: only the O&M Head or the plant's washing Assignee, never one's own report, photos where required.
+    Sends one summary notification instead of one per day."""
+    plant = _plant_for_id(db, payload.plant_id)
+    ids = list(dict.fromkeys(payload.report_ids))
+    # Lock order matches single review/edit (reports, then the plant's config) so concurrent requests cannot deadlock.
+    reports = list(db.scalars(select(WashingDailyReport).where(
+        WashingDailyReport.id.in_(ids), WashingDailyReport.plant_id == plant.id,
+    ).order_by(WashingDailyReport.id).with_for_update()))
+    config = db.scalar(select(WashingConfig).where(WashingConfig.plant_id == plant.id).with_for_update())
+    if not _can_review_washing(user, config):
+        raise HTTPException(403, "Only the O&M Head or the configured washing Assignee for this plant can review its reports")
+    if len(reports) != len(ids):
+        raise HTTPException(404, "Some of these washing reports were not found for this plant")
+    reports.sort(key=lambda report: (report.report_date, report.created_at or datetime.min.replace(tzinfo=timezone.utc)))
+    if any(report.reported_by_id == user.id for report in reports):
+        raise HTTPException(403, "A washing report must be confirmed by someone other than its submitter")
+    reviewed = [report for report in reports if report.review_status != "Pending"]
+    if reviewed:
+        raise HTTPException(409, "Already reviewed: " + ", ".join(_day_label(report.report_date) for report in reviewed) + ". Refresh and try again.")
+    total_tables = _plant_table_count(db, plant.id, config)
+    missing = [report for report in reports if _missing_photo_kinds(report, total_tables)]
+    if missing:
+        raise HTTPException(409, "Upload before and after photos first for " + ", ".join(_day_label(report.report_date) for report in missing))
+
+    cycles = {(report.cycle_month, report.cycle_no) for report in reports}
+    already_done = set(db.execute(select(WashingDailyReport.cycle_month, WashingDailyReport.cycle_no).where(
+        WashingDailyReport.plant_id == plant.id,
+        WashingDailyReport.cycle_completed.is_(True),
+        WashingDailyReport.review_status == "Confirmed",
+    )).tuples())
+    note = (payload.remarks or "").strip() or None
+    now = datetime.now(timezone.utc)
+    for report in reports:
+        report.review_status = "Confirmed"
+        report.reviewed_by_id = user.id
+        report.reviewed_by = user.display_name
+        report.reviewed_at = now
+        report.review_note = note
+        db.add(AuditLog(
+            user_id=user.id, actor_name=user.display_name, action="Reviewed daily washing report",
+            module="Washing", entity_type="washing_daily_report", entity_id=str(report.id),
+            metadata_json={"decision": "Confirmed", "bulk": True, "cycle_month": report.cycle_month, "cycle_no": report.cycle_no},
+        ))
+    db.flush()
+    completed = sorted(key for key in cycles if _refresh_cycle_completion(db, plant.id, key[0], key[1], total_tables) and key not in already_done)
+
+    reporters = list(dict.fromkeys(report.reported_by_id for report in reports if report.reported_by_id))
+    tables = sum(report.tables_cleaned for report in reports)
+    span = _day_label(reports[0].report_date) if len(reports) == 1 else f"{_day_label(reports[0].report_date)} – {_day_label(reports[-1].report_date)}"
+    _notify_wash(
+        db, plant, config,
+        event_type="washing_report_reviewed",
+        title=f"Washing confirmed — {len(reports)} day{'s' if len(reports) != 1 else ''}",
+        message=f"{span} · {tables} table(s) · {user.display_name}" + (f" · {note}" if note else ""),
+        dedupe_key=f"washing-sheet-confirmed:{reports[0].id}:{len(reports)}",
+        extra_user_ids=reporters,
+    )
+    for month, cycle_no in completed:
+        done_count = len(set(db.scalars(select(WashingDailyReport.cycle_no).where(
+            WashingDailyReport.plant_id == plant.id,
+            WashingDailyReport.cycle_month == month,
+            WashingDailyReport.cycle_completed.is_(True),
+            WashingDailyReport.review_status == "Confirmed",
+        ))))
+        _notify_wash(
+            db, plant, config,
+            event_type="washing_cycle_completed",
+            title=f"Washing cycle completed — Cycle {cycle_no}",
+            message=(f"All {total_tables} tables are confirmed clean. {done_count} of {MONTHLY_CYCLE_TARGET} monthly cycles completed. "
+                     + (f"Cycle {cycle_no + 1} starts now." if cycle_no < MONTHLY_CYCLE_TARGET else "All monthly cycles are done.")),
+            dedupe_key=f"washing-cycle-completed:{plant.id}:{month}:{cycle_no}",
+            extra_user_ids=reporters,
+        )
+    db.commit()
+    return {
+        "confirmed": len(reports),
+        "cycles_completed": [{"cycle_month": month, "cycle_no": cycle_no} for month, cycle_no in completed],
+        "reports": [_report_out(report, plant, user, config, True, total_tables) for report in reports],
+    }
 
 
 def check_missed_monthly_targets(db: Session, today: date | None = None) -> int:

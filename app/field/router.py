@@ -212,97 +212,329 @@ def post_field_update(
     db.commit()
     return {"ok": True, "ticket": row.ticket_no, "status": row.status, "at": now.isoformat()}
 
+# ---------------- structured operational search (Ask Solar91) ----------------
+# Plain words in a question become filters: module, severity, status and plant. Every remaining word must match.
+SEARCH_MODULES = ("issues", "pm", "washing", "plants", "equipment")
+_MODULE_WORDS = {
+    "issue": "issues", "issues": "issues", "ticket": "issues", "tickets": "issues", "fault": "issues", "faults": "issues",
+    "breakdown": "issues", "breakdowns": "issues", "complaint": "issues", "complaints": "issues",
+    "pm": "pm", "maintenance": "pm", "preventive": "pm", "task": "pm", "tasks": "pm", "workorder": "pm", "workorders": "pm",
+    "wash": "washing", "washing": "washing", "cleaning": "washing",
+    "plants": "plants", "sites": "plants",
+    "equipment": "equipment", "equipments": "equipment", "asset": "equipment", "assets": "equipment",
+}
+_SEVERITY_WORDS = {"critical": "Critical", "urgent": "Critical", "high": "Critical", "medium": "Medium", "moderate": "Medium", "low": "Low", "minor": "Low"}
+# multi-word phrases first; values are status filter keys
+_STATUS_PHRASES = (
+    ("in progress", "in progress"), ("waiting for parts", "pending vendor"), ("pending vendor", "pending vendor"),
+    ("pending parts", "pending vendor"), ("not assigned", "unassigned"), ("no owner", "unassigned"),
+    ("past etc", "overdue"), ("past due", "overdue"),
+)
+_STATUS_WORDS = {
+    "open": "active", "active": "active", "pending": "active", "unresolved": "active", "outstanding": "active",
+    "overdue": "overdue", "late": "overdue", "breached": "overdue", "delayed": "overdue",
+    "unassigned": "unassigned", "assigned": "assigned", "acknowledged": "acknowledged",
+    "resolved": "resolved", "closed": "closed", "completed": "completed", "done": "completed", "scheduled": "scheduled",
+}
+STATUS_LABELS = {"active": "Open", "overdue": "Overdue", "unassigned": "Unassigned", "assigned": "Assigned", "acknowledged": "Acknowledged",
+                 "in progress": "In progress", "pending vendor": "Pending parts/vendor", "resolved": "Resolved", "closed": "Closed",
+                 "completed": "Completed", "scheduled": "Scheduled"}
+_STOP_WORDS = {
+    "the", "a", "an", "at", "in", "on", "for", "of", "to", "and", "or", "with", "show", "me", "all", "any", "list", "find", "search",
+    "which", "what", "whats", "are", "is", "there", "how", "many", "much", "please", "give", "get", "from", "by", "about", "that",
+    "this", "these", "those", "have", "has", "need", "needs", "status", "records", "record", "only", "latest", "recent", "current",
+    "now", "today", "plant", "site", "where", "who", "it", "its", "be", "do", "does", "can", "you", "i", "we", "our", "my",
+    "work", "week", "month", "yesterday", "number", "count", "total",
+}
+_ACTIVE_TASK = {"Scheduled", "In Progress", "Planned", "Due", "Overdue"}
+
+
+def _split_csv(value: str | None) -> list[str]:
+    return [part.strip() for part in str(value or "").split(",") if part.strip()]
+
+
+def parse_search_query(text: str, plants: list[Plant]) -> dict:
+    """Turn a plain-language question into filters plus the words that must still match."""
+    q = " " + " ".join(re.sub(r"[^\w\s/.-]", " ", text.casefold()).split()) + " "
+    plant = None
+    for candidate in sorted(plants, key=lambda p: -max(len(p.plant_name or ""), len(p.site_code or ""))):
+        for label in (candidate.plant_name, candidate.site_code):
+            key = f" {str(label or '').casefold()} "
+            if label and key in q:
+                plant = candidate
+                q = q.replace(key, " ")
+                break
+        if plant:
+            break
+    statuses: list[str] = []
+    for phrase, key in _STATUS_PHRASES:
+        if f" {phrase} " in q:
+            statuses.append(key)
+            q = q.replace(f" {phrase} ", " ")
+    q = q.replace(" work order ", " workorder ").replace(" work orders ", " workorders ")
+    modules: list[str] = []
+    severities: list[str] = []
+    terms: list[str] = []
+    for word in q.split():
+        if word in _MODULE_WORDS:
+            if _MODULE_WORDS[word] not in modules:
+                modules.append(_MODULE_WORDS[word])
+        elif word in _SEVERITY_WORDS:
+            if _SEVERITY_WORDS[word] not in severities:
+                severities.append(_SEVERITY_WORDS[word])
+        elif word in _STATUS_WORDS:
+            if _STATUS_WORDS[word] not in statuses:
+                statuses.append(_STATUS_WORDS[word])
+        elif len(word) > 1 and word not in _STOP_WORDS:
+            terms.append(word)
+    return {"modules": modules, "severities": severities, "statuses": statuses, "plant": plant, "terms": terms}
+
+
+def _normal_severity(value: str | None) -> str:
+    text = str(value or "").strip().casefold()
+    return "Critical" if text in {"critical", "high"} else "Medium" if text == "medium" else "Low" if text else ""
+
+
+def _status_matches(entry: dict, key: str) -> bool:
+    status = entry["status"].casefold()
+    if key == "active":
+        return entry["active"]
+    if key == "overdue":
+        return entry["overdue"]
+    if key == "unassigned":
+        return entry["active"] and entry["module"] in ("issues", "pm") and not entry["assignee"]
+    if key == "pending vendor":
+        return status.startswith("pending")
+    if key == "completed":
+        return status in {"completed", "done", "closed"}
+    return status == key
+
+
 @router.get('/search')
 def search_operational_records(
     db: Annotated[Session, Depends(get_db)],
     user: Annotated[User, Depends(get_current_user)],
-    q: str = Query(min_length=2, max_length=200),
+    q: str = Query("", max_length=200),
     limit: int = Query(20, ge=1, le=40),
+    module: str | None = Query(None, max_length=80),
+    severity: str | None = Query(None, max_length=80),
+    status: str | None = Query(None, max_length=120),
+    plant: str | None = Query(None, max_length=120),
+    sort: str = Query("relevance", pattern="^(relevance|priority|due|recent)$"),
 ):
+    return run_operational_search(db, user, q, limit=limit, module=module, severity=severity, status=status, plant=plant, sort=sort)
+
+
+def run_operational_search(db: Session, user: User, q: str = "", *, limit: int = 20, module: str | None = None,
+                           severity: str | None = None, status: str | None = None, plant: str | None = None,
+                           sort: str = "relevance") -> dict:
     """Permission-scoped, read-only operational search for Ask Solar91.
 
-    Only explicit safe columns are returned; notes, evidence and private personnel data
-    are never passed through the generic search response. Results are deliberately bounded.
+    Plain words become filters (module, severity, status, plant) and every other word must match.
+    Explicit query parameters add to those filters. Only explicit safe columns are returned; notes,
+    evidence and private personnel data never pass through. Each module is inspected up to 500 records.
     """
     _authorize(user)
+    role_scope = 'one-plant' if user.role == 'Site Engineer' else 'assigned-equipment' if user.role == 'Assignee' else 'portfolio'
+    empty = {'records': [], 'total': 0, 'limited': False, 'scope': role_scope, 'partial': False,
+             'filters': {'modules': [], 'severities': [], 'statuses': [], 'plant': None, 'terms': []}, 'facets': {}}
     ids = _assistant_plant_scope_ids(db, user)
     if ids is not None and not ids:
-        return {'records': [], 'total': 0, 'limited': False, 'scope': 'assigned'}
-    words = [w.casefold() for w in q.split() if len(w) > 1]
-    if not words:
-        return {'records': [], 'total': 0, 'limited': False, 'scope': 'assigned'}
+        return {**empty, 'scope': 'assigned'}
     plants_stmt = select(Plant).order_by(Plant.site_code)
     if ids is not None:
         plants_stmt = plants_stmt.where(Plant.id.in_(ids))
     plants_rows = list(db.scalars(plants_stmt.limit(501)))
     search_limited = len(plants_rows) > 500
     plants = plants_rows[:500]
+    parsed = parse_search_query(q, plants)
+    for value in _split_csv(module):
+        if value in SEARCH_MODULES and value not in parsed['modules']:
+            parsed['modules'].append(value)
+    for value in _split_csv(severity):
+        value = _normal_severity(value)
+        if value and value not in parsed['severities']:
+            parsed['severities'].append(value)
+    for value in _split_csv(status):
+        value = value.casefold()
+        if value in STATUS_LABELS and value not in parsed['statuses']:
+            parsed['statuses'].append(value)
+    if plant:
+        wanted = plant.strip().casefold()
+        parsed['plant'] = next((p for p in plants if wanted in {str(p.site_code).casefold(), str(p.plant_name).casefold()}), parsed['plant'])
+        if parsed['plant'] is None:
+            return {**empty, 'filters': {**empty['filters'], 'terms': parsed['terms']}}
+    if not (parsed['terms'] or parsed['modules'] or parsed['severities'] or parsed['statuses'] or parsed['plant']):
+        return empty
     names = {p.id: p.plant_name for p in plants}
-    entries = []
-    def add(kind, identifier, plant_id, title, status='', due=None, equipment=''):
-        plant = names.get(plant_id, '')
-        haystack = f'{kind} {identifier} {plant} {title} {status} {due or ""} {equipment}'.casefold()
-        # Status and module names may be intent words rather than identifiers.
-        matches = sum(word in haystack for word in words)
-        if matches == 0:
+    codes = {p.id: p.site_code for p in plants}
+    selected_plant = parsed['plant'].id if parsed['plant'] else None
+    wanted_modules = set(parsed['modules']) or set(SEARCH_MODULES)
+    if (parsed['severities'] or parsed['statuses']) and not parsed['modules']:
+        # severity and work status describe work items, not plants or equipment
+        wanted_modules -= {'plants', 'equipment'}
+    if parsed['severities']:
+        wanted_modules &= {'issues'}
+    today = datetime.now(ZoneInfo('Asia/Kolkata')).date()
+    now = datetime.now(timezone.utc)
+    entries: list[dict] = []
+
+    def add(kind, identifier, plant_id, title, status='', due=None, equipment='', *, ticket=None, severity='',
+            assignee='', active=False, overdue=False, extra='', recency=0):
+        if selected_plant and plant_id != selected_plant:
             return
-        entries.append({'module': kind, 'id': str(identifier), 'title': str(title or '')[:180],
-                        'plant': plant, 'status': str(status or ''), 'due': due, 'equipment': str(equipment or '')[:120],
-                        '_score': matches})
-    for p in plants:
-        add('plants', p.site_code, p.id, p.plant_name)
-    issue_stmt = _assistant_issue_scope(db, user).order_by(Issue.updated_at.desc())
-    task_stmt = _assistant_task_scope(db, user).order_by(OMTask.created_at.desc())
-    equip_stmt = select(Equipment).order_by(Equipment.created_at.desc())
-    wash_stmt = select(WashingTable).order_by(WashingTable.created_at.desc())
-    if ids is not None:
-        issue_stmt = issue_stmt.where(Issue.plant_id.in_(ids))
-        task_stmt = task_stmt.where(OMTask.plant_id.in_(ids))
-        equip_stmt = equip_stmt.where(Equipment.plant_id.in_(ids))
-        wash_stmt = wash_stmt.where(WashingTable.plant_id.in_(ids))
-    issue_rows = list(db.scalars(issue_stmt.limit(501)))
-    task_rows = list(db.scalars(task_stmt.limit(501)))
-    if len(issue_rows) > 500 or len(task_rows) > 500:
-        search_limited = True
-    for issue in issue_rows[:500]:
-        add('issues', issue.ticket_no, issue.plant_id, issue.description, issue.status,
-            issue.etc_at.date().isoformat() if issue.etc_at else None, issue.equipment_ref or issue.vertical or '')
-    for task in task_rows[:500]:
-        add('pm', task.work_order_no, task.plant_id, task.task_name, task.status,
-            (task.planned_due_on or task.due_on).isoformat() if (task.planned_due_on or task.due_on) else None,
-            task.equipment_ref or task.task_type or '')
-    if user.role == 'Assignee':
-        types = user_scoped_equipment_types(db, user) or set()
-        equip_stmt = equip_stmt.where(func.lower(func.trim(func.coalesce(Equipment.equipment_type, ''))).in_(types))
-    if ids is not None:
-        equip_stmt = equip_stmt.where(Equipment.plant_id.in_(ids))
-    equip_rows = list(db.scalars(equip_stmt.limit(501)))
-    if len(equip_rows) > 500:
-        search_limited = True
-    for eq in equip_rows[:500]:
-        add('equipment', eq.equipment_code or eq.id, eq.plant_id, eq.equipment_name, eq.status, None, eq.equipment_type or '')
+        entries.append({'module': kind, 'id': str(identifier), 'ticket': ticket, 'title': str(title or '')[:180],
+                        'plant': names.get(plant_id, ''), 'site_code': codes.get(plant_id, ''), 'status': str(status or ''),
+                        'severity': severity, 'due': due, 'equipment': str(equipment or '')[:120], 'assignee': assignee or '',
+                        'active': active, 'overdue': overdue, '_extra': str(extra or ''), '_recency': recency})
+
+    if 'plants' in wanted_modules:
+        for p in plants:
+            add('plants', p.site_code, p.id, p.plant_name)
+    if 'issues' in wanted_modules:
+        issue_stmt = _assistant_issue_scope(db, user).order_by(Issue.updated_at.desc())
+        if ids is not None:
+            issue_stmt = issue_stmt.where(Issue.plant_id.in_(ids))
+        if selected_plant:
+            issue_stmt = issue_stmt.where(Issue.plant_id == selected_plant)
+        issue_rows = list(db.scalars(issue_stmt.limit(501)))
+        search_limited = search_limited or len(issue_rows) > 500
+        for index, issue in enumerate(issue_rows[:500]):
+            active = issue.status not in ('Closed', 'Resolved')
+            etc = issue.etc_at if issue.etc_at is None or issue.etc_at.tzinfo else issue.etc_at.replace(tzinfo=timezone.utc)
+            add('issues', str(issue.id), issue.plant_id, issue.description, issue.status,
+                issue.etc_at.date().isoformat() if issue.etc_at else None, issue.equipment_ref or issue.vertical or '',
+                ticket=issue.ticket_no, severity=_normal_severity(issue.severity), assignee=(issue.assignee_text or '').strip(),
+                active=active, overdue=bool(active and etc and etc < now),
+                extra=' '.join(filter(None, [issue.vertical, issue.subcategory, issue.maker])), recency=-index)
+    if 'pm' in wanted_modules:
+        task_stmt = _assistant_task_scope(db, user).order_by(OMTask.created_at.desc())
+        if ids is not None:
+            task_stmt = task_stmt.where(OMTask.plant_id.in_(ids))
+        if selected_plant:
+            task_stmt = task_stmt.where(OMTask.plant_id == selected_plant)
+        task_rows = list(db.scalars(task_stmt.limit(501)))
+        search_limited = search_limited or len(task_rows) > 500
+        for index, task in enumerate(task_rows[:500]):
+            due = task.planned_due_on or task.due_on
+            active = task.status not in ('Completed', 'Cancelled')
+            add('pm', task.work_order_no, task.plant_id, task.task_name, task.status, due.isoformat() if due else None,
+                task.equipment_ref or task.task_type or '', ticket=task.work_order_no, assignee=(task.assignee_text or '').strip(),
+                active=active, overdue=bool(active and due and due < today), extra=task.task_type or '', recency=-index)
+    if 'equipment' in wanted_modules:
+        equip_stmt = select(Equipment).order_by(Equipment.created_at.desc())
+        if user.role == 'Assignee':
+            types = user_scoped_equipment_types(db, user) or set()
+            equip_stmt = equip_stmt.where(func.lower(func.trim(func.coalesce(Equipment.equipment_type, ''))).in_(types))
+        if ids is not None:
+            equip_stmt = equip_stmt.where(Equipment.plant_id.in_(ids))
+        if selected_plant:
+            equip_stmt = equip_stmt.where(Equipment.plant_id == selected_plant)
+        equip_rows = list(db.scalars(equip_stmt.limit(501)))
+        search_limited = search_limited or len(equip_rows) > 500
+        for eq in equip_rows[:500]:
+            add('equipment', eq.equipment_code or eq.id, eq.plant_id, eq.equipment_name, eq.status, None, eq.equipment_type or '')
     wash_types = user_scoped_equipment_types(db, user) or set()
     can_view_washing = user.role in {'O&M Head', 'Site Engineer'} or (user.role == 'Assignee' and WASHING_TYPE.casefold() in wash_types)
-    if can_view_washing:
+    if can_view_washing and 'washing' in wanted_modules:
         configured = set(db.scalars(select(WashingConfig.plant_id).where(WashingConfig.active.is_(True))))
+        wash_stmt = select(WashingTable).order_by(WashingTable.created_at.desc())
         if ids is not None:
             wash_stmt = wash_stmt.where(WashingTable.plant_id.in_(ids))
+        if selected_plant:
+            wash_stmt = wash_stmt.where(WashingTable.plant_id == selected_plant)
         wash_rows = list(db.scalars(wash_stmt.limit(501)))
-        if len(wash_rows) > 500:
-            search_limited = True
+        search_limited = search_limited or len(wash_rows) > 500
         for table in wash_rows[:500]:
             if table.plant_id not in configured:
                 continue
             if user.role == 'Assignee' and not equipment_scope_matches(db, user, table.plant_id, None, None, WASHING_TYPE):
                 continue
             due = table.rescheduled_to or table.next_due_on
-            add('washing', table.table_code or table.legacy_id, table.plant_id,
-                'Solar panel table washing', 'Scheduled' if due else 'Unscheduled',
-                due.isoformat() if due else None, 'Modules cleaning')
-    entries.sort(key=lambda x: (-x.pop('_score'), x['module'], x['id']))
-    return {'records': entries[:limit], 'total': len(entries), 'limited':
-            search_limited, 'scope': 'one-plant' if user.role == 'Site Engineer' else
-            'assigned-equipment' if user.role == 'Assignee' else 'portfolio'}
+            add('washing', table.table_code or table.legacy_id, table.plant_id, 'Solar panel table washing',
+                'Scheduled' if due else 'Unscheduled', due.isoformat() if due else None, 'Modules cleaning',
+                active=bool(due), overdue=bool(due and due < today))
+
+    # filters that do not depend on words
+    if parsed['severities']:
+        entries = [e for e in entries if e['severity'] in parsed['severities']]
+    for key in parsed['statuses']:
+        entries = [e for e in entries if _status_matches(e, key)]
+    module_label = {'issues': 'issue ticket fault', 'pm': 'maintenance task work order pm', 'washing': 'washing cleaning table',
+                    'plants': 'plant site', 'equipment': 'equipment asset'}
+
+    def haystack(e):
+        return ' '.join([module_label[e['module']], e['id'], e['ticket'] or '', e['title'], e['plant'], e['site_code'], e['status'],
+                         e['severity'], e['equipment'], e['assignee'], e['_extra'], e['due'] or '']).casefold()
+
+    terms = parsed['terms']
+    partial = False
+    if terms:
+        scored = []
+        for e in entries:
+            hay = haystack(e)
+            hits = sum(term in hay for term in terms)
+            if hits:
+                exact = any(term == str(e['ticket'] or e['id']).casefold() for term in terms)
+                scored.append((hits, exact, e))
+        full = [x for x in scored if x[0] == len(terms)]
+        if full:
+            scored = full
+        elif scored and len(terms) > 1:
+            partial = True  # no record matched every word: show the closest ones and say so
+        entries = []
+        for hits, exact, e in scored:
+            e['_score'] = hits + (100 if exact else 0)
+            entries.append(e)
+    sev_rank = {'Critical': 0, 'Medium': 1, 'Low': 2, '': 3}
+    # _recency is 0 for the most recently updated record of a module and more negative for older ones
+    orders = {
+        'relevance': lambda e: (-e.get('_score', 0), not e['active'], not e['overdue'], sev_rank.get(e['severity'], 3),
+                                SEARCH_MODULES.index(e['module']), -e['_recency']),
+        'priority': lambda e: (not e['active'], not e['overdue'], sev_rank.get(e['severity'], 3), -e.get('_score', 0), -e['_recency']),
+        'due': lambda e: (e['due'] is None, e['due'] or '', sev_rank.get(e['severity'], 3)),
+        'recent': lambda e: (-e['_recency'], SEARCH_MODULES.index(e['module'])),
+    }
+    entries.sort(key=orders[sort])
+
+    facets: dict[str, dict[str, int]] = {'module': {}, 'severity': {}, 'status': {}, 'plant': {}}
+    for e in entries:
+        facets['module'][e['module']] = facets['module'].get(e['module'], 0) + 1
+        if e['severity']:
+            facets['severity'][e['severity']] = facets['severity'].get(e['severity'], 0) + 1
+        if e['module'] in ('issues', 'pm', 'washing'):
+            for key in ('active', 'overdue', 'unassigned'):
+                if _status_matches(e, key):
+                    facets['status'][key] = facets['status'].get(key, 0) + 1
+        if e['plant']:
+            label = f"{e['site_code']}" if e['site_code'] else e['plant']
+            facets['plant'][label] = facets['plant'].get(label, 0) + 1
+    facets['plant'] = dict(sorted(facets['plant'].items(), key=lambda kv: -kv[1])[:8])
+    records = []
+    for e in entries[:limit]:
+        records.append({k: v for k, v in e.items() if not k.startswith('_') and k not in ('active',)})
+    return {'records': records, 'total': len(entries), 'limited': search_limited, 'scope': role_scope, 'partial': partial,
+            'filters': {'modules': parsed['modules'], 'severities': parsed['severities'], 'statuses': parsed['statuses'],
+                        'plant': ({'site_code': parsed['plant'].site_code, 'name': parsed['plant'].plant_name} if parsed['plant'] else None),
+                        'terms': terms},
+            'facets': facets}
+
+
+def describe_search_filters(filters: dict) -> str:
+    parts = []
+    if filters.get('statuses'):
+        parts.append(' & '.join(STATUS_LABELS.get(s, s) for s in filters['statuses']).casefold())
+    if filters.get('severities'):
+        parts.append('/'.join(filters['severities']).casefold())
+    names = {'issues': 'issues', 'pm': 'maintenance tasks', 'washing': 'washing tables', 'plants': 'plants', 'equipment': 'equipment'}
+    parts.append(' and '.join(names[m] for m in filters.get('modules') or []) or 'records')
+    text = ' '.join(parts)
+    if filters.get('terms'):
+        text += ' matching “' + ' '.join(filters['terms']) + '”'
+    if filters.get('plant'):
+        text += f" at {filters['plant']['name']}"
+    return text
+
 
 class AskRequest(BaseModel):
     question: str = Field(min_length=2, max_length=300)
@@ -486,7 +718,7 @@ def _assistant_fact_answer(db: Session, user: User, question: str) -> dict | Non
                 "source": f"Issue records · {date_note} · {role_scope}", "total": count,
                 "scope": role_scope, "limited": count > len(records), "structured": True}
 
-    if issue_question and any(word in q for word in ("overdue", "open", "pending", "status", "assigned to me", "my work")):
+    if issue_question and any(word in q for word in ("overdue", "open", "pending", "status", "assigned to me", "my work", "unassigned")):
         stmt = _assistant_issue_scope(db, user)
         active = Issue.status.notin_(["Closed", "Resolved"])
         stmt = stmt.where(active)
@@ -496,13 +728,27 @@ def _assistant_fact_answer(db: Session, user: User, question: str) -> dict | Non
             stmt = stmt.where(Issue.etc_at.is_not(None), Issue.etc_at < now_local.replace(hour=0, minute=0, second=0, microsecond=0))
         if "assigned to me" in q or "my work" in q:
             stmt = stmt.where(Issue.assigned_to == user.id)
+        # severity, "unassigned" and equipment words narrow the exact count too (e.g. "open critical inverter issues")
+        parsed = parse_search_query(question, plants)
+        if parsed["severities"]:
+            wanted = {value.casefold() for value in parsed["severities"]} | ({"high"} if "Critical" in parsed["severities"] else set())
+            stmt = stmt.where(func.lower(Issue.severity).in_(wanted))
+        unassigned = "unassigned" in parsed["statuses"]
+        if unassigned:
+            stmt = stmt.where(Issue.assigned_to.is_(None), func.coalesce(func.trim(Issue.assignee_text), "") == "")
+        narrow = [term for term in parsed["terms"] if not term.isdigit()][:4]
+        for term in narrow:
+            like = f"%{term}%"
+            stmt = stmt.where(or_(Issue.vertical.ilike(like), Issue.equipment_ref.ilike(like), Issue.subcategory.ilike(like),
+                                  Issue.description.ilike(like), Issue.ticket_no.ilike(like)))
         count = db.scalar(select(func.count()).select_from(stmt.subquery())) or 0
         rows = list(db.scalars(stmt.order_by(Issue.updated_at.desc()).limit(20)))
         names = {p.id: p.plant_name for p in plants}
         records = [{"module": "issues", "id": str(row.id), "title": row.description[:180], "ticket": row.ticket_no,
                     "plant": names.get(row.plant_id, ""), "status": row.status, "severity": row.severity,
                     "due": row.etc_at.date().isoformat() if row.etc_at else None, "assignee": row.assignee_text or "Unassigned"} for row in rows]
-        label = "Overdue open issues" if "overdue" in q else "Open issues assigned to you" if "assigned to me" in q or "my work" in q else "Open issues"
+        detail = " ".join([value.casefold() for value in parsed["severities"]] + (["unassigned"] if unassigned else []) + narrow)
+        label = ("Overdue open" if "overdue" in q else "Open") + (f" {detail}" if detail else "") + " issues" + (" assigned to you" if "assigned to me" in q or "my work" in q else "")
         return {"answer": f"{count} {label.casefold()} found{f' at {plant.plant_name}' if plant else ''}.",
                 "summary": {"label": label, "value": count}, "breakdown": [], "records": records,
                 "source": f"Issues · excludes closed/resolved and archived records · as of {now_local:%Y-%m-%d %H:%M} IST · {role_scope}",
@@ -548,13 +794,16 @@ def ask_operational_assistant(
     facts = _assistant_fact_answer(db, user, question)
     if facts is not None:
         return {**facts, "mode": "grounded-query"}
-    result = search_operational_records(db=db, user=user, q=question, limit=15)
+    result = run_operational_search(db, user, question, limit=15)
     as_of = datetime.now(timezone.utc).isoformat()
     count = result['total']
     count_text = f"at least {count}" if result['limited'] else str(count)
-    reply = (f'I found {count_text} matching record(s) in your approved operational scope.' if count
+    described = describe_search_filters(result['filters'])
+    reply = (f'I found {count_text} matching record(s) in your approved operational scope: {described}.' if count
              else 'No matching record was found in the checked records; older records may not be included.' if result['limited']
              else 'I could not find a matching saved record in your approved scope.')
+    if count and result.get('partial'):
+        reply += ' No record matched every word, so the closest matches are shown first.'
     if result['limited']:
         reply += ' The answer may exclude older matches because search inspects a bounded set per module; use the full register for an exhaustive historical search.'
     mode = 'grounded-search'
@@ -593,4 +842,5 @@ def ask_operational_assistant(
     return {'answer': reply, 'summary': {'label': 'Matching saved records', 'value': count},
             'breakdown': [], 'source': f"Permission-scoped operational search · as of {as_of}",
             'narration': narration, 'records': result['records'], 'total': count, 'mode': mode,
-            'limited': result['limited'], 'scope': result['scope']}
+            'limited': result['limited'], 'scope': result['scope'], 'filters': result['filters'],
+            'facets': result['facets'], 'partial': result['partial']}

@@ -31,15 +31,21 @@ else:
     if url.port == 6543:
         connect_args["prepare_threshold"] = None
 
+    # Idle-aware health check (see observability.install_connection_health) instead of pinging before every request.
+    idle_aware_ping = settings.db_pool_pre_ping and settings.db_ping_idle_seconds > 0
     engine = create_engine(
         settings.database_url,
-        pool_pre_ping=settings.db_pool_pre_ping,
+        pool_pre_ping=settings.db_pool_pre_ping and not idle_aware_ping,
         pool_timeout=settings.db_pool_timeout_seconds,
         pool_size=settings.db_pool_size,
         max_overflow=settings.db_max_overflow,
         pool_recycle=settings.db_pool_recycle_seconds,
         connect_args=connect_args,
     )
+    if idle_aware_ping:
+        from app.core.observability import install_connection_health
+
+        install_connection_health(engine, settings.db_ping_idle_seconds)
 
 SessionLocal = sessionmaker(
     bind=engine,

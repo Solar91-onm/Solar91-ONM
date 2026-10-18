@@ -427,14 +427,13 @@
  };
 
  /* ---------- plant overlay ---------- */
- window.openWashingPlantDetails=function(id){S.washTab=null;S.washMonth=(data().today||"").slice(0,7);S.washDetailsPlant=id;S.washReportPlant=id;S.washDayFocus=null;S.washEditReport=null;S.washShowAllReports=false;S.washReportDraft={status:"Done",tables:"",exception:"",remarks:"",date:""};S.modal="washingPlantDetails";S.modalCtx={};render()};
+ window.openWashingPlantDetails=function(id){S.washTab=null;S.washMonth=(data().today||"").slice(0,7);S.washDetailsPlant=id;S.washReportPlant=id;S.washDayFocus=null;S.washEditReport=null;S.washShowAllReports=false;S.washSheetCycle=null;S.washSheetFocus=null;S.washReportDraft={status:"Done",tables:"",exception:"",remarks:"",date:""};S.modal="washingPlantDetails";S.modalCtx={};render()};
  window.washShowAllReports=async function(){S.washShowAllReports=true;S._washReportDays=90;render();try{await loadOverview()}catch(e){toast(detailOf(e,"Could not load older reports."))}};
  window.washFocusDay=function(d){S.washDayFocus=S.washDayFocus===d?null:d;render()};
  /* Site Engineer: pick any day in the last 45 days, enter the cleaned count and add before/after photos. The O&M Head / the plant's Assignee confirm it. */
  window.washReportForDay=function(day){
   if(!(isField()||isTeam())||!day)return;
-  const d=S.washReportDraft||{status:"Done",tables:"",exception:"",remarks:"",date:""};d.date=day;S.washReportDraft=d;S.washDayFocus=day;render();
-  setTimeout(function(){const el=document.getElementById("wc-date");if(el&&el.scrollIntoView)el.scrollIntoView({block:"center",behavior:"smooth"})},60);
+  S.washMonth=day.slice(0,7);S.washSheetCycle=null;S.washSheetFocus=day;S.washDayFocus=day;render();
  };
  function reportCard(r){
   const ev=r.evidence||[],by=k=>ev.filter(e=>e.kind===k),other=ev.filter(e=>e.kind!=="before"&&e.kind!=="after");
@@ -462,17 +461,27 @@
  const shiftMonth=(m,n)=>{const d=new Date(Number(m.slice(0,4)),Number(m.slice(5,7))-1+n,1);return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")};
  const monthCache=()=>S._washMonthCache=S._washMonthCache||{};
  function loadMonth(plantId,month,force){
-  const key=plantId+"|"+month,c=monthCache();
-  if(!force&&c[key])return;
-  c[key]={loading:true};
+  const key=plantId+"|"+month,c=monthCache(),old=c[key];
+  if(!force&&old)return;
+  if(old&&old.cycles)old.refreshing=true;else c[key]={loading:true};
   apiFetch("/api/scheduled/washing/plants/"+encodeURIComponent(plantId)+"/cycles?month="+encodeURIComponent(month))
-   .then(r=>{c[key]=r}).catch(e=>{c[key]={error:detailOf(e,"Could not load this month.")}})
+   .then(r=>{c[key]=r}).catch(e=>{if(old&&old.cycles){old.refreshing=false;toast(detailOf(e,"Could not refresh this month."))}else c[key]={error:detailOf(e,"Could not load this month.")}})
    .finally(()=>{if(S.modal==="washingPlantDetails"&&S.washDetailsPlant===plantId)render()});
+ }
+ function monthNav(month){
+  const thisMonth=(data().today||"").slice(0,7);
+  return '<div class="wx-mnav"><button type="button" class="btn o sm" data-wmonth="-1" onclick="washMonthShift(-1)" aria-label="Previous month">‹</button><b>'+h(monthName(month))+'</b><button type="button" class="btn o sm" data-wmonth="1" onclick="washMonthShift(1)" aria-label="Next month">›</button>'+(month!==thisMonth?'<button type="button" class="btn g sm" onclick="washMonthShift(0)">This month</button>':'<span class="wx-now">Current month</span>')+'</div>';
+ }
+ /* after a report changes: drop the plant's other cached months and reload the one on screen */
+ function refreshPlantMonths(plantId){
+  if(!plantId)return;const c=monthCache(),month=S.washMonth||(data().today||"").slice(0,7),key=plantId+"|"+month;
+  Object.keys(c).forEach(k=>{if(k.startsWith(plantId+"|")&&k!==key)delete c[k]});
+  if(c[key])loadMonth(plantId,month,true);
  }
  function monthCyclesHtml(p){
   const thisMonth=(data().today||"").slice(0,7),month=S.washMonth||thisMonth,key=p.plant_id+"|"+month,mc=monthCache()[key];
   if(!mc)loadMonth(p.plant_id,month);
-  const nav='<div class="wx-mnav"><button type="button" class="btn o sm" data-wmonth="-1" onclick="washMonthShift(-1)" aria-label="Previous month">‹</button><b>'+h(monthName(month))+'</b><button type="button" class="btn o sm" data-wmonth="1" onclick="washMonthShift(1)" aria-label="Next month">›</button>'+(month!==thisMonth?'<button type="button" class="btn g sm" onclick="washMonthShift(0)">This month</button>':'<span class="wx-now">Current month</span>')+'</div>';
+  const nav=monthNav(month);
   if(!mc||mc.loading)return nav+'<div class="wc-empty">Loading '+h(monthName(month))+'…</div>';
   if(mc.error)return nav+'<div class="bn-warn banner">'+h(mc.error)+'</div>';
   const edit=mc.can_edit,past=month<thisMonth,total=mc.table_count||p.table_count||1;
@@ -485,10 +494,10 @@
   }).join("");
   const pat=mc.pattern?'<div class="wx-pattern">🔁 Repeating every month since '+h(monthName(mc.pattern.from))+': '+mc.pattern.cycles.map(c=>c.start_day+'–'+c.due_day).join(" · ")+'</div>':'';
   const save=edit?'<div class="wx-save"><label class="wx-check"><input type="checkbox" id="wx-repeat"'+(mc.pattern&&mc.pattern.from===month?' checked':'')+'/> Use these dates every month from '+h(monthName(month))+' on</label><span class="wx-grow"></span><button type="button" class="btn g sm" onclick="washMonthDefaults()">Standard dates</button><button type="button" class="btn p sm" id="wx-save-btn" onclick="washSaveMonth(\''+h(p.plant_id)+'\')">Save dates</button></div>':'';
-  const pastNote=past&&(isTeam()||isField())?'<div class="wx-past"><div><b>Washing done in '+h(monthName(month))+' but not recorded?</b><span>'+(isTeam()?'Record it on the date it was done — it counts towards that month\'s cycles.':'You can report dates from the last 45 days.')+'</span></div><button type="button" class="btn o sm" onclick="washRecordPast(\''+h(mc.first_day)+'\',\''+h(mc.last_day)+'\')">Record a past date</button></div>':'';
+  const pastNote=past&&(isTeam()||isField())?'<div class="wx-past"><div><b>Washing done in '+h(monthName(month))+' but not recorded?</b><span>'+(isTeam()?'Fill in the days on that month\'s sheet — they count towards that month\'s cycles.':'You can fill in days from the last 45 days.')+'</span></div><button type="button" class="btn o sm" onclick="washRecordPast()">Open '+h(monthName(month))+' sheet</button></div>':'';
   return nav+'<p class="sub">'+(edit?'Any day of '+h(monthName(month))+' can be used. Each cycle must start on or before its deadline, and in order (cycle 1 → 2 → 3).':'Planned washing windows for '+h(monthName(month))+'.')+'</p><div class="wx-cys">'+cards+'</div>'+pat+save+pastNote;
  }
- window.washMonthShift=function(n){const thisMonth=(data().today||"").slice(0,7);S.washMonth=n===0?thisMonth:shiftMonth(S.washMonth||thisMonth,n);render()};
+ window.washMonthShift=function(n){const thisMonth=(data().today||"").slice(0,7);S.washMonth=n===0?thisMonth:shiftMonth(S.washMonth||thisMonth,n);S.washSheetCycle=null;render()};
  window.washMonthDefaults=function(){
   const month=S.washMonth||(data().today||"").slice(0,7),mc=monthCache()[S.washDetailsPlant+"|"+month];if(!mc||!mc.cycles)return;
   mc.cycles.forEach(c=>{const a=document.getElementById("wx-s-"+c.cycle_no),b=document.getElementById("wx-d-"+c.cycle_no);if(a)a.value=c.default_start_date;if(b)b.value=c.default_due_date});
@@ -508,11 +517,7 @@
   }catch(e){toast(detailOf(e,"Could not save the cycle dates."))}
   finally{savingMonth=false;const b=document.getElementById("wx-save-btn");if(b){b.disabled=false;b.textContent="Save dates"}}
  };
- window.washRecordPast=function(first,last){
-  const d=S.washReportDraft||(S.washReportDraft={status:"Done",tables:"",exception:"",remarks:"",date:""});
-  const min=isField()?isoDaysAgo(45):first;d.date=last<todayIso()?last:todayIso();if(d.date<min)d.date=min;
-  S.washTab="record";render();
- };
+ window.washRecordPast=function(){S.washSheetCycle=null;S.washTab="record";render()};
  window.washTab=function(t){S.washTab=t;render()};
  function detailsModal(){
   const p=rowOf(S.washDetailsPlant);if(!p)return "";const head=isTeam();
@@ -534,7 +539,7 @@
   const top='<div class="wx-ov-top">'+ring(conf,pend,p.table_count,cur?"Cycle "+cur.cycle_no:"Done")+'<div class="wx-ov-k"><b>'+(cur?conf+(pend?' <em>+'+pend+' awaiting</em>':'')+' of '+p.table_count+' tables · cycle '+cur.cycle_no:'All 3 cycles done this month')+'</b><div class="wx-ov-chips">'+
    (head?(p.overdue_bucket==="on_track"?chip("On track · next deadline "+fmt(p.next_due),"ok"):chip(p.overdue_days+" d late · cycle "+p.overdue_cycle+" was due "+fmt(p.next_due),TONE[p.overdue_bucket]))+chip("Weekly "+wk+"% (target "+thr+"%)",wk>=thr?"ok":wk>=thr-15?"warn":"crit"):'')+chip(p.cycles_this_month+" of "+p.monthly_target+" cycles this month","info")+'</div></div>'+
    (head?'<button class="btn g sm" onclick="openWashingSetup(\''+h(p.plant_id)+'\')">Edit setup</button>':'')+'</div>';
-  const body=tab==="cycles"?monthCyclesHtml(p):tab==="record"?inlineReport(p):tab==="reports"?reviewGuidance+reportSection:daySection;
+  const body=tab==="cycles"?monthCyclesHtml(p):tab==="record"?sheetHtml(p):tab==="reports"?reviewGuidance+reportSection:daySection;
   return modal(h(p.plant)+' <small style="font-weight:500;color:var(--muted-foreground)">'+h(p.site_code)+'</small>',plural(p.table_count,"table")+' · washing Assignee: '+h(p.assignee_name||"not set"),
    '<div class="wc-ov wx-ov">'+top+'<div class="wx-tabs" role="tablist">'+tabs.map(t=>'<button type="button" role="tab" aria-selected="'+(t[0]===tab)+'" data-wtab="'+t[0]+'" class="'+(t[0]===tab?'on':'')+'" onclick="washTab(\''+t[0]+'\')">'+t[1]+'</button>').join("")+'</div><div class="wx-tabbody">'+body+'</div></div>',
    '<button class="btn o" onclick="closeModal()">Close</button>',true)+(setTimeout(hydrate,40),"");
@@ -544,21 +549,149 @@
  const REASONS=["Rain","Water shortage","Equipment breakdown","Access restriction","Safety stand-down","Other"];
  const isoDaysAgo=n=>{const d=new Date();d.setDate(d.getDate()-n);return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0")};
  const todayIso=()=>data().today||isoDaysAgo(0);
- /* the report form shown inside the plant overlay: a site engineer can finish the whole job here without leaving it */
- function inlineReport(p){
-  const d=S.washReportDraft||(S.washReportDraft={status:"Done",tables:"",exception:"",remarks:"",date:""}),nd=d.status==="Not done";
-  const left=Math.max(0,p.table_count-p.confirmed_tables_cleaned-p.pending_tables_cleaned),date=d.date||todayIso();
-  const hint=isField()?"Report the actual number cleaned on this date; daily amounts may vary. O&M reviews the report and photos.":'<b>Cycle '+p.current_cycle+'</b> · '+p.confirmed_tables_cleaned+' of '+p.table_count+' tables confirmed'+(p.pending_tables_cleaned?' (+'+p.pending_tables_cleaned+' awaiting confirmation)':'')+' · <b>'+left+' left</b>. Missed a day or a past month? Pick that date.';
-  const team=!isField();
-  return '<div class="wc-sec wc-inline-report"><h3>'+(team?'Record washing (O&amp;M entry)':'Report washing')+'</h3><p class="sub">'+hint+(team?' An O&amp;M entry is saved as confirmed. Before and after photos are recommended.':' Add before and after photos for O&amp;M review.')+'</p>'+
-   '<div class="wc-form"><div class="row2"><div class="field"><span class="lbl">Date cleaned</span><input id="wc-date" class="inp" type="date" value="'+h(date)+'" min="'+h(isField()?isoDaysAgo(45):isoDaysAgo(730))+'" max="'+h(todayIso())+'" onchange="washReportDraftChanged()"/>'+(team?'<small>Past dates are allowed — they count towards that month\'s cycles.</small>':'')+'</div>'+
-   '<div class="field"><span class="lbl">Job status</span><select id="wc-status" class="inp" onchange="washReportDraftChanged()"><option'+(nd?"":" selected")+'>Done</option><option'+(nd?" selected":"")+'>Not done</option></select></div></div>'+
-   '<div class="row2"><div class="field" id="wc-count-field" style="display:'+(nd?"none":"block")+'"><span class="lbl">Tables cleaned today</span><input id="wc-tables" class="inp" type="number" min="1" max="'+p.table_count+'" value="'+h(d.tables)+'" placeholder="Enter actual count" oninput="washReportDraftChanged()"/>'+(isField()?'<small>No fixed daily target applies.</small>':'')+'</div>'+
-   '<div class="field" id="wc-exception-field" style="display:'+(nd?"block":"none")+'"><span class="lbl">Reason work was not done</span><select id="wc-exception" class="inp" onchange="washReportDraftChanged()"><option value="">Choose reason</option>'+REASONS.map(x=>'<option'+(d.exception===x?" selected":"")+'>'+x+'</option>').join("")+'</select></div></div>'+
-   '<div id="wc-photo-fields" class="row2" style="display:'+(nd?"none":"grid")+'"><div class="field"><span class="lbl">Before cleaning photos (up to 5)</span><input id="wc-before" class="inp" type="file" accept="image/jpeg,image/png,image/webp" multiple onchange="washPhotoSelection(\'before\',this)"/><small id="wc-before-selected" class="wc-photo-selection">Select before-cleaning photos</small></div><div class="field"><span class="lbl">After cleaning photos (up to 5)</span><input id="wc-after" class="inp" type="file" accept="image/jpeg,image/png,image/webp" multiple onchange="washPhotoSelection(\'after\',this)"/><small id="wc-after-selected" class="wc-photo-selection">Select after-cleaning photos</small></div></div>'+
-   '<div class="field"><span class="lbl">Remarks</span><textarea id="wc-remarks" class="inp" rows="2" maxlength="4000" placeholder="What happened?" oninput="washReportDraftChanged()">'+h(d.remarks)+'</textarea></div>'+
-   '<div class="wc-confirm"><button class="btn p" onclick="submitWashingDailyReport()">'+(team?'Save confirmed record':'Submit for O&amp;M confirmation')+'</button></div></div></div>';
+ /* ---------- cycle sheet: every day of one cycle on one table; type how many tables were cleaned each day ---------- */
+ const SE_BACK_DAYS=45,PHOTO_DAYS=3; /* mirrors MAX_BACKDATE_DAYS / PHOTO_REQUIRED_DAYS on the server */
+ const addDays=(iso,n)=>{const d=new Date(iso+"T00:00:00");d.setDate(d.getDate()+n);return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0")};
+ const dayName=iso=>{const d=new Date(iso+"T00:00:00");return isNaN(d)?iso:d.toLocaleDateString("en-GB",{weekday:"short",day:"2-digit",month:"short"})};
+ function sheetState(plantId,month){
+  const key=plantId+"|"+month;
+  if(!S.washSheet||S.washSheet.key!==key)S.washSheet={key,rows:{},files:{}};
+  return S.washSheet;
  }
+ /* Work always counts towards the month's first unfinished cycle, so a cycle's days run from the day after the
+    previous cycle was completed (the 1st for cycle 1) until it is completed; the open cycle runs until today. */
+ function sheetCycles(mc){
+  const today=todayIso(),last=mc.last_day<today?mc.last_day:today;let start=mc.first_day,open=false;
+  return mc.cycles.map(c=>{
+   const s=start;
+   if(c.state==="Completed"&&c.completed_on){start=addDays(c.completed_on,1);return{c,kind:"done",start:s,end:c.completed_on}}
+   if(!open){open=true;return{c,kind:"open",start:s,end:last}}
+   return{c,kind:"later",start:null,end:null};
+  });
+ }
+ function sheetModel(p,mc){
+  const today=todayIso(),minDate=isField()?addDays(today,-SE_BACK_DAYS):"0000-00-00",photoFrom=addDays(today,-(PHOTO_DAYS-1));
+  const cyc=sheetCycles(mc),open=cyc.find(x=>x.kind==="open");
+  let pick=S.washSheetCycle;if(!cyc.some(x=>x.c.cycle_no===pick))pick=(open||cyc.filter(x=>x.kind==="done").pop()||cyc[0]).c.cycle_no;
+  const cur=cyc.find(x=>x.c.cycle_no===pick),reports=mc.reports||[],st=sheetState(p.plant_id,mc.month);
+  const dates=new Set(reports.filter(r=>r.cycle_no===pick).map(r=>r.report_date));
+  if(cur.end)for(let d=cur.start;d<=cur.end;d=addDays(d,1))dates.add(d);
+  let run=0;
+  const rows=Array.from(dates).sort().map(date=>{
+   const reps=reports.filter(r=>r.report_date===date),active=reps.filter(r=>r.review_status!=="Rejected"),rejected=reps.filter(r=>r.review_status==="Rejected");
+   const mine=active.filter(r=>r.cycle_no===pick),elsewhere=active.filter(r=>r.cycle_no!==pick);
+   const editable=!active.length&&!rejected.some(r=>r.can_edit)&&cur.kind==="open"&&date<=today&&date>=minDate;
+   const draft=editable?(st.rows[date]||{}):{},files=editable?(st.files[date]||{before:[],after:[]}):{before:[],after:[]};
+   const n=editable&&!draft.reason?Math.max(0,parseInt(draft.tables,10)||0):0;
+   run+=mine.filter(r=>r.job_status==="Done").reduce((a,r)=>a+r.tables_cleaned,0)+n;
+   return{date,reps,mine,elsewhere,rejected,editable,draft,files,n,run,needsPhotos:isField()&&date>=photoFrom,locked:!editable&&!reps.length&&cur.kind==="open"&&date<minDate};
+  });
+  const total=mc.table_count||p.table_count||0,recorded=rows.reduce((a,r)=>a+r.mine.filter(x=>x.job_status==="Done").reduce((b,x)=>b+x.tables_cleaned,0),0);
+  const fresh=rows.filter(r=>r.editable&&(r.n>0||r.draft.reason)),newTables=fresh.reduce((a,r)=>a+r.n,0);
+  const pending=rows.flatMap(r=>r.mine.filter(x=>x.can_review)),ready=pending.filter(x=>!(x.photos_required&&(!x.has_before||!x.has_after)));
+  return{cyc,cur,pick,rows,total,recorded,fresh,newTables,left:Math.max(0,total-recorded),pending,ready};
+ }
+ function sheetFoot(m){
+  const team=!isField(),over=m.newTables>m.left,days=m.fresh.length?plural(m.fresh.length,"day"):"days";
+  const sum=m.fresh.length?'<b>'+plural(m.fresh.length,"day")+'</b> to save · '+plural(m.newTables,"table")+(over?' · <b class="wx-over">only '+m.left+' left in cycle '+m.pick+'</b>':' · '+(m.left-m.newTables)+' left after this'):'Type the tables cleaned on each day, or choose a reason if no work was done.';
+  return '<span>'+sum+'</span><button type="button" class="btn p" id="wx-sheet-save" onclick="washSheetSubmit()"'+(m.fresh.length&&!S._washSheetSaving?'':' disabled')+'>'+(S._washSheetSaving?'Saving…':team?'Save '+days+' as confirmed':'Submit '+days+' for confirmation')+'</button>';
+ }
+ function sheetRow(r){
+  const id=h(r.date),st=x=>x.review_status==="Confirmed"?chip("Confirmed","ok"):x.review_status==="Rejected"?chip("Rejected","crit"):chip("Awaiting","info");
+  const val=x=>x.job_status==="Done"?'<b>'+x.tables_cleaned+'</b>':'<span class="wx-nd">Not done — '+h(x.exception_reason)+'</span>';
+  const cls='wx-srow'+(S.washSheetFocus===r.date?' focus':'')+(r.editable?' edit':'');
+  if(r.reps.length&&!r.editable){
+   const shown=r.mine.length?r.mine:r.elsewhere.length?r.elsewhere:r.rejected,photos=shown.reduce((a,x)=>a+(x.evidence||[]).length,0);
+   const flag=shown.some(x=>x.review_status==="Pending"&&x.photos_required&&(!x.has_before||!x.has_after))?' '+chip("Needs photos","warn"):(!isField()&&shown.some(x=>x.review_status!=="Rejected"&&x.backfilled&&x.job_status==="Done"&&!(x.evidence||[]).length)?' '+chip("No photos · back-filled","mute"):'');
+   const note=r.mine.length?'':r.elsewhere.length?' <small>Counted in cycle '+r.elsewhere.map(x=>x.cycle_no).join(", ")+'</small>':' <small>'+h(r.rejected[0].review_note||"Rejected")+'</small>';
+   return '<tr class="'+cls+'" id="wx-row-'+id+'"><td><b>'+dayName(r.date)+'</b></td><td colspan="3">'+shown.map(val).join(" + ")+(shown.length===1&&shown[0].remarks?' <small>“'+h(shown[0].remarks)+'”</small>':'')+note+'</td><td>'+(photos||"—")+'</td><td>'+shown.map(st).join(" ")+flag+'<small class="wx-by">'+h(shown.map(x=>x.reported_by).filter((v,i,a)=>a.indexOf(v)===i).join(", "))+'</small></td><td class="wx-run" id="wx-run-'+id+'">'+(r.mine.length?r.run:"")+'</td><td><button type="button" class="btn g sm" onclick="washOpenDay(\''+id+'\')">Open</button></td></tr>';
+  }
+  if(!r.editable)return '<tr class="'+cls+' wx-blank" id="wx-row-'+id+'"><td><b>'+dayName(r.date)+'</b></td><td colspan="5"><small>'+(r.locked?'Older than '+SE_BACK_DAYS+' days — ask the O&amp;M team to record it':'Not recorded')+'</small></td><td class="wx-run" id="wx-run-'+id+'"></td><td></td></tr>';
+  const d=r.draft,f=r.files,pic=k=>'<label class="wx-pic'+(f[k].length?' on':'')+'" title="'+(k==="before"?"Before":"After")+' cleaning photos (up to 5)">'+(k==="before"?"Before":"After")+(f[k].length?' · '+f[k].length:'')+'<input type="file" accept="image/jpeg,image/png,image/webp" multiple hidden onchange="washSheetPhotos(\''+id+'\',\''+k+'\',this)"/></label>';
+  return '<tr class="'+cls+'" id="wx-row-'+id+'"><td><b>'+dayName(r.date)+'</b></td>'+
+   '<td><input class="wx-in wx-num" type="number" min="1" max="5000" inputmode="numeric" placeholder="0" value="'+h(d.tables||"")+'" aria-label="Tables cleaned on '+dayName(r.date)+'" oninput="washSheetInput(\''+id+'\',\'tables\',this)"/></td>'+
+   '<td><select class="wx-in" aria-label="Reason not done on '+dayName(r.date)+'" onchange="washSheetInput(\''+id+'\',\'reason\',this)"><option value="">—</option>'+REASONS.map(x=>'<option'+(d.reason===x?" selected":"")+'>'+x+'</option>').join("")+'</select></td>'+
+   '<td><input class="wx-in" maxlength="4000" placeholder="Remarks" value="'+h(d.remarks||"")+'" aria-label="Remarks for '+dayName(r.date)+'" oninput="washSheetInput(\''+id+'\',\'remarks\',this)"/></td>'+
+   '<td class="wx-pics">'+pic("before")+pic("after")+(r.needsPhotos?'<small>needed</small>':'')+'</td><td></td><td class="wx-run" id="wx-run-'+id+'">'+(r.n?r.run:"")+'</td><td></td></tr>';
+ }
+ function sheetHtml(p){
+  const thisMonth=(data().today||"").slice(0,7),month=S.washMonth||thisMonth,mc=monthCache()[p.plant_id+"|"+month];
+  if(!mc)loadMonth(p.plant_id,month);
+  const nav=monthNav(month);
+  if(!mc||mc.loading)return nav+'<div class="wc-empty">Loading '+h(monthName(month))+'…</div>';
+  if(mc.error)return nav+'<div class="bn-warn banner">'+h(mc.error)+'</div>';
+  const m=sheetModel(p,mc),team=!isField(),c=m.cur;
+  const picker='<div class="wx-cpick" role="tablist" aria-label="Cycle">'+m.cyc.map(x=>'<button type="button" role="tab" aria-selected="'+(x.c.cycle_no===m.pick)+'" class="'+(x.c.cycle_no===m.pick?'on':'')+'" onclick="washSheetCycle('+x.c.cycle_no+')"><b>Cycle '+x.c.cycle_no+'</b><span>'+(x.kind==="done"?"Completed "+fmt(x.c.completed_on):x.kind==="open"?(x.c.late_days&&team?x.c.late_days+" d late":"Open now"):"Not started")+'</span></button>').join("")+'</div>';
+  if(c.kind==="later")return nav+picker+'<div class="wc-empty">Cycle '+m.pick+' opens once cycle '+(m.pick-1)+' is complete. Washing done now counts towards the open cycle.</div>';
+  const head='<p class="sub"><b>Cycle '+m.pick+'</b> · planned '+fmt(c.c.start_date)+' → '+fmt(c.c.due_date)+' · '+m.recorded+' of '+m.total+' tables recorded'+(c.c.pending?' ('+c.c.pending+' awaiting confirmation)':'')+' · <b>'+m.left+' left</b>.'+(c.kind==="open"?(team?' Your entries are saved as confirmed.':' The O&amp;M Head or the plant\'s Assignee confirms your entries. Days in the last '+PHOTO_DAYS+' days need before and after photos.'):'')+'</p>';
+  const review=m.pending.length?'<div class="wc-flow-note wx-review"><div><b>'+plural(m.pending.length,"day")+' awaiting your confirmation</b><p>'+m.pending.reduce((a,x)=>a+x.tables_cleaned,0)+' tables'+(m.pending.length>m.ready.length?' · '+(m.pending.length-m.ready.length)+' still need before/after photos':'')+'. Use <b>Open</b> on a day to see its photos or to reject it with a note.</p></div>'+(m.ready.length?'<button type="button" class="btn p sm" onclick="washSheetConfirm()"'+(S._washSheetConfirming?' disabled':'')+'>'+(S._washSheetConfirming?'Confirming…':'Confirm '+plural(m.ready.length,"day"))+'</button>':'')+'</div>':'';
+  const th='<tr><th>Date</th><th>Tables cleaned</th><th>Not done reason</th><th>Remarks</th><th>Photos</th><th>Status</th><th>Total</th><th></th></tr>';
+  const body=m.rows.length?m.rows.map(sheetRow).join(""):'<tr><td colspan="8" class="wc-empty">'+(month>thisMonth?'No days to fill yet.':'No days in this cycle yet.')+'</td></tr>';
+  if(S.washSheetFocus){const f=S.washSheetFocus;setTimeout(()=>{const el=document.getElementById("wx-row-"+f);if(el&&el.scrollIntoView)el.scrollIntoView({block:"center",behavior:"smooth"});S.washSheetFocus=null},80)}
+  return nav+picker+head+review+'<div class="wc-table-wrap wx-sheet"><table class="wc-table wc-compact"><thead>'+th+'</thead><tbody>'+body+'</tbody></table></div>'+
+   (c.kind==="open"?'<div class="wx-sheet-foot" id="wx-sheet-foot">'+sheetFoot(m)+'</div>':'');
+ }
+ const sheetCtx=()=>{const p=rowOf(S.washDetailsPlant),month=S.washMonth||(data().today||"").slice(0,7),mc=p&&monthCache()[p.plant_id+"|"+month];return p&&mc&&mc.cycles?{p,mc,m:sheetModel(p,mc)}:null};
+ /* typing never re-renders the table (focus stays put); only the running totals and the footer are updated in place */
+ window.washSheetInput=function(date,field,el){
+  const x=sheetCtx();if(!x)return;const st=sheetState(x.p.plant_id,x.mc.month),r=st.rows[date]=st.rows[date]||{tables:"",reason:"",remarks:""};r[field]=el.value;
+  const m=sheetModel(x.p,x.mc);
+  m.rows.forEach(row=>{const c=document.getElementById("wx-run-"+row.date);if(c)c.textContent=(row.mine.length||row.n)?row.run:""});
+  const foot=document.getElementById("wx-sheet-foot");if(foot)foot.innerHTML=sheetFoot(m);
+ };
+ window.washSheetPhotos=function(date,kind,input){
+  const x=sheetCtx();if(!x)return;const st=sheetState(x.p.plant_id,x.mc.month),f=st.files[date]=st.files[date]||{before:[],after:[]};
+  const files=Array.from(input&&input.files||[]);if(files.length>5){toast("Choose no more than 5 "+kind+" photos for a day.");input.value="";return}
+  f[kind]=files;const label=input.parentElement;if(label){label.classList.toggle("on",!!files.length);label.firstChild.textContent=(kind==="before"?"Before":"After")+(files.length?" · "+files.length:"")}
+ };
+ window.washSheetCycle=function(n){S.washSheetCycle=n;render()};
+ window.washOpenDay=function(d){S.washDayFocus=d;S.washTab="reports";render()};
+ window.washSheetSubmit=async function(){
+  if(S._washSheetSaving)return;
+  const x=sheetCtx();if(!x)return;const {p,mc,m}=x,entries=[],problems=[],uploads=[];
+  for(const r of m.rows){
+   if(!r.editable)continue;
+   const d=r.draft,t=String(d.tables||"").trim(),reason=d.reason||"",remarks=String(d.remarks||"").trim(),f=r.files,day=dayName(r.date);
+   if(!t&&!reason){if(remarks||f.before.length||f.after.length)problems.push(day+": enter the tables cleaned or a reason");continue}
+   if(t&&reason){problems.push(day+": enter either tables cleaned or a reason, not both");continue}
+   if(reason){entries.push({report_date:r.date,job_status:"Not done",tables_cleaned:0,exception_reason:reason,remarks:remarks||null});continue}
+   const n=Number(t);if(!Number.isInteger(n)||n<1){problems.push(day+": tables cleaned must be a whole number");continue}
+   if(r.needsPhotos&&(!f.before.length||!f.after.length)){problems.push(day+": add at least one before and one after photo");continue}
+   entries.push({report_date:r.date,job_status:"Done",tables_cleaned:n,remarks:remarks||null});uploads.push(r.date);
+  }
+  if(problems.length){toast(problems.slice(0,3).join(" · ")+(problems.length>3?" · and "+(problems.length-3)+" more":""));return}
+  if(!entries.length){toast("Type the tables cleaned on at least one day.");return}
+  if(m.newTables>m.left){toast("Only "+m.left+" table(s) are left in cycle "+m.pick+"; you entered "+m.newTables+".");return}
+  const st=sheetState(p.plant_id,mc.month);
+  S._washSheetSaving=true;const foot=document.getElementById("wx-sheet-foot");if(foot)foot.innerHTML=sheetFoot(m);
+  let saved=null;const failed=[];
+  try{
+   saved=await apiFetch("/api/scheduled/washing/daily-reports/sheet",{method:"POST",body:{plant_id:p.plant_id,entries}});
+   for(const rep of saved.reports||[]){
+    const f=st.files[rep.report_date];if(!f||!uploads.includes(rep.report_date))continue;
+    try{await upload(rep.id,f.before||[],"before");await upload(rep.id,f.after||[],"after")}catch(e){failed.push(dayName(rep.report_date))}
+   }
+   S.washSheet={key:st.key,rows:{},files:{}};
+   toast((isField()?plural(saved.saved,"day")+" submitted for O&M confirmation":plural(saved.saved,"day")+" saved and confirmed")+(failed.length?". Photo upload failed for "+failed.join(", ")+" — open that day to add them.":"."));
+  }catch(e){toast(detailOf(e,"Could not save the washing sheet."))}
+  finally{
+   S._washSheetSaving=false;
+   if(saved){refreshPlantMonths(p.plant_id);await loadOverview().catch(()=>{})}
+   render();
+  }
+ };
+ window.washSheetConfirm=async function(){
+  if(S._washSheetConfirming)return;
+  const x=sheetCtx();if(!x||!x.m.ready.length)return;const ids=x.m.ready.map(r=>r.id),tables=x.m.ready.reduce((a,r)=>a+r.tables_cleaned,0);
+  if(!confirm("Confirm "+plural(ids.length,"day")+" ("+tables+" tables) for "+x.p.plant+"?"))return;
+  S._washSheetConfirming=true;render();
+  try{
+   const r=await apiFetch("/api/scheduled/washing/daily-reports/confirm",{method:"POST",body:{plant_id:x.p.plant_id,report_ids:ids}});
+   toast(plural(r.confirmed,"day")+" confirmed"+((r.cycles_completed||[]).length?" · cycle "+r.cycles_completed.map(c=>c.cycle_no).join(", ")+" completed":"")+".");
+   await loadOverview().catch(()=>{});
+  }catch(e){toast(detailOf(e,"Could not confirm these days."))}
+  finally{S._washSheetConfirming=false;refreshPlantMonths(x.p.plant_id);render()}
+ };
  /* ---------- O&M: move a cycle deadline ---------- */
  async function changeCycleDate(plantId,cycleNo,value,kind){
   const month=(data().today||"").slice(0,7),isS=kind==="start",body={month,cycle_no:cycleNo,field:isS?"start":"due"};
@@ -576,11 +709,11 @@
   const v=k=>{const e=document.getElementById("wc-ed-"+k);return e?e.value:""},status=v("status"),body={report_date:v("date")||undefined,job_status:status,remarks:v("remarks")};
   if(status==="Done"){const n=Number(v("tables"));if(!Number.isInteger(n)||n<1){toast("Enter how many tables were cleaned.");return}body.tables_cleaned=n}
   else{if(!v("reason")){toast("Choose the reason the work was not done.");return}body.exception_reason=v("reason")}
-  try{await apiFetch("/api/scheduled/washing/daily-reports/"+encodeURIComponent(id),{method:"PATCH",body});S.washEditReport=null;await loadOverview();render();toast("Report updated.")}catch(e){toast(detailOf(e,"Could not update the report."))}
+  try{await apiFetch("/api/scheduled/washing/daily-reports/"+encodeURIComponent(id),{method:"PATCH",body});S.washEditReport=null;refreshPlantMonths(S.washDetailsPlant);await loadOverview();render();toast("Report updated.")}catch(e){toast(detailOf(e,"Could not update the report."))}
  };
  window.washDeleteReport=async function(id){
   if(!confirm("Delete this washing report and its photos? This cannot be undone."))return;
-  try{await apiFetch("/api/scheduled/washing/daily-reports/"+encodeURIComponent(id),{method:"DELETE"});S.washEditReport=null;await loadOverview();render();toast("Report deleted.")}catch(e){toast(detailOf(e,"Could not delete the report."))}
+  try{await apiFetch("/api/scheduled/washing/daily-reports/"+encodeURIComponent(id),{method:"DELETE"});S.washEditReport=null;refreshPlantMonths(S.washDetailsPlant);await loadOverview();render();toast("Report deleted.")}catch(e){toast(detailOf(e,"Could not delete the report."))}
  };
  /* ---------- daily report (count + before/after photos) ---------- */
  window.openWashingDailyReport=function(id){S.washReportPlant=id;S.washReportDraft={status:"Done",tables:"",exception:"",remarks:"",date:""};S.modal="washingDailyReport";S.modalCtx={};render()};
@@ -631,7 +764,7 @@
    await upload(saved.id,fb,"before");await upload(saved.id,fa,"after");
    const inOverlay=S.modal==="washingPlantDetails";
    if(!inOverlay)S.modal=null;
-   S.washReportDraft={status:"Done",tables:"",exception:"",remarks:"",date:""};await loadOverview();render();toast(isField()?"Washing report submitted for O&M confirmation.":"Washing record saved and confirmed"+(!nd&&(!fb.length||!fa.length)?". Add before/after photos from the report card when you have them.":"."));
+   S.washReportDraft={status:"Done",tables:"",exception:"",remarks:"",date:""};refreshPlantMonths(p.plant_id);await loadOverview();render();toast(isField()?"Washing report submitted for O&M confirmation.":"Washing record saved and confirmed"+(!nd&&(!fb.length||!fa.length)?". Add before/after photos from the report card when you have them.":"."));
   }catch(e){
    if(saved){S.washDetailsPlant=p.plant_id;S.washReportPlant=p.plant_id;S.modal="washingPlantDetails";S.modalCtx={};S.washReportDraft={status:"Done",tables:"",exception:"",remarks:"",date:""};await loadOverview().catch(()=>{});render();toast("Report saved, but photo upload failed. Retry the missing photo from this report card. "+detailOf(e));return}
    toast(detailOf(e));
@@ -641,13 +774,13 @@
  };
  window.uploadAdditionalWashingEvidence=async function(reportId,input,kind){
   const files=Array.from(input&&input.files||[]);if(!files.length)return;
-  try{await upload(reportId,files,kind||"other");await loadOverview();render();toast("Photos uploaded.")}catch(e){input.value="";toast(detailOf(e))}
+  try{await upload(reportId,files,kind||"other");refreshPlantMonths(S.washDetailsPlant);await loadOverview();render();toast("Photos uploaded.")}catch(e){input.value="";toast(detailOf(e))}
  };
  window.reviewWashingReport=async function(id,decision){
   const rep=(data().reports||[]).find(r=>r.id===id),note=((document.getElementById("wc-review-"+id)||{}).value||"").trim();
   if(decision==="Reject"&&!note){toast("Add a note explaining the rejection.");return}
-  if(decision==="Confirm"&&rep&&rep.job_status==="Done"&&(!rep.has_before||!rep.has_after)){toast("Upload at least one before and one after photo before confirming this report.");return}
-  try{await apiFetch("/api/scheduled/washing/daily-reports/"+encodeURIComponent(id)+"/review",{method:"POST",body:{decision,remarks:note}});await loadOverview();render();toast(decision==="Confirm"?"Cleaning confirmed.":"Report rejected.")}catch(e){toast(detailOf(e))}
+  if(decision==="Confirm"&&rep&&rep.photos_required&&(!rep.has_before||!rep.has_after)){toast("Upload at least one before and one after photo before confirming this report.");return}
+  try{await apiFetch("/api/scheduled/washing/daily-reports/"+encodeURIComponent(id)+"/review",{method:"POST",body:{decision,remarks:note}});refreshPlantMonths(S.washDetailsPlant);await loadOverview();render();toast(decision==="Confirm"?"Cleaning confirmed.":"Report rejected.")}catch(e){toast(detailOf(e))}
  };
 
  /* ---------- Command Center panel ---------- */

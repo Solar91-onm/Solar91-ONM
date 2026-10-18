@@ -1696,7 +1696,7 @@ function omHeadMoveTicket(id,next){
 /* Row actions are handled by the page-level data-act listener, which acts on the innermost [data-act] (the button,
    not the row). The wrapper used to call event.stopPropagation(), which blocked that listener: View, Assign and
    Plant did nothing when clicked from issue rows. */
-function issueQuickActs(t){const p=plantRec(t.plant),isHead=AUTH_IDENTITY.role==="O&M Head";let a='<div class="row" style="gap:4px;flex-wrap:wrap" data-row-actions="1">';a+='<button class="btn g sm" data-act="issue" data-id="'+esc(t.id)+'">View</button>';if(isHead&&t.status!=="Closed"&&t.status!=="Resolved")a+='<button class="btn o sm" data-act="assignQuick" data-id="'+esc(t.id)+'">'+(t.assignee?"Reassign":"Assign")+'</button>';if(p)a+='<button class="btn g sm" data-act="plant" data-id="'+esc(p.id)+'">Plant</button>';return a+'</div>'}
+function issueQuickActs(t){const p=plantRec(t.plant),isHead=AUTH_IDENTITY.role==="O&M Head";let a='<div class="row" style="gap:4px;flex-wrap:wrap" data-row-actions="1">';a+='<button class="btn g sm" data-act="issue" data-id="'+esc(t.id)+'">View</button>';if(isHead&&t.status!=="Closed"&&t.status!=="Resolved")a+='<button class="btn o sm'+(t.assignee?'':' si-act-main')+'" data-act="assignQuick" data-id="'+esc(t.id)+'">'+(t.assignee?"Reassign":"Assign")+'</button>';if(p)a+='<button class="btn g sm" data-act="plant" data-id="'+esc(p.id)+'">Plant</button>';return a+'</div>'}
 function setTrendDays(n){S.trendDays=n;render()}
 function seedESR(){return[]}
 function seedInventory(){return[]}

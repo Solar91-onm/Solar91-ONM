@@ -17,12 +17,12 @@ from app.core.models import AuditLog, Equipment, Issue, OMTask, PMAlertLog, PMDu
 from app.core.security import WASHING_TYPE, equipment_scope_matches, get_current_user, require_csrf, require_permission, user_scoped_equipment_types, user_scoped_plant_ids, resolve_equipment_id
 from app.plants.codes import find_plant_by_code, normalize_site_code
 from app.pmplan.units import distribute, next_cycle_id
-from app.scheduled.schemas import PMFollowUpCreate, ProblemTaskCreate, TaskCompletion, TaskIssueLink, TaskReassign, TaskScheduleEdit, TaskUnitPlanEdit, WashingCycleDateRequest, WashingCycleScheduleRequest, WashingDailyReportRequest, WashingReportReviewRequest, WashingReportUpdateRequest, WashingSetupRequest
+from app.scheduled.schemas import PMFollowUpCreate, ProblemTaskCreate, TaskCompletion, TaskIssueLink, TaskReassign, TaskScheduleEdit, TaskUnitPlanEdit, WashingCycleDateRequest, WashingCycleScheduleRequest, WashingDailyReportRequest, WashingReportReviewRequest, WashingReportUpdateRequest, WashingSetupRequest, WashingSheetRequest, WashingBulkConfirmRequest
 from app.storage.service import SupabaseStorage
 from app.issues.service import next_issue_ticket_no
 from app.pmplan.followups import FOLLOW_UP_OUTCOMES, follow_up_out, get_follow_up_state
 from app.pmplan.alerts import alert_log_out, task_alert_scope
-from app.scheduled.washing_cycles import create_daily_report, delete_daily_report, get_overview, list_assignees, month_cycles, review_daily_report, save_cycle_schedule, set_cycle_date, setup_plant, update_daily_report
+from app.scheduled.washing_cycles import confirm_sheet_reports, create_daily_report, create_sheet_reports, delete_daily_report, get_overview, list_assignees, month_cycles, review_daily_report, save_cycle_schedule, set_cycle_date, setup_plant, update_daily_report
 from app.scheduled.washing_import import MAX_IMPORT_BYTES, export_bytes, import_setup, template_bytes
 
 router = APIRouter(prefix="/api/scheduled", tags=["Preventive Maintenance"])
@@ -776,6 +776,16 @@ def import_washing_setup(
 @router.post("/washing/daily-reports", dependencies=[Depends(require_csrf)])
 def submit_washing_report(payload: WashingDailyReportRequest, db: Annotated[Session, Depends(get_db)], user: Annotated[User, Depends(get_current_user)]):
     return create_daily_report(db, user, payload)
+
+
+@router.post("/washing/daily-reports/sheet", dependencies=[Depends(require_csrf)])
+def submit_washing_sheet(payload: WashingSheetRequest, db: Annotated[Session, Depends(get_db)], user: Annotated[User, Depends(get_current_user)]):
+    return create_sheet_reports(db, user, payload)
+
+
+@router.post("/washing/daily-reports/confirm", dependencies=[Depends(require_csrf)])
+def confirm_washing_sheet(payload: WashingBulkConfirmRequest, db: Annotated[Session, Depends(get_db)], user: Annotated[User, Depends(get_current_user)]):
+    return confirm_sheet_reports(db, user, payload)
 
 
 @router.post("/washing/daily-reports/{report_id}/evidence", dependencies=[Depends(require_csrf)])

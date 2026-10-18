@@ -48,6 +48,10 @@ SETUP_SCRIPT_TIMEOUT_SECONDS = 60
 async def lifespan(app: FastAPI):
     info = build_info(app.version, settings.app_env)
     logger.info("Solar91 starting version=%s commit=%s frontend_bundle=%s", info["app_version"], info["commit_short"] or "unknown", info["frontend_bundle"])
+    if settings.app_env != "test":
+        # One line in the service log with the network round trip to the database: every SQL statement, new connection
+        # and health check costs at least this much, so slow-request lines can be read against it.
+        app.state.latency_probe = asyncio.create_task(_log_database_latency())
     if settings.app_env == "production":
         app.state.bootstrap_task = asyncio.create_task(_run_deploy_setup())
         app.state.bootstrap_ready = False
@@ -65,6 +69,7 @@ async def lifespan(app: FastAPI):
         tasks = [
             task
             for task in (
+                getattr(app.state, "latency_probe", None),
                 getattr(app.state, "bootstrap_task", None),
                 getattr(app.state, "pm_job", None),
             )
@@ -136,10 +141,24 @@ async def drop_washing_cache_after_writes(request: Request, call_next):
             invalidate_overview_cache()
 
 from app.core.database import engine as _engine_for_timing
-from app.core.observability import install_query_counter, make_timing_middleware
+from app.core.observability import install_connection_timing, install_query_counter, make_timing_middleware
 
 install_query_counter(_engine_for_timing)
+install_connection_timing(_engine_for_timing)
 app.middleware("http")(make_timing_middleware(settings.slow_request_ms))  # added last = outermost, so it times everything
+
+async def _log_database_latency() -> None:
+    from app.core.database import engine
+    from app.core.observability import measure_database_latency
+
+    rtt = await asyncio.to_thread(measure_database_latency, engine)
+    if rtt is None:
+        logger.warning("database_latency unavailable (database not reachable at startup)")
+    else:
+        logger.log(logging.WARNING if rtt >= 50 else logging.INFO,
+                   "database_latency round_trip_ms=%.0f%s", rtt,
+                   " (high: the app and database are probably in different regions; each query costs at least this much)" if rtt >= 50 else "")
+
 
 async def _run_setup_script(script: str) -> int:
     path = BASE / "scripts" / script

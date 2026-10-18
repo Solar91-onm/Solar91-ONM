@@ -46,6 +46,6 @@ services:
       - key: DB_MAX_OVERFLOW
         value: "2"
       - key: DB_POOL_RECYCLE_SECONDS
-        value: "300"
+        value: "1800"
       - key: BOOTSTRAP_CLOSED_ISSUE_DAYS
         value: "0"

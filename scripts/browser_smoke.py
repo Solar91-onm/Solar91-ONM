@@ -171,7 +171,8 @@ def main():
                 assert not page.evaluate('''id=>openTk(S.issues).some(row=>row.id===id)''',ticket['id'])
                 print("PASS: assign, acknowledge, start, progress, close; data and metrics persist")
                 # Validating chart fault isolation is essential to original failure.
-                chart=page.evaluate('''()=>{const saved=window.issueSpark;window.issueSpark=()=>{throw Error("simulated chart failure")};try{return renderIssues();}finally{window.issueSpark=saved}}''')
+                # The register opens on the priority chart; switch to the trend view, which is the chart under test.
+                chart=page.evaluate('''()=>{const saved=window.issueSpark,by=S.siChartBy;S.siChartBy="trend";window.issueSpark=()=>{throw Error("simulated chart failure")};try{return renderIssues();}finally{window.issueSpark=saved;S.siChartBy=by}}''')
                 assert "Trend chart unavailable" in chart and ticket["id"] in chart
                 assert "START renderIssues" not in page.locator("body").inner_text()
                 print("PASS: chart failure isolated; register remains visible; no red debug banner")

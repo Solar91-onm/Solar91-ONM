@@ -187,13 +187,26 @@ function m26Hub(){
  const ang=Math.PI*(1-frac),sx=150+120*Math.cos(ang),sy=130-120*Math.sin(ang);
  const greet=hr<12?"Good morning":hr<17?"Good afternoon":"Good evening";
  const who=(S.currentUser||"").split(" ")[0];
- const stat=(k,v,s,onclick)=>'<div class="cc26-stat"'+(onclick?' onclick="'+onclick+'" style="cursor:pointer" role="button" tabindex="0"':'')+'><div class="k">'+k+'</div><div class="v">'+v+'</div><div class="s">'+s+'</div></div>';
- let h='<div class="cc26"><div class="cc26-head"><div><div class="d">'+now.toLocaleDateString(undefined,{weekday:"long",day:"numeric",month:"long"})+'</div><h1>'+greet+(who?', '+esc(who):'')+'</h1></div></div>';
-
- /* ---- Today's priorities (one clickable line) ---- */
+ /* ---- layout (Oct 2026): layered hero with live KPIs, then work lanes. Same figures and links as before. ---- */
  const ws=m26WashSummary();
  const washRedN=ws.cycle?ws.late.length:(typeof washLinked==="function"?washLinked():wash).filter(t=>wColor(t)==="red"&&!washedToday(t)&&!excToday(t)).length;
  const critUn=crit.filter(t=>!t.assignee).length;
+ const sevN=k=>open.filter(t=>normalizeIssueSeverity(t.severity)===k).length,med=sevN("Medium"),low=sevN("Low");
+ const mwTxt=v=>v>0?(v>=10?Math.round(v):v.toFixed(2))+" MW":"—";
+ const nav=on=>on?' onclick="'+on+'" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();'+on.replace(/"/g,"&quot;")+'}" role="button" tabindex="0"':'';
+ /* segmented bar: parts [{v,c,l}] */
+ const seg=(parts)=>{const t=parts.reduce((a,p)=>a+p.v,0);return '<div class="cx-seg" aria-hidden="true">'+(t?parts.filter(p=>p.v).map(p=>'<i style="flex:'+p.v+';background:'+p.c+'" title="'+esc(p.l)+': '+p.v+'"></i>').join(""):'<i style="flex:1;background:var(--cx-line)"></i>')+'</div>'};
+ const ring=(pct,c)=>{const v=pct==null?0:Math.max(0,Math.min(100,pct)),r=22,C=2*Math.PI*r;return '<svg class="cx-ring" viewBox="0 0 54 54" aria-hidden="true"><circle cx="27" cy="27" r="'+r+'" fill="none" stroke="var(--cx-ring-bg)" stroke-width="6"/><circle cx="27" cy="27" r="'+r+'" fill="none" stroke="'+c+'" stroke-width="6" stroke-linecap="round" stroke-dasharray="'+(C*v/100).toFixed(1)+' '+C.toFixed(1)+'" transform="rotate(-90 27 27)"/></svg>'};
+ const healthPct=plants.length?Math.round(100*hc.Healthy/plants.length):null;
+
+ let h='<div class="cc26 cx">';
+ /* ---- hero ---- */
+ const pulse=[];
+ if(crit.length)pulse.push('<b>'+crit.length+' critical</b> issue'+(crit.length===1?'':'s')+' open');
+ if(od.length)pulse.push('<b>'+od.length+' overdue</b>');
+ if(un.length)pulse.push('<b>'+un.length+'</b> without an owner');
+ if(tOd.length)pulse.push('<b>'+tOd.length+'</b> maintenance task'+(tOd.length===1?'':'s')+' late');
+ if(washRedN)pulse.push('<b>'+washRedN+'</b> '+(ws.cycle?'plant'+(washRedN===1?'':'s')+' behind on washing':'tables past their wash cycle'));
  const pri=[
   [critUn,"critical unassigned","bad","m26Nav('issues')"],
   [od.length,"overdue issues","bad","m26Nav('issues')"],
@@ -201,59 +214,70 @@ function m26Hub(){
   [tOd.length,"late maintenance tasks","warn","m26Nav('pm')"],
   [washRedN,ws.cycle?"plants behind a washing deadline":"tables past wash cycle","info","m26Nav('wash')"]
  ].filter(x=>x[0]>0);
- h+='<div class="cc26-prio">'+(pri.length?'<span class="cc26-prio-k">TODAY</span>'+pri.map(x=>'<button type="button" class="cc26-pp '+x[2]+'" onclick="'+x[3]+'"><b>'+x[0]+'</b> '+x[1]+'</button>').join(""):'<span class="cc26-pp ok">✓ All clear — nothing urgent today</span>')+'</div>';
- h+='<div class="cc26-hero"><svg viewBox="0 0 300 150" role="img" aria-label="Daylight progress"><path d="M30,130 A120,120 0 0 1 270,130" fill="none" stroke="#1F5C38" stroke-width="12" stroke-linecap="round"/>'
-  +(frac>0?'<path d="M30,130 A120,120 0 0 1 '+sx.toFixed(1)+','+sy.toFixed(1)+'" fill="none" stroke="#F5B821" stroke-width="12" stroke-linecap="round"/><circle cx="'+sx.toFixed(1)+'" cy="'+sy.toFixed(1)+'" r="12" fill="#F5B821" stroke="#0F3D22" stroke-width="4"/>':'')
-  +'<text x="150" y="98" font-size="30" fill="#fff" text-anchor="middle" font-weight="500">'+(hasTel?fmtN(gen):plants.length)+'</text><text x="150" y="118" font-size="12" fill="#9CC9AE" text-anchor="middle">'+(hasTel?'mWh generated (latest)':'plants in portfolio')+'</text></svg>'
-  +'<div class="cc26-stats">'
-  +stat("Healthy plants",hc.Healthy+" / "+plants.length,(hc.Warning+hc.Critical)+" need attention")
-  +stat("DC capacity",mw>0?(mw>=10?Math.round(mw):mw.toFixed(2))+" MW":"—","portfolio total")
-  +stat("AC capacity",acMw>0?(acMw>=10?Math.round(acMw):acMw.toFixed(2))+" MW":"—","portfolio total")
-  +(hasTel&&prv!=null?stat("Performance ratio",prv.toFixed(1)+"%","average across plants"):"")
-  +(hasTel&&av!=null
-  ?stat("Availability",av.toFixed(1)+"%",open.length+" open issues · "+crit.length+" critical")
-  :stat("Open issues",open.length,crit.length+" critical · "+od.length+" overdue","m26Nav('issues')"))
-  +stat("Maintenance on time",pmPct==null?"—":pmPct+"%",dueWk+" due this week","m26Nav('pm')")+'</div></div>';
+ const sun='<svg class="cx-sun" viewBox="0 0 120 64" aria-label="Daylight progress"><path d="M8,58 A52,52 0 0 1 112,58" fill="none" stroke="rgba(255,255,255,.18)" stroke-width="5" stroke-linecap="round"/>'+(frac>0?'<path d="M8,58 A52,52 0 0 1 '+(60+52*Math.cos(ang)).toFixed(1)+','+(58-52*Math.sin(ang)).toFixed(1)+'" fill="none" stroke="#F5B821" stroke-width="5" stroke-linecap="round"/><circle cx="'+(60+52*Math.cos(ang)).toFixed(1)+'" cy="'+(58-52*Math.sin(ang)).toFixed(1)+'" r="6" fill="#FCD34D" stroke="#0B4F2C" stroke-width="2"/>':'')+'</svg>';
+ h+='<section class="cx-hero"><div class="cx-hero-main"><div class="cx-date">'+sun+'<span>'+now.toLocaleDateString(undefined,{weekday:"long",day:"numeric",month:"long"})+'</span></div>'
+  +'<h1>'+greet+(who?', '+esc(who):'')+'</h1>'
+  +'<p class="cx-pulse">'+(pulse.length?pulse.join(' · ')+'.':'Everything is on track across '+plants.length+' plant'+(plants.length===1?'':'s')+'.')+'</p>'
+  +'<div class="cx-prio">'+(pri.length?pri.map(x=>'<button type="button" class="cx-pp '+x[2]+'" onclick="'+x[3]+'"><b>'+x[0]+'</b> '+x[1]+'</button>').join(""):'<span class="cx-pp ok">✓ All clear — nothing urgent today</span>')+'</div>'
+  +'<div class="cx-cap"><span><small>Plants</small><b>'+plants.length+'</b></span><span><small>DC capacity</small><b>'+mwTxt(mw)+'</b></span><span><small>AC capacity</small><b>'+mwTxt(acMw)+'</b></span>'
+  +(hasTel?'<span><small>Generation (latest)</small><b>'+fmtN(gen)+' mWh</b></span>':'')+(hasTel&&prv!=null?'<span><small>Performance ratio</small><b>'+prv.toFixed(1)+'%</b></span>':'')+(hasTel&&av!=null?'<span><small>Availability</small><b>'+av.toFixed(1)+'%</b></span>':'')+'</div></div>';
+ const kpi=(cls,label,val,sub,visual,on)=>'<div class="cx-kpi '+cls+'"'+nav(on)+'><div class="cx-kpi-top"><span>'+label+'</span>'+(on?'<em aria-hidden="true">→</em>':'')+'</div><div class="cx-kpi-v">'+val+'</div>'+visual+'<div class="cx-kpi-s">'+sub+'</div></div>';
+ h+='<div class="cx-kpis">'
+  +kpi("k-health","Plant health",'<b>'+hc.Healthy+'</b><small>/ '+plants.length+' healthy</small>',(hc.Warning+hc.Critical)?(hc.Critical?hc.Critical+' critical · ':'')+hc.Warning+' warning':'No plant needs attention',seg([{v:hc.Healthy,c:"#34D399",l:"Healthy"},{v:hc.Warning,c:"#FBBF24",l:"Warning"},{v:hc.Critical,c:"#F87171",l:"Critical"}]),"m26Nav('plants')")
+  +kpi("k-issues","Open issues",'<b>'+open.length+'</b><small>'+crit.length+' critical</small>',od.length+' overdue · '+un.length+' unassigned',seg([{v:crit.length,c:"#F87171",l:"Critical"},{v:med,c:"#60A5FA",l:"Medium"},{v:low,c:"#CBD5E1",l:"Low"}]),"m26Nav('issues')")
+  +kpi("k-pm","Maintenance on time",'<b>'+(pmPct==null?'—':pmPct+'%')+'</b>',dueWk+' due this week'+(tOd.length?' · '+tOd.length+' late':''),'<div class="cx-bar"><i style="width:'+(pmPct||0)+'%;background:#34D399"></i></div>',"m26Nav('pm')")
+  +kpi("k-wash","Washing on track",'<b>'+(ws.cycle?(ws.pct==null?'—':ws.pct+'%'):(wPct==null?'—':wPct+'%'))+'</b>',ws.cycle?(ws.late.length?ws.late.length+' behind deadline':'all plants on track')+' · '+ws.done+' month done':wRed+' tables overdue','<div class="cx-bar"><i style="width:'+((ws.cycle?ws.pct:wPct)||0)+'%;background:#38BDF8"></i></div>',"m26Nav('wash')")
+  +'</div></section>';
+
+ /* ---- needs you now + plants needing attention ---- */
  const items=[],f=S.m26Need||"all";
  open.slice().sort((a,b)=>(SEV_RANK[a.severity]??9)-(SEV_RANK[b.severity]??9)||issueAgeDays(b)-issueAgeDays(a))
   .filter(t=>t.severity==="Critical"||isOverdueIssue(t)||!t.assignee).slice(0,5).forEach(t=>{
-   const p=plantRec(t.plant),tag=t.severity==="Critical"?"Critical":isOverdueIssue(t)?"Overdue":"Unassigned";
-   items.push({g:"issues",cls:t.severity==="Critical"?"bad":"warn",ico:t.assignee?"⚠":"⚑",
-    title:(t.vertical||"Issue")+(t.desc?" — "+t.desc:""),sub:t.id+" · "+(p?p.id:t.plant)+(t.equip&&t.equip!=="—"?" · "+t.equip:"")+" · "+issueAgeDays(t)+"d · "+tag+((etcInfo(t)||{}).txt?" · "+etcInfo(t).txt:""),
+   const p=plantRec(t.plant),tag=t.severity==="Critical"?"Critical":isOverdueIssue(t)?"Overdue":"Unassigned",e=etcInfo(t);
+   items.push({g:"issues",cls:t.severity==="Critical"?"bad":"warn",ico:t.assignee?"⚠":"⚑",kind:"Issue",
+    title:(t.vertical||"Issue")+(t.desc?" — "+t.desc:""),meta:[t.id,p?p.id:t.plant,issueAgeDays(t)+"d old"].concat(t.equip&&t.equip!=="—"?[t.equip]:[]),
+    tags:[[tag,t.severity==="Critical"||tag==="Overdue"?"bad":"warn"]].concat(t.assignee?[[t.assignee,"mute"]]:[]).concat(e?[[e.txt,e.cls==="bad"?"bad":e.cls==="warn"?"warn":"mute"]]:[]),
     btn:t.assignee||AUTH_IDENTITY.role!=="O&M Head"?"":'<button class="bt p" onclick="m26Nav(\'issue\','+m26Js(t.id)+')">Assign</button>',
     open:'<button class="bt'+(t.assignee?' p':'')+'" onclick="m26Nav(\'issue\','+m26Js(t.id)+')">Open</button>'});});
  const resolved=issues.filter(t=>t.status==="Resolved").length;
- if(resolved)items.push({g:"issues",cls:"ok",ico:"✓",title:resolved+" resolved issue"+(resolved===1?"":"s")+" awaiting closure",sub:"Site issues · review evidence and close",btn:"",open:'<button class="bt p" onclick="m26Nav(\'issues\')">Review</button>'});
- tOd.sort((a,b)=>taskOD(b)-taskOD(a)).slice(0,2).forEach(t=>items.push({g:"pm",cls:"warn",ico:"🛠",title:t.name,sub:"Maintenance · "+(plantRec(t.plant)?plantRec(t.plant).id:t.plant)+" · "+taskOD(t)+" days late",btn:"",open:'<button class="bt p" onclick="m26Nav(\'pm\')">Open</button>'}));
- if(ws.cycle)ws.late.slice(0,3).forEach(w=>items.push({g:"wash",cls:w.overdue_bucket==="7d"?"bad":"warn",ico:"💧",title:"Washing cycle "+(w.overdue_cycle||w.current_cycle)+" is "+w.overdue_days+" day"+(w.overdue_days===1?"":"s")+" late",sub:"Washing · "+w.site_code+" · "+w.plant+" · "+(w.assignee_name||"no Assignee"),btn:"",open:'<button class="bt p" onclick="m26OpenWash('+m26Js(w.plant_id)+')">Open</button>'}));
- else Object.entries(wByPlant).filter(([,w])=>w.red>0).sort((a,b)=>b[1].red-a[1].red).slice(0,2).forEach(([pn,w])=>items.push({g:"wash",cls:"info",ico:"💧",title:w.red+" table"+(w.red===1?"":"s")+" past wash cycle",sub:"Washing · "+(plantRec(pn)?plantRec(pn).id:pn),btn:"",open:'<button class="bt p" onclick="m26Nav(\'wash\','+m26Js(pn)+')">Plan wash</button>'}));
- const shown=items.filter(i=>f==="all"||i.g===f);
- const chip=(id,l)=>'<button type="button" class="chip'+(f===id?" on":"")+'" onclick="m26Need(\''+id+'\')">'+l+'</button>';
- h+='<div class="cc26-card"><div class="cc26-row0"><b>Needs you now</b><span class="cc26-n">'+items.length+'</span><div class="cc26-chips">'+chip("all","All")+chip("issues","Issues")+chip("pm","Maintenance")+chip("wash","Washing")+'</div></div>'
-  +(shown.length?shown.map(i=>'<div class="cc26-it"><div class="ic '+i.cls+'">'+i.ico+'</div><div class="tx"><div>'+esc(String(i.title).slice(0,80))+'</div><div class="sb">'+esc(i.sub)+'</div></div>'+i.btn+i.open+'</div>').join(""):'<div class="cc26-clear">All clear. Nothing needs attention right now.</div>')+'</div>';
+ if(resolved)items.push({g:"issues",cls:"ok",ico:"✓",kind:"Issue",title:resolved+" resolved issue"+(resolved===1?"":"s")+" awaiting closure",meta:["Review evidence and close"],tags:[],btn:"",open:'<button class="bt p" onclick="m26Nav(\'issues\')">Review</button>'});
+ tOd.sort((a,b)=>taskOD(b)-taskOD(a)).slice(0,2).forEach(t=>items.push({g:"pm",cls:"warn",ico:"🛠",kind:"Maintenance",title:t.name,meta:[plantRec(t.plant)?plantRec(t.plant).id:t.plant],tags:[[taskOD(t)+" days late","warn"]],btn:"",open:'<button class="bt p" onclick="m26Nav(\'pm\')">Open</button>'}));
+ if(ws.cycle)ws.late.slice(0,3).forEach(w=>items.push({g:"wash",cls:w.overdue_bucket==="7d"?"bad":"warn",ico:"💧",kind:"Washing",title:"Washing cycle "+(w.overdue_cycle||w.current_cycle)+" is "+w.overdue_days+" day"+(w.overdue_days===1?"":"s")+" late",meta:[w.site_code,w.plant],tags:[[w.assignee_name||"no Assignee",w.assignee_name?"mute":"warn"]],btn:"",open:'<button class="bt p" onclick="m26OpenWash('+m26Js(w.plant_id)+')">Open</button>'}));
+ else Object.entries(wByPlant).filter(([,w])=>w.red>0).sort((a,b)=>b[1].red-a[1].red).slice(0,2).forEach(([pn,w])=>items.push({g:"wash",cls:"info",ico:"💧",kind:"Washing",title:w.red+" table"+(w.red===1?"":"s")+" past wash cycle",meta:[plantRec(pn)?plantRec(pn).id:pn],tags:[],btn:"",open:'<button class="bt p" onclick="m26Nav(\'wash\','+m26Js(pn)+')">Plan wash</button>'}));
+ const shown=items.filter(i=>f==="all"||i.g===f),cnt=g=>items.filter(i=>i.g===g).length;
+ const chip=(id,l,n)=>'<button type="button" class="cx-chip'+(f===id?" on":"")+'" aria-pressed="'+(f===id)+'" onclick="m26Need(\''+id+'\')">'+l+(n!=null?' <span>'+n+'</span>':'')+'</button>';
+ h+='<div class="cx-grid"><section class="cx-card cx-need"><header><div><h2>Needs you now</h2><p>Highest priority first</p></div><span class="cx-count">'+items.length+'</span></header>'
+  +'<div class="cx-chips">'+chip("all","All",items.length)+chip("issues","Issues",cnt("issues"))+chip("pm","Maintenance",cnt("pm"))+chip("wash","Washing",cnt("wash"))+'</div>'
+  +(shown.length?'<div class="cx-list">'+shown.map(i=>'<div class="cx-it '+i.cls+'"><div class="ic">'+i.ico+'</div><div class="tx"><div class="t">'+esc(String(i.title).slice(0,90))+'</div><div class="m"><span class="k">'+esc(i.kind)+'</span>'+i.meta.map(x=>'<span>'+esc(x)+'</span>').join("")+i.tags.map(x=>'<em class="'+x[1]+'">'+esc(x[0])+'</em>').join("")+'</div></div><div class="ac">'+i.btn+i.open+'</div></div>').join("")+'</div>':'<div class="cx-clear">✓ All clear. Nothing needs attention right now.</div>')+'</section>';
 
- /* ---- Plant health: worst first ---- */
  {const rows=plants.map(p=>{
    const oi=open.filter(t=>t.plant===p.name),c=oi.filter(t=>t.severity==="Critical").length,b=oi.filter(isOverdueIssue).length,u=oi.filter(t=>!t.assignee).length;
    const cw=ws.byName[p.name],w=wByPlant[p.name],wp=ws.cycle?(cw&&typeof cw.weekly_compliance_percent==="number"?cw.weekly_compliance_percent:null):(w&&w.n?Math.round(100*w.ok/w.n):null),pm=tOd.filter(t=>t.plant===p.name).length;
    return{p,n:oi.length,c,b,u,wp,pm,score:c*5+b*3+u*2+pm*2+(wp!=null&&wp<WASH_TH?2:0)};
-  }).filter(r=>r.score>0).sort((a,b)=>b.score-a.score).slice(0,8);
-  const chip=(v,cls)=>v?'<span class="cc26-n2 '+cls+'">'+v+'</span>':'<span class="cc26-n2 z">0</span>';
-  h+='<div class="cc26-card"><div class="cc26-row0"><b>Plants needing attention</b><span class="sb" style="margin-left:auto">worst first · click a plant</span></div>'
-   +(rows.length?'<div style="overflow-x:auto"><table class="cc26-ph"><thead><tr><th>Plant</th><th>Open</th><th>Critical</th><th>Overdue</th><th>No owner</th><th>Wash</th><th>PM late</th></tr></thead><tbody>'
-    +rows.map(r=>'<tr onclick="m26Nav(\'plant\','+m26Js(r.p.id)+')"><td><b>'+esc(r.p.name)+'</b></td><td>'+r.n+'</td><td>'+chip(r.c,"bad")+'</td><td>'+chip(r.b,"bad")+'</td><td>'+chip(r.u,"warn")+'</td><td>'+(r.wp==null?'<span class="sb">—</span>':'<span class="cc26-n2 '+(r.wp>=WASH_TH?"ok":"bad")+'">'+r.wp+'%</span>')+'</td><td>'+chip(r.pm,"warn")+'</td></tr>').join("")+'</tbody></table></div>'
-    :'<div class="cc26-clear">All plants are running clean.</div>')+'</div>';}
+  }).filter(r=>r.score>0).sort((a,b)=>b.score-a.score).slice(0,8),top=Math.max(1,...rows.map(r=>r.score));
+  const tag=(v,l,cls)=>v?'<em class="'+cls+'">'+v+' '+l+'</em>':'';
+  h+='<section class="cx-card cx-plants"><header><div><h2>Plants needing attention</h2><p>Worst first · click a plant</p></div><button type="button" class="cx-link" onclick="m26Nav(\'plants\')">All plants →</button></header>'
+   +(rows.length?'<div class="cx-plist">'+rows.map(r=>{const tone=r.c||r.b?"bad":"warn";return '<div class="cx-prow '+tone+'"'+nav("m26Nav('plant',"+m26Js(r.p.id).replace(/&quot;/g,"'")+")")+'><div class="nm"><b>'+esc(r.p.name)+'</b><small>'+esc(r.p.id)+' · '+r.n+' open</small></div><div class="tags">'+tag(r.c,"critical","bad")+tag(r.b,"overdue","bad")+tag(r.u,"no owner","warn")+tag(r.pm,"PM late","warn")+(r.wp!=null?'<em class="'+(r.wp>=WASH_TH?"ok":"bad")+'">wash '+r.wp+'%</em>':'')+'</div><div class="sc"><i style="width:'+Math.round(r.score/top*100)+'%"></i></div></div>'}).join("")+'</div>'
+    :'<div class="cx-clear">✓ All plants are running clean.</div>')+'</section></div>';}
+
+ /* ---- work lanes: issues · maintenance · washing ---- */
+ const lane=(cls,ico,title,big,bigSub,parts,on,cta)=>'<section class="cx-card cx-lane '+cls+'"><header><span class="cx-lane-ic">'+ico+'</span><h2>'+title+'</h2><button type="button" class="cx-link" onclick="'+on+'">'+cta+' →</button></header><div class="cx-lane-big"><b>'+big+'</b><span>'+bigSub+'</span></div>'+seg(parts)+'<ul class="cx-legend">'+parts.map(p=>'<li><i style="background:'+p.c+'"></i>'+esc(p.l)+'<b>'+p.v+'</b></li>').join("")+'</ul></section>';
+ h+='<div class="cx-lanes">'
+  +lane("l-issues","⚠","Site issues",open.length,"open",[{l:"Critical",v:crit.length,c:"#DC4C3E"},{l:"Medium",v:med,c:"#3B82F6"},{l:"Low",v:low,c:"#94A3B8"}],"m26Nav('issues')","Open register")
+  +lane("l-pm","🛠","Maintenance",pmPct==null?"—":pmPct+"%","on time",[{l:"Done",v:tDone,c:"#16A34A"},{l:"Overdue",v:tOd.length,c:"#DC4C3E"},{l:"Upcoming",v:Math.max(0,tasks.length-tDone-tOd.length),c:"#CBD5D0"}],"m26Nav('pm')","Open planner")
+  +(ws.cycle?lane("l-wash","💧","Panel washing",ws.pct==null?"—":ws.pct+"%","plants on track",[{l:"On track",v:Math.max(0,ws.ok-ws.done),c:"#16A34A"},{l:"Month done",v:ws.done,c:"#0E9F6E"},{l:"Behind deadline",v:ws.late.length,c:"#DC4C3E"}],"m26Nav('wash')","Open washing")
+   :lane("l-wash","💧","Panel washing",wPct==null?"—":wPct+"%","tables compliant",[{l:"Compliant",v:wOk,c:"#16A34A"},{l:"Overdue",v:wRed,c:"#DC4C3E"},{l:"Due soon",v:Math.max(0,wash.length-wOk-wRed),c:"#F5C76B"}],"m26Nav('wash')","Open washing"))
+  +'</div>';
+
+ /* ---- team workload + generation ---- */
  const load={};open.forEach(t=>{const k=t.assignee||"Unassigned";load[k]=(load[k]||0)+1});
  const lrows=Object.entries(load).sort((a,b)=>b[1]-a[1]).slice(0,6),lmax=Math.max(1,...lrows.map(x=>x[1]));
+ h+='<div class="cx-grid'+(hasTel?'':' one')+'"><section class="cx-card cx-team"><header><div><h2>Team workload</h2><p>Open issues per person</p></div></header>'
+  +(lrows.length?lrows.map(([n,c])=>'<div class="cc26-wl"><span class="av'+(n==="Unassigned"?' un':'')+'">'+(n==="Unassigned"?"⚑":esc(ccIni(n)))+'</span><div class="b"><div>'+esc(n)+'</div><div class="bar"><i style="width:'+Math.round(c/lmax*100)+'%;background:'+(n==="Unassigned"?"#DC4C3E":c/lmax>.7?"#D97706":"#16A34A")+'"></i></div></div><b>'+c+'</b></div>').join(""):'<div class="cx-clear">No open issues.</div>')+'</section>';
  if(hasTel){const mx=Math.max(...tel.map(p=>p.generation));
-  h+='<div class="cc26-card"><div class="cc26-row0"><b>Generation by plant</b><span class="sb" style="margin-left:auto">mWh · latest telemetry</span></div><div class="cc26-gen">'
-   +tel.slice().sort((a,b)=>b.generation-a.generation).slice(0,8).map(p=>'<div class="gc"><span class="v">'+fmtN(p.generation)+'</span><i style="height:'+Math.max(6,Math.round(p.generation/mx*110))+'px"></i><span class="n" title="'+esc(p.name)+'">'+esc(p.id)+'</span></div>').join("")+'</div></div>';}
- h+='<div class="m26-dnrow m26-dn3">'+m26Donut("Issue priority","open issues",[{l:"Critical",v:crit.length,c:"#DC4C3E"},{l:"Medium",v:open.filter(t=>normalizeIssueSeverity(t.severity)==="Medium").length,c:"#3B82F6"},{l:"Low",v:open.filter(t=>normalizeIssueSeverity(t.severity)==="Low").length,c:"#94A3B8"}],open.length,"open","m26Nav('issues')")
-  +m26Donut("Maintenance","work orders",[{l:"Done",v:tDone,c:"#16A34A"},{l:"Overdue",v:tOd.length,c:"#DC4C3E"},{l:"Upcoming",v:Math.max(0,tasks.length-tDone-tOd.length),c:"#CBD5D0"}],pmPct==null?"—":pmPct+"%","on time","m26Nav('pm')")
-  +(ws.cycle?m26Donut("Panel washing","plants",[{l:"On track",v:ws.ok-ws.done,c:"#16A34A"},{l:"Month done",v:ws.done,c:"#0E9F6E"},{l:"Behind deadline",v:ws.late.length,c:"#DC4C3E"}],ws.pct==null?"—":ws.pct+"%","on track","m26Nav('wash')")
-   :m26Donut("Panel washing","all tables",[{l:"Compliant",v:wOk,c:"#16A34A"},{l:"Overdue",v:wRed,c:"#DC4C3E"},{l:"Due soon",v:Math.max(0,wash.length-wOk-wRed),c:"#FAD9A0"}],wPct==null?"—":wPct+"%","compliant","m26Nav('wash')"))+'</div>';
-  h+='<div class="cc26-one"><div class="cc26-card"><div class="cc26-row0"><b>Team workload</b><span class="sb" style="margin-left:auto">open issues</span></div>'
-  +(lrows.length?lrows.map(([n,c])=>'<div class="cc26-wl"><span class="av'+(n==="Unassigned"?' un':'')+'">'+(n==="Unassigned"?"⚑":esc(ccIni(n)))+'</span><div class="b"><div>'+esc(n)+'</div><div class="bar"><i style="width:'+Math.round(c/lmax*100)+'%;background:'+(n==="Unassigned"?"#DC4C3E":c/lmax>.7?"#D97706":"#16A34A")+'"></i></div></div><b>'+c+'</b></div>').join(""):'<div class="cc26-clear">No open issues.</div>')+'</div></div></div>';
+  h+='<section class="cx-card"><header><div><h2>Generation by plant</h2><p>mWh · latest telemetry</p></div></header><div class="cc26-gen">'
+   +tel.slice().sort((a,b)=>b.generation-a.generation).slice(0,8).map(p=>'<div class="gc"><span class="v">'+fmtN(p.generation)+'</span><i style="height:'+Math.max(6,Math.round(p.generation/mx*110))+'px"></i><span class="n" title="'+esc(p.name)+'">'+esc(p.id)+'</span></div>').join("")+'</div></section>';}
+ h+='</div></div>';
  return h;
 }
 

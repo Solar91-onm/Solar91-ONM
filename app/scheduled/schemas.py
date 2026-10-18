@@ -149,8 +149,42 @@ class WashingDailyReportRequest(BaseModel):
         return self
 
 
+class WashingSheetEntry(BaseModel):
+    """One day of a cycle sheet: how many tables were cleaned that day, or why nothing was done."""
+    report_date: date
+    tables_cleaned: int = Field(default=0, ge=0, le=5000)
+    job_status: Literal["Done", "Not done"]
+    exception_reason: Literal["Rain", "Water shortage", "Equipment breakdown", "Access restriction", "Safety stand-down", "Other"] | None = None
+    remarks: str | None = Field(default=None, max_length=4000)
+
+    @model_validator(mode="after")
+    def validate_entry(self):
+        if self.job_status == "Not done" and self.exception_reason is None:
+            raise ValueError("Choose an exception reason for work that was not done")
+        if self.job_status == "Done" and self.exception_reason is not None:
+            raise ValueError("An exception reason is only valid when the job was not done")
+        if self.job_status == "Done" and self.tables_cleaned < 1:
+            raise ValueError("Enter how many tables were cleaned")
+        if self.job_status == "Not done" and self.tables_cleaned:
+            raise ValueError("A not-done exception cannot include cleaned tables")
+        return self
+
+
+class WashingSheetRequest(BaseModel):
+    """Several days of one plant saved together (all or nothing)."""
+    plant_id: UUID
+    entries: list[WashingSheetEntry] = Field(min_length=1, max_length=62)
+
+
 class WashingReportReviewRequest(BaseModel):
     decision: Literal["Confirm", "Reject"]
+    remarks: str | None = Field(default=None, max_length=4000)
+
+
+class WashingBulkConfirmRequest(BaseModel):
+    """Confirm several pending daily reports of one plant at once (all or nothing)."""
+    plant_id: UUID
+    report_ids: list[UUID] = Field(min_length=1, max_length=100)
     remarks: str | None = Field(default=None, max_length=4000)
 
 

@@ -51,11 +51,17 @@ class Settings(BaseSettings):
     # Persistent hosted service: keep the application-side DB pool deliberately small.
     db_pool_size: int = 5
     db_max_overflow: int = 2
-    db_pool_recycle_seconds: int = 300
+    # Replace pooled connections after 30 minutes. Each new connection costs several network round trips (TCP, TLS,
+    # login), so recycling every few minutes made page loads pay for reconnects. Dead connections are still caught by
+    # the health check below, whatever this value is.
+    db_pool_recycle_seconds: int = 1800
     db_pool_timeout_seconds: int = 30  # how long a request waits for a free connection before failing
     # True = test each pooled connection before use (one extra round trip per request; safest). Set DB_POOL_PRE_PING=false
     # only after measuring that the round trip matters AND the pooler does not drop idle connections.
     db_pool_pre_ping: bool = True
+    # With pre-ping on, skip the test for a connection used within this many seconds (it cannot have gone stale yet);
+    # this removes one database round trip from most requests of a page load. 0 = test before every use, as before.
+    db_ping_idle_seconds: float = 10
     slow_request_ms: int = 1000  # requests slower than this are logged with their database query count/time
     state_sync_enabled: bool = True
     # 0 = send every issue to the browser. Set e.g. 365 to leave out tickets closed more than a year ago
