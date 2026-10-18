@@ -14,7 +14,7 @@ services:
       - key: DATABASE_URL
         sync: false
       - key: SUPABASE_URL
-        value: https://bszyxstmdywwexelaxaq.supabase.co
+        value: https://rzonysizyladirptllns.supabase.co
       - key: SUPABASE_SERVICE_ROLE_KEY
         sync: false
       - key: CLERK_PUBLISHABLE_KEY
