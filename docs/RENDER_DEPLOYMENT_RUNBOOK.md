@@ -62,7 +62,7 @@ The service reached a PostgreSQL database that has no Solar91 tables. This usual
 
 - Startup preflight now checks for the core tables (`users`, `plants`, `issues`, `om_tasks`), logs `ERROR: ... Solar91 tables are missing` with the user/host it used, keeps the portal unavailable, and re-checks with back-off. It becomes ready by itself once the schema exists; no redeploy is needed.
 - API requests that hit a missing core table return `503 database_schema_missing` with one concise log line per minute instead of a traceback on every refresh.
-- To fix: in Supabase SQL editor for the intended project run `select to_regclass('public.users');`. `NULL` means the schema is absent. Confirm you are on the right project first, then apply the approved migrations in order as described above. Moving existing data from the old project is a separate, explicitly approved step.
+- To fix: in Supabase SQL editor for the intended project run `select to_regclass('public.users');`. Or, from a machine whose `.env` has that project's `DATABASE_URL`: `python scripts/migrate.py --check` (read-only). For a brand-new empty project, `python scripts/migrate.py` applies every migration in one transaction; it refuses to run when Solar91 tables already exist. `NULL` means the schema is absent. Confirm you are on the right project first, then apply the approved migrations in order as described above. Moving existing data from the old project is a separate, explicitly approved step.
 
 ## Deploy and smoke test
 
