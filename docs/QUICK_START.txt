@@ -1,9 +1,0 @@
-SOLAR91 O&M COMMAND CENTER - QUICK START
-========================================
-1. Install Python 3.12 or newer (tick "Add Python to PATH").
-2. Copy .env.example to .env and fill in your Clerk, database and Supabase Storage settings.
-3. On Windows, double-click launchers\START_SOLAR91_WINDOWS.bat
-4. Open http://127.0.0.1:8000 and sign in.
-
-Never share your .env file.
-The full guide is in README.md.

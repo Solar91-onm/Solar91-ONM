@@ -1,4 +1,0 @@
--r requirements.txt
-pytest==8.4.2
-pytest-cov==6.2.1
-playwright==1.54.0
