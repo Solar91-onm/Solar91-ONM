@@ -1,0 +1,344 @@
+[
+  {
+    "siteCode": "KRN01",
+    "plantName": "Kerli Nadi ",
+    "projectCompany": "Solar91 Project Nine Pvt. Ltd.",
+    "commissionedOn": "2024-10-18",
+    "capacitykW": 3159.1,
+    "capacitymW": 3.159,
+    "acCapacitykW": 2520
+  },
+  {
+    "siteCode": "ASA01",
+    "plantName": "Asadi",
+    "projectCompany": "Solar91 Project Eight Pvt. Ltd.",
+    "commissionedOn": "2025-03-29",
+    "capacitykW": 3412.41,
+    "capacitymW": 3.412,
+    "acCapacitykW": 2520
+  },
+  {
+    "siteCode": "IND01",
+    "plantName": "Indora",
+    "projectCompany": "Solar91 Project Six Pvt. Ltd.",
+    "commissionedOn": "2024-10-22",
+    "capacitykW": 1663.2,
+    "capacitymW": 1.663,
+    "acCapacitykW": 1330
+  },
+  {
+    "siteCode": "JOD01",
+    "plantName": "Jodhyasi",
+    "projectCompany": "Solar91 Project Four Pvt. Ltd.",
+    "commissionedOn": "2024-12-06",
+    "capacitykW": 3361.2,
+    "capacitymW": 3.361,
+    "acCapacitykW": 2680
+  },
+  {
+    "siteCode": "KH001",
+    "plantName": "Khorandi",
+    "projectCompany": "Solar91 Project Three Pvt. Ltd.",
+    "commissionedOn": "2024-12-26",
+    "capacitykW": 3357.2,
+    "capacitymW": 3.357,
+    "acCapacitykW": 2680
+  },
+  {
+    "siteCode": "MUW01",
+    "plantName": "Muwana",
+    "projectCompany": "Solar91 Project Five Pvt. Ltd.",
+    "commissionedOn": "2025-02-18",
+    "capacitykW": 2371.6,
+    "capacitymW": 2.372,
+    "acCapacitykW": 1890
+  },
+  {
+    "siteCode": "ALN01",
+    "plantName": "Alaniyawas 01",
+    "projectCompany": "Solar91 Project Fourteen pvt. Ltd.",
+    "commissionedOn": "2025-04-25",
+    "capacitykW": 3295.0,
+    "capacitymW": 3.295,
+    "acCapacitykW": 2630
+  },
+  {
+    "siteCode": "ALN02",
+    "plantName": "Alaniyawas 02",
+    "projectCompany": "Solar91 Project Sixteen pvt. Ltd.",
+    "commissionedOn": "2025-05-26",
+    "capacitykW": 1971.2,
+    "capacitymW": 1.971,
+    "acCapacitykW": 1560
+  },
+  {
+    "siteCode": "ALN03",
+    "plantName": "Alaniyawas 03",
+    "projectCompany": "Solar91 Project Fourteen pvt. Ltd.",
+    "commissionedOn": "2025-04-25",
+    "capacitykW": 3803.8,
+    "capacitymW": 3.804,
+    "acCapacitykW": 3040
+  },
+  {
+    "siteCode": "KKN01",
+    "plantName": "KANKARLANADA 01",
+    "projectCompany": "Solar91 Project Fifteen pvt. Ltd.",
+    "commissionedOn": "2025-05-12",
+    "capacitykW": 3148.47,
+    "capacitymW": 3.148,
+    "acCapacitykW": 2520
+  },
+  {
+    "siteCode": "KKN03",
+    "plantName": "KANKARLANADA 03",
+    "projectCompany": "Solar91 Project Fifteen pvt. Ltd.",
+    "commissionedOn": "2025-05-12",
+    "capacitykW": 3148.47,
+    "capacitymW": 3.148,
+    "acCapacitykW": 2520
+  },
+  {
+    "siteCode": "PDA01",
+    "plantName": "PADASALA 01",
+    "projectCompany": "Solar91 Project Twenty pvt. Ltd.",
+    "commissionedOn": "2025-05-22",
+    "capacitykW": 3158.82,
+    "capacitymW": 3.159,
+    "acCapacitykW": 2520
+  },
+  {
+    "siteCode": "PDA03",
+    "plantName": "PADASALA 03",
+    "projectCompany": "Solar91 Project Twenty pvt. Ltd.",
+    "commissionedOn": "2025-05-22",
+    "capacitykW": 3158.82,
+    "capacitymW": 3.159,
+    "acCapacitykW": 2520
+  },
+  {
+    "siteCode": "JKD01",
+    "plantName": "JAKHARO KI DHANI 01",
+    "projectCompany": "Solar91 Project Nineteen Pvt. Ltd.",
+    "commissionedOn": "2025-07-19",
+    "capacitykW": 3158.82,
+    "capacitymW": 3.159,
+    "acCapacitykW": 2520
+  },
+  {
+    "siteCode": "JKD02",
+    "plantName": "JAKHARO KI DHANI 02",
+    "projectCompany": "Solar91 Project Nineteen Pvt. Ltd.",
+    "commissionedOn": "2025-07-19",
+    "capacitykW": 3158.82,
+    "capacitymW": 3.159,
+    "acCapacitykW": 2520
+  },
+  {
+    "siteCode": "IMS01",
+    "plantName": "Ishru Mehteb Dhani 01",
+    "projectCompany": "Solar91 Project Twenty Six pvt. Ltd.",
+    "commissionedOn": "2025-08-06",
+    "capacitykW": 3158.82,
+    "capacitymW": 3.159,
+    "acCapacitykW": 2520
+  },
+  {
+    "siteCode": "IMS02",
+    "plantName": "Ishru Mehteb Dhani 02",
+    "projectCompany": "Solar91 Project Twenty Six pvt. Ltd.",
+    "commissionedOn": "2025-08-23",
+    "capacitykW": 3157.02,
+    "capacitymW": 3.157,
+    "acCapacitykW": 2520
+  },
+  {
+    "siteCode": "DDS01",
+    "plantName": "DewDawas 01",
+    "projectCompany": "Solar91 Project Thirty Seven pvt. Ltd.",
+    "commissionedOn": "2025-07-12",
+    "capacitykW": 3433.5,
+    "capacitymW": 3.433,
+    "acCapacitykW": 2740
+  },
+  {
+    "siteCode": "ABH01",
+    "plantName": "ABHANERI 01",
+    "projectCompany": "Solar91 Project Thirty Five pvt. Ltd.",
+    "commissionedOn": "2025-06-25",
+    "capacitykW": 5371.52,
+    "capacitymW": 5.372,
+    "acCapacitykW": 4300
+  },
+  {
+    "siteCode": "MNP01",
+    "plantName": "Meenapada 01",
+    "projectCompany": "Solar91 Project Thirty Five pvt. Ltd.",
+    "commissionedOn": "2025-06-26",
+    "capacitykW": 1968.54,
+    "capacitymW": 1.969,
+    "acCapacitykW": 1570
+  },
+  {
+    "siteCode": "GUL01",
+    "plantName": "Gullana 01",
+    "projectCompany": "Solar91 Project Thirty Seven pvt. Ltd.",
+    "commissionedOn": "2025-07-26",
+    "capacitykW": 1441.9,
+    "capacitymW": 1.442,
+    "acCapacitykW": 1160
+  },
+  {
+    "siteCode": "LKT01",
+    "plantName": "Lakheta 01",
+    "projectCompany": "Solar91 Project Twenty Five pvt. Ltd.",
+    "commissionedOn": "2025-09-13",
+    "capacitykW": 3121.56,
+    "capacitymW": 3.122,
+    "acCapacitykW": 2520
+  },
+  {
+    "siteCode": "JGM01",
+    "plantName": "Jogi Magra 01",
+    "projectCompany": "Solar91 Project Twenty Eight pvt. Ltd.",
+    "commissionedOn": "2025-11-06",
+    "capacitykW": 3129.36,
+    "capacitymW": 3.129,
+    "acCapacitykW": 2520
+  },
+  {
+    "siteCode": "PAL01",
+    "plantName": "Palli 01",
+    "projectCompany": "Solar91 Project Twenty Five pvt. Ltd.",
+    "commissionedOn": "2025-11-10",
+    "capacitykW": 5000,
+    "capacitymW": 5.0,
+    "acCapacitykW": 4000
+  },
+  {
+    "siteCode": "RAM01",
+    "plantName": "Ram Nagar 01",
+    "projectCompany": "Solar91 Project Twenty Nine pvt. Ltd.",
+    "commissionedOn": "2025-11-14",
+    "capacitykW": 3123.9,
+    "capacitymW": 3.124,
+    "acCapacitykW": 2520
+  },
+  {
+    "siteCode": "BST01",
+    "plantName": "Banasthali 01",
+    "projectCompany": "Solar91 Project Thirty Seven pvt. Ltd.",
+    "commissionedOn": "2025-11-14",
+    "capacitykW": 1670.11,
+    "capacitymW": 1.67,
+    "acCapacitykW": 1340
+  },
+  {
+    "siteCode": "AVK01",
+    "plantName": "Avika Nagar 01",
+    "projectCompany": "Solar91 Project Thirty Seven pvt. Ltd.",
+    "commissionedOn": "2025-12-24",
+    "capacitykW": 1871.48,
+    "capacitymW": 1.871,
+    "acCapacitykW": 1500
+  },
+  {
+    "siteCode": "NSR01",
+    "plantName": "Noser",
+    "projectCompany": "Solar91 Project Twenty Four Pvt. Ltd.",
+    "commissionedOn": "2026-01-10",
+    "capacitykW": 4924.14,
+    "capacitymW": 4.924,
+    "acCapacitykW": 4000
+  },
+  {
+    "siteCode": "DMS01",
+    "plantName": "Dharam Sagar 01",
+    "projectCompany": "Solar91 Project Twenty Three Pvt. Ltd.",
+    "commissionedOn": "2026-01-11",
+    "capacitykW": 3150.42,
+    "capacitymW": 3.15,
+    "acCapacitykW": 2520
+  },
+  {
+    "siteCode": "DMS02",
+    "plantName": "Dharam Sagar 02",
+    "projectCompany": "Solar91 Project Twenty Three Pvt. Ltd.",
+    "commissionedOn": "2026-01-25",
+    "capacitykW": 3120,
+    "capacitymW": 3.12,
+    "acCapacitykW": 2520
+  },
+  {
+    "siteCode": "CRI01",
+    "plantName": "Chirai",
+    "projectCompany": "Solar91 Project Twenty One Pvt. Ltd.",
+    "commissionedOn": "2026-01-16",
+    "capacitykW": 1687.4,
+    "capacitymW": 1.687,
+    "acCapacitykW": 2520
+  },
+  {
+    "siteCode": "RNR01",
+    "plantName": "Raneri Village",
+    "projectCompany": "Solar91 Project Twenty Nine Pvt. Ltd.",
+    "commissionedOn": "2026-02-01",
+    "capacitykW": 3173.17,
+    "capacitymW": 3.173,
+    "acCapacitykW": 2520
+  },
+  {
+    "siteCode": "NKD01",
+    "plantName": "Nimeda Ki Dhani ",
+    "projectCompany": "Solar91 Project Seventeen Pvt. Ltd.",
+    "commissionedOn": "2026-03-16",
+    "capacitykW": 1953.85,
+    "capacitymW": 1.954,
+    "acCapacitykW": 1560
+  },
+  {
+    "siteCode": "RJV01",
+    "plantName": "Rajveer Nagar",
+    "projectCompany": "Solar91 Project Twenty Nine Pvt. Ltd.",
+    "commissionedOn": "2026-03-28",
+    "capacitykW": 5000.84,
+    "capacitymW": 5.001,
+    "acCapacitykW": 4000
+  },
+  {
+    "siteCode": "RRP01",
+    "plantName": "Ramnagar Rampuriya ",
+    "projectCompany": "Solar91 Project Thirty pvt. Ltd.",
+    "commissionedOn": "2026-04-08",
+    "capacitykW": 3139.22,
+    "capacitymW": 3.139,
+    "acCapacitykW": 2520
+  },
+  {
+    "siteCode": "HLM01",
+    "plantName": "Halli Maysore",
+    "projectCompany": "Solar91 Project Fourty one pvt. Ltd.",
+    "commissionedOn": "2026-07-18",
+    "capacitykW": 3555.58,
+    "capacitymW": 3.556,
+    "acCapacitykW": 3543
+  },
+  {
+    "siteCode": "TNF01",
+    "plantName": "Tinwri Fanta",
+    "projectCompany": "Solar91 Project Thirty pvt. Ltd.",
+    "commissionedOn": "2026-08-14",
+    "capacitykW": 1466.4,
+    "capacitymW": 1.466,
+    "acCapacitykW": 2520
+  },
+  {
+    "siteCode": "BHT01",
+    "plantName": "Bohat",
+    "projectCompany": "Solar91 Project Thirty pvt. Ltd.",
+    "commissionedOn": "2026-08-27",
+    "capacitykW": null,
+    "capacitymW": null,
+    "acCapacitykW": 2000
+  }
+]

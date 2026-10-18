@@ -1,0 +1,76 @@
+/* Solar91 design layer — loaded last. Refines spacing, tables, controls, focus and motion for every page.
+   It never touches the brand block (.side-brand / .side-mark / .side-title) or the company name. */
+
+/* ---- 1. Calm motion: the portal repaints often, so nothing may replay or jump on each repaint ---- */
+.panel,.card,.kpi,.ring,.ring-card,.metric{animation:none!important}
+.panel:hover,.card:hover,.kpi:hover,.ring-card:hover{transform:none!important}
+.cc-line,.cc-area,.viz-bar-track i,.oi-aging-row i{animation:none!important}
+.donut-seg2{transition:opacity .18s,stroke-width .15s}
+@media (prefers-reduced-motion:reduce){*{transition-duration:.01ms!important;animation-duration:.01ms!important}}
+
+/* ---- 2. Type & numbers ---- */
+body{line-height:1.45;text-rendering:optimizeLegibility}
+.content h1{letter-spacing:-.02em}
+.content h2{letter-spacing:-.01em}
+table,.metric .v,.cc26-stat .v,.kpi-value,.oi-kpis *,.cc26-n,.cc26-n2,.side-badge{font-variant-numeric:tabular-nums}
+.kpi-label,.lbl,th{letter-spacing:.05em}
+
+/* ---- 3. Cards ---- */
+.panel,.metric,.cc26-card{border-color:#E1E8E4;border-radius:14px}
+.content>div>.panel:first-child,.content>div>*+.panel{margin-top:0}
+
+/* ---- 4. Tables: readable rows, clear hover, tidy numbers ---- */
+.content table th{background:#F5F8F6;color:#5B6862;font-weight:700;padding:10px 14px;border-bottom:1px solid #E1E8E4}
+.content table td{padding:10px 14px;border-bottom:1px solid #EDF1EE;vertical-align:middle}
+.content table tbody tr:last-child td{border-bottom:none}
+.content table tbody tr.click,.content table tbody tr[data-act]{cursor:pointer}
+.content table tbody tr:hover td{background:#F6FAF7}
+.content table tbody tr.click:active td{background:#EEF6F1}
+.content table.dense td{padding:8px 12px}
+.panel:has(table) th:last-child{background:#F5F8F6}
+.panel:has(table) tbody tr:hover td:last-child{background:#F6FAF7}
+
+/* ---- 5. Buttons & inputs: one size, one focus ring ---- */
+.btn{transition:background-color .15s,border-color .15s,color .15s,box-shadow .15s,transform .05s;min-height:34px}
+.btn.sm{min-height:28px}
+.btn:active:not(:disabled){transform:translateY(1px)}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.btn.o:hover{background:#F6FAF7}
+.btn.p:hover{box-shadow:0 2px 8px rgba(12,94,42,.28)}
+.inp,.sel,.txt{min-height:36px;transition:border-color .15s,box-shadow .15s}
+.inp:hover,.sel:hover,.txt:hover{border-color:#C9D6CF}
+.inp:focus,.sel:focus,.txt:focus{border-color:var(--primary);box-shadow:0 0 0 3px rgba(12,94,42,.14)}
+.inp::placeholder,.txt::placeholder{color:#9AA6A0}
+:focus-visible{outline:2px solid #22C55E;outline-offset:2px}
+.inp:focus-visible,.sel:focus-visible,.txt:focus-visible{outline:none}
+
+/* ---- 6. Badges & pills: same height, same weight ---- */
+.badge{line-height:1.2;font-weight:700;letter-spacing:.01em}
+.pill{line-height:1.2}
+.pillsm{padding:4px 10px;font-size:12.5px}
+
+/* ---- 7. Sidebar links (not the brand block) ---- */
+.side-link{transition:background-color .15s,color .15s;position:relative}
+.side-link.active::before{content:"";position:absolute;left:-12px;top:9px;bottom:9px;width:3px;border-radius:0 3px 3px 0;background:var(--sidebar-primary)}
+.side-scroll::-webkit-scrollbar{width:5px}.side-scroll::-webkit-scrollbar-thumb{background:#26322C}
+.side-badge{min-width:20px;text-align:center}
+
+/* ---- 8. Drawers / modals ---- */
+.modal{border-radius:0}
+.modal .field .lbl,.field .lbl{margin-bottom:5px}
+
+/* ---- 9. Page rhythm ---- */
+.content{padding-top:20px}
+.kgrid,.grid4,.kpis4,.kpis8{gap:12px}
+.empty-box,.cc26-clear{color:var(--muted-foreground)}
+
+/* ---- 10. Toast ---- */
+.toast{border-radius:12px;box-shadow:0 12px 32px rgba(10,24,16,.28)}
+
+/* ---- 11. Phones: comfortable tap targets, no sideways page scroll ---- */
+@media (max-width:760px){
+ .content{padding:14px 12px 76px}
+ .btn{min-height:38px}.btn.sm{min-height:34px}
+ .inp,.sel,.txt{min-height:40px;font-size:16px}
+ .content table th,.content table td{padding:9px 10px}
+}

@@ -1,0 +1,302 @@
+/* Shared portal layout: keep navigation and the working area usable on short desktop screens. */
+.sidebar {
+  overflow: hidden;
+}
+
+.side-scroll {
+  min-height: 0;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.side-user {
+  flex-shrink: 0;
+}
+
+.portal-page-stack {
+  width: 100%;
+}
+
+@media (min-width: 901px) {
+  html,
+  body {
+    height: 100%;
+  }
+
+  body {
+    overflow: hidden;
+  }
+
+  .shell {
+    height: 100vh;
+    height: 100dvh;
+    min-height: 0;
+  }
+
+  .main {
+    height: 100vh;
+    height: 100dvh;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .topbar {
+    position: relative;
+    display: grid;
+    grid-template-columns: minmax(155px, 205px) minmax(180px, 1fr) minmax(0, auto);
+    gap: 10px;
+    width: 100%;
+    min-height: 64px;
+    height: auto;
+    padding: 8px 14px;
+  }
+
+  .topbar > div:first-child {
+    min-width: 0 !important;
+  }
+
+  .topbar > div:first-child > div:last-child {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .topbar > div:nth-child(2) {
+    width: 100%;
+    min-width: 0;
+    max-width: none !important;
+  }
+
+  .topbar > div:last-child {
+    min-width: 0;
+    max-width: 100%;
+    gap: 7px !important;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+
+  .topbar > div:last-child > .row {
+    min-width: 0;
+    max-width: 210px;
+  }
+
+  .topbar > div:last-child > .row > div:last-child {
+    min-width: 0;
+    overflow: hidden;
+  }
+
+  .topbar > div:last-child > .row > div:last-child > div:first-child {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .content {
+    min-height: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior-y: contain;
+    scrollbar-gutter: stable;
+  }
+}
+
+@media (min-width: 901px) and (max-width: 1450px) {
+  .topbar {
+    grid-template-columns: minmax(145px, 180px) minmax(150px, 1fr) minmax(0, auto);
+    gap: 7px;
+    padding-right: 10px;
+    padding-left: 10px;
+  }
+
+  .topbar > div:last-child {
+    max-width: min(54vw, 650px);
+  }
+
+  .topbar > div:last-child > select {
+    width: 135px !important;
+  }
+
+  .topbar > div:last-child > input[type="date"] {
+    width: 125px !important;
+  }
+}
+
+@media (min-width: 901px) and (max-width: 1350px) {
+  .topbar {
+    grid-template-columns: minmax(130px, 170px) minmax(150px, 1fr);
+  }
+
+  .topbar > div:last-child {
+    grid-column: 1 / -1;
+    max-width: 100%;
+    justify-content: flex-start;
+  }
+}
+
+@media (min-width: 901px) and (max-height: 900px) {
+  .side-brand {
+    height: 58px;
+  }
+
+  .side-mark img,
+  .side-mark span {
+    width: 38px !important;
+    height: 38px !important;
+  }
+
+  .side-scroll {
+    padding: 7px 10px;
+  }
+
+  .side-label {
+    padding: 7px 9px 3px;
+    font-size: 11px;
+  }
+
+  .side-label:first-child {
+    padding-top: 0;
+  }
+
+  .side-link {
+    min-height: 32px;
+    gap: 8px;
+    margin-bottom: 1px;
+    padding: 6px 10px;
+    font-size: 12px;
+  }
+
+  .side-link svg {
+    width: 15px;
+    height: 15px;
+    flex: 0 0 15px;
+  }
+
+  .side-user {
+    padding: 7px 10px;
+  }
+
+  .side-user .av {
+    width: 28px;
+    height: 28px;
+  }
+
+  .content {
+    padding: 12px 18px 28px;
+  }
+
+  .portal-page-stack {
+    gap: 10px !important;
+  }
+
+  .portal-page-stack > .panel,
+  .portal-page-stack > .card,
+  .portal-page-stack > .metric {
+    padding: 13px;
+  }
+
+  .portal-page-stack .kgrid,
+  .portal-page-stack .kpis4,
+  .portal-page-stack .grid4 {
+    gap: 9px;
+  }
+
+  .portal-page-stack h1 {
+    margin-top: 2px;
+  }
+
+  .portal-page-stack h2 {
+    margin-top: 0;
+    margin-bottom: 4px;
+  }
+}
+
+@media (min-width: 901px) and (max-height: 680px) {
+  .side-brand {
+    height: 50px;
+  }
+
+  .side-mark img,
+  .side-mark span {
+    width: 32px !important;
+    height: 32px !important;
+  }
+
+  .side-scroll {
+    padding-top: 4px;
+    padding-bottom: 4px;
+  }
+
+  .side-label {
+    padding-top: 4px;
+  }
+
+  .side-link {
+    min-height: 28px;
+    padding-top: 4px;
+    padding-bottom: 4px;
+  }
+
+  .content {
+    padding-top: 8px;
+  }
+}
+
+@media (max-width: 900px) {
+  body {
+    overflow-x: hidden;
+  }
+
+  .side-scroll {
+    scrollbar-gutter: auto;
+  }
+
+  .portal-page-stack {
+    gap: 12px !important;
+  }
+}
+
+/* ===== Topbar + frame fit (v12) — header never overlaps; adapts to screen width ===== */
+body .topbar{height:auto !important;min-height:64px !important;flex-shrink:0}
+@media (min-width:901px){
+  body .topbar{display:grid !important;grid-template-columns:minmax(150px,max-content) minmax(0,1fr) max-content !important;
+    grid-template-areas:"title search ctrl" !important;align-items:center !important;column-gap:14px !important;row-gap:8px !important;padding:8px 16px !important}
+  body .topbar > div:first-child{grid-area:title;min-width:0 !important}
+  body .topbar > div:nth-child(2){grid-area:search;width:100%;max-width:560px !important;min-width:0 !important;flex:none !important}
+  body .topbar > div:last-child{grid-area:ctrl;margin:0 !important;display:flex !important;flex-wrap:nowrap !important;align-items:center;justify-content:flex-end;gap:8px !important;max-width:none !important;min-width:0}
+  body .topbar > div:last-child > *{flex:0 0 auto}
+  body .topbar > div:last-child > select{width:150px !important}
+  body .topbar > div:last-child > input[type="date"]{width:134px !important}
+  body .topbar > div:last-child > .row{max-width:200px;min-width:0}
+}
+/* laptops / split screens: title + controls on the first line, search on its own full-width line */
+@media (min-width:901px) and (max-width:1599px){
+  body .topbar{grid-template-columns:minmax(0,1fr) max-content !important;grid-template-areas:"title ctrl" "search search" !important}
+  body .topbar > div:nth-child(2){max-width:none !important}
+}
+@media (min-width:901px) and (max-width:1180px){
+  body .topbar > div:last-child{flex-wrap:wrap !important}
+  body .topbar > div:last-child > select{width:128px !important}
+  body .topbar > div:last-child > input[type="date"]{width:124px !important}
+  body .topbar > div:last-child > .row > div:last-child{display:none}
+}
+/* sidebar gives space back on smaller screens */
+@media (min-width:901px) and (max-width:1366px){
+  .sidebar{width:222px} .main{margin-left:222px}
+  .content{padding-left:16px !important;padding-right:16px !important}
+}
+@media (min-width:901px) and (max-width:1100px){
+  .sidebar{width:204px} .main{margin-left:204px}
+}
+/* phones / tablets */
+@media (max-width:900px){
+  body .topbar{display:flex !important;flex-wrap:wrap !important;align-items:center !important;gap:8px !important;padding:8px 10px !important}
+  body .topbar > div:first-child{order:1;flex:1 1 0 !important;min-width:0 !important}
+  body .topbar > div:last-child{order:2;flex:0 0 auto;margin:0 !important;display:flex !important;align-items:center;gap:6px !important;flex-wrap:nowrap !important}
+  body .topbar > div:nth-child(2){order:3;flex:1 1 100% !important;max-width:none !important;width:100%}
+  body .topbar > div:last-child > select{width:auto !important;max-width:38vw}
+  body .topbar > div:last-child > .row > div:last-child{display:none}
+}
+/* content never pushes the frame wider than the screen */
+.content{min-width:0}
+.content img,.content svg,.content canvas,.content video{max-width:100%}
+.panel,.card,.metric,.kpi{min-width:0}
+.content table{max-width:100%}
+
