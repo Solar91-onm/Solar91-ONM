@@ -346,7 +346,8 @@ def setup_plant(db: Session, user: User, payload: WashingSetupRequest) -> dict:
     config.assigned_user_id = assignee.id
     config.compliance_threshold_percent = payload.compliance_threshold_percent
     db.add(config)
-    table_count = _set_table_count(db, plant, payload.table_count)
+    config.tables_per_cycle = payload.table_count
+    table_count = payload.table_count
 
     db.add(AuditLog(
         user_id=user.id,
@@ -427,7 +428,7 @@ def _build_overview(db: Session, user: User, include_tables: bool = False, repor
             Plant,
             WashingConfig,
             User.display_name,
-            func.coalesce(table_counts_subquery.c.table_count, 0),
+            func.coalesce(WashingConfig.tables_per_cycle, table_counts_subquery.c.table_count, 0),
             latest_reports_subquery.c.last_report_date,
         )
         .outerjoin(WashingConfig, WashingConfig.plant_id == Plant.id)
@@ -774,6 +775,16 @@ def _build_overview(db: Session, user: User, include_tables: bool = False, repor
     return result
 
 
+def _plant_table_count(db: Session, plant_id: UUID, config: WashingConfig | None = None) -> int:
+    """Tables a plant washes in one cycle. This is only the target the compliance ratio is measured against.
+    Uses the plant's tables_per_cycle number; falls back to counting registered tables for older setups."""
+    if config is None:
+        config = db.get(WashingConfig, plant_id)
+    if config is not None and config.tables_per_cycle:
+        return int(config.tables_per_cycle)
+    return db.scalar(select(func.count(WashingTable.id)).where(WashingTable.plant_id == plant_id)) or 0
+
+
 def _refresh_cycle_completion(db: Session, plant_id: UUID, month: str, cycle_no: int, total_tables: int) -> bool:
     """A cycle is complete once confirmed tables reach the plant's table count. The report on which the running
     total first reaches that count carries the completion flag (its date is the cycle's completion date)."""
@@ -835,16 +846,11 @@ def create_daily_report(db: Session, user: User, payload: WashingDailyReportRequ
     if not config:
         raise HTTPException(409, "Washing has not been set up for this plant")
     _require_plant_access(db, user, plant, config)
-    total_tables = db.scalar(select(func.count(WashingTable.id)).where(WashingTable.plant_id == plant.id)) or 0
+    total_tables = _plant_table_count(db, plant.id, config)
     if total_tables < 1:
         raise HTTPException(409, "Washing has not been set up for this plant")
-    if payload.tables_cleaned > total_tables:
-        raise HTTPException(422, "Tables cleaned cannot exceed the plant's registered table count")
     if payload.job_status == "Done" and payload.tables_cleaned == 0:
         raise HTTPException(422, "Enter at least one cleaned table for a Done report")
-    ordered_codes = _ordered_codes(db, plant.id)
-    if not set(payload.cleaned_table_codes).issubset(set(ordered_codes)):
-        raise HTTPException(422, "A selected table is not registered to this plant")
     report_date = payload.report_date or business_today()
     _validate_report_date(user, manager, report_date)
     month = _month_key(report_date)
@@ -855,17 +861,9 @@ def create_daily_report(db: Session, user: User, payload: WashingDailyReportRequ
         WashingDailyReport.cycle_no == cycle_no,
         WashingDailyReport.review_status.in_(["Pending", "Confirmed"]),
     )))
-    reserved = sum(row.tables_cleaned for row in current_rows)
-    prior_codes = {code for row in current_rows for code in (row.cleaned_table_codes or [])}
-    if prior_codes.intersection(payload.cleaned_table_codes):
-        raise HTTPException(409, "A table can only be reported once in the same washing cycle")
-    if reserved + payload.tables_cleaned > total_tables:
-        raise HTTPException(409, f"Only {max(0, total_tables - reserved)} table(s) remain to be reported in cycle {cycle_no}")
+    # Teams only report HOW MANY tables they cleaned that day. The plant's number is a target, never a limit,
+    # so nothing is rejected for being above or below it and no individual tables are tracked.
     cleaned_codes = list(payload.cleaned_table_codes)
-    if payload.job_status == "Done" and not cleaned_codes:
-        # The site engineer reports HOW MANY tables were cleaned; the next free tables of this cycle are assigned in order.
-        free = [code for code in ordered_codes if code not in prior_codes]
-        cleaned_codes = free[:payload.tables_cleaned]
 
     report = WashingDailyReport(
         plant_id=plant.id,
@@ -933,7 +931,7 @@ def _load_report_for_change(db: Session, user: User, report_id: UUID):
 
 def update_daily_report(db: Session, user: User, report_id: UUID, payload: WashingReportUpdateRequest) -> dict:
     report, plant, config, manager = _load_report_for_change(db, user, report_id)
-    total_tables = db.scalar(select(func.count(WashingTable.id)).where(WashingTable.plant_id == plant.id)) or 0
+    total_tables = _plant_table_count(db, plant.id, config)
     before = {"report_date": report.report_date.isoformat(), "tables_cleaned": report.tables_cleaned, "job_status": report.job_status,
               "exception_reason": report.exception_reason, "remarks": report.remarks, "cycle_no": report.cycle_no, "cycle_month": report.cycle_month}
     old_month, old_cycle = report.cycle_month, report.cycle_no
@@ -945,8 +943,6 @@ def update_daily_report(db: Session, user: User, report_id: UUID, payload: Washi
         tables = payload.tables_cleaned if payload.tables_cleaned is not None else report.tables_cleaned
         if tables < 1:
             raise HTTPException(422, "Enter at least one cleaned table for a Done report")
-        if tables > total_tables:
-            raise HTTPException(422, "Tables cleaned cannot exceed the plant's registered table count")
         reason = None
     else:
         tables = 0
@@ -965,10 +961,7 @@ def update_daily_report(db: Session, user: User, report_id: UUID, payload: Washi
         WashingDailyReport.review_status.in_(["Pending", "Confirmed"]),
         WashingDailyReport.id != report.id,
     )))
-    if sum(row.tables_cleaned for row in others) + tables > total_tables:
-        raise HTTPException(409, f"Only {max(0, total_tables - sum(row.tables_cleaned for row in others))} table(s) remain in cycle {cycle_no}")
-    used = {code for row in others for code in (row.cleaned_table_codes or [])}
-    codes = [code for code in _ordered_codes(db, plant.id) if code not in used][:tables] if status == "Done" else []
+    codes: list[str] = []
 
     report.report_date = new_date
     report.cycle_month = new_month
@@ -1002,7 +995,7 @@ def update_daily_report(db: Session, user: User, report_id: UUID, payload: Washi
 
 def delete_daily_report(db: Session, user: User, report_id: UUID) -> dict:
     report, plant, config, manager = _load_report_for_change(db, user, report_id)
-    total_tables = db.scalar(select(func.count(WashingTable.id)).where(WashingTable.plant_id == plant.id)) or 0
+    total_tables = _plant_table_count(db, plant.id, config)
     month, cycle_no = report.cycle_month, report.cycle_no
     paths = [str(entry.get("storage_path")) for entry in (report.evidence or []) if isinstance(entry, dict) and entry.get("storage_path")]
     info = {"plant": plant.site_code, "report_date": report.report_date.isoformat(), "tables_cleaned": report.tables_cleaned, "cycle_month": month, "cycle_no": cycle_no, "review_status": report.review_status}
@@ -1103,7 +1096,7 @@ def month_cycles(db: Session, user: User, plant_id: UUID, month: str) -> dict:
         raise HTTPException(409, "Washing has not been set up for this plant")
     _require_plant_access(db, user, plant, config)
     first = _parse_month(month)
-    table_count = db.scalar(select(func.count(WashingTable.id)).where(WashingTable.plant_id == plant.id)) or 0
+    table_count = _plant_table_count(db, plant.id, config)
     reports = list(db.scalars(select(WashingDailyReport).where(
         WashingDailyReport.plant_id == plant.id, WashingDailyReport.cycle_month == month,
         WashingDailyReport.review_status.in_(("Pending", "Confirmed")),
@@ -1198,7 +1191,7 @@ def review_daily_report(db: Session, user: User, report_id: UUID, payload: Washi
         raise HTTPException(403, "A washing report must be confirmed by someone other than its submitter")
     if report.review_status != "Pending":
         raise HTTPException(409, "This washing report has already been reviewed")
-    total_tables = db.scalar(select(func.count(WashingTable.id)).where(WashingTable.plant_id == plant.id)) or 0
+    total_tables = _plant_table_count(db, plant.id, config)
     if payload.decision == "Confirm" and report.job_status == "Done":
         if report.tables_cleaned < total_tables:
             evidence_kinds = {
@@ -1215,14 +1208,6 @@ def review_daily_report(db: Session, user: User, report_id: UUID, payload: Washi
                     f"Upload {labels} cleaning photo evidence before confirming this report",
                 )
     if payload.decision == "Confirm":
-        approved_other = db.scalar(select(func.coalesce(func.sum(WashingDailyReport.tables_cleaned), 0)).where(
-            WashingDailyReport.plant_id == plant.id,
-            WashingDailyReport.cycle_month == report.cycle_month,
-            WashingDailyReport.cycle_no == report.cycle_no,
-            WashingDailyReport.review_status == "Confirmed",
-        )) or 0
-        if approved_other + report.tables_cleaned > total_tables:
-            raise HTTPException(409, "Confirmed cleaning count would exceed the registered table count")
         report.review_status = "Confirmed"
     else:
         report.review_status = "Rejected"
@@ -1240,7 +1225,7 @@ def review_daily_report(db: Session, user: User, report_id: UUID, payload: Washi
             WashingDailyReport.cycle_no == report.cycle_no,
             WashingDailyReport.review_status == "Confirmed",
         )) or 0
-        if total_confirmed == total_tables:
+        if total_confirmed >= total_tables:
             report.cycle_completed = True
             cycle_completed = True
 
@@ -1292,7 +1277,7 @@ def check_missed_monthly_targets(db: Session, today: date | None = None) -> int:
         if not config.active:
             continue
         plant = db.get(Plant, config.plant_id)
-        total_tables = db.scalar(select(func.count(WashingTable.id)).where(WashingTable.plant_id == config.plant_id)) or 0
+        total_tables = _plant_table_count(db, config.plant_id, config)
         if not plant or not total_tables:
             continue
         completed = len(list(db.scalars(
@@ -1334,8 +1319,8 @@ def check_weekly_compliance_alerts(db: Session, today: date | None = None) -> in
         if not config.active:
             continue
         plant = db.get(Plant, config.plant_id)
-        tables = list(db.scalars(select(WashingTable).where(WashingTable.plant_id == config.plant_id)))
-        if not plant or not tables:
+        total_tables = _plant_table_count(db, config.plant_id, config)
+        if not plant or not total_tables:
             continue
         excused_dates = set(db.scalars(select(WashingDailyReport.report_date).where(
             WashingDailyReport.plant_id == plant.id,
@@ -1345,7 +1330,7 @@ def check_weekly_compliance_alerts(db: Session, today: date | None = None) -> in
             WashingDailyReport.exception_reason.is_not(None),
         )))
         expected = sum(
-            _daily_table_target(len(tables), week_start + timedelta(days=offset), config.cycle_overrides)
+            _daily_table_target(total_tables, week_start + timedelta(days=offset), config.cycle_overrides)
             for offset in range(7)
             if week_start + timedelta(days=offset) <= current
             and week_start + timedelta(days=offset) not in excused_dates
@@ -1389,7 +1374,7 @@ def check_washing_overdue(db: Session, today: date | None = None) -> int:
         if not config.active:
             continue
         plant = db.get(Plant, config.plant_id)
-        total_tables = db.scalar(select(func.count(WashingTable.id)).where(WashingTable.plant_id == config.plant_id)) or 0
+        total_tables = _plant_table_count(db, config.plant_id, config)
         if not plant or not total_tables:
             continue
         completed = len(set(db.scalars(

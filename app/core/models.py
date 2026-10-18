@@ -406,6 +406,8 @@ class WashingConfig(Base):
     active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     notes: Mapped[str | None] = mapped_column(String(500))
     cycle_overrides: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    # Tables a plant washes in one cycle (3 cycles a month). Only a target for the compliance ratio, never a limit.
+    tables_per_cycle: Mapped[int | None] = mapped_column(Integer)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 

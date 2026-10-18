@@ -58,6 +58,9 @@ def _configured_rows(db: Session, plants: list[Plant]) -> dict[UUID, tuple[Washi
         .where(WashingTable.plant_id.in_(ids))
         .group_by(WashingTable.plant_id)
     ).all())
+    for plant_id, row in configs.items():
+        if row.tables_per_cycle:
+            counts[plant_id] = row.tables_per_cycle
     assignees = {
         user.id: user.email for user in db.scalars(
             select(User).where(User.id.in_([c.assigned_user_id for c in configs.values() if c.assigned_user_id]))
@@ -294,10 +297,6 @@ def import_setup(db: Session, user: User, filename: str, content: bytes, *, dry_
             errors.append("Notes must be 500 characters or fewer")
         elif notes:
             next_notes = notes
-        if plant and count_text and table_count < current_count:
-            issue = _reduction_problem(db, plant, current_count, table_count)
-            if issue:
-                errors.append(issue)
 
         if plant and not errors:
             current_assignee_id = config.assigned_user_id if config else None
@@ -353,7 +352,7 @@ def import_setup(db: Session, user: User, filename: str, content: bytes, *, dry_
             config.active = item["active"]
             config.notes = item["notes"]
             db.add(config)
-            _set_table_count(db, item["plant"], item["table_count"])
+            config.tables_per_cycle = item["table_count"]
         db.add(AuditLog(
             user_id=user.id,
             actor_name=user.display_name,

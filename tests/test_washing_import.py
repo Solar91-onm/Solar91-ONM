@@ -76,7 +76,7 @@ def test_import_dry_run_then_create_setup_and_write_audit(client, db):
     assert config.assigned_user_id == assignee.id
     assert config.compliance_threshold_percent == 90
     assert config.active is True and config.notes == "Use south gate"
-    assert db.query(WashingTable).filter_by(plant_id=plant.id).count() == 11
+    assert config.tables_per_cycle == 11 and db.query(WashingTable).filter_by(plant_id=plant.id).count() == 0
     assert db.query(UserEquipmentTypeAssignment).filter_by(user_id=assignee.id, equipment_type="Modules cleaning").count() == 1
     audit = db.query(AuditLog).filter_by(user_id=head.id, action="Imported washing setup").one()
     assert audit.metadata_json == {"created": 1, "updated": 0, "unchanged": 0}
@@ -94,7 +94,7 @@ def test_import_can_create_minimal_setup_without_assignee(client, db):
     config = db.get(WashingConfig, plant.id)
     assert config is not None and config.assigned_user_id is None
     assert config.compliance_threshold_percent == 85 and config.active is True
-    assert db.query(WashingTable).filter_by(plant_id=plant.id).count() == 24
+    assert config.tables_per_cycle == 24 and db.query(WashingTable).filter_by(plant_id=plant.id).count() == 0
 
 
 def test_import_updates_only_nonblank_fields_and_reports_unchanged(client, db):
@@ -122,7 +122,7 @@ def test_import_updates_only_nonblank_fields_and_reports_unchanged(client, db):
     config = db.get(WashingConfig, plant.id)
     assert config.assigned_user_id == assignee.id and config.compliance_threshold_percent == 88
     assert config.active is False and config.notes == "Saved notes"
-    assert db.query(WashingTable).filter_by(plant_id=plant.id).count() == 7
+    assert config.tables_per_cycle == 7 and db.query(WashingTable).filter_by(plant_id=plant.id).count() == 0
 
 
 def test_import_problems_are_row_numbered_and_prevent_all_writes(client, db):

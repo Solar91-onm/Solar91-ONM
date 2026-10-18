@@ -1,4 +1,4 @@
--- ============================================================================
+\-- ============================================================================
 -- SUPABASE: run this ONCE in  Supabase -> SQL Editor -> New query -> Run.
 -- Adds the Preventive Maintenance and Washing workflow features
 -- (unit workload planning, editable maintenance scope, plant washing cycles).
@@ -275,6 +275,9 @@ CREATE INDEX IF NOT EXISTS ix_issues_deleted_at ON public.issues(deleted_at DESC
 -- O&M Head can re-date a plant's washing cycle deadline (e.g. when it was set up by mistake).
 -- Stored per plant as {"YYYY-MM": {"1": "YYYY-MM-DD", ...}}; an empty object means the default 10th / 20th / month-end.
 ALTER TABLE washing_config ADD COLUMN IF NOT EXISTS cycle_overrides jsonb NOT NULL DEFAULT '{}'::jsonb;
+
+-- Tables a plant washes per cycle (migration 030): the target for the compliance ratio, never a limit.
+ALTER TABLE washing_config ADD COLUMN IF NOT EXISTS tables_per_cycle integer;
 
 SELECT table_name, column_name FROM information_schema.columns
 WHERE (table_name = 'om_tasks' AND column_name IN ('unit_no','total_units','cycle_id','cycle_day','planned_due_on','missed_days','rolled_count','quantity'))

@@ -128,22 +128,22 @@ def test_not_done_exception_is_distinct_and_does_not_consume_cycle_tables(client
     assert done.json()["cycle_no"] == exception.json()["cycle_no"] == 1
 
 
-def test_done_report_rejects_unknown_table_codes(client, db):
+def test_done_report_is_never_rejected_for_count_or_codes(client, db):
     plant = _plant(db)
     _setup_cycle_users(client, db, plant)
     engineer = login_user(client, db, role="Site Engineer", name="Invalid Table Engineer", email="invalid-table-engineer@example.com")
     db.add(UserPlantAssignment(user_id=engineer.id, plant_id=plant.id, assignment_role="Site Engineer"))
     db.commit()
 
+    # The plant number is only a compliance target: any reported count is accepted.
     response = client.post(f"{BASE}/daily-reports", json={
         "plant_id": str(plant.id), "job_status": "Done", "tables_cleaned": 1,
         "cleaned_table_codes": ["Table 999"],
     })
-    assert response.status_code == 422
-    assert "not registered" in response.json()["detail"].lower()
+    assert response.status_code == 200, response.text
 
 
-def test_setup_cannot_reduce_table_count_after_reports(client, db):
+def test_setup_can_change_tables_per_cycle_after_reports(client, db):
     plant = _plant(db)
     _head, assignee = _setup_cycle_users(client, db, plant)
     db.add(WashingDailyReport(
@@ -156,9 +156,10 @@ def test_setup_cannot_reduce_table_count_after_reports(client, db):
     response = client.post(f"{BASE}/setup", json={
         "plant_id": str(plant.id), "table_count": 2, "assignee_user_id": str(assignee.id),
     })
-    assert response.status_code == 409
-    assert "reports" in response.json()["detail"].lower()
-    assert db.query(WashingTable).filter_by(plant_id=plant.id).count() == 4
+    assert response.status_code == 200, response.text
+    db.expire_all()
+    assert db.get(WashingConfig, plant.id).tables_per_cycle == 2
+    assert db.query(WashingTable).filter_by(plant_id=plant.id).count() == 0
 
 
 def test_missed_monthly_target_notification_is_deduplicated(client, db):
@@ -221,17 +222,17 @@ def _engineer(client, db, plant, email="wash-eng@example.com"):
     return engineer
 
 
-def test_site_engineer_reports_a_count_and_tables_are_assigned_in_order(client, db):
+def test_site_engineer_reports_a_daily_count_with_no_upper_limit(client, db):
     plant = _plant(db)
     _head, assignee = _setup_cycle_users(client, db, plant)        # 4 tables in the plant
     _engineer(client, db, plant)
     first = client.post(f"{BASE}/daily-reports", json={"plant_id": str(plant.id), "job_status": "Done", "tables_cleaned": 3})
     assert first.status_code == 200, first.text
-    assert first.json()["cleaned_table_codes"] == ["Table 001", "Table 002", "Table 003"]
+    assert first.json()["cleaned_table_codes"] == []                    # no individual tables are tracked
     second = client.post(f"{BASE}/daily-reports", json={"plant_id": str(plant.id), "job_status": "Done", "tables_cleaned": 1})
-    assert second.json()["cleaned_table_codes"] == ["Table 004"]       # continues where the last report stopped
+    assert second.status_code == 200, second.text
     too_many = client.post(f"{BASE}/daily-reports", json={"plant_id": str(plant.id), "job_status": "Done", "tables_cleaned": 1})
-    assert too_many.status_code == 409                                   # the cycle is already fully reported
+    assert too_many.status_code == 200                                   # above the target is still accepted
     zero = client.post(f"{BASE}/daily-reports", json={"plant_id": str(plant.id), "job_status": "Done", "tables_cleaned": 0})
     assert zero.status_code == 422
 
@@ -377,7 +378,7 @@ def test_engineer_can_backdate_edit_and_delete_own_pending_report(client, db):
     edited = client.patch(f"{BASE}/daily-reports/{body['id']}", json={"tables_cleaned": 3, "remarks": "fixed count"})
     assert edited.status_code == 200, edited.text
     assert edited.json()["tables_cleaned"] == 3 and edited.json()["remarks"] == "fixed count"
-    assert client.patch(f"{BASE}/daily-reports/{body['id']}", json={"tables_cleaned": 99}).status_code == 422
+    assert client.patch(f"{BASE}/daily-reports/{body['id']}", json={"tables_cleaned": 99}).status_code == 200
     assert client.delete(f"{BASE}/daily-reports/{body['id']}").status_code == 200
 
 
