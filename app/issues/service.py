@@ -111,7 +111,7 @@ class IssueService:
 
     DUPLICATE_WINDOW_SECONDS = 120
 
-    def _recent_duplicate(self, user: User, payload: dict) -> Issue | None:
+    def _recent_duplicate(self, user: User, payload: dict, units: list[dict]) -> Issue | None:
         """The creator's newest ticket if it is identical and was raised moments ago (double submit)."""
         latest = self.db.scalar(
             select(Issue).where(Issue.created_by == user.id, Issue.deleted_at.is_(None))
@@ -130,19 +130,62 @@ class IssueService:
             and norm(latest.equipment_ref) == norm(payload.get("equipment_ref"))
             and norm(latest.vertical) == norm(payload.get("vertical"))
             and norm(latest.description) == norm(payload.get("description"))
+            and sorted(str(u.get("id")) for u in latest.units) == sorted(str(u.get("id")) for u in units)
         )
         return latest if same else None
+
+    MAX_UNITS_IN_REF = 255
+
+    def _resolve_units(self, plant_id, unit_ids) -> list[dict]:
+        """Registered units one ticket covers. Every unit must be active equipment of the ticket's plant."""
+        ordered = list(dict.fromkeys(unit_ids or []))
+        if not ordered:
+            return []
+        if plant_id is None:
+            raise HTTPException(422, "Choose the plant before selecting units")
+        rows = {row.id: row for row in self.db.scalars(select(Equipment).where(Equipment.id.in_(ordered)))}
+        units = []
+        for unit_id in ordered:
+            row = rows.get(unit_id)
+            if row is None:
+                raise HTTPException(404, "A selected unit was not found in the equipment register")
+            if row.plant_id != plant_id:
+                raise HTTPException(422, "Every selected unit must belong to the selected plant")
+            if str(row.status or "active").lower() == "inactive":
+                raise HTTPException(422, f"{row.equipment_code or row.equipment_name} is retired and cannot be ticketed")
+            units.append({"id": str(row.id), "code": row.equipment_code or row.equipment_name, "name": row.equipment_name, "type": row.equipment_type})
+        return units
+
+    @classmethod
+    def _units_ref(cls, units: list[dict]) -> str:
+        codes = [str(u.get("code") or u.get("name") or "").strip() for u in units]
+        text_ref = ", ".join(code for code in codes if code)
+        if len(text_ref) <= cls.MAX_UNITS_IN_REF:
+            return text_ref
+        return f"{len(units)} units: " + text_ref[: cls.MAX_UNITS_IN_REF - 20].rsplit(",", 1)[0] + " …"
 
     def create(self,data:IssueCreate,user:User):
         payload = data.model_dump()
         assigned_to = payload.pop("assigned_to", None)
         supplier = payload.pop("supplier", None)
         serial_number = payload.pop("serial_number", None)
+        unit_ids = payload.pop("unit_ids", None) or []
         ticket_no = (payload.pop("ticket_no", None) or "").strip()
         auto_number = not ticket_no
         plant_id = payload.get("plant_id")
         if plant_id and not self.db.get(Plant, plant_id):
             raise HTTPException(404, "Plant not found")
+        units = self._resolve_units(plant_id, unit_ids)
+        if units:
+            if len(units) == 1 and not payload.get("equipment_id"):
+                payload["equipment_id"] = uuid.UUID(units[0]["id"])
+            elif len(units) > 1:
+                # A multi-unit ticket is not tied to one unit; the covered units are listed on the ticket.
+                payload["equipment_id"] = None
+            if len(units) > 1 or not (payload.get("equipment_ref") or "").strip():
+                payload["equipment_ref"] = self._units_ref(units)
+            if not (payload.get("vertical") or "").strip():
+                payload["vertical"] = next((u["type"] for u in units if u.get("type")), None)
         equipment_id = payload.get("equipment_id")
         if equipment_id:
             equipment = self.db.get(Equipment, equipment_id)
@@ -153,15 +196,17 @@ class IssueService:
         assignee = self._resolve_assignee(assigned_to, None) if assigned_to else None
         if assignee:
             self._ensure_assignee_scope(assignee, user, plant_id, equipment_id, payload.get("equipment_ref"), payload.get("vertical"))
-        if auto_number:
-            duplicate = self._recent_duplicate(user, payload)
-            if duplicate is not None:
-                # A repeated click or resubmission of the same form returns the ticket that was already saved.
-                return duplicate
         row = None
         for attempt in range(6):
             if auto_number:
                 _lock_issue_ticket_numbers(self.db)
+                # Checked under the ticket-number lock so simultaneous submissions of the same form cannot each
+                # pass the check before either ticket is saved.
+                duplicate = self._recent_duplicate(user, payload, units)
+                if duplicate is not None:
+                    # A repeated click or resubmission of the same form returns the ticket that was already saved.
+                    self.db.rollback()
+                    return duplicate
                 ticket_no = next_issue_ticket_no(self.db)
             row=Issue(
                 ticket_no=ticket_no, **payload,
@@ -169,7 +214,7 @@ class IssueService:
                 assignee_text=assignee.display_name if assignee else None,
                 status="Assigned" if assignee else "Open",
                 created_by=user.id,
-                legacy_payload={"supplier": supplier, "serial_number": serial_number, "evidence": []},
+                legacy_payload={"supplier": supplier, "serial_number": serial_number, "evidence": [], **({"units": units} if units else {})},
             )
             self.db.add(row)
             try:

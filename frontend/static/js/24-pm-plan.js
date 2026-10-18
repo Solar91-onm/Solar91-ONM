@@ -33,7 +33,19 @@
     const cfg=(c.configs||[]).find(x=>x.plant_id===id&&x.equipment_type===type),reg=(c.register||[]).find(x=>x.plant_id===id&&x.equipment_type===type);
     return{cfg:cfg||null,reg:reg?reg.units:null};
   }
+  /* Job forms ask "finish within how many days?" — every plant paces its own units, so 1 transformer and
+     40 inverters can share one job without a per-day number that only fits some plants. */
+  window.pmDaysHint=function(p){
+    const el=document.getElementById(p+"-hint");if(!el)return;
+    const T=parseInt(v(p==="pq"?"pq-total":"pa-units"),10),N=parseInt(v(p+"-days"),10),all=p==="pa"||v("pq-plant")==="__all";el.style.color="";
+    if(!N){el.textContent=all?"Leave blank to use each plant's saved pace. With All plants, plants that have none of this equipment are skipped.":"Leave blank to do every unit on the first due date (or the plant's saved pace).";return}
+    if(!T){el.textContent="Every plant spreads its own units over "+N+" day"+(N===1?"":"s")+" — e.g. 8 inverters in "+N+" day"+(N===1?"":"s")+" = "+Math.ceil(8/N)+" a day, while a single transformer is simply done on day 1.";return}
+    const per=Math.ceil(T/N),days=Math.ceil(T/per),parts=[];
+    for(let i=0;i<Math.min(days,4);i++){const count=Math.min(per,T-i*per);parts.push("Day "+(i+1)+" → "+count)}
+    el.textContent=T+" unit"+(T===1?"":"s")+" in "+N+" day"+(N===1?"":"s")+" = "+per+" a day ("+days+" working day"+(days===1?"":"s")+"): "+parts.join(" · ")+(days>4?" …":"");
+  };
   window.pmUnitHint=function(p){
+    if(p==="pq"||p==="pa")return window.pmDaysHint(p);
     const el=document.getElementById(p+"-hint");if(!el)return;
     const T=parseInt(v(p+"-total"),10),D=parseInt(v(p+"-perday"),10);el.style.color="";
     if(!T||!D){el.textContent=(p==="pq"&&v("pq-plant")==="__all")?"All plants: each plant uses its own saved unit configuration unless you enter numbers here.":"Enter the number of units and the maximum units per day to see the day plan.";return}
@@ -57,11 +69,12 @@
       const pre=await apiFetch(url,{method:"POST",body:Object.assign({},body,{dry_run:true})});
       if(!pre.count){toast(pre.skipped?("Nothing new to create — "+pre.skipped+" already scheduled."):"Nothing to create.");return false}
       const note=pre.open_without_units?"\n\nNote: "+pre.open_without_units+" open task(s) for this job already exist without unit numbers. They are left as they are.":"";
-      if((pre.count>1||note)&&!confirm("Create "+pre.count+" task(s) across "+pre.plants+" plant(s)"+(pre.days>1?", spread over up to "+pre.days+" day(s)":"")+(pre.skipped?" ("+pre.skipped+" already scheduled will be skipped)":"")+"?"+note))return false;
+      const noKit=(pre.skipped_plants||[]).length?"\n\nSkipped "+pre.skipped_plants.length+" plant(s) with no "+(body.equipment_type||"such equipment")+" registered: "+pre.skipped_plants.slice(0,8).join(", ")+(pre.skipped_plants.length>8?"…":""):"";
+      if((pre.count>1||note||noKit)&&!confirm("Create "+pre.count+" task(s) across "+pre.plants+" plant(s)"+(pre.days>1?", spread over up to "+pre.days+" day(s)":"")+(pre.skipped?" ("+pre.skipped+" already scheduled will be skipped)":"")+"?"+note+noKit))return false;
       const res=await apiFetch(url,{method:"POST",body:Object.assign({},body,{dry_run:false})});
       await refreshTasks();
       S.modal=null;S.modalCtx=null;S.tablePages=S.tablePages||{};S.tablePages.scheduled=1;render();
-      toast(res.count+" PM task(s) created.");
+      toast(res.count+" PM task(s) created"+((res.skipped_plants||[]).length?" · "+res.skipped_plants.length+" plant(s) without this equipment skipped.":"."));
       return true;
     }catch(e){toast(errText(e));return false}
   }
@@ -80,12 +93,11 @@
   };
   /* Pre-fill Number of units / units per day from the plant configuration (else the Equipment Register). */
   window.pmQuickCfg=function(){
-    const t=document.getElementById("pq-total"),d=document.getElementById("pq-perday");if(!t||!d)return;
-    if(v("pq-plant")==="__all"){t.value="";d.value="";t.placeholder="Each plant's own";d.placeholder="Each plant's own"}
-    else{const r=cfgFor(v("pq-plant"),v("pq-type"));t.placeholder=(r&&r.reg)?"Register: "+r.reg:"e.g. 10";d.placeholder="e.g. 2";
-      t.value=r&&r.cfg?r.cfg.total_units:(r&&r.reg)||"";d.value=r&&r.cfg?r.cfg.units_per_day:""}
-    const tpl=(S._pmTpl||[]).find(x=>x.equipment_type===v("pq-type")&&x.task_name===v("pq-task").trim());
-    if(tpl&&tpl.units_per_day&&!d.value&&v("pq-plant")!=="__all")d.value=tpl.units_per_day;
+    const t=document.getElementById("pq-total"),d=document.getElementById("pq-days");if(!t||!d)return;
+    if(v("pq-plant")==="__all"){t.value="";t.placeholder="Each plant's own count";d.placeholder="e.g. 3"}
+    else{const r=cfgFor(v("pq-plant"),v("pq-type"));t.placeholder=(r&&r.reg)?"Register: "+r.reg:"e.g. 10";
+      t.value=r&&r.cfg?r.cfg.total_units:(r&&r.reg)||"";
+      d.placeholder=r&&r.cfg&&r.cfg.total_units&&r.cfg.units_per_day?"Saved pace: "+Math.ceil(r.cfg.total_units/r.cfg.units_per_day)+" day(s)":"e.g. 3"}
     window.pmUnitHint("pq");
   };
   window.pmQuickFill=function(){ /* typed task matches a saved template → copy its settings */
@@ -93,7 +105,7 @@
     if(!t)return;
     const set=(id,val)=>{const e=document.getElementById(id);if(e&&val!==null&&val!==undefined)e.value=val};
     set("pq-freq",t.frequency);set("pq-safety",t.safety);set("pq-hours",t.est_hours);
-    if(t.units_per_day&&v("pq-plant")!=="__all"&&!(cfgFor(v("pq-plant"),v("pq-type"))||{}).cfg){set("pq-perday",t.units_per_day);window.pmUnitHint("pq")}
+    window.pmUnitHint("pq");
   };
   window.openProblemScheduledTask=async function(){
     if(!canCreate()){toast("Site Engineer can execute assigned Preventive Maintenance work, but cannot create it.");return}
@@ -113,8 +125,8 @@
       '<div class="field"><span class="lbl">Task — what to do</span><input id="pq-task" class="inp" list="pq-sugg" oninput="pmQuickFill()" placeholder="Pick a suggestion or type your own"/><datalist id="pq-sugg">'+suggestions(type).map(x=>'<option value="'+esc(x)+'"></option>').join("")+'</datalist></div>'+
       '<div class="kgrid" style="grid-template-columns:1fr 1fr 1fr;gap:12px">'+
        '<div class="field"><span class="lbl">Number of units</span><input id="pq-total" class="inp" type="number" min="1" max="500" oninput="pmUnitHint(\'pq\')"/></div>'+
-       '<div class="field"><span class="lbl">Max units per day</span><input id="pq-perday" class="inp" type="number" min="1" max="500" oninput="pmUnitHint(\'pq\')"/></div>'+
-       '<div class="field"><span class="lbl">Daily workload</span><div class="inp" style="display:flex;align-items:center;color:var(--muted-foreground)">Distributed automatically by plant</div></div></div>'+
+       '<div class="field"><span class="lbl">Finish within (days)</span><input id="pq-days" class="inp" type="number" min="1" max="366" placeholder="e.g. 3" oninput="pmUnitHint(\'pq\')"/></div>'+
+       '<div class="field"><span class="lbl">Daily workload</span><div class="inp" style="display:flex;align-items:center;color:var(--muted-foreground)">Worked out for each plant</div></div></div>'+
       '<div id="pq-hint" class="muted" style="font-size:12px;margin:-2px 0 10px"></div>'+
       (isHead()?'<label style="display:flex;gap:8px;align-items:center;font-size:12.5px;margin:0 0 10px"><input id="pq-savecfg" type="checkbox"/> Save these unit counts as the plant default (when one plant is selected)</label>':'')+
       '<div class="kgrid" style="grid-template-columns:1fr 1fr;gap:12px">'+
@@ -134,15 +146,14 @@
     if(task.length<2){toast("Enter the task.");return}
     const sel=v("pq-plant"),plant=sel==="__all"?null:plantObj(sel);
     if(sel!=="__all"&&!plant){toast("Select a valid plant.");return}
-    const total=parseInt(v("pq-total"),10)||null,perDay=parseInt(v("pq-perday"),10)||null;
-    if(total&&perDay&&perDay>total){toast("Units per day cannot exceed the number of units.");return}
+    const total=parseInt(v("pq-total"),10)||null,days=parseInt(v("pq-days"),10)||null;
     await run("/api/pm-plan/tasks",{
       equipment_type:v("pq-type"),task_name:task,frequency:v("pq-freq"),safety:v("pq-safety"),
       est_hours:parseFloat(v("pq-hours"))||null,plants:plant?[plantKey(plant)]:["All plants"],
       start_date:v("pq-due"),assignees:v("pq-assignee")?[v("pq-assignee")]:[],
       per_unit:true,save_template:checked("pq-save"),
-      total_units:total,units_per_day:perDay,
-      save_unit_config:!!(plant&&total&&perDay&&checked("pq-savecfg"))});
+      total_units:total,spread_days:days,
+      save_unit_config:!!(plant&&total&&days&&checked("pq-savecfg"))});
   };
 
   /* ───────── PM templates ───────── */
@@ -204,7 +215,7 @@
        '<div class="field"><span class="lbl">Assignee(s) — hold Ctrl/Cmd for several; each plant gets one assignee, plants are shared between them</span><select id="pa-assignees" class="inp" multiple size="4">'+TEAM_POOL.map(n=>'<option>'+esc(n)+'</option>').join("")+'</select></div>'+
        '<div><div class="field"><span class="lbl">First due date</span><input id="pa-due" class="inp" type="date" value="'+addDays(TODAY,3)+'"/></div>'+
        '<div class="field"><span class="lbl">Number of units (optional — else each plant\'s configuration)</span><input id="pa-units" class="inp" type="number" min="1" max="500" oninput="pmUnitHint(\'pa\')" placeholder="e.g. 10"/></div>'+
-       '<div class="field"><span class="lbl">Max units per day (optional)</span><input id="pa-perday" class="inp" type="number" min="1" max="500" oninput="pmUnitHint(\'pa\')" value="'+(t.units_per_day||"")+'" placeholder="plant setting wins"/></div>'+
+       '<div class="field"><span class="lbl">Finish within (days, optional)</span><input id="pa-days" class="inp" type="number" min="1" max="366" oninput="pmUnitHint(\'pa\')" placeholder="each plant\'s saved pace"/></div>'+
        '<div id="pa-hint" class="muted" style="font-size:12px"></div></div></div>';
     return modal("Assign to plants","Creates the tasks; plants already having an open copy are skipped.",body,
       '<button class="btn o" onclick="pmOpenTemplates()">Back</button><button class="btn p" onclick="pmAssignGo()">Create tasks</button>',true);
@@ -217,7 +228,7 @@
     const who=sel?[].slice.call(sel.selectedOptions).map(o=>o.value):[];
     await run("/api/pm-plan/templates/"+encodeURIComponent(S.pmAssignId)+"/apply",{
       plants:all?["All plants"]:names.map(n=>{const p=plantObj(n);return p?plantKey(p):n}),
-      start_date:v("pa-due"),assignees:who,per_unit:true,total_units:parseInt(v("pa-units"),10)||null,units_per_day:parseInt(v("pa-perday"),10)||null});
+      start_date:v("pa-due"),assignees:who,per_unit:true,total_units:parseInt(v("pa-units"),10)||null,spread_days:parseInt(v("pa-days"),10)||null});
   };
 
   /* ───────── Maintenance scope editor (O&M Head) ───────── */
@@ -344,6 +355,6 @@
   render=function(){
     oldRender.apply(this,arguments);try{patchCard()}catch(e){console.warn("[PM plan]",e)}
     /* pick up the O&M Head's saved scope once signed in (retry at most every 30 s while signed out) */
-    if(S.currentUser&&Date.now()-scopeAt>30000&&!window._pmScopeOk){scopeAt=Date.now();loadScope().then(r=>{if(r!==null){window._pmScopeOk=true;if(r)render()}})}
+    if(S.currentUser&&["O&M Head","Assignee"].includes(AUTH_IDENTITY.role)&&Date.now()-scopeAt>30000&&!window._pmScopeOk){scopeAt=Date.now();loadScope().then(r=>{if(r!==null){window._pmScopeOk=true;if(r)render()}})}
   };
 })();

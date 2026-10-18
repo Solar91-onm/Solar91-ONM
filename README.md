@@ -2,7 +2,7 @@
 
 FastAPI operations portal for Solar91's solar plants, equipment, Site Issues, scheduled maintenance, washing, reports and administrative access. The **database is authoritative**: the browser sends operational writes to FastAPI, backed by Supabase PostgreSQL. Clerk sends email sign-in codes; Solar91 roles and access scopes remain in the application database.
 
-This release preserves the existing business modules, includes navigation/freeze protections, and adds a **site-engineer-first Field Desk** for real daily issue and scheduled maintenance work, plus a top-left Ask Solar91 entry. The search assistant is read-only and rule-based, not a paid generative AI service. See [`docs/FIELD_DESK_RELEASE_2026-10-13.md`](docs/FIELD_DESK_RELEASE_2026-10-13.md) for access rights and verification. See [`docs/STABLE_RELEASE_2026-10-13.md`](docs/STABLE_RELEASE_2026-10-13.md) for changes and **precise verification limitations**.
+The portal includes a **site-engineer-first Field Desk** for daily issue and scheduled maintenance work, plus a top-left Ask Solar91 entry. The search assistant is read-only and grounded in role-authorized operational data. See [`docs/FIELD_DESK_RELEASE_2026-10-13.md`](docs/FIELD_DESK_RELEASE_2026-10-13.md) for access rights and verification.
 
 ## Daily field operations
 
@@ -85,7 +85,7 @@ Or on Linux/macOS: `for f in frontend/static/js/*.js; do node --check "$f" || ex
 
 ## Deployment
 
-`render.yaml`, `Dockerfile`, and the [Render runbook](docs/RENDER_DEPLOYMENT_RUNBOOK.md) are provided for the existing Render service. Set private environment variables through the Render dashboard. Configure Clerk's allowed origins and email-code sign-in, then verify readiness and permissions in staging. **This ZIP has not been deployed to Render or connected to production services.** See the stabilization record for checks that remain external.
+`render.yaml`, `Dockerfile`, and the [Render runbook](docs/RENDER_DEPLOYMENT_RUNBOOK.md) are provided for the existing Render service. Set private environment variables through the Render dashboard. Configure Clerk's allowed origins and email-code sign-in, then follow [`RELEASE_VALIDATION.md`](RELEASE_VALIDATION.md) to verify readiness and permissions in staging. This source has not been deployed to Render or connected to production services.
 
 Production entry point: `uvicorn app.main:app`; test-only entry point `tests.e2e_server:app` is strictly for local browser smoke tests and is guarded against accidental production execution.
 

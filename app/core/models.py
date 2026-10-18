@@ -184,6 +184,10 @@ class Issue(Base):
             if isinstance(entry,dict)
         ]
 
+    @property
+    def units(self) -> list[dict[str, Any]]:
+        return [entry for entry in (self.legacy_payload or {}).get("units", []) if isinstance(entry, dict)]
+
 
 class IssueHistory(Base):
     __tablename__ = "issue_history"

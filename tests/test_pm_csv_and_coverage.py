@@ -57,5 +57,5 @@ def test_pm_inventory_includes_equipment_without_scheduled_tasks(client, db):
     db.commit()
     r = client.get("/api/pm-plan/unit-config")
     assert r.status_code == 200, r.text
-    assert {"plant_id": str(p.id), "equipment_type": "Transformer", "units": 7} in r.json()["register"]
+    assert {"plant_id": str(p.id), "equipment_type": "Transformer", "units": 7, "critical": 0, "faulty": 0} in r.json()["register"]
     assert db.query(OMTask).count() == 0

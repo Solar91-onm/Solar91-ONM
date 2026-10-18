@@ -16,3 +16,10 @@
 
 ## Excel plan template
 `frontend/static/templates/PM_Task_Plan_Template.xlsx` follows the supplied style: sheets *How to fill*, *PM Tasks*, *Task ideas*, *Lists*; columns A-G (Equipment type, Plant(s), Task, Frequency, Assignee(s), Safety needed, Est. time). Optional columns H-K: How to do it, Start date, No. of units, Units per day (blank = use the plant's Unit configuration). Dropdowns read the *Lists* sheet.
+
+## Finish-within-days, equipped plants and the morning plan (October 2026)
+- **Finish within (days)** replaces "Max units per day" on *Add PM task* and *Assign to plants* (`spread_days` on `/api/pm-plan/tasks` and template apply). Each plant paces its own units: 8 inverters in 4 days = 2 a day; 1 transformer is done on day 1. `units_per_day` is still accepted and still wins when sent; the plant *Unit configuration* keeps its per-day crew capacity.
+- **All plants** jobs go only to plants that have that equipment in the Equipment Register or saved unit counts; the response lists `skipped_plants`. If no plant has the equipment recorded anywhere, every plant is kept (previous behaviour).
+- **Equipment coverage** shows one row per equipment type with a per-plant dropdown. `/api/pm-plan/unit-config` register rows now include `critical` (units with High criticality) and `faulty` (status `fault`).
+- **Maintenance by day** lists, for a chosen day, every plant and the equipment on that day's plan (a job is on every day from its start date to its due date).
+- **Morning plan notification** (`pm_daily_plan`, on by default, in-app; email optional under PM alerts): from 06:00 plant time the daily job sends each person one message — Assignees their own jobs, Site Engineers their plants, the O&M Head the portfolio (respecting "assignee only" team routing). Clicking it opens the day planner on that date. Deduplicated per person per day.

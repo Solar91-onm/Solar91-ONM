@@ -115,10 +115,12 @@ def test_site_engineer_gets_pm_alerts_even_when_team_routing_is_assignee_only(db
     send_reminders_and_escalations(db, date(2026, 10, 1))
     send_reminders_and_escalations(db, date(2026, 10, 4))
     db.flush()
-    assert {(row.event_type, row.user_id) for row in db.query(Notification).all()} == {
+    assert {(row.event_type, row.user_id) for row in db.query(Notification).all() if row.event_type != "pm_daily_plan"} == {
         ("pm_due_soon", assignee.id), ("pm_due_soon", engineer.id),
         ("pm_due_today", assignee.id), ("pm_due_today", engineer.id),
     }
+    # the morning plan follows the same routing: no O&M Head copy for an "assignee only" plant
+    assert head.id not in {row.user_id for row in db.query(Notification).filter_by(event_type="pm_daily_plan")}
 
 
 def test_preferences_disable_delivery_and_email_is_opt_in(db, monkeypatch):
@@ -310,3 +312,31 @@ def test_task_output_marks_jobs_critical_after_seven_days(client, db):
     row = next(item for item in response.json() if item["id"] == task.work_order_no)
     assert row["days_late"] == 7
     assert row["critical"] is True
+
+
+def test_morning_plan_lists_plants_and_equipment_once_per_person(db):
+    from app.pmplan.alerts import send_pm_daily_plan
+    plant = _plant(db, code="PMPLAN1", name="Khorandi")
+    other = _plant(db, code="PMPLAN2", name="Bhadla")
+    assignee = _user(db, "Assignee", "Ravi", "ravi-plan@example.com")
+    head = _user(db, "O&M Head", "Head", "head-plan@example.com")
+    engineer = _user(db, "Site Engineer", "Engineer", "engineer-plan@example.com")
+    db.add(UserPlantAssignment(user_id=engineer.id, plant_id=other.id))
+    day = date(2026, 10, 6)
+    _task(db, plant, day, assignee, unit_no=1, cycle_id="plan-a")
+    theirs = _task(db, other, day, None, unit_no=2, cycle_id="plan-b")
+    theirs.task_type = "WMS"
+    _task(db, plant, day + timedelta(days=2), assignee)        # not on today's plan
+    db.commit()
+
+    assert send_pm_daily_plan(db, day, datetime(2026, 10, 6, 5, 30)) == 0      # before the morning send time
+    assert send_pm_daily_plan(db, day, datetime(2026, 10, 6, 7, 0)) == 3
+    assert send_pm_daily_plan(db, day, datetime(2026, 10, 6, 9, 0)) == 0       # once per person per day
+    db.flush()
+    rows = {row.user_id: row for row in db.query(Notification).filter_by(event_type="pm_daily_plan")}
+    assert set(rows) == {assignee.id, head.id, engineer.id}
+    assert rows[head.id].title.startswith("Today's PM plan · 2 plants")
+    assert "Inverter ×1" in rows[head.id].message and "WMS ×1" in rows[head.id].message
+    assert "WMS" not in rows[assignee.id].message and "Inverter ×1" in rows[assignee.id].message
+    assert "Inverter" not in rows[engineer.id].message
+    assert rows[head.id].target_type == "pm_day" and rows[head.id].target_id == day.isoformat()

@@ -106,6 +106,24 @@ def test_only_the_head_can_edit_or_close_and_direct_close_needs_a_reason(client,
     assert closed.status_code == 200 and closed.json()["status"] == "Closed"
 
 
+def test_ticket_conversation_records_intent_and_locks_when_closed(client, db):
+    _, _, issue = _head_with_issue(client, db)
+    done = client.post(f"/api/issues/{issue['id']}/comments", json={"message": "Fuse replaced, INV back online", "intent": "work_done"})
+    assert done.status_code == 200, done.text
+    assert done.json()["metadata"]["intent"] == "work_done"
+    assert client.post(f"/api/issues/{issue['id']}/comments", json={"message": "x", "intent": "approve"}).status_code == 422
+    plain = client.post(f"/api/issues/{issue['id']}/comments", json={"message": "Checked the string currents"})
+    assert plain.status_code == 200 and plain.json()["metadata"]["intent"] == "update"
+    closed = client.post(f"/api/issues/{issue['id']}/close", json={"note": "Verified on site visit", "direct": True})
+    assert closed.status_code == 200
+    late = client.post(f"/api/issues/{issue['id']}/comments", json={"message": "One more thing"})
+    assert late.status_code == 409
+    history = client.get(f"/api/issues/{issue['id']}/activity").json()
+    messages = [row for row in history if row["action"] == "issue.message"]
+    # both messages stay in the history (SQLite timestamps tie within a second, so compare without order)
+    assert sorted(row["note"] for row in messages) == ["Checked the string currents", "Fuse replaced, INV back online"]
+
+
 def test_status_cannot_be_changed_through_edit(client, db):
     _, _, issue = _head_with_issue(client, db)
     client.patch(f"/api/issues/{issue['id']}", json={"status": "Closed", "description": "Edited text"})

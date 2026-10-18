@@ -14,24 +14,49 @@ function s91IssueEquipmentLabel(t){
  if(e)return [e.equipment_name,e.equipment_code].filter(Boolean).filter((v,i,a)=>a.indexOf(v)===i).join(" · ");
  const ref=String(t&&t.equip||"").trim();return ref&&ref!=="—"?ref:"Not specified";
 }
-/* Raise-issue wizard: pick the exact registered unit so one ticket is raised for one asset. */
+/* Raise-issue wizard: one ticket covers every affected unit of one equipment type at one plant
+   (four tripped inverters = one ticket listing INV-01…INV-04, not four tickets). */
 function s91TkPlantName(){const sel=document.getElementById("tk-plant");return (AUTH_IDENTITY.role==="Site Engineer"&&S._sePlant)||(sel?sel.value:"")||((S.plants||[])[0]||{}).name||""}
-function s91TkEquipOptionsHtml(plantName,vertical){
+function s91TkUnitRows(plantName,vertical){
  const plant=(S.plants||[]).find(p=>p.name===plantName);
  const rows=(S.equipment||[]).filter(e=>plant&&String(e.plant_id)===String(plant.dbId)&&String(e.status||"active").toLowerCase()!=="inactive");
  const same=rows.filter(e=>!vertical||String(e.equipment_type||"").toLowerCase()===String(vertical).toLowerCase());
- const list=(same.length?same:rows).slice().sort((a,b)=>String(a.equipment_code||a.equipment_name).localeCompare(String(b.equipment_code||b.equipment_name),undefined,{numeric:true}));
- return '<option value="">'+(list.length?'Select the unit with the problem ('+list.length+' registered)':'No registered equipment at this plant')+'</option>'+
-  list.map(e=>'<option value="'+esc(e.id)+'">'+esc([e.equipment_code,e.equipment_name].filter(Boolean).join(" · ")+(e.serial_number?" · S/N "+e.serial_number:""))+'</option>').join("")+
-  '<option value="__other">Not in the register (type the reference below)</option>';
+ return same.slice().sort((a,b)=>String(a.equipment_code||a.equipment_name).localeCompare(String(b.equipment_code||b.equipment_name),undefined,{numeric:true}));
 }
-function s91TkEquipRefresh(){const pick=document.getElementById("tk-equip-pick");if(pick)pick.innerHTML=s91TkEquipOptionsHtml(s91TkPlantName(),(document.getElementById("tk-vert")||{}).value||"")}
-function s91TkEquipPicked(id){
- const e=(S.equipment||[]).find(x=>String(x.id)===String(id)),set=(k,v)=>{const el=document.getElementById(k);if(el)el.value=v==null?"":v};
- if(!e){if(id==="__other"){set("tk-equip","");const el=document.getElementById("tk-equip");if(el)el.focus()}return}
- set("tk-equip",e.equipment_code||e.equipment_name||"");set("tk-serial",e.serial_number||"");set("tk-maker",e.maker||"");set("tk-supplier",e.supplier||"");
- const v=document.getElementById("tk-vert");if(v&&e.equipment_type&&[...v.options].some(o=>o.value===e.equipment_type)&&v.value!==e.equipment_type){v.value=e.equipment_type;if(typeof updIssueAssignees==="function")updIssueAssignees()}
+function s91TkPicked(){if(!(S._tkUnits instanceof Set))S._tkUnits=new Set();return S._tkUnits}
+function s91TkSelectedUnits(){const ids=s91TkPicked();return (S.equipment||[]).filter(e=>ids.has(String(e.id)))}
+function s91TkOpenSameType(plantName,vertical){
+ return (S.issues||[]).filter(t=>t.plant===plantName&&String(t.vertical||"").toLowerCase()===String(vertical||"").toLowerCase()&&!["Resolved","Closed"].includes(t.status));
 }
+function s91TkUnitsHtml(plantName,vertical){
+ const list=s91TkUnitRows(plantName,vertical),picked=s91TkPicked(),n=list.filter(e=>picked.has(String(e.id))).length;
+ const open=s91TkOpenSameType(plantName,vertical);
+ let h='';
+ if(open.length)h+='<div class="tk-dupe"><b>'+open.length+' open '+esc(vertical)+' ticket'+(open.length>1?'s':'')+' already at this plant</b>'+
+  open.slice(0,3).map(t=>'<button type="button" onclick="closeModal();openIssue(\''+esc(t.id)+'\')">'+esc(t.id)+' · '+esc(t.status)+(t.equip&&t.equip!=="—"?' · '+esc(String(t.equip).slice(0,40)):'')+' — open it</button>').join("")+
+  '<small>If it is the same fault, add a message on that ticket instead of raising a new one.</small></div>';
+ if(!list.length)return h+'<div class="tk-units-empty">No registered '+esc(vertical)+' units at this plant. Type the reference below.</div>';
+ h+='<div class="tk-units-head"><span><b>'+n+'</b> of '+list.length+' unit'+(list.length>1?'s':'')+' selected</span>'+
+  '<button type="button" class="btn g sm" onclick="s91TkUnitsAll('+(n===list.length?'false':'true')+')">'+(n===list.length?'Clear':'Select all')+'</button></div>'+
+  '<div class="tk-units">'+list.map(e=>{const id=String(e.id),on=picked.has(id);
+   return '<button type="button" class="tk-unit'+(on?' on':'')+'" aria-pressed="'+on+'" title="'+esc([e.equipment_name,e.serial_number?"S/N "+e.serial_number:""].filter(Boolean).join(" · "))+'" onclick="s91TkUnitToggle(\''+esc(id)+'\')">'+(on?'✓ ':'')+esc(e.equipment_code||e.equipment_name)+'</button>'}).join("")+'</div>';
+ return h;
+}
+function s91TkEquipRefresh(){
+ const box=document.getElementById("tk-units-box");if(!box)return;
+ const plant=s91TkPlantName(),vert=(document.getElementById("tk-vert")||{}).value||"";
+ const valid=new Set(s91TkUnitRows(plant,vert).map(e=>String(e.id)));
+ s91TkPicked().forEach(id=>{if(!valid.has(id))s91TkPicked().delete(id)});
+ box.innerHTML=s91TkUnitsHtml(plant,vert);s91TkSyncFields();
+}
+function s91TkSyncFields(){
+ const units=s91TkSelectedUnits(),set=(k,v)=>{const el=document.getElementById(k);if(el)el.value=v==null?"":v};
+ const ref=document.getElementById("tk-equip");
+ if(ref&&(units.length||ref.dataset.auto==="1")){ref.value=units.map(e=>e.equipment_code||e.equipment_name).join(", ");ref.dataset.auto=units.length?"1":"0"}
+ if(units.length===1){const e=units[0];set("tk-serial",e.serial_number||"");set("tk-maker",e.maker||"");set("tk-supplier",e.supplier||"")}
+}
+function s91TkUnitToggle(id){const p=s91TkPicked();if(p.has(id))p.delete(id);else p.add(id);s91TkEquipRefresh()}
+function s91TkUnitsAll(on){const p=s91TkPicked();s91TkUnitRows(s91TkPlantName(),(document.getElementById("tk-vert")||{}).value||"").forEach(e=>{if(on)p.add(String(e.id));else p.delete(String(e.id))});s91TkEquipRefresh()}
 function modal(title,sub,body,foot,wide){
  return '<div class="overlay" onclick="if(event.target===this)closeModal()"><div class="modal '+(wide?"wide":"")+'">'+
   '<div class="modal-h"><div><h3 style="font-size:16px;font-weight:600;margin:0">'+title+'</h3>'+(sub?'<p style="font-size:12px;color:var(--muted-foreground);margin:4px 0 0">'+sub+'</p>':'')+'</div>'+
@@ -148,7 +173,7 @@ function renderModal(){
  /* --- certificate --- */
  if(m==="certificate"){
   const h=S.handovers.find(x=>x.id===ctx.hid);const prog=hoProg(h);
-  return modal("Handover Completion Certificate",(h.certificate?h.certificate.no:"HCC-"+h.handoverId)+" · auto-generated PDF summary of checklist, dates, approvers — stored in the project document repository (3.6)",
+  return modal("Handover Completion Certificate",(h.certificate?h.certificate.no:"HCC-"+h.handoverId)+" · auto-generated PDF summary of checklist, dates, approvers — stored in the project document repository",
    '<div style="display:flex;flex-direction:column">'+
    [["Project",h.name+" · "+h.handoverId],["Capacity",capLabel(h.capacity)],["EPC / Client",h.epc+" · "+h.client],["Commissioned",h.commissioned],
     ["Checklist result",prog.done+"/"+prog.total+" closed ("+h.items.filter(i=>i.status==="na").length+" N/A justified) · "+h.items.reduce((s,i)=>s+i.evidence,0)+" evidence files"]]
@@ -172,13 +197,13 @@ function renderModal(){
    '<div class="row" style="gap:7px;justify-content:flex-end;flex-wrap:wrap">'+(t.status==="Scheduled"?'<button class="btn o sm" onclick="closeModal();startTask(\''+t.id+'\')">Start</button>':"")+(t.status==="In Progress"?'<button class="btn p sm" onclick="closeModal();openModal(\'complete\',{id:\''+t.id+'\'})">Complete</button>':"")+(scheduledAdmin()?'<button class="btn g sm" onclick="closeModal();openModal(\'reassignTask\',{id:\''+t.id+'\'})">Reassign</button>':"")+'<button class="btn o sm" onclick="closeModal()">Close</button></div>',true);
  }
  /* --- newTask --- */
- if(m==="newTask"){const first=(S.schedScope!=="all"?S.schedScope:(S.plants[0]?S.plants[0].name:""));return modal("Build maintenance task — recurrence builder (2.1.1)","Progressive task setup · recurrence remains anchored to the first due date",
+ if(m==="newTask"){const first=(S.schedScope!=="all"?S.schedScope:(S.plants[0]?S.plants[0].name:""));return modal("Build maintenance task — recurrence builder","Progressive task setup · recurrence remains anchored to the first due date",
   '<div class="wiz-task" data-step="1"><div class="pill pillsm b-info" style="margin-bottom:12px">Step 1 of 3 · Plant & maintenance category</div><div class="field"><span class="lbl">Plant</span><select id="nt-plant" class="inp">'+S.plants.map(p=>'<option'+(first===p.name?' selected':'')+'>'+esc(p.name)+'</option>').join("")+'</select></div><div class="field"><span class="lbl">Task name</span><input id="nt-name" class="inp" placeholder="e.g. Preventive maintenance task"/></div><div class="field"><span class="lbl">Maintenance category</span><select id="nt-type" class="inp">'+TASK_TYPES.map(t=>'<option>'+t.name+'</option>').join("")+'</select></div><div class="row" style="justify-content:flex-end"><button class="btn p" onclick="wizardGo(&quot;task&quot;,2)">Next</button></div></div>'+
   '<div class="wiz-task" data-step="2" style="display:none"><div class="pill pillsm b-info" style="margin-bottom:12px">Step 2 of 3 · Safety</div><div class="field"><span class="lbl">Safety precautions</span><select id="nt-safety" class="inp"><option>—</option><option>PTW required</option><option>LOTO required</option><option>PTW + LOTO required</option></select></div><div class="field"><span class="lbl">SOP reference</span><input id="nt-sop" class="inp" placeholder="SOP reference"/></div><div class="row between"><button class="btn o" onclick="wizardGo(&quot;task&quot;,1)">Back</button><button class="btn p" onclick="wizardGo(&quot;task&quot;,3)">Next</button></div></div>'+
   '<div class="wiz-task" data-step="3" style="display:none"><div class="pill pillsm b-info" style="margin-bottom:12px">Step 3 of 3 · Schedule & assignment</div><div class="row" style="gap:12px"><div class="field" style="flex:1"><span class="lbl">Frequency</span><select id="nt-freq" class="inp">'+Object.keys(FREQ_MAP).map(f=>'<option'+(f==="Monthly"?' selected':'')+'>'+f+'</option>').join("")+'</select></div><div class="field" style="flex:1"><span class="lbl">First due date</span><input id="nt-start" class="inp" type="date" value="'+addDays(TODAY,3)+'"/></div></div><div class="field"><span class="lbl">Assignee</span><select id="nt-who" class="inp">'+TEAM_POOL.map(n=>'<option>'+n+'</option>').join("")+'</select></div><div class="row" style="gap:12px"><div class="field" style="flex:1"><span class="lbl">Estimated duration</span><input id="nt-dur" class="inp" value="4 hrs"/></div><div class="field" style="flex:1"><span class="lbl">Required tools / spares</span><input id="nt-tools" class="inp" placeholder="Torque wrench, IR camera…"/></div></div><div class="row"><button class="btn o" onclick="wizardGo(&quot;task&quot;,2)">Back</button></div></div>',
   '<button class="btn o" onclick="closeModal()">Cancel</button><button data-wiz-final="task" style="display:none" class="btn p" onclick="createTask()">Create task</button>');}
  /* --- importCSV --- */
- if(m==="importCSV")return modal("Upload pre-built schedule (2.1.1)","Excel/CSV template with columns: task, plant, type, frequency, assignee, start_date. PM work is assigned by plant and category, not to an individual unit.",
+ if(m==="importCSV")return modal("Upload pre-built schedule","Excel/CSV template with columns: task, plant, type, frequency, assignee, start_date. PM work is assigned by plant and category, not to an individual unit.",
   '<div style="border:1px dashed var(--border);border-radius:10px;padding:24px;text-align:center;background:var(--surface-subtle)">'+I.ftext(26)+
   '<div style="font-weight:600;font-size:13px;margin-top:6px">Choose maintenance_schedule.xlsx or .csv</div><input id="csv-file" class="inp" type="file" accept=".xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv" style="margin-top:12px"/><div style="font-size:12.5px;color:var(--muted-foreground);margin-top:3px">Only rows in the selected file are imported. Duplicate work is not generated from hidden sample data.</div></div>',
   '<button class="btn o" onclick="closeModal()">Cancel</button><button class="btn p" onclick="importCSV()">Import schedule</button>');
@@ -198,12 +223,12 @@ function renderModal(){
  }
  /* --- reassignTask --- */
  if(m==="reassignTask"){const t=S.tasks.find(x=>x.id===ctx.id);
-  return modal("Reassign / delegate (2.1.2)","Currently assigned to "+esc(t.assignee)+" · due "+fmtD(t.due)+" — the change is logged",
+  return modal("Reassign / delegate","Currently assigned to "+esc(t.assignee)+" · due "+fmtD(t.due)+" — the change is logged",
    '<div class="field"><span class="lbl">New assignee</span><select id="rt-name" class="inp">'+TEAM_POOL.filter(n=>n!==t.assignee).map(n=>'<option>'+n+'</option>').join("")+'</select></div>',
    '<button class="btn o" onclick="closeModal()">Cancel</button><button class="btn p" onclick="reassignTask()">Reassign</button>');}
  /* --- bulkWash --- */
  if(m==="bulkWash"){const meta=S.washMeta[S.washPlant]||{team:["—"]};const crew=meta.team||[],team=crew.length?crew:["—"];const invs=[...new Set(S.washing.filter(t=>t.plant===S.washPlant).map(t=>t.inv))];
-  return modal("Bulk entry — inverter washed today (2.2.2)","Mark multiple tables as washed in one action — per-table date-stamped records are still stored",
+  return modal("Bulk entry — inverter washed today","Mark multiple tables as washed in one action — per-table date-stamped records are still stored",
    '<div class="row" style="gap:12px"><div style="flex:1" class="field"><span class="lbl">Inverter</span><select id="bw-inv" class="inp">'+invs.map(i=>'<option value="'+i+'">INV-'+pad2(i)+' — all tables</option>').join("")+'</select></div>'+
    '<div style="flex:1" class="field"><span class="lbl">Logged by</span><select id="bw-by" class="inp">'+team.map(n=>'<option>'+esc(n)+'</option>').join("")+'</select></div></div>'+
    '<div style="font-size:12.5px;color:var(--muted-foreground)">Date stamp: '+fmtDate(TODAY)+' · tables already washed today are skipped.</div>',
@@ -217,7 +242,7 @@ function renderModal(){
  if(m==="exception"){const t=S.washing.find(x=>x.id===ctx.id);
   if(!t)return modal("Log exception","This table is no longer in the washing register.",'<div class="bn-info banner">Refresh the register and try again.</div>','<button class="btn o" onclick="closeModal()">Close</button>');
   const crew=((S.washMeta[t.plant]||{}).team||[]),team=crew.length?crew:["—"];
-  return modal("Log exception — "+t.tableId+" (2.2.3)","Scheduled but not washed due to rain or another valid reason? Log it as an exception rather than leaving it blank/undone.",
+  return modal("Log exception — "+t.tableId+"","Scheduled but not washed due to rain or another valid reason? Log it as an exception rather than leaving it blank/undone.",
    '<div class="field"><span class="lbl">Reason code</span><select id="ex-reason" class="inp">'+EXC_REASONS.map(r=>'<option>'+r+'</option>').join("")+'</select></div>'+
    '<div class="field"><span class="lbl">Logged by</span><select id="ex-by" class="inp">'+team.map(n=>'<option>'+esc(n)+'</option>').join("")+'</select></div>'+
    '<div class="field"><span class="lbl">Notes (free text, especially for \u2018Other\u2019)</span><input id="ex-notes" class="inp" placeholder="Details…"/></div>'+
@@ -225,7 +250,7 @@ function renderModal(){
    '<button class="btn o" onclick="closeModal()">Cancel</button><button class="btn p" onclick="logException()">Log exception</button>');}
  /* --- washHistory --- */
  if(m==="washHistory"){const t=S.washing.find(x=>x.id===ctx.id);if(!t)return modal("Cleaning history","This table is no longer in the washing register.",'<div class="bn-info banner">Refresh the register and try again.</div>','<button class="btn o" onclick="closeModal()">Close</button>');const d=daysSince(t);
-  return modal("Cleaning history — "+t.tableId+" (2.2.4)",esc(t.plant)+" · full timeline of wash dates, skip/exception dates, and days-since-last-wash counter",
+  return modal("Cleaning history — "+t.tableId+"",esc(t.plant)+" · full timeline of wash dates, skip/exception dates, and days-since-last-wash counter",
    '<div class="row" style="gap:10px;margin-bottom:12px;align-items:center">'+badge(d<10?"On track":d<=15?"Attention":"Overdue")+'<b style="font-size:13px">Days since last wash: '+(d===999?"never":d)+'</b></div>'+
    '<div class="col">'+t.history.slice().reverse().map(hh=>'<div class="row" style="gap:10px;align-items:flex-start;padding:8px 0;border-bottom:1px solid var(--border)"><span class="history-dot" style="background:'+(hh.type==="wash"?"var(--success)":"var(--info)")+'"></span>'+
     '<div style="font-size:12.5px"><b>'+(hh.type==="wash"?"Washed":"Exception — "+esc(hh.reason||"Other"))+'</b><div style="font-size:12.5px;color:var(--muted-foreground)">'+fmtDate(hh.date)+' · by '+esc(hh.by||"Unknown")+'</div>'+
@@ -233,14 +258,14 @@ function renderModal(){
     (hh.type==="exception"&&(hh.rescheduledTo||(hh.reason==="Rain"&&t.rescheduledTo&&hh.date===TODAY))?'<div style="margin-top:4px;font-size:12.5px;color:var(--warning-strong)">Rescheduled to '+fmtDate(hh.rescheduledTo||t.rescheduledTo)+'</div>':"")+'</div></div>').join("")+'</div>',
    '<button class="btn o" onclick="closeModal()">Close</button>');}
  /* --- washScheduleImport --- */
- if(m==="washScheduleImport")return modal("Upload washing schedule (2.2.1)","Excel/CSV columns: plant, table_id, inverter, secondary_inverter (optional), frequency_days, next_due, crew (optional)",
+ if(m==="washScheduleImport")return modal("Upload washing schedule","Excel/CSV columns: plant, table_id, inverter, secondary_inverter (optional), frequency_days, next_due, crew (optional)",
   '<div style="border:1px dashed var(--border);border-radius:10px;padding:22px;text-align:center;background:var(--surface-subtle)">'+I.ftext(26)+
   '<div style="font-weight:600;font-size:13px;margin-top:6px">Choose washing_schedule.xlsx or .csv</div><input id="wash-schedule-file" class="inp" type="file" accept=".xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv" style="margin-top:12px"/>'+
   '<div style="font-size:12.5px;color:var(--muted-foreground);margin-top:5px">Rows can create/update table mappings. A table may include a secondary inverter when it is physically split between two inverters.</div></div>',
   '<button class="btn o" onclick="closeModal()">Cancel</button><button class="btn p" onclick="importWashSchedule()">Import washing schedule</button>');
  /* --- washSetup --- */
  if(m==="washSetup"){const opt=n=>'<option value="">—</option>'+SITE_ENG_POOL.map(x=>'<option'+(x===n?' selected':'')+'>'+esc(x)+'</option>').join("");
-  return modal("Set up washing — "+esc(S.washPlant),"Inverter → table mapping, wash frequency and crew (2.2.1)",
+  return modal("Set up washing — "+esc(S.washPlant),"Inverter → table mapping, wash frequency and crew",
    '<div class="row" style="gap:12px"><div style="flex:1" class="field"><span class="lbl">Inverters</span><input id="ws-inv" class="inp" type="number" min="1" max="60" value="6"/></div><div style="flex:1" class="field"><span class="lbl">Tables per inverter</span><input id="ws-tpi" class="inp" type="number" min="1" max="30" value="4"/></div><div style="flex:1" class="field"><span class="lbl">Wash every (days)</span><input id="ws-freq" class="inp" type="number" min="1" value="12"/></div></div>'+
    '<div class="row" style="gap:12px"><div style="flex:1" class="field"><span class="lbl">Crew member 1</span><select id="ws-t1" class="inp">'+opt("")+'</select></div><div style="flex:1" class="field"><span class="lbl">Crew member 2</span><select id="ws-t2" class="inp">'+opt("")+'</select></div></div>',
    '<button class="btn o" onclick="closeModal()">Cancel</button><button class="btn p" onclick="saveWashSetup()">Create tables</button>');}
@@ -265,13 +290,13 @@ function renderModal(){
   return modal(esc(p.name),esc(p.id)+" · plant detail",body,'<button class="btn o" onclick="closeModal();setPlantScope(\''+esc(p.name)+'\')">Scope dashboard to this plant</button><button class="btn p" onclick="closeModal()">Close</button>',true);}
  /* --- washFreq --- */
  if(m==="washFreq"){const f=(S.washMeta[S.washPlant]||{}).freq||12;
-  return modal("Washing schedule / frequency (2.2.1)","Pre-planned schedule for "+esc(S.washPlant)+" — drives each table's due date and the compliance calculation",
+  return modal("Washing schedule / frequency","Pre-planned schedule for "+esc(S.washPlant)+" — drives each table's due date and the compliance calculation",
    '<div class="field"><span class="lbl">Wash every (days) — '+esc(S.washPlant)+'</span><input id="wf-days" class="inp" type="number" min="1" value="'+f+'"/></div>',
    '<button class="btn o" onclick="closeModal()">Cancel</button><button class="btn p" onclick="saveWashFreq()">Save schedule</button>');}
  /* --- newTicket --- */
- if(m==="newTicket"){return modal("Raise issue ticket (2.3.1)","Step-by-step issue capture · Ticket ID and timestamp are generated only when you submit",
+ if(m==="newTicket"){return modal("Raise issue ticket","Step-by-step issue capture · Ticket ID and timestamp are generated only when you submit",
   '<div class="wiz-ticket" data-step="1"><div class="pill pillsm b-info" style="margin-bottom:12px">Step 1 of 3 · Plant & issue context</div><div class="field"><span class="lbl">Plant code</span><select id="tk-plant" class="inp" onchange="s91TkEquipRefresh()">'+S.plants.map((p,i)=>'<option value="'+esc(p.name)+'"'+(i===0?' selected':'')+'>'+esc(p.id||p.name)+'</option>').join("")+'</select></div><div class="row" style="justify-content:flex-end"><button class="btn p" onclick="wizardGo(&quot;ticket&quot;,2)">Next</button></div></div>'+
-  '<div class="wiz-ticket" data-step="2" style="display:none"><div class="pill pillsm b-info" style="margin-bottom:12px">Step 2 of 3 · Classification</div><div class="field"><span class="lbl">Issue vertical / category</span><select id="tk-vert" class="inp" onchange="updIssueAssignees();s91TkEquipRefresh()">'+VERTICALS.map(v=>'<option>'+v+'</option>').join("")+'</select></div><div class="field"><span class="lbl">Registered equipment</span><select id="tk-equip-pick" class="inp" onchange="s91TkEquipPicked(this.value)">'+s91TkEquipOptionsHtml(s91TkPlantName(),VERTICALS[0])+'</select><small class="muted">Choose one unit. The ticket is raised for that unit only.</small></div><div class="field"><span class="lbl">Equipment / component reference</span><input id="tk-equip" class="inp" maxlength="255" placeholder="e.g. INV-03, transformer, pump, or equipment code"/></div><div class="field"><span class="lbl">Serial number</span><input id="tk-serial" class="inp" placeholder="Issue or equipment serial number"/></div><div class="field"><span class="lbl">Supplier</span><input id="tk-supplier" class="inp" placeholder="Supplier / vendor name"/></div><div class="field"><span class="lbl">Maker / manufacturer (if known)</span><input id="tk-maker" class="inp" placeholder="e.g. Sungrow, Waaree"/></div><div class="field"><span class="lbl">Occurrence date</span><input id="tk-occurred" class="inp" type="date" value="'+TODAY+'"/></div><div class="row between"><button class="btn o" onclick="wizardGo(&quot;ticket&quot;,1)">Back</button><button class="btn p" onclick="wizardGo(&quot;ticket&quot;,3)">Next</button></div></div>'+
+  '<div class="wiz-ticket" data-step="2" style="display:none"><div class="pill pillsm b-info" style="margin-bottom:12px">Step 2 of 3 · Classification</div><div class="field"><span class="lbl">Issue vertical / category</span><select id="tk-vert" class="inp" onchange="updIssueAssignees();s91TkEquipRefresh()">'+VERTICALS.map(v=>'<option>'+v+'</option>').join("")+'</select></div><div class="field"><span class="lbl">Affected units — pick every unit with this fault (one ticket)</span><div id="tk-units-box">'+s91TkUnitsHtml(s91TkPlantName(),VERTICALS[0])+'</div></div><div class="field"><span class="lbl">Equipment / component reference</span><input id="tk-equip" class="inp" maxlength="255" placeholder="Filled from the units above, or type e.g. transformer, pump" oninput="this.dataset.auto=0"/></div><details class="tk-more"><summary>Serial number, supplier, maker (optional)</summary><div class="field"><span class="lbl">Serial number</span><input id="tk-serial" class="inp" placeholder="Issue or equipment serial number"/></div><div class="field"><span class="lbl">Supplier</span><input id="tk-supplier" class="inp" placeholder="Supplier / vendor name"/></div><div class="field"><span class="lbl">Maker / manufacturer (if known)</span><input id="tk-maker" class="inp" placeholder="e.g. Sungrow, Waaree"/></div></details><div class="field"><span class="lbl">Occurrence date</span><input id="tk-occurred" class="inp" type="date" value="'+TODAY+'"/></div><div class="row between"><button class="btn o" onclick="wizardGo(&quot;ticket&quot;,1)">Back</button><button class="btn p" onclick="wizardGo(&quot;ticket&quot;,3)">Next</button></div></div>'+
   '<div class="wiz-ticket" data-step="3" style="display:none"><div class="pill pillsm b-info" style="margin-bottom:12px">Step 3 of 3 · Priority & details</div><div class="row" style="gap:12px"><div class="field" style="flex:1"><span class="lbl">Severity / Priority</span><select id="tk-sev" class="inp" onchange="updEtc()"><option>Critical</option><option selected>Medium</option><option>Low</option></select></div><div class="field" style="flex:1"><span class="lbl">Expected Time to Close (ETC)</span><input id="tk-etc" class="inp" type="datetime-local" value="'+addHoursISO(stampISO(),etcHrs("Medium"))+'"/></div></div><div class="field"><span class="lbl">Issue details</span><textarea id="tk-desc" class="txt" rows="3" placeholder="Describe the actual issue observed"></textarea></div><div class="row" style="gap:12px"><div class="field" style="flex:1"><span class="lbl">Evidence photos (up to 10)</span><input id="tk-photos" class="inp" type="file" accept="image/jpeg,image/png,image/webp" multiple onchange="showIssuePhotoSelection(this)"/><small id="tk-photo-count" class="muted">No photos selected</small></div><div class="field" style="flex:1"><span class="lbl">Assign to Assignee (optional)</span><select id="tk-assignee" class="inp">'+issueAssigneeOptions()+'</select></div></div><div class="row"><button class="btn o" onclick="wizardGo(&quot;ticket&quot;,2)">Back</button></div></div>',
   '<button class="btn o" onclick="closeModal()">Cancel</button><button data-wiz-final="ticket" style="display:none" class="btn p" onclick="createTicket()">Create ticket</button>');}
  /* --- editTicket --- */
@@ -330,7 +355,7 @@ function renderModal(){
    '<div class="row" style="gap:8px;flex-wrap:wrap;justify-content:flex-end">'+acts+'</div>');}
  /* --- assign --- */
  if(m==="assign"){const t=S.issues.find(x=>x.id===ctx.id);
-  return modal("Assign & triage — "+t.id+" (2.3.2)","Assign to a specific team member (or vendor/OEM support for warranty issues) responsible for resolution",
+  return modal("Assign & triage — "+t.id+"","Assign to a specific team member (or vendor/OEM support for warranty issues) responsible for resolution",
    '<div class="field"><span class="lbl">Assign to</span><select id="at-who" class="inp" onchange="var v=document.getElementById(\'at-vf\');if(v)v.style.display=this.value===\'__vendor\'?\'grid\':\'none\'">'+
    TEAM_POOL.map(n=>'<option>'+n+'</option>').join("")+'<option value="__vendor">— Vendor / OEM support (warranty / specialist) —</option></select></div>'+
    '<div id="at-vf" style="display:none;border:1px dashed var(--warning);border-radius:10px;padding:12px;gap:10px" class="col">'+
@@ -342,14 +367,14 @@ function renderModal(){
    (t.severity==="Critical"?'<div style="font-size:12px;font-weight:600;color:var(--danger)">☎ Critical severity — assignee gets an immediate call/SMS alert in addition to the app notification.</div>':''),
    '<button class="btn o" onclick="closeModal()">Cancel</button><button class="btn p" onclick="assignTicket()">Assign &amp; notify</button>');}
     /* --- progress --- */
- if(m==="progress")return modal("Add progress note (2.3.3)","Assignee updates progress notes, actual inventory parts used, and time spent",
+ if(m==="progress")return modal("Add progress note","Assignee updates progress notes, actual inventory parts used, and time spent",
   '<div class="field"><span class="lbl">Progress note</span><textarea id="pg-note" class="txt" rows="3" placeholder="What was done / found?"></textarea></div>'+
   '<div class="row" style="gap:12px"><div style="flex:2" class="field"><span class="lbl">Spare part from inventory</span><select id="pg-part" class="inp"><option value="">— No part used —</option>'+S.inventory.map(x=>'<option value="'+x.id+'">'+esc(x.item)+' · '+x.qty+' '+esc(x.unit)+' · '+esc(x.plant)+'</option>').join("")+'</select></div>'+
   '<div style="flex:0 0 100px" class="field"><span class="lbl">Qty</span><input id="pg-qty" class="inp" type="number" min="1" value="1"/></div><div style="flex:1" class="field"><span class="lbl">Time spent (hrs)</span><input id="pg-hrs" class="inp" type="number" min="0" step="0.5" value="1"/></div></div>',
   '<button class="btn o" onclick="closeModal()">Cancel</button><button class="btn p" onclick="addProgress()">Save note</button>');
  /* --- resolve --- */
  if(m==="resolve"){const t=S.issues.find(x=>x.id===ctx.id);const spent=(t.progress||[]).reduce((s,p)=>s+(p.hrs||0),0);
-  return modal("Submit resolution — "+t.id+" (2.3.3)","On resolution, submit closure details: root cause, corrective action taken, photo evidence of fix, and actual time-to-close",
+  return modal("Submit resolution — "+t.id+"","On resolution, submit closure details: root cause, corrective action taken, photo evidence of fix, and actual time-to-close",
    '<div class="field"><span class="lbl">Root cause *</span><textarea id="rs-root" class="txt" rows="2" placeholder="What caused the issue?"></textarea></div>'+
    '<div class="field"><span class="lbl">Corrective action taken *</span><textarea id="rs-act" class="txt" rows="2" placeholder="What was done to fix it?"></textarea></div>'+
    '<div class="field"><span class="lbl">Photo evidence of the fix *</span><input id="rs-photos" class="inp" type="file" accept="image/jpeg,image/png,image/webp" multiple onchange="showResolutionPhotoSelection(this)"/><small id="rs-photo-count" class="muted">Attach at least one fix photo · '+Math.max(0,10-(t.evidence||[]).length)+' remaining</small></div>'+
@@ -362,24 +387,24 @@ function renderModal(){
    '<div class="field"><span class="lbl">Verification remarks (optional)</span><input id="vf-rem" class="inp" placeholder="e.g. Fix verified on site — closed."/></div>',
    '<button class="btn o" onclick="closeModal()">Cancel</button><button class="btn p" onclick="verifyTicket()">'+I.check(13)+'Verify &amp; close</button>');}
  /* --- reopen --- */
- if(m==="reopen")return modal("Reopen ticket","Send the ticket back to Open — e.g. the issue recurred. Recurrence feeds chronic-problem detection (2.3.4).",
+ if(m==="reopen")return modal("Reopen ticket","Send the ticket back to Open — e.g. the issue recurred. Recurrence feeds chronic-problem detection.",
   '<div class="field"><span class="lbl">Reason</span><input id="ro-reason" class="inp" placeholder="e.g. Fault reappeared after 48 hrs…"/></div>',
   '<button class="btn o" onclick="closeModal()">Cancel</button><button class="btn d" onclick="reopenTicket()">Reopen ticket</button>');
  /* --- create inventory/vendor/document/SLA --- */
- if(m==="newInventory")return modal("Add stock item (3.2)","Create an inventory record; low-stock state is derived from quantity vs minimum.",
+ if(m==="newInventory")return modal("Add stock item","Create an inventory record; low-stock state is derived from quantity vs minimum.",
   '<div class="field"><span class="lbl">Item name</span><input id="ni-item" class="inp" placeholder="e.g. 15A gPV fuse"/></div><div class="row" style="gap:12px"><div class="field" style="flex:1"><span class="lbl">Category</span><input id="ni-cat" class="inp" placeholder="Fuse / Module / Connector"/></div><div class="field" style="flex:1"><span class="lbl">Plant</span><select id="ni-plant" class="inp">'+S.plants.map(p=>'<option>'+esc(p.name)+'</option>').join("")+'</select></div></div><div class="field"><span class="lbl">Store / warehouse</span><input id="ni-store" class="inp" placeholder="Main store"/></div><div class="row" style="gap:12px"><div class="field" style="flex:1"><span class="lbl">Quantity</span><input id="ni-qty" class="inp" type="number" min="0" value="0"/></div><div class="field" style="flex:1"><span class="lbl">Minimum</span><input id="ni-min" class="inp" type="number" min="0" value="0"/></div><div class="field" style="flex:1"><span class="lbl">Unit</span><input id="ni-unit" class="inp" value="pcs"/></div></div>',
   '<button class="btn o" onclick="closeModal()">Cancel</button><button class="btn p" onclick="createInventory()">Add item</button>');
- if(m==="newVendor")return modal("Add vendor (3.7)","Performance is not entered manually; on-time rate is derived from actual vendor-linked ticket data.",
+ if(m==="newVendor")return modal("Add vendor","Performance is not entered manually; on-time rate is derived from actual vendor-linked ticket data.",
   '<div class="field"><span class="lbl">Vendor name</span><input id="nv-name" class="inp"/></div><div class="row" style="gap:12px"><div class="field" style="flex:1"><span class="lbl">Type</span><select id="nv-type" class="inp"><option>OEM service partner</option><option>Washing contractor</option><option>Security agency</option><option>Other</option></select></div><div class="field" style="flex:1"><span class="lbl">Scope</span><input id="nv-scope" class="inp" placeholder="Plants / services covered"/></div></div><div class="field"><span class="lbl">SLA / service commitment</span><input id="nv-sla" class="inp" placeholder="e.g. 48h mobilisation"/></div><div class="field"><span class="lbl">Contract end</span><input id="nv-end" class="inp" type="date"/></div>',
   '<button class="btn o" onclick="closeModal()">Cancel</button><button class="btn p" onclick="createVendor()">Add vendor</button>');
- if(m==="newDocument")return modal("Add document (3.6)","Store a document record with optional expiry; reminders are derived from the actual expiry date.",
+ if(m==="newDocument")return modal("Add document","Store a document record with optional expiry; reminders are derived from the actual expiry date.",
   '<div class="field"><span class="lbl">Document name</span><input id="nd-name" class="inp"/></div><div class="row" style="gap:12px"><div class="field" style="flex:1"><span class="lbl">Type</span><input id="nd-type" class="inp" placeholder="Warranty / Certificate / Manual"/></div><div class="field" style="flex:1"><span class="lbl">Plant</span><select id="nd-plant" class="inp"><option>Portfolio</option>'+S.plants.map(p=>'<option>'+esc(p.name)+'</option>').join("")+'</select></div></div><div class="row" style="gap:12px"><div class="field" style="flex:1"><span class="lbl">Owner</span><input id="nd-owner" class="inp" value="'+OM_HEAD+'"/></div><div class="field" style="flex:1"><span class="lbl">Expiry date (optional)</span><input id="nd-exp" class="inp" type="date"/></div></div><div class="field"><span class="lbl">File</span><input id="nd-file" class="inp" type="file"/><span class="muted" style="font-size:12px">Document metadata is persisted in Supabase PostgreSQL. Binary document-file storage is not enabled for this module in the current production build.</span></div>',
   '<button class="btn o" onclick="closeModal()">Cancel</button><button class="btn p" onclick="createDocument()">Add document</button>');
- if(m==="newSLA")return modal("Add SLA contract (3.13)","Targets are configuration only; breach status is derived from actual tickets/washing and Operations date.",
+ if(m==="newSLA")return modal("Add SLA contract","Targets are configuration only; breach status is derived from actual tickets/washing and Operations date.",
   '<div class="field"><span class="lbl">Contract name</span><input id="ns-name" class="inp" placeholder="O&M SLA"/></div><div class="field"><span class="lbl">Plant scope</span><select id="ns-plant" class="inp"><option>All Plants</option>'+S.plants.map(p=>'<option>'+esc(p.name)+'</option>').join("")+'</select></div><div class="row" style="gap:8px"><div class="field" style="flex:1"><span class="lbl">Critical (hrs)</span><input id="ns-c" type="number" class="inp" value="24"/></div><div class="field" style="flex:1"><span class="lbl">Medium</span><input id="ns-m" type="number" class="inp" value="120"/></div><div class="field" style="flex:1"><span class="lbl">Low</span><input id="ns-l" type="number" class="inp" value="240"/></div></div><div class="field"><span class="lbl">Washing frequency (days, optional)</span><input id="ns-w" type="number" min="0" class="inp" placeholder="e.g. 12"/></div>',
   '<button class="btn o" onclick="closeModal()">Cancel</button><button class="btn p" onclick="createSLA()">Save SLA</button>');
  /* --- incident --- */
- if(m==="incident")return modal("Report safety incident / near-miss (3.5)","Separate register from equipment Issues — feeds the monthly compliance pack",
+ if(m==="incident")return modal("Report safety incident / near-miss","Separate register from equipment Issues — feeds the monthly compliance pack",
   '<div class="row" style="gap:12px"><div style="flex:2" class="field"><span class="lbl">Plant</span><select id="in-plant" class="inp">'+S.plants.map(p=>'<option>'+esc(p.name)+'</option>').join("")+'</select></div>'+
   '<div style="flex:1" class="field"><span class="lbl">Type</span><select id="in-type" class="inp"><option>Near Miss</option><option>Incident</option><option>First-aid case</option></select></div>'+
   '<div style="flex:1" class="field"><span class="lbl">Severity</span><select id="in-sev" class="inp"><option>Low</option><option>Medium</option><option>High</option></select></div></div>'+
@@ -391,7 +416,7 @@ function renderModal(){
    if(t.status!=="Closed"&&t.status!=="Resolved"){pm[t.assignee].open++;if(slaState(t)==="breach")pm[t.assignee].overdue++;}
    if(t.closure&&t.closure.resolutionHrs){pm[t.assignee].sh+=t.closure.resolutionHrs;pm[t.assignee].n++;}});
   const rows=Object.entries(pm).map(e=>({name:e[0],...e[1],avg:e[1].n?e[1].sh/e[1].n:0})).sort((a,b)=>b.open-a.open);
-  return modal("Issues — Person-wise performance report (2.3.5)","Exportable report · generated "+stampLong(),
+  return modal("Issues — Person-wise performance report","Exportable report · generated "+stampLong(),
    '<table><thead><tr><th>Team member</th><th>Open</th><th>Overdue</th><th>Avg resolution</th></tr></thead><tbody>'+
    rows.map(r=>'<tr><td>'+esc(r.name)+'</td><td>'+r.open+'</td><td>'+r.overdue+'</td><td>'+(r.n?(r.avg>=48?(r.avg/24).toFixed(1)+" d":r.avg.toFixed(1)+" h"):"—")+'</td></tr>').join("")+'</tbody></table>',
    '<button class="btn o" onclick="window.print()">Print / save PDF</button><button class="btn p" onclick="closeModal()">Close</button>',true);

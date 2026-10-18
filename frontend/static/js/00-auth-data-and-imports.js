@@ -1311,7 +1311,7 @@ function downloadSecRep(){const tab=S.repTab||"generation",d=secRepData(tab),k="
  const rows=d.rows.filter(r=>(!q||d.textIdx.map(i=>r[i]).join(" ").toLowerCase().includes(q))&&(st.f==="all"||r[d.facetIdx]===st.f));
  const csv=[[d.title]].concat([d.cols],rows.map(r=>r.slice(0,d.cols.length))).map(r=>r.map(c=>'"'+s91CsvText(c).replace(/"/g,'""')+'"').join(",")).join("\r\n");
  const a=document.createElement("a");a.href=URL.createObjectURL(new Blob(["\ufeff"+csv],{type:"text/csv;charset=utf-8"}));a.download="solar91-"+tab+"-report-"+TODAY+".csv";document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),800);
- audit("Reports","Downloaded "+d.title+" (3.10)",OM_HEAD);toast("Downloaded "+a.download)}
+ audit("Reports","Downloaded "+d.title+"",OM_HEAD);toast("Downloaded "+a.download)}
 function renderSecReports(){const tab=S.repTab||"generation",d=secRepData(tab),k="rep_"+tab;
  const lc=listCtl(k,d.rows.map(r=>({r})),{facet:x=>x.r[d.facetIdx],facetLabel:d.facetName,text:x=>d.textIdx.map(i=>x.r[i]).join(" "),ph:"Search "+(REP_TABS.find(t=>t[0]===tab)||[])[1]});
  const mo=tab==="generation"?'<div class="field" style="min-width:150px"><span class="lbl">Month</span><select class="inp" onchange="S.repMonth=this.value;S.tablePages.'+k+'=1;render()">'+xlMonthsList().map(m=>'<option value="'+m+'"'+((S.repMonth||XL_LAST.slice(0,7))===m?" selected":"")+'>'+XL_MON[+m.slice(5)-1]+" "+m.slice(0,4)+'</option>').join("")+'</select></div>':"";

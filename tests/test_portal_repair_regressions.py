@@ -69,10 +69,49 @@ def test_one_issue_links_to_exactly_one_registered_unit(client, db):
 def test_issue_overlay_and_wizard_show_registered_equipment():
     modals = (ROOT / "frontend/static/js/07-modal-renderers.js").read_text(encoding="utf-8")
     bridge = (ROOT / "frontend/static/js/19-production-identity-and-domain-bridge.js").read_text(encoding="utf-8")
-    assert 'id="tk-equip-pick"' in modals and "s91IssueEquipmentLabel(t)" in modals
+    assert 'id="tk-units-box"' in modals and "s91IssueEquipmentLabel(t)" in modals
     # actions are the footer argument; the old call passed `true` as the footer and printed it
     assert "+acts+'</div>',true);}" not in modals
-    assert "if(creatingTicket)return;" in bridge and 'getElementById("tk-equip-pick")' in bridge
+    # the wizard sends every selected unit so one fault on several units is one ticket
+    assert "if(creatingTicket)return;" in bridge and "unit_ids:units.map(e=>e.id)" in bridge
+
+
+def test_one_ticket_covers_several_units_of_one_plant(client, db):
+    login_user(client, db)
+    plant, units = _plant_with_inverters(db, count=4)
+    body = {"plant_id": str(plant.id), "vertical": "Inverter", "description": "Four inverters tripped on grid fault",
+            "severity": "Critical", "unit_ids": [str(u.id) for u in units]}
+    created = client.post("/api/issues", json=body)
+    assert created.status_code == 201, created.text
+    data = created.json()
+    assert data["equipment_id"] is None
+    assert data["equipment_ref"] == "INV-01, INV-02, INV-03, INV-04"
+    assert [u["code"] for u in data["units"]] == ["INV-01", "INV-02", "INV-03", "INV-04"]
+    assert len(db.scalars(select(Issue)).all()) == 1
+    # a repeated submit of the same multi-unit form is the same ticket
+    again = client.post("/api/issues", json=body)
+    assert again.status_code == 201 and again.json()["ticket_no"] == data["ticket_no"]
+    assert len(db.scalars(select(Issue)).all()) == 1
+    # the same text for a different set of units is a different ticket
+    other = client.post("/api/issues", json={**body, "unit_ids": [str(units[0].id)]})
+    assert other.status_code == 201 and other.json()["ticket_no"] != data["ticket_no"]
+    assert other.json()["equipment_id"] == str(units[0].id)
+
+
+def test_ticket_units_must_belong_to_the_ticket_plant(client, db):
+    login_user(client, db)
+    plant, units = _plant_with_inverters(db)
+    elsewhere = Plant(site_code="OTH01", plant_name="Other Plant")
+    db.add(elsewhere)
+    db.commit()
+    stray = Equipment(plant_id=elsewhere.id, equipment_code="INV-99", equipment_name="Inverter 99", equipment_type="Inverter", status="active")
+    retired = Equipment(plant_id=plant.id, equipment_code="INV-50", equipment_name="Inverter 50", equipment_type="Inverter", status="inactive")
+    db.add_all([stray, retired])
+    db.commit()
+    base = {"plant_id": str(plant.id), "vertical": "Inverter", "description": "Fault", "severity": "Low"}
+    assert client.post("/api/issues", json={**base, "unit_ids": [str(units[0].id), str(stray.id)]}).status_code == 422
+    assert client.post("/api/issues", json={**base, "unit_ids": [str(retired.id)]}).status_code == 422
+    assert db.scalars(select(Issue)).all() == []
 
 
 # ---------------------------------------------------------------- washing

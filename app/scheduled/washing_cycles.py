@@ -42,10 +42,32 @@ def _month_key(value: date) -> str:
     return value.strftime("%Y-%m")
 
 
+PATTERN_KEY = "pattern"   # cycle_overrides["pattern"] = {"from": "YYYY-MM", "days": {"s1": 1, "1": 10, ...}}
+
+
+def _month_overrides(value: date, overrides: dict | None) -> dict:
+    """The cycle dates that apply to `value`'s month: the plant's repeating pattern (day numbers, clamped to the
+    month's length, from the month it was set) overlaid by any dates saved for that specific month."""
+    overrides = overrides or {}
+    merged: dict = {}
+    pattern = overrides.get(PATTERN_KEY)
+    if isinstance(pattern, dict) and (not pattern.get("from") or _month_key(value) >= str(pattern["from"])):
+        last = monthrange(value.year, value.month)[1]
+        for key, day in (pattern.get("days") or {}).items():
+            try:
+                merged[str(key)] = date(value.year, value.month, min(max(1, int(day)), last)).isoformat()
+            except (TypeError, ValueError):
+                continue
+    specific = overrides.get(_month_key(value))
+    if isinstance(specific, dict):
+        merged.update(specific)
+    return merged
+
+
 def _daily_table_target(table_count: int, value: date, overrides: dict | None = None) -> int:
     """Tables due on `value`. Default cycles are days 1-10, 11-20 and 21-month end; when the O&M team moved a
     cycle's start or deadline (`overrides`), the day's share is spread over that cycle's own window instead."""
-    if overrides and (overrides.get(_month_key(value)) or {}):
+    if overrides and _month_overrides(value, overrides):
         window = next(((a, b) for a, b in _cycle_windows(value, overrides) if a <= value <= b), None)
         if window is None:
             return 0
@@ -75,7 +97,7 @@ def _cycle_due_dates(value: date, overrides: dict | None = None) -> list[date]:
 
     The O&M Head can move any single deadline (stored per plant in washing_config.cycle_overrides)."""
     dates = _default_due_dates(value)
-    for key, raw in ((overrides or {}).get(_month_key(value)) or {}).items():
+    for key, raw in _month_overrides(value, overrides).items():
         try:
             index = int(key) - 1
             if 0 <= index < MONTHLY_CYCLE_TARGET:
@@ -92,7 +114,7 @@ def _default_start_dates(value: date) -> list[date]:
 def _cycle_start_dates(value: date, overrides: dict | None = None) -> list[date]:
     """Each cycle's start date. Overrides are stored beside the deadlines under the keys "s1", "s2", "s3"."""
     dates = _default_start_dates(value)
-    for key, raw in ((overrides or {}).get(_month_key(value)) or {}).items():
+    for key, raw in _month_overrides(value, overrides).items():
         try:
             if str(key).startswith("s"):
                 index = int(str(key)[1:]) - 1
@@ -1026,8 +1048,9 @@ def set_cycle_date(db: Session, user: User, plant_id: UUID, payload: WashingCycl
     else:
         trial[key] = new_value.isoformat()
     first = date(year, month_no, 1)
-    start_now = _cycle_start_dates(first, {payload.month: trial})[payload.cycle_no - 1]
-    due_now = _cycle_due_dates(first, {payload.month: trial})[payload.cycle_no - 1]
+    trial_all = {**overrides, payload.month: trial}
+    start_now = _cycle_start_dates(first, trial_all)[payload.cycle_no - 1]
+    due_now = _cycle_due_dates(first, trial_all)[payload.cycle_no - 1]
     if start_now > due_now:
         raise HTTPException(422, f"Cycle {payload.cycle_no} cannot start ({start_now.isoformat()}) after its deadline ({due_now.isoformat()})")
     if new_value is None:
@@ -1050,6 +1073,117 @@ def set_cycle_date(db: Session, user: User, plant_id: UUID, payload: WashingCycl
         "due_dates": [d.isoformat() for d in _cycle_due_dates(first, config.cycle_overrides)],
         "start_dates": [d.isoformat() for d in _cycle_start_dates(first, config.cycle_overrides)],
     }
+
+
+def _parse_month(month: str) -> date:
+    try:
+        first = date(int(month[:4]), int(month[5:7]), 1)
+    except (TypeError, ValueError):
+        raise HTTPException(422, "Month must look like 2026-10")
+    today = business_today()
+    if first < date(today.year - 2, today.month, 1) or first > date(today.year + 1, today.month, 1):
+        raise HTTPException(422, "Choose a month within the last two years or the next twelve months")
+    return first
+
+
+def _pattern_out(config: WashingConfig) -> dict | None:
+    pattern = (config.cycle_overrides or {}).get(PATTERN_KEY)
+    if not isinstance(pattern, dict) or not pattern.get("days"):
+        return None
+    days = pattern["days"]
+    return {"from": pattern.get("from"), "cycles": [
+        {"cycle_no": n, "start_day": days.get(f"s{n}"), "due_day": days.get(str(n))} for n in range(1, MONTHLY_CYCLE_TARGET + 1)]}
+
+
+def month_cycles(db: Session, user: User, plant_id: UUID, month: str) -> dict:
+    """One plant's three cycles for any month (past months included): planned dates, defaults, and what was done."""
+    plant = _plant_for_id(db, plant_id)
+    config = db.scalar(select(WashingConfig).where(WashingConfig.plant_id == plant.id))
+    if not config:
+        raise HTTPException(409, "Washing has not been set up for this plant")
+    _require_plant_access(db, user, plant, config)
+    first = _parse_month(month)
+    table_count = db.scalar(select(func.count(WashingTable.id)).where(WashingTable.plant_id == plant.id)) or 0
+    reports = list(db.scalars(select(WashingDailyReport).where(
+        WashingDailyReport.plant_id == plant.id, WashingDailyReport.cycle_month == month,
+        WashingDailyReport.review_status.in_(("Pending", "Confirmed")),
+    ).order_by(WashingDailyReport.report_date)))
+    starts, dues = _cycle_start_dates(first, config.cycle_overrides), _cycle_due_dates(first, config.cycle_overrides)
+    default_starts, default_dues = _default_start_dates(first), _default_due_dates(first)
+    specific = (config.cycle_overrides or {}).get(month) or {}
+    today = business_today()
+    cycles = []
+    for n in range(1, MONTHLY_CYCLE_TARGET + 1):
+        rows = [r for r in reports if r.cycle_no == n]
+        confirmed = sum(r.tables_cleaned for r in rows if r.review_status == "Confirmed")
+        pending = sum(r.tables_cleaned for r in rows if r.review_status == "Pending")
+        done_on = next((r.report_date for r in rows if r.cycle_completed and r.review_status == "Confirmed"), None)
+        due = dues[n - 1]
+        state = "Completed" if done_on else "In progress" if rows else ("Missed" if due < today else "Upcoming")
+        cycles.append({
+            "cycle_no": n, "start_date": starts[n - 1].isoformat(), "due_date": due.isoformat(),
+            "default_start_date": default_starts[n - 1].isoformat(), "default_due_date": default_dues[n - 1].isoformat(),
+            "start_set_for_month": f"s{n}" in specific, "due_set_for_month": str(n) in specific,
+            "state": state, "confirmed": confirmed, "pending": pending, "reports": len(rows),
+            "started_on": rows[0].report_date.isoformat() if rows else None,
+            "completed_on": done_on.isoformat() if done_on else None,
+            "late_days": max(0, (done_on - due).days) if done_on else (max(0, (today - due).days) if state in ("In progress", "Missed") else 0),
+        })
+    last = monthrange(first.year, first.month)[1]
+    return {
+        "plant_id": str(plant.id), "plant": plant.plant_name, "site_code": plant.site_code, "month": month,
+        "first_day": first.isoformat(), "last_day": first.replace(day=last).isoformat(), "table_count": table_count,
+        "cycles": cycles, "pattern": _pattern_out(config), "can_edit": _is_washing_manager(db, user),
+    }
+
+
+def save_cycle_schedule(db: Session, user: User, plant_id: UUID, payload) -> dict:
+    """Save all three cycles of one month at once. Any day of that month can be used (past months too).
+    With apply_to_future the same days of the month become the plant's pattern from that month on."""
+    if not _is_washing_manager(db, user):
+        raise HTTPException(403, "Only the O&M Head or the washing Assignee can change washing cycle dates")
+    plant = _plant_for_id(db, plant_id)
+    config = db.scalar(select(WashingConfig).where(WashingConfig.plant_id == plant.id).with_for_update())
+    if not config:
+        raise HTTPException(409, "Washing has not been set up for this plant")
+    first = _parse_month(payload.month)
+    last = first.replace(day=monthrange(first.year, first.month)[1])
+    rows = sorted(payload.cycles, key=lambda c: c.cycle_no)
+    if [c.cycle_no for c in rows] != list(range(1, MONTHLY_CYCLE_TARGET + 1)):
+        raise HTTPException(422, "Send all three cycles (1, 2 and 3)")
+    for c in rows:
+        for label, value in (("start", c.start_date), ("deadline", c.due_date)):
+            if not (first <= value <= last):
+                raise HTTPException(422, f"Cycle {c.cycle_no} {label} must be between {first.isoformat()} and {last.isoformat()}")
+        if c.start_date > c.due_date:
+            raise HTTPException(422, f"Cycle {c.cycle_no} cannot start after its deadline")
+    for before, after in zip(rows, rows[1:]):
+        if after.start_date < before.start_date or after.due_date < before.due_date:
+            raise HTTPException(422, f"Cycle {after.cycle_no} must start and end on or after cycle {before.cycle_no}")
+    overrides = {k: (dict(v) if isinstance(v, dict) else v) for k, v in (config.cycle_overrides or {}).items()}
+    previous_month, previous_pattern = overrides.get(payload.month), overrides.get(PATTERN_KEY)
+    month_map: dict = {}
+    for c in rows:
+        month_map[f"s{c.cycle_no}"] = c.start_date.isoformat()
+        month_map[str(c.cycle_no)] = c.due_date.isoformat()
+    overrides[payload.month] = month_map
+    if payload.apply_to_future:
+        overrides[PATTERN_KEY] = {"from": payload.month, "days": {**{f"s{c.cycle_no}": c.start_date.day for c in rows},
+                                                                 **{str(c.cycle_no): c.due_date.day for c in rows}}}
+        # later months follow the new pattern instead of older one-off dates
+        for key in [k for k in overrides if k != PATTERN_KEY and k > payload.month]:
+            overrides.pop(key, None)
+    config.cycle_overrides = overrides
+    db.add(config)
+    db.add(AuditLog(
+        user_id=user.id, actor_name=user.display_name, action="Saved washing cycle schedule", module="Washing",
+        entity_type="plant", entity_id=plant.site_code,
+        metadata_json={"month": payload.month, "from": previous_month, "to": month_map, "apply_to_future": payload.apply_to_future,
+                       "previous_pattern": previous_pattern},
+    ))
+    db.commit()
+    invalidate_overview_cache()
+    return month_cycles(db, user, plant.id, payload.month)
 
 
 def review_daily_report(db: Session, user: User, report_id: UUID, payload: WashingReportReviewRequest) -> dict:

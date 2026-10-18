@@ -21,11 +21,9 @@ async function syncScada(){
 }
 function scadaUiState(){const sc=S.scada||SCADA_DEFAULT;return{live:!!sc.connected,label:sc.connected?"SCADA live":"SCADA adapter ready",detail:sc.lastSync?"Last sync "+new Date(sc.lastSync).toLocaleTimeString():"SCADA integration endpoint available"}}
 window.Solar91SCADA={config:SCADA_CONFIG,configure:scadaConfigure,normalize:normalizeScadaTelemetry,ingest:scadaIngest,sync:syncScada};
-/* Real people only: the assignee lists are filled from the signed-in user, people already assigned work, and (for the O&M Head) active users. */
+/* "Assign to" lists everywhere are people with the Assignee role only — never the O&M Head, Administration or a
+   Site Engineer. The list comes from the database (/api/issues/assignees = every active Assignee). */
 async function refreshTeamPool(){
- const names=new Set();
- if(AUTH_IDENTITY.name)names.add(AUTH_IDENTITY.name);
- [].concat(S.issues||[],S.tasks||[]).forEach(t=>{if(t&&t.assignee)names.add(t.assignee)});
  const seNames=new Set();
  if(AUTH_IDENTITY.role==="Site Engineer"&&AUTH_IDENTITY.name)seNames.add(AUTH_IDENTITY.name);
  const isHead=AUTH_IDENTITY.role==="O&M Head";
@@ -33,9 +31,14 @@ async function refreshTeamPool(){
  const usersPromise=isHead?apiFetch("/api/users").catch(error=>{console.error("Could not load team users",error);return []}):Promise.resolve([]);
  const assigneesPromise=canLoadAssignees?apiFetch("/api/issues/assignees").catch(error=>{console.error("Could not load issue assignees",error);toast("Assignee list could not be loaded. Refresh before assigning a new issue. "+error.message);return null}):Promise.resolve(null);
  const [users,assignees]=await Promise.all([usersPromise,assigneesPromise]);
- (users||[]).forEach(u=>{if(u.active&&u.name&&["O&M Head","Assignee","Site Engineer"].includes(u.role))names.add(u.name);if(isHead&&u.active&&u.name&&u.role==="Site Engineer")seNames.add(u.name)});
+ const names=new Set();
+ (assignees||[]).forEach(a=>{if(a&&a.name)names.add(a.name)});
+ const seByPlant={};
+ (users||[]).forEach(u=>{if(u.active&&u.name&&u.role==="Assignee")names.add(u.name);if(isHead&&u.active&&u.name&&u.role==="Site Engineer"){seNames.add(u.name);(u.plants||[]).forEach(pl=>{(seByPlant[pl.plant_id]=seByPlant[pl.plant_id]||[]).push(u.name)})}});
+ if(isHead)window.SITE_ENG_BY_PLANT=seByPlant;
+ if(!assignees&&!(users||[]).length&&AUTH_IDENTITY.role==="Assignee"&&AUTH_IDENTITY.name)names.add(AUTH_IDENTITY.name);
  SITE_ENG_POOL.length=0;[...seNames].sort().forEach(n=>SITE_ENG_POOL.push(n));
- const list=[...names].sort();
+ const list=[...names].sort((a,b)=>a.localeCompare(b));
  [TEAM_POOL,ASSIGNEE_NAMES,ASSIGNEES].forEach(a=>{a.length=0;list.forEach(n=>a.push(n))});
  if(assignees){ISSUE_ASSIGNEES.length=0;assignees.forEach(a=>ISSUE_ASSIGNEES.push(a))}
 }
@@ -159,25 +162,29 @@ function toggleEquipFree(prefix){const sel=document.getElementById(prefix+"-equi
 function pickedEquip(prefix){const sel=document.getElementById(prefix+"-equip-sel"),free=document.getElementById(prefix+"-equip-free");if(sel&&sel.value!=="__other")return sel.value;const inp=free&&(free.value!==undefined?free:free.querySelector("input"));return(inp&&inp.value.trim())||"—"}
 function vendorStats(v){const rows=S.issues.filter(t=>t.vendor&&t.vendor.name===v.name);const closed=rows.filter(t=>t.status==="Closed"&&t.closure&&t.closure.closedAt);const met=closed.filter(t=>new Date(t.closure.closedAt)<=new Date(t.etc)).length;return{jobs:rows.length,closed:closed.length,onTime:closed.length?Math.round(100*met/closed.length):null}}
 function slaLive(c){const issues=S.issues.filter(t=>(c.project==="All Plants"||t.plant===c.project)&&t.created),hrs=t=>{const n=Number(c[String(t.severity||"").toLowerCase()]);return Number.isFinite(n)&&n>0?n:etcHrs(t.severity)},due=t=>addHoursISO(t.created,hrs(t));const closed=issues.filter(t=>t.status==="Closed"&&t.closure&&t.closure.closedAt);const met=closed.filter(t=>new Date(t.closure.closedAt)<=new Date(due(t))).length;const openBreach=issues.filter(t=>t.status!=="Closed"&&t.status!=="Resolved"&&new Date(NOW_ISO)>new Date(due(t))).length;const washRows=S.washing.filter(t=>c.project==="All Plants"||t.plant===c.project);const wf=Number(c.washDays)||0;const washBreaches=wf?washRows.filter(t=>daysSince(t)>wf).length:0;const total=closed.length;return{breach:openBreach+washBreaches>0,issueBreaches:openBreach,washBreaches,metPct:total?Math.round(100*met/total):null}}
-function wizardGo(prefix,step){if(prefix==="ticket"&&step===2&&typeof s91TkEquipRefresh==="function"){const pick=document.getElementById("tk-equip-pick");if(pick&&!pick.value)s91TkEquipRefresh()}document.querySelectorAll(".wiz-"+prefix).forEach(x=>x.style.display="none");const el=document.querySelector(".wiz-"+prefix+"[data-step='"+step+"']");if(el)el.style.display="block";document.querySelectorAll("[data-wiz-final='"+prefix+"']").forEach(x=>x.style.display=step>=3?"inline-flex":"none")}
+function wizardGo(prefix,step){if(prefix==="ticket"&&step===2&&typeof s91TkEquipRefresh==="function"){if(document.getElementById("tk-units-box"))s91TkEquipRefresh()}document.querySelectorAll(".wiz-"+prefix).forEach(x=>x.style.display="none");const el=document.querySelector(".wiz-"+prefix+"[data-step='"+step+"']");if(el)el.style.display="block";document.querySelectorAll("[data-wiz-final='"+prefix+"']").forEach(x=>x.style.display=step>=3?"inline-flex":"none")}
 function allNotifs(){const out=(S.events||[]).map(eventNotif);
  {const nr=S.plants.filter(p=>XL_BY[p.id]&&p.genDate&&p.genDate<XL_LAST);if(nr.length)out.push({id:"xl-nr",title:nr.length+" plant"+(nr.length===1?"":"s")+" not reporting on "+xlFmtD(XL_LAST),meta:nr.slice(0,3).map(p=>p.id+" (last "+xlFmtD(p.genDate)+")").join(", ")+(nr.length>3?" +"+(nr.length-3)+" more":"")+" · Excel DGR"});
   const lo=S.plants.map(p=>({p,m:xlPlantMtd(p.id)})).filter(z=>z.m&&z.m.pct!=null&&z.m.days>=3&&z.m.pct<90).sort((a,b)=>a.m.pct-b.m.pct);
   if(lo.length)out.push({id:"xl-low",title:lo.length+" plant"+(lo.length===1?"":"s")+" below 90% of PV Syst (MTD)",meta:"Worst: "+lo[0].p.name+" at "+lo[0].m.pct+"% · Excel DGR"});}
  S.issues.filter(t=>t.severity==="Critical"&&t.status!=="Closed"&&t.status!=="Resolved").forEach(t=>out.push({id:t.id,title:"Critical issue — "+t.id,meta:t.plant+" · "+(t.assignee||"unassigned")+" · "+ageBucket(t)}));
  S.issues.filter(t=>!t.assignee&&t.status!=="Closed"&&t.status!=="Resolved").forEach(t=>out.push({id:t.id+"u",title:"Unassigned issue — "+t.id,meta:t.plant+" · "+t.severity+" · "+t.vertical}));
- S.issues.filter(t=>slaState(t)==="breach").forEach(t=>out.push({id:t.id+"b",title:"Overdue issue — "+t.id+" past ETC",meta:t.plant+" · "+t.vertical+" · management alert (R3)"}));
- S.issues.filter(t=>slaState(t)==="nearing").forEach(t=>out.push({id:t.id+"n",title:"Nearing ETC — "+t.id+" ("+t.severity+")",meta:t.plant+" · "+(t.assignee||"unassigned")+" (R2)"}));
- S.tasks.filter(t=>t.status!=="Completed"&&taskOD(t)>0).forEach(t=>out.push({id:t.id,title:t.name+" — overdue "+taskOD(t)+"d",meta:t.plant+" · "+(escLabel(t)||t.assignee)+" (R4)"}));
+ S.issues.filter(t=>slaState(t)==="breach").forEach(t=>out.push({id:t.id+"b",title:"Overdue issue — "+t.id+" past ETC",meta:t.plant+" · "+t.vertical+" · management alert"}));
+ S.issues.filter(t=>slaState(t)==="nearing").forEach(t=>out.push({id:t.id+"n",title:"Nearing ETC — "+t.id+" ("+t.severity+")",meta:t.plant+" · "+(t.assignee||"unassigned")+""}));
+ S.tasks.filter(t=>t.status!=="Completed"&&taskOD(t)>0).forEach(t=>out.push({id:t.id,title:t.name+" — overdue "+taskOD(t)+"d",meta:t.plant+" · "+(escLabel(t)||t.assignee)+""}));
  S.handovers.forEach(h=>h.items.filter(i=>i.mandatory&&itemOD(i)>0&&!counted(i)).forEach(i=>out.push({id:h.id+i.id,title:"Critical handover item overdue — "+i.title,meta:h.name+" · escalated per Step 1.3"})));
- S.inventory.filter(s=>s.qty<s.min).forEach(s=>out.push({id:s.id,title:"Low stock — "+s.item,meta:s.qty+"/"+s.min+" "+s.unit+" · "+s.plant+" (R6)"}));
- S.docs.filter(d=>d.expires&&dayDiff(TODAY,d.expires)<=14).forEach(d=>out.push({id:d.id,title:"Document expiring — "+d.name,meta:fmtD(d.expires)+" · owner "+d.owner+" (R7)"}));
+ S.inventory.filter(s=>s.qty<s.min).forEach(s=>out.push({id:s.id,title:"Low stock — "+s.item,meta:s.qty+"/"+s.min+" "+s.unit+" · "+s.plant+""}));
+ S.docs.filter(d=>d.expires&&dayDiff(TODAY,d.expires)<=14).forEach(d=>out.push({id:d.id,title:"Document expiring — "+d.name,meta:fmtD(d.expires)+" · owner "+d.owner+""}));
  return out;}
-function washAlert(){let worst=null;Object.keys(S.washMeta).forEach(p=>{
+function washAlert(){
+ const cyc=S._washCycles&&Array.isArray(S._washCycles.plants)?S._washCycles.plants:null;
+ if(cyc){let low=null;cyc.forEach(p=>{const v=p.weekly_compliance_percent,t=p.compliance_threshold_percent||WASH_TH;if(typeof v==="number"&&v<t&&(!low||v<low.pct))low={plant:p.plant,pct:v,t}});
+  return low?{title:"Washing compliance "+low.pct+"% — "+low.plant,meta:"Below the "+low.t+"% weekly target"}:null}
+ let worst=null;Object.keys(S.washMeta).forEach(p=>{
  const rows=S.washing.filter(t=>t.plant===p);if(!rows.length)return;
  const pct=Math.round(100-(rows.filter(t=>wColor(t)==="red").length/rows.length)*100);
  if(pct<WASH_TH&&(!worst||pct<worst.pct))worst={plant:p,pct};});
- return worst?{title:"Washing compliance "+worst.pct+"% — "+worst.plant,meta:"Below "+WASH_TH+"% weekly threshold · supervisor alerted (R5)"}:null;}
+ return worst?{title:"Washing compliance "+worst.pct+"% — "+worst.plant,meta:"Below "+WASH_TH+"% weekly threshold · supervisor alerted"}:null;}
 function quickSearchResults(){const q=(S.quickSearch||"").trim().toLowerCase();if(q.length<2)return[];const out=[],hit=(s)=>String(s||"").toLowerCase().includes(q),isSE=(S._roleLabel||S.currentRole)==="Site Engineer",sePlant=isSE?(S._sePlant||""):"";
  S.plants.filter(p=>(!isSE||!sePlant||p.name===sePlant||p.id===sePlant)&&hit([p.name,p.id,plantProject(p),plantEngineer(p)].join(" "))).forEach(p=>out.push({type:"plant",id:p.id,title:p.name||p.id,meta:(p.id||"")+" · "+(plantProject(p)||"no project")+(xlNum(p.capacity)?" · "+p.capacity+" mW":"")}));
  S.issues.filter(t=>(!isSE||!sePlant||t.plant===sePlant)&&(()=>{const p=plantRec(t.plant);return hit([t.id,t.plant,t.equip,t.maker,t.desc,t.assignee,t.vertical,p&&p.id,p&&plantProject(p)].join(" "))})()).forEach(t=>out.push({type:"issue",id:t.id,title:t.id+(t.equip?" · "+t.equip:""),meta:(t.plant||"")+" · "+t.status+(t.assignee?" · "+t.assignee:" · unassigned")}));

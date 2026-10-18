@@ -76,7 +76,7 @@ async function startSolar91App(){
       equip:row.equipment_ref||"—",desc:row.description,severity:row.severity,status:row.status,
       created:row.created_at,updated:row.updated_at,occurred:row.occurred_at,etc:row.etc_at,
       assignee:row.assignee_text||null,assignedTo:row.assigned_to?String(row.assigned_to):null,
-      maker:row.maker||"",supplier:row.supplier||null,serialNumber:row.serial_number||null,impact:row.impact||null,photos:Number(row.photo_count||0),evidence:row.evidence||((prior&&prior.evidence)||[]),
+      maker:row.maker||"",supplier:row.supplier||null,serialNumber:row.serial_number||null,units:Array.isArray(row.units)?row.units:((prior&&prior.units)||[]),impact:row.impact||null,photos:Number(row.photo_count||0),evidence:row.evidence||((prior&&prior.evidence)||[]),
       vendor:row.vendor||null,closure:row.closure||((prior&&prior.closure)||null),
       sourceTask:row.source_task||((prior&&prior.sourceTask)||null),
       reopenedFrom:row.reopened_from||((prior&&prior.reopenedFrom)||null),reopenCount:Number(row.reopen_count||0)
@@ -112,13 +112,14 @@ async function startSolar91App(){
     if(photoFiles.length>10){toast("Choose no more than 10 evidence photos.");return}
     const sev=(document.getElementById("tk-sev")||{}).value||"Medium";
     const equipmentRef=((document.getElementById("tk-equip")||{}).value||"").trim();
-    const pickedId=((document.getElementById("tk-equip-pick")||{}).value||"");
-    const registeredEquipment=(S.equipment||[]).find(e=>String(e.id)===pickedId&&String(e.plant_id)===String(plantId))||(S.equipment||[]).find(e=>
+    const units=(typeof s91TkSelectedUnits==="function"?s91TkSelectedUnits():[]).filter(e=>String(e.plant_id)===String(plantId));
+    const registeredEquipment=(units.length===1?units[0]:null)||(!units.length&&(S.equipment||[]).find(e=>
       String(e.plant_id)===String(plantId)&&String(e.status||"active").toLowerCase()!=="inactive"&&
       [e.equipment_code,e.equipment_name].filter(Boolean).some(value=>String(value).trim().toLowerCase()===equipmentRef.toLowerCase())
-    );
+    ))||null;
     const body={
       plant_id:plantId,equipment_id:registeredEquipment?registeredEquipment.id:null,equipment_ref:equipmentRef||null,
+      unit_ids:units.map(e=>e.id),
       vertical:(registeredEquipment&&registeredEquipment.equipment_type)||((document.getElementById("tk-vert")||{}).value||"Other"),description:desc,severity:sev,
       assigned_to:((document.getElementById("tk-assignee")||{}).value||"")||null,
       occurred_at:(document.getElementById("tk-occurred")||{}).value?document.getElementById("tk-occurred").value+"T09:00:00":null,
@@ -141,8 +142,8 @@ async function startSolar91App(){
           return;
         }
       }
-      revealNew("issues",ui.id);S.modal=null;render();
-      toast("Issue "+ui.id+" created and saved.");
+      S._tkUnits=new Set();revealNew("issues",ui.id);S.modal=null;render();
+      toast("Issue "+ui.id+" created and saved"+(units.length>1?" for "+units.length+" units.":"."));
     }catch(e){toast(e.message||"Could not create issue.")}
   }
 

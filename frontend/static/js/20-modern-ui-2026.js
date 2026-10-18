@@ -152,6 +152,21 @@ function etcLabel(t){const e=etcInfo(t);return e?'<div class="oi-etc '+e.cls+'">
 function m26Need(f){S.m26Need=f;render()}
 const m26Js=v=>esc(JSON.stringify(v==null?"":v));
 
+/* Washing on the dashboard follows the cycle model used on the Washing page (3 cycles a month per plant). */
+function m26WashSummary(){
+ if(typeof washCyclesEnsureLoaded==="function")washCyclesEnsureLoaded();
+ const d=S._washCycles;
+ if(d&&Array.isArray(d.plants)){
+  const rows=d.plants.filter(p=>p.active!==false);
+  const late=rows.filter(p=>p.overdue_bucket&&p.overdue_bucket!=="on_track").sort((a,b)=>(b.overdue_days||0)-(a.overdue_days||0));
+  const below=rows.filter(p=>typeof p.weekly_compliance_percent==="number"&&p.weekly_compliance_percent<(p.compliance_threshold_percent||WASH_TH));
+  const byName={};rows.forEach(p=>{byName[p.plant]=p});
+  const done=rows.filter(p=>p.cycles_this_month>=p.monthly_target).length,ok=rows.length-late.length;
+  return{cycle:true,rows,late,below,byName,ok,done,pct:rows.length?Math.round(100*ok/rows.length):null};
+ }
+ return{cycle:false,rows:[],late:[],below:[],byName:{},ok:0,done:0,pct:null};
+}
+function m26OpenWash(plantId){goScheduledOM("washing");if(plantId&&typeof openWashingPlantDetails==="function")setTimeout(()=>openWashingPlantDetails(plantId),60)}
 function m26Hub(){
  const plants=S.plants||[],issues=S.issues||[],open=openTk(issues);
  const crit=open.filter(t=>normalizeIssueSeverity(t.severity)==="Critical"),od=open.filter(isOverdueIssue),un=open.filter(t=>!t.assignee);
@@ -176,14 +191,15 @@ function m26Hub(){
  let h='<div class="cc26"><div class="cc26-head"><div><div class="d">'+now.toLocaleDateString(undefined,{weekday:"long",day:"numeric",month:"long"})+'</div><h1>'+greet+(who?', '+esc(who):'')+'</h1></div></div>';
 
  /* ---- Today's priorities (one clickable line) ---- */
- const washRedN=(typeof washLinked==="function"?washLinked():wash).filter(t=>wColor(t)==="red"&&!washedToday(t)&&!excToday(t)).length;
+ const ws=m26WashSummary();
+ const washRedN=ws.cycle?ws.late.length:(typeof washLinked==="function"?washLinked():wash).filter(t=>wColor(t)==="red"&&!washedToday(t)&&!excToday(t)).length;
  const critUn=crit.filter(t=>!t.assignee).length;
  const pri=[
   [critUn,"critical unassigned","bad","m26Nav('issues')"],
   [od.length,"overdue issues","bad","m26Nav('issues')"],
   [un.length-critUn,"waiting for an owner","warn","m26Nav('issues')"],
   [tOd.length,"late maintenance tasks","warn","m26Nav('pm')"],
-  [washRedN,"tables past wash cycle","info","m26Nav('wash')"]
+  [washRedN,ws.cycle?"plants behind a washing deadline":"tables past wash cycle","info","m26Nav('wash')"]
  ].filter(x=>x[0]>0);
  h+='<div class="cc26-prio">'+(pri.length?'<span class="cc26-prio-k">TODAY</span>'+pri.map(x=>'<button type="button" class="cc26-pp '+x[2]+'" onclick="'+x[3]+'"><b>'+x[0]+'</b> '+x[1]+'</button>').join(""):'<span class="cc26-pp ok">✓ All clear — nothing urgent today</span>')+'</div>';
  h+='<div class="cc26-hero"><svg viewBox="0 0 300 150" role="img" aria-label="Daylight progress"><path d="M30,130 A120,120 0 0 1 270,130" fill="none" stroke="#1F5C38" stroke-width="12" stroke-linecap="round"/>'
@@ -202,14 +218,15 @@ function m26Hub(){
  open.slice().sort((a,b)=>(SEV_RANK[a.severity]??9)-(SEV_RANK[b.severity]??9)||issueAgeDays(b)-issueAgeDays(a))
   .filter(t=>t.severity==="Critical"||isOverdueIssue(t)||!t.assignee).slice(0,5).forEach(t=>{
    const p=plantRec(t.plant),tag=t.severity==="Critical"?"Critical":isOverdueIssue(t)?"Overdue":"Unassigned";
-   items.push({g:"issues",cls:t.severity==="Critical"?"bad":"warn",ico:t.assignee?"⚠":"?",
-    title:(t.title||t.summary||t.description||t.vertical||t.id),sub:"Site issue · "+(p?p.id:t.plant)+(t.equip?" · "+t.equip:"")+" · "+issueAgeDays(t)+"d · "+tag+((etcInfo(t)||{}).txt?" · "+etcInfo(t).txt:""),
-    btn:t.assignee?"":'<button class="bt p" onclick="m26Nav(\'issue\','+m26Js(t.id)+')">Assign</button>',
+   items.push({g:"issues",cls:t.severity==="Critical"?"bad":"warn",ico:t.assignee?"⚠":"⚑",
+    title:(t.vertical||"Issue")+(t.desc?" — "+t.desc:""),sub:t.id+" · "+(p?p.id:t.plant)+(t.equip&&t.equip!=="—"?" · "+t.equip:"")+" · "+issueAgeDays(t)+"d · "+tag+((etcInfo(t)||{}).txt?" · "+etcInfo(t).txt:""),
+    btn:t.assignee||AUTH_IDENTITY.role!=="O&M Head"?"":'<button class="bt p" onclick="m26Nav(\'issue\','+m26Js(t.id)+')">Assign</button>',
     open:'<button class="bt'+(t.assignee?' p':'')+'" onclick="m26Nav(\'issue\','+m26Js(t.id)+')">Open</button>'});});
  const resolved=issues.filter(t=>t.status==="Resolved").length;
  if(resolved)items.push({g:"issues",cls:"ok",ico:"✓",title:resolved+" resolved issue"+(resolved===1?"":"s")+" awaiting closure",sub:"Site issues · review evidence and close",btn:"",open:'<button class="bt p" onclick="m26Nav(\'issues\')">Review</button>'});
  tOd.sort((a,b)=>taskOD(b)-taskOD(a)).slice(0,2).forEach(t=>items.push({g:"pm",cls:"warn",ico:"🛠",title:t.name,sub:"Maintenance · "+(plantRec(t.plant)?plantRec(t.plant).id:t.plant)+" · "+taskOD(t)+" days late",btn:"",open:'<button class="bt p" onclick="m26Nav(\'pm\')">Open</button>'}));
- Object.entries(wByPlant).filter(([,w])=>w.red>0).sort((a,b)=>b[1].red-a[1].red).slice(0,2).forEach(([pn,w])=>items.push({g:"wash",cls:"info",ico:"💧",title:w.red+" table"+(w.red===1?"":"s")+" past wash cycle",sub:"Washing · "+(plantRec(pn)?plantRec(pn).id:pn),btn:"",open:'<button class="bt p" onclick="m26Nav(\'wash\','+m26Js(pn)+')">Plan wash</button>'}));
+ if(ws.cycle)ws.late.slice(0,3).forEach(w=>items.push({g:"wash",cls:w.overdue_bucket==="7d"?"bad":"warn",ico:"💧",title:"Washing cycle "+(w.overdue_cycle||w.current_cycle)+" is "+w.overdue_days+" day"+(w.overdue_days===1?"":"s")+" late",sub:"Washing · "+w.site_code+" · "+w.plant+" · "+(w.assignee_name||"no Assignee"),btn:"",open:'<button class="bt p" onclick="m26OpenWash('+m26Js(w.plant_id)+')">Open</button>'}));
+ else Object.entries(wByPlant).filter(([,w])=>w.red>0).sort((a,b)=>b[1].red-a[1].red).slice(0,2).forEach(([pn,w])=>items.push({g:"wash",cls:"info",ico:"💧",title:w.red+" table"+(w.red===1?"":"s")+" past wash cycle",sub:"Washing · "+(plantRec(pn)?plantRec(pn).id:pn),btn:"",open:'<button class="bt p" onclick="m26Nav(\'wash\','+m26Js(pn)+')">Plan wash</button>'}));
  const shown=items.filter(i=>f==="all"||i.g===f);
  const chip=(id,l)=>'<button type="button" class="chip'+(f===id?" on":"")+'" onclick="m26Need(\''+id+'\')">'+l+'</button>';
  h+='<div class="cc26-card"><div class="cc26-row0"><b>Needs you now</b><span class="cc26-n">'+items.length+'</span><div class="cc26-chips">'+chip("all","All")+chip("issues","Issues")+chip("pm","Maintenance")+chip("wash","Washing")+'</div></div>'
@@ -218,7 +235,7 @@ function m26Hub(){
  /* ---- Plant health: worst first ---- */
  {const rows=plants.map(p=>{
    const oi=open.filter(t=>t.plant===p.name),c=oi.filter(t=>t.severity==="Critical").length,b=oi.filter(isOverdueIssue).length,u=oi.filter(t=>!t.assignee).length;
-   const w=wByPlant[p.name],wp=w&&w.n?Math.round(100*w.ok/w.n):null,pm=tOd.filter(t=>t.plant===p.name).length;
+   const cw=ws.byName[p.name],w=wByPlant[p.name],wp=ws.cycle?(cw&&typeof cw.weekly_compliance_percent==="number"?cw.weekly_compliance_percent:null):(w&&w.n?Math.round(100*w.ok/w.n):null),pm=tOd.filter(t=>t.plant===p.name).length;
    return{p,n:oi.length,c,b,u,wp,pm,score:c*5+b*3+u*2+pm*2+(wp!=null&&wp<WASH_TH?2:0)};
   }).filter(r=>r.score>0).sort((a,b)=>b.score-a.score).slice(0,8);
   const chip=(v,cls)=>v?'<span class="cc26-n2 '+cls+'">'+v+'</span>':'<span class="cc26-n2 z">0</span>';
@@ -233,9 +250,10 @@ function m26Hub(){
    +tel.slice().sort((a,b)=>b.generation-a.generation).slice(0,8).map(p=>'<div class="gc"><span class="v">'+fmtN(p.generation)+'</span><i style="height:'+Math.max(6,Math.round(p.generation/mx*110))+'px"></i><span class="n" title="'+esc(p.name)+'">'+esc(p.id)+'</span></div>').join("")+'</div></div>';}
  h+='<div class="m26-dnrow m26-dn3">'+m26Donut("Issue priority","open issues",[{l:"Critical",v:crit.length,c:"#DC4C3E"},{l:"Medium",v:open.filter(t=>normalizeIssueSeverity(t.severity)==="Medium").length,c:"#3B82F6"},{l:"Low",v:open.filter(t=>normalizeIssueSeverity(t.severity)==="Low").length,c:"#94A3B8"}],open.length,"open","m26Nav('issues')")
   +m26Donut("Maintenance","work orders",[{l:"Done",v:tDone,c:"#16A34A"},{l:"Overdue",v:tOd.length,c:"#DC4C3E"},{l:"Upcoming",v:Math.max(0,tasks.length-tDone-tOd.length),c:"#CBD5D0"}],pmPct==null?"—":pmPct+"%","on time","m26Nav('pm')")
-  +m26Donut("Panel washing","all tables",[{l:"Compliant",v:wOk,c:"#16A34A"},{l:"Overdue",v:wRed,c:"#DC4C3E"},{l:"Due soon",v:Math.max(0,wash.length-wOk-wRed),c:"#FAD9A0"}],wPct==null?"—":wPct+"%","compliant","m26Nav('wash')")+'</div>';
+  +(ws.cycle?m26Donut("Panel washing","plants",[{l:"On track",v:ws.ok-ws.done,c:"#16A34A"},{l:"Month done",v:ws.done,c:"#0E9F6E"},{l:"Behind deadline",v:ws.late.length,c:"#DC4C3E"}],ws.pct==null?"—":ws.pct+"%","on track","m26Nav('wash')")
+   :m26Donut("Panel washing","all tables",[{l:"Compliant",v:wOk,c:"#16A34A"},{l:"Overdue",v:wRed,c:"#DC4C3E"},{l:"Due soon",v:Math.max(0,wash.length-wOk-wRed),c:"#FAD9A0"}],wPct==null?"—":wPct+"%","compliant","m26Nav('wash')"))+'</div>';
   h+='<div class="cc26-one"><div class="cc26-card"><div class="cc26-row0"><b>Team workload</b><span class="sb" style="margin-left:auto">open issues</span></div>'
-  +(lrows.length?lrows.map(([n,c])=>'<div class="cc26-wl"><span class="av'+(n==="Unassigned"?' un':'')+'">'+(n==="Unassigned"?"?":esc(ccIni(n)))+'</span><div class="b"><div>'+esc(n)+'</div><div class="bar"><i style="width:'+Math.round(c/lmax*100)+'%;background:'+(n==="Unassigned"?"#DC4C3E":c/lmax>.7?"#D97706":"#16A34A")+'"></i></div></div><b>'+c+'</b></div>').join(""):'<div class="cc26-clear">No open issues.</div>')+'</div></div></div>';
+  +(lrows.length?lrows.map(([n,c])=>'<div class="cc26-wl"><span class="av'+(n==="Unassigned"?' un':'')+'">'+(n==="Unassigned"?"⚑":esc(ccIni(n)))+'</span><div class="b"><div>'+esc(n)+'</div><div class="bar"><i style="width:'+Math.round(c/lmax*100)+'%;background:'+(n==="Unassigned"?"#DC4C3E":c/lmax>.7?"#D97706":"#16A34A")+'"></i></div></div><b>'+c+'</b></div>').join(""):'<div class="cc26-clear">No open issues.</div>')+'</div></div></div>';
  return h;
 }
 

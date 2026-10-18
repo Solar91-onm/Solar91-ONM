@@ -37,6 +37,8 @@ class IssueCreate(BaseModel):
     serial_number: str | None = None
     impact: str | None = None
     photo_count: int = 0
+    # One ticket can cover several registered units of the same plant (e.g. four inverters with the same fault).
+    unit_ids: list[UUID] = Field(default_factory=list, max_length=500)
 
     @field_validator("severity", mode="before")
     @classmethod
@@ -137,9 +139,21 @@ class IssueDatesUpdate(BaseModel):
     reason: str = Field(min_length=3, max_length=4000)
 
 
+ISSUE_MESSAGE_INTENTS = {"update", "work_done", "question", "blocked", "confirm"}
+
+
 class IssueCommentCreate(BaseModel):
     message: str = Field(default="", max_length=4000)
     evidence_ids: list[str] = Field(default_factory=list, max_length=10)
+    intent: str = Field(default="update", max_length=20)
+
+    @field_validator("intent", mode="before")
+    @classmethod
+    def validate_intent(cls, value: Any) -> Any:
+        value = (value or "update").strip() if isinstance(value, str) or value is None else value
+        if value not in ISSUE_MESSAGE_INTENTS:
+            raise ValueError("intent must be update, work_done, question, blocked or confirm")
+        return value
 
 
 class IssueStatusRequest(BaseModel):
@@ -196,3 +210,4 @@ class IssueOut(BaseModel):
     supplier: str | None = None
     serial_number: str | None = None
     evidence: list[dict[str, Any]] = Field(default_factory=list)
+    units: list[dict[str, Any]] = Field(default_factory=list)

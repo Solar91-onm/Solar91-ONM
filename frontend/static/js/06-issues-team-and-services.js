@@ -1,7 +1,13 @@
 "use strict";
 /* ---------------- 2.3 ISSUES ---------------- */
-function engineerLoad(){const names=[...new Set(SITE_ENG_POOL)]; /* Site Engineers only — O&M team assignees are not listed here */
- return names.map(n=>{const rows=(S.issues||[]).filter(t=>t.assignee===n);const open=openTk(rows);return{name:n,assigned:open.length,critical:open.filter(t=>t.severity==="Critical").length,overdue:open.filter(isOverdueIssue).length,progress:open.filter(t=>t.status==="In Progress").length,resolved:rows.filter(t=>t.status==="Resolved"||t.status==="Closed").length,rows}}).sort((a,b)=>b.assigned-a.assigned||b.critical-a.critical)}
+/* Workload of the people who own work: every active Assignee (issues and PM jobs are assigned to the Assignee role),
+   plus any other name that still appears as an owner on older records. */
+function engineerLoad(){
+ const names=new Set(TEAM_POOL);
+ (S.issues||[]).forEach(t=>{if(t.assignee)names.add(t.assignee)});
+ return [...names].map(n=>{const rows=(S.issues||[]).filter(t=>t.assignee===n);const open=openTk(rows);const tasks=(S.tasks||[]).filter(t=>t.assignee===n&&t.status!=="Completed"&&t.status!=="Cancelled");
+  return{name:n,assigned:open.length,critical:open.filter(t=>t.severity==="Critical").length,overdue:open.filter(isOverdueIssue).length,progress:open.filter(t=>t.status==="In Progress").length,resolved:rows.filter(t=>t.status==="Resolved"||t.status==="Closed").length,tasks:tasks.length,tasksLate:tasks.filter(t=>typeof taskOD==="function"&&taskOD(t)>0).length,rows}})
+  .sort((a,b)=>b.assigned-a.assigned||b.critical-a.critical||b.tasks-a.tasks||a.name.localeCompare(b.name))}
 
 
 function reportRowsForHub(kind){
@@ -11,14 +17,14 @@ function reportRowsForHub(kind){
   return{title:kind[0].toUpperCase()+kind.slice(1)+" O&M summary",cols:["Metric","Value"],rows:[["Period",from+" → "+TODAY],["Issues raised",raised.length],["Resolved / closed",closed.length],["Still open",open.length],["Overdue",open.filter(isOverdueIssue).length],["Unassigned",open.filter(t=>!t.assignee).length],["Critical open",open.filter(isCriticalIssue).length]]};}
  if(kind==="open")return{title:"Open issues",cols:["Issue","Plant","Priority","Status","Assignee","Age"],rows:open.map(t=>[t.id,t.plant,t.severity,t.status,t.assignee||"Unassigned",ageBucket(t)])};
  if(kind==="overdue")return{title:"Overdue issues",cols:["Issue","Plant","Priority","Assignee","Age"],rows:open.filter(isOverdueIssue).map(t=>[t.id,t.plant,t.severity,t.assignee||"Unassigned",ageBucket(t)])};
- if(kind==="work")return{title:"Engineer workload",cols:["Engineer","Assigned","Critical","Overdue","In progress","Resolved"],rows:engineerLoad().map(r=>[r.name,r.assigned,r.critical,r.overdue,r.progress,r.resolved])};
+ if(kind==="work")return{title:"Assignee workload",cols:["Assignee","Assigned","Critical","Overdue","In progress","Resolved"],rows:engineerLoad().map(r=>[r.name,r.assigned,r.critical,r.overdue,r.progress,r.resolved])};
  if(kind==="plants")return{title:"Plant issue summary",cols:["Plant","Site","Open","Critical","Engineer","Health"],rows:S.plants.map(p=>{const oi=open.filter(t=>t.plant===p.name);return[p.name,p.id,oi.length,oi.filter(isCriticalIssue).length,plantEngineer(p)||"—",plantHealth(p)]})};
  const mk={};(S.issues||[]).forEach(t=>{const k=(t.equip||"—")+" / "+(t.maker||"unspecified");mk[k]=(mk[k]||0)+1});
  return{title:"Equipment / maker issue summary",cols:["Equipment / maker","Issues"],rows:Object.entries(mk).sort((a,b)=>b[1]-a[1])};
 }
 function renderReportsHub(){
  const kind=S.reportKind||"daily",rep=reportRowsForHub(kind);
- const tabs=[["daily","Daily O&M"],["weekly","Weekly O&M"],["monthly","Monthly O&M"],["open","Open issues"],["overdue","Overdue"],["work","Engineer workload"],["plants","Plant issues"],["equip","Equipment / maker"]];
+ const tabs=[["daily","Daily O&M"],["weekly","Weekly O&M"],["monthly","Monthly O&M"],["open","Open issues"],["overdue","Overdue"],["work","Assignee workload"],["plants","Plant issues"],["equip","Equipment / maker"]];
  let h='<div class="ops-page ops-reports"><div class="ops-page-head"><div><div class="kpi-label">SOLAR OPERATIONS · REPORTING</div><h1>Reports</h1><p>Operational summaries and registers built from the current application data.</p></div><button class="btn o sm" onclick="window.print()">Print / PDF</button></div>';
  h+='<div class="ops-report-tabs" role="group" aria-label="Report type">'+tabs.map(([id,l])=>'<button type="button" class="pill sev-pill'+(kind===id?" active":"")+'" aria-pressed="'+(kind===id)+'" onclick="S.reportKind=\''+id+'\';render()">'+l+'</button>').join("")+'</div>';
  if(rep.sum&&rep.sum.length)h+='<div class="ops-report-metrics">'+rep.sum.map(([label,value])=>'<div class="ops-report-metric"><span>'+esc(String(label))+'</span><b>'+esc(String(value))+'</b></div>').join("")+'</div>';
@@ -67,7 +73,7 @@ function taEqStatus(e){
  const s=String(e.status||"active").toLowerCase();
  return /fault|fail|down|break|trip|alarm|offline/.test(s)?"bad":/maint|service|warn|degrad|repair/.test(s)?"warn":s==="active"?"ok":"off";
 }
-function taSummaryText(types){return types.length?types.length+" equipment type"+(types.length===1?"":"s")+" · all plants":"No equipment type selected"}
+function taSummaryText(types){const wash=types.includes("Modules cleaning"),eq=types.length-(wash?1:0);return types.length?(eq?eq+" equipment type"+(eq===1?"":"s"):"")+(wash?(eq?" + ":"")+"washing":"")+" · all plants":"No equipment type selected"}
 
 /* ---- drafts ---- */
 function taDraft(u){
@@ -153,15 +159,19 @@ async function taToggleActive(id,on){
  catch(e){toast("Not changed — "+e.message)}
 }
 
-/* ---- equipment TYPE selector (shared by the user rows and the Add-person form) ---- */
+/* ---- equipment TYPE selector (shared by the user rows and the Add-person form) ----
+   Washing is given to an Assignee like any equipment type: "Modules cleaning" shows as "Washing (module cleaning)" and is listed first. */
+const TA_WASHING_TYPE="Modules cleaning";
+function taTypeLabel(t){return t===TA_WASHING_TYPE?"💧 Washing (module cleaning)":t}
 function taTypeSelect(key){
- const have=new Set(taEqIds(key));
- return '<select class="inp ta-eq-select" aria-label="Select equipment type" onchange="taPickType(\''+esc(key)+'\',this.value)"><option value="">＋ Select equipment type…</option>'
-  +VERTICALS.filter(t=>!have.has(t)).map(t=>'<option value="'+esc(t)+'">'+esc(t)+'</option>').join("")+'</select>';
+ const have=new Set(taEqIds(key)),list=VERTICALS.filter(t=>!have.has(t));
+ const wash=list.includes(TA_WASHING_TYPE)?'<optgroup label="Washing"><option value="'+esc(TA_WASHING_TYPE)+'">'+esc(taTypeLabel(TA_WASHING_TYPE))+'</option></optgroup>':'';
+ return '<select class="inp ta-eq-select" aria-label="Select equipment type or washing" onchange="taPickType(\''+esc(key)+'\',this.value)"><option value="">＋ Select equipment type or washing…</option>'
+  +wash+'<optgroup label="Equipment">'+list.filter(t=>t!==TA_WASHING_TYPE).map(t=>'<option value="'+esc(t)+'">'+esc(t)+'</option>').join("")+'</optgroup></select>';
 }
 function taTypeChips(key){
  const ids=taEqIds(key);
- return ids.map(t=>'<span class="ta-chip pc0" title="All '+esc(t)+' across all plants"><i></i>'+esc(t)+' · all plants<button type="button" class="ta-x" aria-label="Remove '+esc(t)+'" onclick="taToggleEq(\''+esc(key)+'\',\''+esc(t)+'\',false)">×</button></span>').join("");
+ return ids.map(t=>'<span class="ta-chip '+(t===TA_WASHING_TYPE?"pc-wash":"pc0")+'" title="'+(t===TA_WASHING_TYPE?"Plant washing at every plant":"All "+esc(t)+" across all plants")+'"><i></i>'+esc(taTypeLabel(t))+' · all plants<button type="button" class="ta-x" aria-label="Remove '+esc(t)+'" onclick="taToggleEq(\''+esc(key)+'\',\''+esc(t)+'\',false)">×</button></span>').join("");
 }
 function taTypeBox(key){
  const ids=taEqIds(key),n=ids.length;
@@ -280,7 +290,7 @@ function renderSettings(){
 }
 
 /* ---------------- 3. EXTRA SERVICES ---------------- */
-const EXT_TABS=[["requests","Requests"],["inventory","3.2 Inventory"],["performance","3.3/3.4 Performance"],["safety","3.5 Safety"],["documents","3.6 Documents"],["vendors","3.7 Vendors"],["rules","3.8 Notifications"],["roles","3.9 Roles"],["reports","3.10 Reports"],["mobile","3.11 Mobile"],["audit","3.12 Audit"],["contracts","3.13 SLA"],["weather","3.14 Weather"]];
+const EXT_TABS=[["requests","Requests"],["inventory","Inventory"],["performance","Performance"],["safety","Safety"],["documents","Documents"],["vendors","Vendors"],["rules","Notifications"],["roles","Roles"],["reports","Reports"],["mobile","Mobile"],["audit","Audit"],["contracts","SLA"],["weather","Weather"]];
 function serviceStatusRecords(sub){
  if(sub==="requests")return S.serviceRequests.map(x=>({status:x.status}));
  if(sub==="inventory")return S.inventory.map(x=>({status:x.qty<x.min?"Critical":"Available"}));
@@ -312,7 +322,7 @@ function renderServices(){
  if(sub==="inventory"){
   const low=S.inventory.filter(s=>s.qty<s.min);
   if(low.length)h+='<div class="bn-danger banner"><b>Low-stock alerts ('+low.length+')</b> — reorder workflow below. Auto-deduction is live: spare parts used against Issue tickets / Preventive Maintenance tasks decrement stock automatically (see movements log).</div>';
-  h+='<div class="panel" style="padding:0"><div style="padding:16px 20px 0"><div class="row between wrap"><div><h2 style="font-size:15px;font-weight:600">Spares &amp; inventory per project / warehouse (3.2)</h2><p style="font-size:12px;color:var(--muted-foreground);margin:3px 0 12px">Inverters, fuses, connectors, modules — with minimum levels and reorder</p></div><button class="btn p sm" onclick="openModal(&quot;newInventory&quot;)">+ Add stock item</button></div></div>';
+  h+='<div class="panel" style="padding:0"><div style="padding:16px 20px 0"><div class="row between wrap"><div><h2 style="font-size:15px;font-weight:600">Spares &amp; inventory per project / warehouse</h2><p style="font-size:12px;color:var(--muted-foreground);margin:3px 0 12px">Inverters, fuses, connectors, modules — with minimum levels and reorder</p></div><button class="btn p sm" onclick="openModal(&quot;newInventory&quot;)">+ Add stock item</button></div></div>';
   const lcS=listCtl("inv",S.inventory,{facet:s=>s.qty<s.min?"Low stock":"In stock",facetLabel:"Stock",text:s=>[s.item,s.cat,s.plant,s.store].join(" "),ph:"Search item, category or plant"});h+=lcS.bar;
   h+='<table><thead><tr><th>Item</th><th>Category</th><th>Plant / store</th><th>Stock</th><th>Min</th><th>Status</th><th>Action</th></tr></thead><tbody>';
   lcS.rows.forEach(s=>{const isLow=s.qty<s.min;
@@ -327,7 +337,7 @@ function renderServices(){
   h+='</tbody></table>'+lcM.pager+'</div>';
  }
  if(sub==="performance"){
-  h+='<div class="bn-info banner"><b>Performance data (3.3)</b> — The Excel DGR provides generation, capacity and PV Syst targets. PR, availability and alarm feeds are not in the workbook, so they show — until SCADA is connected. MTD vs PV Syst covers '+xlFmtD(XL_LAST.slice(0,7)+"-01")+' – '+xlFmtDY(XL_LAST)+'.</div>';
+  h+='<div class="bn-info banner"><b>Performance data</b> — The Excel DGR provides generation, capacity and PV Syst targets. PR, availability and alarm feeds are not in the workbook, so they show — until SCADA is connected. MTD vs PV Syst covers '+xlFmtD(XL_LAST.slice(0,7)+"-01")+' – '+xlFmtDY(XL_LAST)+'.</div>';
   const lcQ=listCtl("perf",S.plants,{size:8,facet:p=>{const m=xlPlantMtd(p.id);return m&&m.pct!=null?(m.pct>=100?"≥ 100% of PV Syst":m.pct>=90?"90 – 99%":"< 90%"):"No PV Syst target"},facetLabel:"MTD vs PV Syst",text:p=>p.name+" "+p.id,ph:"Search plant or site code",pad:"0 0 12px"});h+='<div class="panel">'+lcQ.bar+'<div class="kgrid" style="grid-template-columns:repeat(4,1fr)">'+lcQ.rows.map(p=>{const m=xlPlantMtd(p.id);return '<div class="metric"><div style="font-size:12px;font-weight:600">'+esc(p.name)+'</div><div style="font-size:12.5px;color:var(--muted-foreground);margin:2px 0 8px">'+capStr(p.capacity)+' · '+esc(p.id)+'</div>'+
    '<div class="col" style="gap:4px;font-size:12px"><div class="row between"><span class="muted">PR</span><b>'+xlPct(p.pr)+'</b></div>'+
    '<div class="row between"><span class="muted">Availability</span><b>'+xlPct(p.availability)+'</b></div><div class="row between"><span class="muted">Alarms</span><b>'+(p.alarms||"—")+'</b></div><div class="row between"><span class="muted">MTD vs PV Syst</span><b>'+(m&&m.pct!=null?m.pct+"%":"—")+'</b></div></div></div>'}).join("")+'</div>'+lcQ.pager+'</div>';
@@ -347,7 +357,7 @@ function renderServices(){
  if(sub==="safety"){
   const pend=S.ptw.filter(p=>p.status==="Pending Approval");
   if(pend.length)h+='<div class="bn-warn banner"><b>'+pend.length+' PTW request(s) awaiting digital sign-off</b> — high-risk tasks (electrical, height work) stay blocked until approved. LOTO tracked per permit.</div>';
-  h+='<div class="panel" style="padding:0"><div style="padding:16px 20px 0"><div class="row between wrap"><div><h2 style="font-size:15px;font-weight:600">Permit to Work / LOTO register (3.5)</h2><p style="font-size:12px;color:var(--muted-foreground);margin:3px 0 12px">Digital sign-off before high-risk tasks; links to PTW flags on Preventive Maintenance tasks</p></div>'+
+  h+='<div class="panel" style="padding:0"><div style="padding:16px 20px 0"><div class="row between wrap"><div><h2 style="font-size:15px;font-weight:600">Permit to Work / LOTO register</h2><p style="font-size:12px;color:var(--muted-foreground);margin:3px 0 12px">Digital sign-off before high-risk tasks; links to PTW flags on Preventive Maintenance tasks</p></div>'+
    '<button class="btn p sm" onclick="openModal(\'incident\')">+ Report incident / near-miss</button></div></div>';
   const lcP=listCtl("ptw",S.ptw,{facet:p=>p.status,facetLabel:"Status",text:p=>[p.id,p.task,p.plant,p.type,p.hazard,p.requestedBy].join(" "),ph:"Search permit, task or plant"});h+=lcP.bar;
   h+='<table><thead><tr><th>PTW</th><th>Task</th><th>Type / hazard</th><th>LOTO</th><th>Validity</th><th>Status</th><th>Actions</th></tr></thead><tbody>';
@@ -368,11 +378,11 @@ function renderServices(){
   h+='<div class="panel"><h2 style="font-size:15px;font-weight:600">Statutory compliance watchlist</h2><p style="font-size:12px;color:var(--muted-foreground);margin:3px 0 10px">Fire safety, electrical certificates, insurance — renewal reminders via 3.8</p>';
   const expSoon=S.docs.filter(d=>d.expires&&dayDiff(TODAY,d.expires)<=30);
   h+=expSoon.length?expSoon.map(d=>'<div class="row between" style="padding:8px 0;border-bottom:1px solid var(--border);font-size:12.5px;gap:8px"><div><div>'+esc(d.name)+'</div><div style="font-size:12.5px;color:var(--muted-foreground)">'+esc(d.plant)+'</div></div>'+badge(dayDiff(TODAY,d.expires)+"d left")+'</div>').join(""):'<div style="font-size:12px;color:var(--muted-foreground)">Nothing inside 30 days.</div>';
-  h+='<div style="font-size:12px;color:var(--muted-foreground);margin-top:10px">Quarterly audit checklist (fire safety, electrical certificates, PTW compliance) exports in the Monthly compliance pack (3.10).</div></div></div>';
+  h+='<div style="font-size:12px;color:var(--muted-foreground);margin-top:10px">Quarterly audit checklist (fire safety, electrical certificates, PTW compliance) exports in the Monthly compliance pack.</div></div></div>';
  }
  if(sub==="documents"){
   const sorted=S.docs.slice().sort((a,b)=>(a.expires||"9999")<(b.expires||"9999")?-1:1);
-  h+='<div class="panel" style="padding:0"><div style="padding:16px 20px 0"><div class="row between wrap"><div><h2 style="font-size:15px;font-weight:600">Central document repository (3.6)</h2><p style="font-size:12px;color:var(--muted-foreground);margin:3px 0 12px">O&amp;M manuals, warranties, as-builts, compliance certificates — with expiry tracking and automated renewal reminders. Handover Completion Certificates (1.4) land here automatically.</p></div><button class="btn p sm" onclick="openModal(&quot;newDocument&quot;)">+ Add document</button></div></div>';
+  h+='<div class="panel" style="padding:0"><div style="padding:16px 20px 0"><div class="row between wrap"><div><h2 style="font-size:15px;font-weight:600">Central document repository</h2><p style="font-size:12px;color:var(--muted-foreground);margin:3px 0 12px">O&amp;M manuals, warranties, as-builts, compliance certificates — with expiry tracking and automated renewal reminders. Handover Completion Certificates land here automatically.</p></div><button class="btn p sm" onclick="openModal(&quot;newDocument&quot;)">+ Add document</button></div></div>';
   const lcD=listCtl("doc",sorted,{facet:d=>d.type,facetLabel:"Type",text:d=>[d.name,d.type,d.plant,d.owner].join(" "),ph:"Search document, plant or owner"});h+=lcD.bar;
   h+='<table><thead><tr><th>Document</th><th>Type</th><th>Plant</th><th>Owner</th><th>Expires</th><th>Countdown</th><th>Action</th></tr></thead><tbody>';
   lcD.rows.forEach(d=>{const dd=d.expires?dayDiff(TODAY,d.expires):null;
@@ -382,7 +392,7 @@ function renderServices(){
   h+='</tbody></table>'+lcD.pager+'</div>';
  }
  if(sub==="vendors"){
-  h+='<div class="panel"><div class="row between wrap"><div><h2 style="font-size:15px;font-weight:600">Vendor &amp; contractor management (3.7)</h2><p style="font-size:12px;color:var(--muted-foreground);margin:3px 0 12px">Third-party vendors — washing contractors, security agencies, OEM service partners — with SLAs, contracts and performance ratings. Feeds Vendor-Dependent tagging on Issues (2.3.2).</p></div><button class="btn p sm" onclick="openModal(&quot;newVendor&quot;)">+ Add vendor</button></div>';
+  h+='<div class="panel"><div class="row between wrap"><div><h2 style="font-size:15px;font-weight:600">Vendor &amp; contractor management</h2><p style="font-size:12px;color:var(--muted-foreground);margin:3px 0 12px">Third-party vendors — washing contractors, security agencies, OEM service partners — with SLAs, contracts and performance ratings. Feeds Vendor-Dependent tagging on Issues.</p></div><button class="btn p sm" onclick="openModal(&quot;newVendor&quot;)">+ Add vendor</button></div>';
   const lcV=listCtl("ven",S.vendors,{size:4,facet:v=>v.type,facetLabel:"Type",text:v=>[v.name,v.type,v.scope].join(" "),ph:"Search vendor or scope",pad:"0 0 12px"});h+=lcV.bar;
   h+='<div class="kgrid" style="grid-template-columns:repeat(2,1fr)">';
   lcV.rows.forEach(v=>{const vs=vendorStats(v),on=vs.onTime;h+='<div class="metric"><div class="row between wrap" style="gap:6px"><div><div style="font-weight:700;font-size:13.5px">'+esc(v.name)+'</div><div style="font-size:12.5px;color:var(--muted-foreground)">'+v.type+' · '+esc(v.scope)+'</div></div></div>'+
@@ -394,20 +404,20 @@ function renderServices(){
   h+='</div>'+lcV.pager+'</div>';
  }
  if(sub==="rules"){
-  h+='<div class="panel" style="padding:0"><div style="padding:16px 20px 0"><h2 style="font-size:15px;font-weight:600">Notification &amp; escalation engine (3.8)</h2><p style="font-size:12px;color:var(--muted-foreground);margin:3px 0 12px">Configurable rules across all modules — channel (app/SMS/email/call), recipients by role, escalation tiers by time elapsed. Powers every alert in the bell. The live alerts you see in the bell (SLA breaches, task escalations, washing compliance, low stock, document expiry) are generated by these rules.</p></div>';
+  h+='<div class="panel" style="padding:0"><div style="padding:16px 20px 0"><h2 style="font-size:15px;font-weight:600">Notification &amp; escalation engine</h2><p style="font-size:12px;color:var(--muted-foreground);margin:3px 0 12px">Configurable rules across all modules — channel (app/SMS/email/call), recipients by role, escalation tiers by time elapsed. Powers every alert in the bell. The live alerts you see in the bell (SLA breaches, task escalations, washing compliance, low stock, document expiry) are generated by these rules.</p></div>';
   h+='<table><thead><tr><th></th><th>Event</th><th>Channel</th><th>Recipients</th><th>Escalation tiers</th></tr></thead><tbody>';
   S.rules.forEach(r=>{h+='<tr><td><button onclick="toggleRule(\''+r.id+'\')" style="width:34px;height:19px;border-radius:999px;background:'+(r.on?"var(--success)":"var(--input)")+';border:none;cursor:pointer;position:relative"><span style="position:absolute;top:2px;left:'+(r.on?17:2)+'px;width:15px;height:15px;border-radius:999px;background:#fff;transition:.15s"></span></button></td>'+
    '<td style="font-weight:500">'+esc(r.event)+'</td><td>'+r.channel+'</td><td>'+esc(r.to)+'</td><td style="font-size:12.5px;color:var(--muted-foreground)">'+esc(r.tiers)+'</td></tr>';});
   h+='</tbody></table></div>';
  }
  if(sub==="roles"){
-  h+='<div class="panel" style="padding:0"><div style="padding:16px 20px 0"><h2 style="font-size:15px;font-weight:600">Roles &amp; permissions (3.9)</h2><p style="font-size:12px;color:var(--muted-foreground);margin:3px 0 12px">Role-based access control with configurable approval hierarchies per project or client contract. Current login: '+OM_HEAD+' — O&amp;M Head (portfolio scope).</p></div>';
+  h+='<div class="panel" style="padding:0"><div style="padding:16px 20px 0"><h2 style="font-size:15px;font-weight:600">Roles &amp; permissions</h2><p style="font-size:12px;color:var(--muted-foreground);margin:3px 0 12px">Role-based access control with configurable approval hierarchies per project or client contract. Current login: '+OM_HEAD+' — O&amp;M Head (portfolio scope).</p></div>';
   h+='<table><thead><tr><th>Role</th><th>Handover</th><th>Preventive Maintenance</th><th>Washing</th><th>Issues</th><th>Documents</th><th>Scope</th></tr></thead><tbody>';
   ROLES.forEach(r=>{h+='<tr><td style="font-weight:600" class="nowrap">'+r.role+'</td><td>'+r.handover+'</td><td>'+r.sched+'</td><td>'+r.washing+'</td><td>'+r.issues+'</td><td>'+r.docs+'</td><td>'+badge(r.scope)+'</td></tr>';});
   h+='</tbody></table></div>';
  }
  if(sub==="reports"){
-  h+='<div class="panel"><h2 style="font-size:15px;font-weight:600">Reporting suite (3.10)</h2><p style="font-size:12px;color:var(--muted-foreground);margin:3px 0 12px">Scheduled auto-reports emailed to stakeholders; client-facing templates match O&amp;M contract SLAs (useful for billing / penalty clauses)</p><div class="col" style="gap:10px">';
+  h+='<div class="panel"><h2 style="font-size:15px;font-weight:600">Reporting suite</h2><p style="font-size:12px;color:var(--muted-foreground);margin:3px 0 12px">Scheduled auto-reports emailed to stakeholders; client-facing templates match O&amp;M contract SLAs (useful for billing / penalty clauses)</p><div class="col" style="gap:10px">';
   [["Daily operations snapshot","Daily 18:00","O&M Head, regional heads","Generation, PR, open issues, wash progress"],
    ["Weekly client report — per plant","Weekly Mon 08:00","Client / asset owners","Wash compliance, PM adherence, issue summary with SLA status"],
    ["Monthly O&M compliance pack","Monthly 1st","All clients","Scheduled compliance, washing, incidents, PR vs target"],
@@ -417,7 +427,7 @@ function renderServices(){
   h+='</div></div>';
  }
  if(sub==="mobile"){
-  h+='<div class="bn-info banner"><b>Offline-capable field app (3.11)</b> — technicians log washing, complete Preventive Maintenance work and raise/update Site Issues in low-connectivity plant areas; everything syncs once back online.</div>';
+  h+='<div class="bn-info banner"><b>Offline-capable field app</b> — technicians log washing, complete Preventive Maintenance work and raise/update Site Issues in low-connectivity plant areas; everything syncs once back online.</div>';
   h+='<div class="kgrid" style="grid-template-columns:1fr 1fr;align-items:start">';
   h+='<div class="panel"><div class="row between" style="margin-bottom:10px"><h2 style="font-size:15px;font-weight:600">Sync queue — today</h2><button class="btn p sm" onclick="syncQueue()">Sync now</button></div>';
   S.offlineQueue.forEach(q=>{h+='<div class="row" style="gap:10px;align-items:flex-start;padding:9px 0;border-bottom:1px solid var(--border)"><span class="dot" style="background:'+(q.status==="Queued"?"var(--warning)":"var(--success)")+';margin-top:5px"></span>'+
@@ -427,10 +437,10 @@ function renderServices(){
    '<div>🔧 <b>Preventive Maintenance:</b> start tasks, submit completion with sub-steps, readings &amp; photos</div>'+
    '<div>🐞 <b>Issues:</b> raise tickets on the go with photos, severity &amp; ETC; add progress from the field</div>'+
    '<div>🦺 <b>Safety:</b> PTW sign-off requests and near-miss reporting from site</div>'+
-   '<div>🌦️ <b>Weather:</b> rain warnings pushed to washing crews (3.14)</div></div></div></div>';
+   '<div>🌦️ <b>Weather:</b> rain warnings pushed to washing crews</div></div></div></div>';
  }
  if(sub==="audit"){
-  h+='<div class="panel" style="padding:0"><div style="padding:16px 20px 0"><h2 style="font-size:15px;font-weight:600">Immutable audit trail (3.12)</h2><p style="font-size:12px;color:var(--muted-foreground);margin:3px 0 12px">Every status change, assignment, approval and edit across Handover, Preventive Maintenance, Washing and Issues — with user, timestamp, and before/after values — for accountability and dispute resolution.</p></div>';
+  h+='<div class="panel" style="padding:0"><div style="padding:16px 20px 0"><h2 style="font-size:15px;font-weight:600">Immutable audit trail</h2><p style="font-size:12px;color:var(--muted-foreground);margin:3px 0 12px">Every status change, assignment, approval and edit across Handover, Preventive Maintenance, Washing and Issues — with user, timestamp, and before/after values — for accountability and dispute resolution.</p></div>';
   h+='<table><thead><tr><th>When</th><th>Module</th><th>Event</th><th>User</th><th>Before → After</th></tr></thead><tbody>';
   S.audit.forEach(a=>{const moduleName=a.module==="Scheduled O&M"?"Preventive Maintenance":a.module;h+='<tr><td class="nowrap">'+a.at+'</td><td>'+badge("Internal")+' '+esc(moduleName)+'</td><td>'+esc(a.text)+'</td><td>'+esc(a.user)+'</td><td style="font-size:12.5px;color:var(--muted-foreground)">'+esc(a.before)+' → <b>'+esc(a.after)+'</b></td></tr>';});
   h+='</tbody></table></div>';
@@ -438,7 +448,7 @@ function renderServices(){
  if(sub==="contracts"){
   const breaches=S.sla.filter(c=>slaLive(c).breach);
   if(breaches.length)h+='<div class="bn-danger banner"><b>Contract breach watch ('+breaches.length+')</b> — '+breaches.map(s=>esc(s.project)+" · "+esc(s.name||s.term||"SLA")).join(" · ")+'. Compliance is tracked against the actual contract, not just internal targets.</div>';
-  h+='<div class="panel" style="padding:0"><div style="padding:16px 20px 0"><div class="row between wrap"><div><h2 style="font-size:15px;font-weight:600">SLA &amp; contract management (3.13)</h2><p style="font-size:12px;color:var(--muted-foreground);margin:3px 0 12px">O&amp;M contract terms mapped to actual ticket ETC and washing records using the selected Operations date.</p></div><button class="btn p sm" onclick="openModal(&quot;newSLA&quot;)">+ Add SLA contract</button></div></div>';
+  h+='<div class="panel" style="padding:0"><div style="padding:16px 20px 0"><div class="row between wrap"><div><h2 style="font-size:15px;font-weight:600">SLA &amp; contract management</h2><p style="font-size:12px;color:var(--muted-foreground);margin:3px 0 12px">O&amp;M contract terms mapped to actual ticket ETC and washing records using the selected Operations date.</p></div><button class="btn p sm" onclick="openModal(&quot;newSLA&quot;)">+ Add SLA contract</button></div></div>';
   h+='<table><thead><tr><th>Plant</th><th>Contract</th><th>Resolution targets</th><th>Washing</th><th>Live status</th><th>Actual ticket compliance</th></tr></thead><tbody>';
   S.sla.forEach(c=>{const live=slaLive(c);h+='<tr><td>'+esc(c.project)+'</td><td style="font-weight:500">'+esc(c.name||"O&M SLA")+'</td><td style="font-size:12.5px">Critical '+(c.critical||24)+'h · Medium '+(c.medium||120)+'h · Low '+(c.low||240)+'h</td><td>'+(c.washDays?esc(c.washDays)+" days":"—")+'</td>'+
    '<td>'+(live.breach?badge("Breached"):badge("Compliant"))+'<div class="muted" style="font-size:12px;margin-top:3px">'+live.issueBreaches+' ticket · '+live.washBreaches+' wash breach(es)</div></td>'+
@@ -446,7 +456,7 @@ function renderServices(){
   h+='</tbody></table></div>';
  }
  if(sub==="weather"){
-  h+='<div class="panel"><h2 style="font-size:15px;font-weight:600">Weather integration (3.14)</h2><p style="font-size:12px;color:var(--muted-foreground);margin:3px 0 12px">Local weather (rain, forecast) pulled automatically to pre-flag washing exceptions and help plan Preventive Maintenance around weather windows</p>';
+  h+='<div class="panel"><h2 style="font-size:15px;font-weight:600">Weather integration</h2><p style="font-size:12px;color:var(--muted-foreground);margin:3px 0 12px">Local weather (rain, forecast) pulled automatically to pre-flag washing exceptions and help plan Preventive Maintenance around weather windows</p>';
   h+='<div class="kgrid" style="grid-template-columns:repeat(2,1fr)">';
   if(!WEATHER.length)h+='<div style="grid-column:1/-1;font-size:12px;color:var(--muted-foreground);padding:8px">No weather feed connected — connect a forecast provider to pre-flag washing exceptions.</div>';
   WEATHER.forEach(w=>{const rd=w.f.findIndex(r=>r>=60);

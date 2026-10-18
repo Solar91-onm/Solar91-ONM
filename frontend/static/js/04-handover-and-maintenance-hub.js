@@ -45,7 +45,7 @@ function projectOverviewPanel(p){
 }
 function renderHandover(){
  const p=S.handovers.find(h=>h.id===S.hoOpen)||S.handovers[0];
- if(!p)return '<div class="panel" style="text-align:center;padding:40px"><h2 style="font-size:15px;font-weight:600">No handover projects yet</h2><p style="font-size:12px;color:var(--muted-foreground);margin:6px 0 14px">Commissioned projects appear here for checklist tracking and approval.</p><button class="btn p" onclick="openModal(\'commission\')">+ Commission project (1.1)</button></div>';
+ if(!p)return '<div class="panel" style="text-align:center;padding:40px"><h2 style="font-size:15px;font-weight:600">No handover projects yet</h2><p style="font-size:12px;color:var(--muted-foreground);margin:6px 0 14px">Commissioned projects appear here for checklist tracking and approval.</p><button class="btn p" onclick="openModal(\'commission\')">+ Commission project</button></div>';
  const hf=S.hoF;
  const hoAssignees=[...new Set(S.handovers.flatMap(h=>h.items.map(i=>i.assignee)))].sort();
  const hoViewStatus=h=>h.items.length?(hoProg(h).pct===100?"Completed":HO_ST[h.status]||"In Progress"):"Empty";

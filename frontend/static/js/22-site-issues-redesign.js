@@ -31,6 +31,148 @@
   if(e.key==="/"&&!typing){const i=document.getElementById("si-q");if(i){e.preventDefault();i.focus()}}
   else if(e.key==="Escape"&&t&&t.id==="si-q"&&t.value){t.value="";siSearch(t)}})}
 
+
+ /* ================= grouping, plant snapshot, sites matrix, priority chart ================= */
+ const GROUP_PAGE=10;
+ const SEVS=["Critical","Medium","Low"];
+ let triGroups=[];
+ const siOpen=()=>{if(!(S.siOpenGroups instanceof Set))S.siOpenGroups=new Set();return S.siOpenGroups};
+ const isOpenT=t=>t.status!=="Closed"&&t.status!=="Resolved";
+ const sevOf=t=>t.severity==="High"?"Critical":(SEVS.includes(t.severity)?t.severity:"Low");
+ function siGroups(list){
+  const map=new Map();
+  (list||[]).forEach(t=>{const vert=t.vertical||"Other",key=(t.plant||"")+"|"+vert;
+   if(!map.has(key))map.set(key,{key,plant:t.plant||"",vert,items:[]});map.get(key).items.push(t)});
+  return [...map.values()].map(g=>{g.worst=g.items.map(sevOf).sort((a,b)=>(SEV_RANK[a]??9)-(SEV_RANK[b]??9))[0]||"Low";return g});
+ }
+ function siUnitCodes(items){
+  const out=[];items.forEach(t=>{const u=Array.isArray(t.units)&&t.units.length?t.units.map(x=>x.code||x.name):(t.equip&&t.equip!=="—"?String(t.equip).split(/\s*,\s*/):[]);u.forEach(c=>{if(c&&!out.includes(c))out.push(c)})});
+  return out;
+ }
+ function siUnitsCell(t){
+  const codes=siUnitCodes([t]);
+  if(codes.length>1)return '<div class="si-units"><b>'+codes.length+' units</b><small>'+esc(codes.slice(0,4).join(", "))+(codes.length>4?" +"+(codes.length-4):"")+'</small></div>';
+  return esc(t.equip||"—")+(t.maker?'<div class="si-sub">'+esc(t.maker)+'</div>':'');
+ }
+ function siRow(t,cls){
+  const p=plantRec(t.plant),sla=slaState(t),age=issueAgeDays(t),ab=ageBucket(t),c=PRI[t.severity]||"#ccc";
+  return '<tr class="si-r click'+cls+(sla==="breach"?" od":"")+(S.flashId===t.id?" flash-new":"")+'" data-rid="'+esc(t.id)+'" data-act="issue" data-id="'+esc(t.id)+'">'+
+   '<td style="--c:'+c+'"><div class="si-id">'+esc(t.id)+'<small>'+esc(t.vertical||"")+(t.sub?" · "+esc(t.sub):"")+'</small></div>'+(t.desc?'<div class="si-desc">'+esc(String(t.desc).slice(0,90))+'</div>':'')+'</td>'+
+   '<td><div style="font-weight:600">'+esc(p?p.id:t.plant)+'</div><div class="si-sub">'+esc(p?p.name:"")+'</div></td>'+
+   '<td>'+siUnitsCell(t)+'</td>'+
+   '<td><span class="si-pri" style="--c:'+c+'"><i></i>'+esc(t.severity)+'</span></td>'+
+   '<td class="si-age" style="--c:'+(AGEC[ab]||"#94A3B8")+'"><b>'+age+'d</b><div class="tr"><i style="width:'+Math.min(100,Math.round(age/15*100))+'%"></i></div></td>'+
+   '<td>'+(t.assignee?'<span class="si-av"><i>'+esc(ccIni(t.assignee))+'</i>'+esc(t.assignee)+'</span>':'<span class="si-un">⚑ Unassigned</span>')+'</td>'+
+   '<td>'+badge(t.status)+(sla==="breach"?" "+badge("Overdue"):"")+etcLabel(t)+'</td>'+
+   '<td class="oi-action-cell"><div class="oi-row-actions">'+issueQuickActs(t)+'</div></td></tr>';
+ }
+ const MIXC={Open:"#3B82F6",Assigned:"#6675D9",Acknowledged:"#8B5CF6","In Progress":"#0F9F8C","Pending Vendor":"#D97706",Resolved:"#16A34A",Closed:"#94A3B8"};
+ function siStatusMix(items){
+  const order=Object.keys(MIXC),cnt={};
+  items.forEach(t=>{cnt[t.status]=(cnt[t.status]||0)+1});
+  return '<div class="si-mix">'+order.filter(k=>cnt[k]).map(k=>'<span style="--c:'+MIXC[k]+'"><i></i>'+esc(k==="Pending Vendor"?"Pending parts":k)+' <b>'+cnt[k]+'</b></span>').join("")+'</div>';
+ }
+ function siGroupRow(g,open){
+  const p=plantRec(g.plant),oldest=Math.max.apply(null,g.items.map(issueAgeDays)),un=g.items.filter(t=>!t.assignee).length,who=[...new Set(g.items.map(t=>t.assignee).filter(Boolean))];
+  const units=siUnitCodes(g.items),sev={};g.items.forEach(t=>{const k=sevOf(t);sev[k]=(sev[k]||0)+1});
+  const over=g.items.filter(t=>slaState(t)==="breach").length,ids=g.items.map(t=>t.id);
+  return '<tr class="si-g'+(open?" open":"")+'" onclick="siGroupToggle(\''+q(g.key)+'\')" title="'+(open?"Hide":"Show")+' the '+g.items.length+' tickets">'+
+   '<td class="cc-cbcell" onclick="event.stopPropagation()"><input type="checkbox" class="si-gcb" aria-label="Select all '+g.items.length+' tickets" data-ids="'+esc(ids.join(","))+'" onchange="siGroupSelect(this)"/></td>'+
+   '<td style="--c:'+(PRI[g.worst]||"#ccc")+'"><div class="si-gid"><span class="si-chev">'+(open?"▾":"▸")+'</span><b>'+esc(g.vert)+'</b><em>'+g.items.length+' tickets</em></div><div class="si-desc">'+esc(ids.slice(0,4).join(" · ")+(ids.length>4?" +"+(ids.length-4):""))+'</div></td>'+
+   '<td><div style="font-weight:600">'+esc(p?p.id:g.plant)+'</div><div class="si-sub">'+esc(p?p.name:"")+'</div></td>'+
+   '<td>'+(units.length?'<div class="si-units"><b>'+units.length+' unit'+(units.length>1?"s":"")+'</b><small>'+esc(units.slice(0,4).join(", "))+(units.length>4?" +"+(units.length-4):"")+'</small></div>':'<span class="si-sub">Not specified</span>')+'</td>'+
+   '<td><span class="si-pri" style="--c:'+(PRI[g.worst]||"#ccc")+'"><i></i>'+esc(g.worst)+'</span><div class="si-sub">'+SEVS.filter(k=>sev[k]).map(k=>sev[k]+" "+k).join(" · ")+'</div></td>'+
+   '<td class="si-age" style="--c:'+(oldest>=15?"#DC4C3E":oldest>=4?"#D97706":"#3B82F6")+'"><b>'+oldest+'d</b><div class="si-sub">oldest</div></td>'+
+   '<td>'+(un?'<span class="si-un">⚑ '+un+' unassigned</span>':'')+(who.length===1?'<span class="si-av"><i>'+esc(ccIni(who[0]))+'</i>'+esc(who[0])+'</span>':who.length?'<span class="si-sub">'+who.length+' people</span>':'')+'</td>'+
+   '<td>'+siStatusMix(g.items)+(over?'<div class="si-over">'+over+' overdue</div>':'')+'</td>'+
+   '<td class="oi-action-cell" onclick="event.stopPropagation()"><div class="oi-row-actions"><button type="button" class="btn g sm" onclick="siGroupToggle(\''+q(g.key)+'\')">'+(open?"Hide":"Show "+g.items.length)+'</button>'+
+   (scheduledAdmin()&&un?'<button type="button" class="btn o sm" onclick="siGroupBulkAssign(\''+esc(ids.join(","))+'\')">Assign all</button>':'')+'</div></td></tr>';
+ }
+ window.siView=function(mode){S.issView=mode;S.tablePages.issues=1;render()};
+ window.siGroupToggle=function(key){const o=siOpen();if(o.has(key))o.delete(key);else o.add(key);render()};
+ window.siGroupSelect=function(el){
+  (el.dataset.ids||"").split(",").filter(Boolean).forEach(id=>{const cb=document.querySelector('.cc-rowcb[data-tid="'+id+'"]');if(cb)cb.checked=el.checked;if(typeof ccToggleSel==="function"){try{ccToggleSel(id,{checked:el.checked})}catch(e){}}});
+ };
+ window.siGroupBulkAssign=function(ids){
+  if(!scheduledAdmin()){toast("Only the O&M Head can assign tickets.");return}
+  const list=String(ids||"").split(",").filter(Boolean);if(!list.length)return;
+  S.modal="bulkAssign";S.modalCtx={ids:list};render();
+ };
+ window.siGroupFocus=function(i){const g=triGroups[i];if(!g)return;siOpen().add(g.key);S.issView="list";siSet({plant:g.plant,vert:g.vert,chip:"Unassigned"});
+  setTimeout(()=>{const el=document.getElementById("section-results");if(el)el.scrollIntoView({behavior:"smooth",block:"start"})},30)};
+ window.siGroupAssign=async function(i){
+  const g=triGroups[i];if(!g)return;
+  if(!scheduledAdmin()){toast("Only the O&M Head can assign tickets.");return}
+  const sel=document.getElementById("si-ga-"+i),who=sel?sel.value:"";
+  if(!who){toast("Choose who to assign "+(g.items.length>1?"these "+g.items.length+" tickets":g.items[0].id)+" to.");if(sel)sel.focus();return}
+  const pool=typeof ISSUE_ASSIGNEES!=="undefined"&&Array.isArray(ISSUE_ASSIGNEES)?ISSUE_ASSIGNEES:[];
+  const person=pool.find(a=>a.id===who);
+  if(!person){toast("Choose an Assignee from the list.");return}
+  const btn=sel&&sel.nextElementSibling;if(btn){btn.disabled=true;btn.textContent="Assigning…"}
+  let ok=0;const failed=[];
+  for(const t of g.items.slice()){
+   if(typeof postIssue!=="function")break;
+   const row=await postIssue(t.id,t.assignee?"/reassign":"/assign",{assigned_to:person.id,assignee_text:person.name,note:"Assigned from the triage queue"});
+   if(row)ok++;else failed.push(t.id);
+  }
+  render();toast(ok+" ticket"+(ok===1?"":"s")+" assigned to "+person.name+(failed.length?" · not changed: "+failed.join(", "):" — notified."));
+ };
+ function siPlantSnapshot(plantName,all,f){
+  const p=plantRec(plantName),mine=all.filter(t=>t.plant===plantName),open=mine.filter(isOpenT);
+  const groups=siGroups(mine).sort((a,b)=>b.items.filter(isOpenT).length-a.items.filter(isOpenT).length||(SEV_RANK[a.worst]??9)-(SEV_RANK[b.worst]??9));
+  let h='<div class="si-plant"><div class="si-plant-h"><div><span class="kpi-label">PLANT SNAPSHOT</span><h3>'+esc(p?p.id+" · "+p.name:plantName)+'</h3></div><div class="si-plant-k"><span><b>'+open.length+'</b> open</span><span class="c"><b>'+open.filter(t=>sevOf(t)==="Critical").length+'</b> critical</span><span class="o"><b>'+open.filter(isOverdueIssue).length+'</b> overdue</span><span><b>'+groups.filter(g=>g.items.some(isOpenT)).length+'</b> equipment types affected</span></div>'+
+   '<button type="button" class="btn o sm" onclick="siSet({plant:\'all\',vert:\'all\'})">All plants</button></div>';
+  if(!groups.length)return h+'<div class="si-plant-empty">✓ No issues recorded at this plant.</div></div>';
+  h+='<div class="si-plant-grid">'+groups.map(g=>{const o=g.items.filter(isOpenT),done=g.items.length-o.length,on=f.vert===g.vert,units=siUnitCodes(o);
+   const worst=o.length?siGroups(o)[0].worst:"Low";
+   return '<button type="button" class="si-eq'+(on?" on":"")+(o.length?"":" ok")+'" style="--c:'+(o.length?PRI[worst]:"#16A34A")+'" onclick="siToggle(\'vert\',\''+q(g.vert)+'\')"><div class="si-eq-h"><b>'+esc(g.vert)+'</b><span class="si-eq-n">'+(o.length?o.length+" open":"✓ clear")+'</span></div>'+
+    (o.length?siStatusMix(o):'')+
+    '<small>'+(units.length?esc(units.slice(0,5).join(", "))+(units.length>5?" +"+(units.length-5):"")+' · ':'')+(o.length?'worst '+esc(worst)+' · oldest '+Math.max.apply(null,o.map(issueAgeDays))+'d':'')+(done?(o.length?' · ':'')+done+' done':'')+'</small></button>'}).join("")+'</div></div>';
+  return h;
+ }
+ function siSitesMatrix(list){
+  const plants=[...new Set(list.map(t=>t.plant).filter(Boolean))],types=[...new Set(list.map(t=>t.vertical||"Other"))];
+  const typeCount=k=>list.filter(t=>(t.vertical||"Other")===k&&isOpenT(t)).length,plantCount=k=>list.filter(t=>t.plant===k&&isOpenT(t)).length;
+  types.sort((a,b)=>typeCount(b)-typeCount(a)||a.localeCompare(b));
+  plants.sort((a,b)=>plantCount(b)-plantCount(a)||a.localeCompare(b));
+  if(!plants.length)return '<div class="si-empty"><div class="ico">✓</div><b>No issues in view</b><p>Change the filters to see plants here.</p></div>';
+  const TINT={Critical:"rgba(220,76,62,.16)",Medium:"rgba(59,130,246,.14)",Low:"rgba(148,163,184,.2)"};
+  let h='<div class="si-mx-wrap"><div class="si-mx-legend"><span>Number = open tickets · colour = worst priority</span>'+SEVS.map(k=>'<span><i style="background:'+PRI[k]+'"></i>'+k+'</span>').join("")+'<span><i class="ok"></i>All done</span></div><div class="si-scroll"><table class="si-mx"><thead><tr><th class="pl">Plant</th>'+types.map(k=>'<th title="'+esc(k)+'">'+esc(k)+'</th>').join("")+'<th class="tot">Open</th></tr></thead><tbody>';
+  plants.forEach(pn=>{const p=plantRec(pn);
+   h+='<tr><th class="pl"><button type="button" onclick="S.issView=\'list\';siSet({plant:\''+q(pn)+'\'})"><b>'+esc(p?p.id:pn)+'</b><small>'+esc(p?p.name:"")+'</small></button></th>';
+   types.forEach(k=>{const items=list.filter(t=>t.plant===pn&&(t.vertical||"Other")===k);
+    if(!items.length){h+='<td class="e">·</td>';return}
+    const o=items.filter(isOpenT),go="S.issView=\'list\';siSet({plant:\'"+q(pn)+"\',vert:\'"+q(k)+"\'})";
+    if(!o.length){h+='<td><button type="button" class="si-cell ok" title="'+esc(k)+' at '+esc(pn)+': '+items.length+' done" onclick="'+go+'">✓</button></td>';return}
+    const w=siGroups(o)[0].worst,un=o.filter(t=>!t.assignee).length,od=o.filter(isOverdueIssue).length;
+    h+='<td><button type="button" class="si-cell" style="--c:'+PRI[w]+';background:'+TINT[w]+'" title="'+esc(k)+' at '+esc(pn)+': '+o.length+' open, worst '+w+(un?', '+un+' unassigned':'')+(od?', '+od+' overdue':'')+'" onclick="'+go+'"><b>'+o.length+'</b>'+(od?'<i class="od"></i>':un?'<i class="un"></i>':'')+'</button></td>'});
+   h+='<td class="tot"><b>'+plantCount(pn)+'</b></td></tr>'});
+  h+='</tbody><tfoot><tr><th class="pl">Open per type</th>'+types.map(k=>'<td class="tot"><b>'+typeCount(k)+'</b></td>').join("")+'<td class="tot"><b>'+list.filter(isOpenT).length+'</b></td></tr></tfoot></table></div><div class="si-mx-note"><span><i class="od"></i>overdue</span><span><i class="un"></i>unassigned</span><span>Click any cell to open those tickets</span></div></div>';
+  return h;
+ }
+ function siPriorityChart(list,by,f){
+  const scope=S.siChartScope==="all"?list:list.filter(isOpenT);
+  const keyOf=t=>by==="plant"?(t.plant||"—"):(t.vertical||"Other");
+  const map=new Map();scope.forEach(t=>{const k=keyOf(t);if(!map.has(k))map.set(k,{k,Critical:0,Medium:0,Low:0,n:0});const r=map.get(k);r[sevOf(t)]++;r.n++});
+  let rows=[...map.values()].sort((a,b)=>b.Critical-a.Critical||b.n-a.n||a.k.localeCompare(b.k));
+  if(!rows.length)return '<div class="si-empty"><div class="ico">✓</div><b>'+(S.siChartScope==="all"?"No tickets in view":"No open tickets in view")+'</b><p>Nothing to chart for the current filters.</p></div>';
+  if(rows.length>12){const rest=rows.slice(11),o={k:"Other ("+rest.length+")",Critical:0,Medium:0,Low:0,n:0,other:true};rest.forEach(r=>{SEVS.forEach(s=>{o[s]+=r[s]});o.n+=r.n});rows=rows.slice(0,11).concat([o])}
+  const max=Math.max.apply(null,rows.map(r=>r.n)),tot={Critical:0,Medium:0,Low:0};rows.forEach(r=>SEVS.forEach(s=>{tot[s]+=r[s]}));
+  const label=r=>{if(by!=="plant"||r.other)return '<b>'+esc(r.k)+'</b>';const p=plantRec(r.k);return '<b>'+esc(p?p.id:r.k)+'</b> <small>'+esc(p?p.name:"")+'</small>'};
+  const filt=(r,s)=>(by==="plant"?"siSet({plant:\'"+q(r.k)+"\'":"siSet({vert:\'"+q(r.k)+"\'")+(s?",sev:\'"+s+"\'":"")+"})";
+  return '<div class="si-pc"><div class="si-pc-lg">'+SEVS.map(s=>'<span><i style="background:'+PRI[s]+'"></i>'+s+' <b>'+tot[s]+'</b></span>').join("")+'</div>'+
+   rows.map(r=>'<div class="si-pc-row"><button type="button" class="si-pc-l" '+(r.other?"disabled":'onclick="'+filt(r,"")+'"')+' title="'+esc(r.k)+'">'+label(r)+'</button><div class="si-pc-bar">'+
+    SEVS.filter(s=>r[s]).map(s=>'<button type="button" class="si-pc-seg" style="width:'+(r[s]/max*100).toFixed(2)+'%;--c:'+PRI[s]+'" data-tip="'+esc(r.k)+' · '+s+': '+r[s]+' of '+r.n+'" aria-label="'+esc(r.k)+' '+s+' '+r[s]+'" '+(r.other?"disabled":'onclick="'+filt(r,s)+'"')+'>'+(r[s]/max>=.07?'<span>'+r[s]+'</span>':'')+'</button>').join("")+
+    '</div><b class="si-pc-n">'+r.n+'</b></div>').join("")+'</div>';
+ }
+ if(!window._siTip){window._siTip=1;
+  document.addEventListener("mouseover",e=>{const seg=e.target&&e.target.closest?e.target.closest(".si-pc-seg"):null;let tip=document.getElementById("si-tip");
+   if(!seg){if(tip)tip.style.display="none";return}
+   if(!tip){tip=document.createElement("div");tip.id="si-tip";tip.className="si-tip";document.body.appendChild(tip)}
+   tip.textContent=seg.dataset.tip||"";tip.style.display="block";const r=seg.getBoundingClientRect();
+   tip.style.left=Math.max(8,Math.min(window.innerWidth-tip.offsetWidth-8,r.left+r.width/2-tip.offsetWidth/2))+"px";tip.style.top=Math.max(8,r.top-tip.offsetHeight-8)+"px"});
+ }
+
  renderIssues=function(){
   const f=F(),all=S.issues||[],filtered=filterIssues(all,f),openAll=openTk(all),openF=openTk(filtered);
   const people=[...new Set(all.map(t=>t.assignee).filter(Boolean).concat(TEAM_POOL))].sort();
@@ -103,52 +245,66 @@
    donut("Status",sI,sBase.length,"issues",x=>f.bucket===x.l,x=>"siBucket(\'"+q(x.l)+"\')")+
    donut("Deadline",dI,dOpen.length?Math.round(100*(dOpen.length-dOver)/dOpen.length)+"%":"—","on time",x=>f.sla===x.k,x=>"siToggle(\'sla\',\'"+x.k+"\')")+'</div>';
 
-  /* ---- triage queue ---- */
+  /* ---- plant snapshot: what is broken at this plant, by equipment type ---- */
+  if(f.plant&&f.plant!=="all")h+=siPlantSnapshot(f.plant,all,f);
+
+  /* ---- triage queue: compact, one card per plant + equipment type ---- */
   if(scheduledAdmin()){
    const need=openAll.filter(t=>!t.assignee).sort((a,b)=>(SEV_RANK[a.severity]??9)-(SEV_RANK[b.severity]??9)||String(a.created).localeCompare(String(b.created)));
-   if(need.length){const opts='<option value="">Assign to…</option>'+(typeof assigneeOptionsHtml==="function"?assigneeOptionsHtml():people.map(x=>'<option>'+esc(x)+'</option>').join(""));
-    h+='<div class="si-tri"><h3>⚑ Needs an owner — '+need.length+' unassigned '+(need.filter(t=>t.severity==="Critical").length?'<span class="pill pillsm b-danger">'+need.filter(t=>t.severity==="Critical").length+' critical</span>':'')+'</h3>'+
-     need.slice(0,4).map(t=>'<div class="si-tri-row" style="--c:'+(PRI[t.severity]||"#ccc")+'"><div class="m" data-act="issue" data-id="'+esc(t.id)+'"><b>'+esc(t.id)+'</b> '+badge(t.severity)+'<small>'+esc(t.plant||"—")+(t.equip&&t.equip!=="—"?" · "+esc(t.equip):"")+" · "+esc(t.vertical||"")+'</small></div>'+
-      '<div class="a" onclick="event.stopPropagation()"><select class="sel" id="oi-qa-'+esc(t.id)+'">'+opts+'</select><button class="btn p sm" onclick="oiQuickAssign(\''+esc(t.id)+'\')">Assign</button></div></div>').join("")+
-     (need.length>4?'<div style="margin-top:8px"><button class="btn g sm" onclick="siChip(\'Unassigned\')">+ '+(need.length-4)+' more — view all unassigned</button></div>':'')+'</div>'}
-  }
-
-  /* ---- results ---- */
-  const sorted=filtered.slice().sort((a,b)=>f.sort==="created"?String(b.created).localeCompare(String(a.created)):f.sort==="severity"?(SEV_RANK[a.severity]??9)-(SEV_RANK[b.severity]??9):f.sort==="age"?issueAgeDays(b)-issueAgeDays(a):new Date(a.etc)-new Date(b.etc));
-  const rows=pageRows("issues",sorted,LIST_SIZE),mode=S.issView==="board"?"board":"list";
-  const top='<div class="si-tbl-top"><div><b>'+(hasF?"Matching issues":"All issues")+'</b> <span>· showing '+rows.length+' of '+filtered.length+'</span></div><div class="si-seg"><button type="button" class="'+(mode==="list"?"on":"")+'" onclick="m26IssView(\'list\')">☰ List</button><button type="button" class="'+(mode==="board"?"on":"")+'" onclick="m26IssView(\'board\')">▦ Board</button></div></div>';
-  const th=(l,k)=>'<th class="s'+(f.sort===k?" on":"")+'" onclick="siSort(\''+k+'\')">'+l+(f.sort===k?" ↓":"")+'</th>';
-  let tb='<div id="section-results" class="si-tbl">'+top;
-  if(mode==="board"&&typeof m26Board==="function"){tb+='<div style="padding:0 12px 12px">'+m26Board()+'</div>'}
-  else{
-   tb+='<div class="si-scroll"><table class="si-t dense"><thead><tr><th>Issue</th><th>Plant / site</th><th>Equipment</th>'+th("Priority","severity")+th("Age","age")+'<th>Assignee</th>'+th("Status / due","etc")+'<th>Action</th></tr></thead><tbody>';
-   if(!rows.length)tb+='<tr><td colspan="8"><div class="si-empty"><div class="ico">'+(all.length?"⌕":"✓")+'</div><b>'+(all.length?"No issues match these filters":"No issues raised yet")+'</b><p>'+(all.length?"Try removing a filter or searching with different words.":"When a fault is reported at a plant it will appear here, ranked by priority.")+'</p>'+(all.length&&hasF?'<button class="btn o sm" onclick="S.issF=blankIssF();S.tablePages.issues=1;render()">Clear all filters</button>':'<button class="btn p sm" onclick="openModal(\'newTicket\')">'+I.plus(12)+' Raise Issue</button>')+'</div></td></tr>';
-   rows.forEach(t=>{const p=plantRec(t.plant),sla=slaState(t),age=issueAgeDays(t),ab=ageBucket(t),c=PRI[t.severity]||"#ccc";
-    tb+='<tr class="si-r click'+(sla==="breach"?" od":"")+(S.flashId===t.id?" flash-new":"")+'" data-rid="'+esc(t.id)+'" data-act="issue" data-id="'+esc(t.id)+'">'+
-     '<td style="--c:'+c+'"><div class="si-id">'+esc(t.id)+'<small>'+esc(t.vertical||"")+(t.sub?" · "+esc(t.sub):"")+'</small></div>'+(t.desc?'<div class="si-desc">'+esc(String(t.desc).slice(0,90))+'</div>':'')+'</td>'+
-     '<td><div style="font-weight:600">'+esc(p?p.id:t.plant)+'</div><div class="si-sub">'+esc(p?p.name:"")+'</div></td>'+
-     '<td>'+esc(t.equip||"—")+(t.maker?'<div class="si-sub">'+esc(t.maker)+'</div>':'')+'</td>'+
-     '<td><span class="si-pri" style="--c:'+c+'"><i></i>'+esc(t.severity)+'</span></td>'+
-     '<td class="si-age" style="--c:'+(AGEC[ab]||"#94A3B8")+'"><b>'+age+'d</b><div class="tr"><i style="width:'+Math.min(100,Math.round(age/15*100))+'%"></i></div></td>'+
-     '<td>'+(t.assignee?'<span class="si-av"><i>'+esc(ccIni(t.assignee))+'</i>'+esc(t.assignee)+'</span>':'<span class="si-un">⚑ Unassigned</span>')+'</td>'+
-     '<td>'+badge(t.status)+(sla==="breach"?" "+badge("Overdue"):"")+etcLabel(t)+'</td>'+
-     '<td class="oi-action-cell"><div class="oi-row-actions">'+issueQuickActs(t)+'</div></td></tr>'});
-   tb+='</tbody></table></div>'+tablePager("issues",filtered.length,LIST_SIZE)}
-  h+=tb+'</div>';
-
-  /* ---- trend (collapsible) ---- */
-  const days=S.trendDays||10,trendEnd=f.to||TODAY,trendStart=f.from||addDays(trendEnd,-days+1);
-  let trendHtml="";
-  if(S.siTrend!==false){
-   try{trendHtml=issueSpark(issueTrendRows(days,filterIssues(all,Object.assign({},f,{from:"",to:""})),trendStart,trendEnd));}
-   catch(error){
-    console.error("Solar91: issue trend failed independently of register",error);
-    trendHtml='<div class="si-empty" role="alert"><b>Trend chart unavailable</b><p>Issues are still available. Change the date range or refresh to retry.</p></div>';
+   triGroups=siGroups(need);
+   if(need.length){
+    const crit=need.filter(t=>t.severity==="Critical").length;
+    const opts=k=>'<option value="">Assign to…</option>'+(typeof assigneeOptionsHtml==="function"?assigneeOptionsHtml(k):people.map(x=>'<option>'+esc(x)+'</option>').join(""));
+    h+='<div class="si-tri2"><div class="si-tri2-h"><b>⚑ Needs an owner</b><span>'+need.length+' unassigned'+(crit?' · <em>'+crit+' critical</em>':'')+'</span>'+
+     (need.length>1?'<button type="button" class="si-link" onclick="siChip(\'Unassigned\')">Show in list</button>':'')+'</div><div class="si-tri2-list">'+
+     triGroups.slice(0,8).map((g,i)=>{const one=g.items.length===1,t0=g.items[0],p=plantRec(g.plant);
+      return '<div class="si-tc" style="--c:'+(PRI[g.worst]||"#ccc")+'"><button type="button" class="si-tc-m" title="'+esc(g.items.map(t=>t.id).join(", "))+'" onclick="'+(one?"openIssue(\'"+q(t0.id)+"\')":"siGroupFocus("+i+")")+'">'+
+       '<b>'+(one?esc(t0.id):esc(g.vert)+' <i>×'+g.items.length+'</i>')+'</b><small>'+esc(p?p.id:g.plant)+' · '+(one?esc(g.vert):g.items.length+' tickets')+'</small></button>'+
+       '<div class="si-tc-a"><select class="sel" id="si-ga-'+i+'" aria-label="Assignee for '+esc(g.vert)+' at '+esc(g.plant)+'">'+opts(g.vert)+'</select><button type="button" class="btn p sm" title="Assign '+(one?"this ticket":"all "+g.items.length+" tickets")+'" onclick="siGroupAssign('+i+')">'+(one?"Assign":"Assign all")+'</button></div></div>'}).join("")+
+     (triGroups.length>8?'<button type="button" class="si-tc si-tc-more" onclick="siChip(\'Unassigned\')">+'+(triGroups.length-8)+' more</button>':'')+'</div></div>';
    }
   }
-  h+='<div class="si-trend"><div class="si-trend-h"><div><h3>Issue trend</h3><span class="si-sub">Created, resolved and open backlog</span></div><div class="si-seg">'+
-   [[3,"3d"],[10,"10d"],[14,"2w"],[21,"3w"],[30,"Month"]].map(([n,l])=>'<button type="button" class="'+(days===n?"on":"")+'" onclick="setTrendDays('+n+')">'+l+'</button>').join("")+
-   '<button type="button" onclick="siTrend()">'+(S.siTrend===false?"Show":"Hide")+'</button></div></div>'+trendHtml+'</div>';
+
+  /* ---- results: one row per plant + equipment type (expand to see its tickets) ---- */
+  const sorted=filtered.slice().sort((a,b)=>f.sort==="created"?String(b.created).localeCompare(String(a.created)):f.sort==="severity"?(SEV_RANK[a.severity]??9)-(SEV_RANK[b.severity]??9):f.sort==="age"?issueAgeDays(b)-issueAgeDays(a):new Date(a.etc)-new Date(b.etc));
+  const mode=S.issView==="board"?"board":S.issView==="sites"?"sites":"list",grouped=S.siGroup!==false;
+  const groups=grouped?siGroups(sorted):sorted.map(t=>({key:t.id,plant:t.plant,vert:t.vertical||"Other",items:[t],worst:t.severity}));
+  const rv=S.reveal;
+  if(rv&&rv.kind==="issues"&&rv.id){const gi=groups.findIndex(g=>g.items.some(t=>t.id===rv.id));if(gi>=0){S.tablePages.issues=Math.floor(gi/GROUP_PAGE)+1;if(groups[gi].items.length>1)siOpen().add(groups[gi].key)}S.reveal=null}
+  const pageGroups=pageRows("issues",groups,GROUP_PAGE);
+  const top='<div class="si-tbl-top"><div><b>'+(hasF?"Matching issues":"All issues")+'</b> <span>· '+filtered.length+' ticket'+(filtered.length===1?"":"s")+(grouped&&mode==="list"?' in '+groups.length+' plant · equipment group'+(groups.length===1?"":"s"):'')+'</span></div><div class="si-tbl-tools">'+
+   (mode==="list"?'<label class="si-tog"><input type="checkbox"'+(grouped?" checked":"")+' onchange="S.siGroup=this.checked;S.tablePages.issues=1;render()"/> Group by plant &amp; equipment</label>':'')+
+   '<div class="si-seg"><button type="button" class="'+(mode==="list"?"on":"")+'" onclick="siView(\'list\')">☰ List</button><button type="button" class="'+(mode==="sites"?"on":"")+'" onclick="siView(\'sites\')">▦ Sites</button><button type="button" class="'+(mode==="board"?"on":"")+'" onclick="siView(\'board\')">◫ Board</button></div></div></div>';
+  const th=(l,k)=>'<th class="s'+(f.sort===k?" on":"")+'" onclick="siSort(\''+k+'\')">'+l+(f.sort===k?" ↓":"")+'</th>';
+  /* the Sites matrix uses its own id so the batch-checkbox injector (which targets #section-results table) leaves it alone */
+  let tb='<div id="'+(mode==="sites"?"section-results-sites":"section-results")+'" class="si-tbl">'+top;
+  if(mode==="board"&&typeof m26Board==="function"){tb+='<div style="padding:0 12px 12px">'+m26Board()+'</div>'}
+  else if(mode==="sites"){tb+=siSitesMatrix(filtered)}
+  else{
+   tb+='<div class="si-scroll"><table class="si-t dense"><thead><tr><th>Issue</th><th>Plant / site</th><th>Equipment</th>'+th("Priority","severity")+th("Age","age")+'<th>Assignee</th>'+th("Status / due","etc")+'<th>Action</th></tr></thead><tbody>';
+   if(!pageGroups.length)tb+='<tr><td colspan="9"><div class="si-empty"><div class="ico">'+(all.length?"⌕":"✓")+'</div><b>'+(all.length?"No issues match these filters":"No issues raised yet")+'</b><p>'+(all.length?"Try removing a filter or searching with different words.":"When a fault is reported at a plant it will appear here, ranked by priority.")+'</p>'+(all.length&&hasF?'<button class="btn o sm" onclick="S.issF=blankIssF();S.tablePages.issues=1;render()">Clear all filters</button>':'<button class="btn p sm" onclick="openModal(\'newTicket\')">'+I.plus(12)+' Raise Issue</button>')+'</div></td></tr>';
+   pageGroups.forEach(g=>{
+    if(g.items.length===1){tb+=siRow(g.items[0],"");return}
+    const open=siOpen().has(g.key);tb+=siGroupRow(g,open);
+    if(open)g.items.forEach(t=>{tb+=siRow(t," si-child")});
+   });
+   tb+='</tbody></table></div>'+tablePager("issues",groups.length,GROUP_PAGE)}
+  h+=tb+'</div>';
+
+  /* ---- priority chart (by equipment or by plant) + trend ---- */
+  const chartBy=S.siChartBy||"equipment";
+  let chartHtml="";
+  if(S.siTrend!==false){
+   if(chartBy==="trend"){
+    const days=S.trendDays||10,trendEnd=f.to||TODAY,trendStart=f.from||addDays(trendEnd,-days+1);
+    try{chartHtml='<div class="si-seg si-seg-sub">'+[[3,"3d"],[10,"10d"],[14,"2w"],[21,"3w"],[30,"Month"]].map(([n,l])=>'<button type="button" class="'+(days===n?"on":"")+'" onclick="setTrendDays('+n+')">'+l+'</button>').join("")+'</div>'+issueSpark(issueTrendRows(days,filterIssues(all,Object.assign({},f,{from:"",to:""})),trendStart,trendEnd));}
+    catch(error){console.error("Solar91: issue trend failed independently of register",error);chartHtml='<div class="si-empty" role="alert"><b>Trend chart unavailable</b><p>Issues are still available. Change the date range or refresh to retry.</p></div>'}
+   }else chartHtml=siPriorityChart(filterIssues(all,Object.assign({},f,{sev:"all"})),chartBy,f);
+  }
+  h+='<div class="si-trend"><div class="si-trend-h"><div><h3>'+(chartBy==="trend"?"Issue trend":"Issues by priority")+'</h3><span class="si-sub">'+(chartBy==="trend"?"Created, resolved and open backlog":"Critical, Medium and Low "+(S.siChartScope==="all"?"tickets (all statuses)":"open tickets")+" per "+(chartBy==="plant"?"plant":"equipment type")+" · click a bar to filter")+'</span></div><div class="si-trend-tools">'+
+   (chartBy!=="trend"?'<div class="si-seg"><button type="button" class="'+(S.siChartScope!=="all"?"on":"")+'" onclick="S.siChartScope=\'open\';render()">Open</button><button type="button" class="'+(S.siChartScope==="all"?"on":"")+'" onclick="S.siChartScope=\'all\';render()">All</button></div>':'')+
+   '<div class="si-seg">'+[["equipment","By equipment"],["plant","By plant"],["trend","Trend"]].map(([k,l])=>'<button type="button" class="'+(chartBy===k?"on":"")+'" onclick="S.siChartBy=\''+k+'\';S.siTrend=true;render()">'+l+'</button>').join("")+
+   '<button type="button" onclick="siTrend()">'+(S.siTrend===false?"Show":"Hide")+'</button></div></div></div>'+chartHtml+'</div>';
   return '<div class="m26 m26-issues si">'+h+'</div>';
  };
 })();

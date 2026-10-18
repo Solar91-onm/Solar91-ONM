@@ -22,7 +22,7 @@
 
   function enforceSiteEngineerModules(){
     if(rev05Role()!=="Site Engineer")return;
-    var allowed=["Command Center","Site Issues","Preventive Maintenance","Washing"];
+    var allowed=["Command Center","My Plant","Site Issues","Preventive Maintenance","Washing"];
     document.querySelectorAll(".side-link").forEach(function(a){
       var sp=a.querySelector("span"),txt=(sp?sp.textContent:a.textContent||"").trim();
       a.style.display=allowed.some(function(x){return txt===x||txt.indexOf(x)===0})?"":"none";
@@ -335,7 +335,7 @@
     if(S.view==="om-module"&&["issues","scheduled","washing"].indexOf(S.omTab)<0)S.omTab="issues";
 
     /* exact desktop module whitelist */
-    var allowed=["Command Center","Site Issues","Preventive Maintenance","Washing"];
+    var allowed=["Command Center","My Plant","Site Issues","Preventive Maintenance","Washing"];
     document.querySelectorAll(".side-link").forEach(function(a){
       var sp=a.querySelector("span"),txt=(sp?sp.textContent:a.textContent||"").trim();
       a.style.display=allowed.indexOf(txt)>=0?"":"none";

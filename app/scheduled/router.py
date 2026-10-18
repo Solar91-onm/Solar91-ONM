@@ -17,12 +17,12 @@ from app.core.models import AuditLog, Equipment, Issue, OMTask, PMAlertLog, PMDu
 from app.core.security import WASHING_TYPE, equipment_scope_matches, get_current_user, require_csrf, require_permission, user_scoped_equipment_types, user_scoped_plant_ids, resolve_equipment_id
 from app.plants.codes import find_plant_by_code, normalize_site_code
 from app.pmplan.units import distribute, next_cycle_id
-from app.scheduled.schemas import PMFollowUpCreate, ProblemTaskCreate, TaskCompletion, TaskIssueLink, TaskReassign, TaskScheduleEdit, TaskUnitPlanEdit, WashingCycleDateRequest, WashingDailyReportRequest, WashingReportReviewRequest, WashingReportUpdateRequest, WashingSetupRequest
+from app.scheduled.schemas import PMFollowUpCreate, ProblemTaskCreate, TaskCompletion, TaskIssueLink, TaskReassign, TaskScheduleEdit, TaskUnitPlanEdit, WashingCycleDateRequest, WashingCycleScheduleRequest, WashingDailyReportRequest, WashingReportReviewRequest, WashingReportUpdateRequest, WashingSetupRequest
 from app.storage.service import SupabaseStorage
 from app.issues.service import next_issue_ticket_no
 from app.pmplan.followups import FOLLOW_UP_OUTCOMES, follow_up_out, get_follow_up_state
 from app.pmplan.alerts import alert_log_out, task_alert_scope
-from app.scheduled.washing_cycles import create_daily_report, delete_daily_report, get_overview, list_assignees, review_daily_report, set_cycle_date, setup_plant, update_daily_report
+from app.scheduled.washing_cycles import create_daily_report, delete_daily_report, get_overview, list_assignees, month_cycles, review_daily_report, save_cycle_schedule, set_cycle_date, setup_plant, update_daily_report
 from app.scheduled.washing_import import MAX_IMPORT_BYTES, export_bytes, import_setup, template_bytes
 
 router = APIRouter(prefix="/api/scheduled", tags=["Preventive Maintenance"])
@@ -407,6 +407,7 @@ def create_problem_task(payload: ProblemTaskCreate, db: Annotated[Session, Depen
             User.is_active.is_(True),
             (User.display_name.ilike(payload.assignee.strip())) | (User.email.ilike(payload.assignee.strip()))
         ))
+    _require_assignee_role(assigned_user)
     if assigned_user and assigned_user.role == "Assignee" and not equipment_scope_matches(
         db, assigned_user, plant.id, None, payload.equipment_ref, payload.asset
     ):
@@ -717,6 +718,13 @@ def complete_task(work_order_no: str, payload: TaskCompletion, db: Annotated[Ses
     return {"task": _task_out(db, task), "linked_issue": linked_issue}
 
 
+def _require_assignee_role(target: User | None) -> None:
+    """Field work is owned by people with the Assignee role, never by an O&M Head, Administration or Site Engineer.
+    Names that match no portal user (older free-text records) are left as they are."""
+    if target is not None and target.role != "Assignee":
+        raise HTTPException(422, f"Work can only be assigned to a user with the Assignee role ({target.display_name} is {target.role})")
+
+
 @router.get("/washing/assignees")
 def washing_assignees(db: Annotated[Session, Depends(get_db)], user: Annotated[User, Depends(get_current_user)]):
     return list_assignees(db, user)
@@ -877,6 +885,16 @@ def change_washing_cycle_date(plant_id: UUID, payload: WashingCycleDateRequest, 
     return set_cycle_date(db, user, plant_id, payload)
 
 
+@router.get("/washing/plants/{plant_id}/cycles")
+def washing_month_cycles(plant_id: UUID, month: str, db: Annotated[Session, Depends(get_db)], user: Annotated[User, Depends(get_current_user)]):
+    return month_cycles(db, user, plant_id, month)
+
+
+@router.put("/washing/plants/{plant_id}/cycle-schedule", dependencies=[Depends(require_csrf)])
+def save_washing_cycle_schedule(plant_id: UUID, payload: WashingCycleScheduleRequest, db: Annotated[Session, Depends(get_db)], user: Annotated[User, Depends(get_current_user)]):
+    return save_cycle_schedule(db, user, plant_id, payload)
+
+
 @router.post("/washing/daily-reports/{report_id}/review", dependencies=[Depends(require_csrf)])
 def confirm_washing_report(report_id: UUID, payload: WashingReportReviewRequest, db: Annotated[Session, Depends(get_db)], user: Annotated[User, Depends(get_current_user)]):
     return review_daily_report(db, user, report_id, payload)
@@ -975,6 +993,8 @@ def edit_task_schedule(work_order_no: str, payload: TaskScheduleEdit, db: Annota
     target_user = None
     if who:
         target_user = db.scalar(select(User).where(User.is_active.is_(True), (User.display_name.ilike(who)) | (User.email.ilike(who))))
+        if any(who != (t.assignee_text or "") for t in targets):
+            _require_assignee_role(target_user)
     changed = []
     for t in targets:
         notes = []
@@ -1176,6 +1196,7 @@ def reassign_task(work_order_no: str, payload: TaskReassign, db: Annotated[Sessi
             User.is_active.is_(True),
             (User.display_name.ilike(payload.assignee.strip())) | (User.email.ilike(payload.assignee.strip()))
         ))
+    _require_assignee_role(target)
     if target and target.role == "Assignee" and not equipment_scope_matches(
         db,target,task.plant_id,None,task.equipment_ref,task.task_type
     ):

@@ -122,3 +122,10 @@ Core tables:
 - `audit_logs`
 
 Latest production fields are introduced by `007_rev14_production.sql`.
+
+## Washing cycle dates, assignment and plant search (October 2026)
+- **Cycle dates for any month**: the washing plant overlay has a *Cycles & dates* tab with a month switcher (two years back to one year ahead). The O&M Head / washing Assignee can set every cycle's start and deadline to any day of that month and save all three at once (`PUT /api/scheduled/washing/plants/{id}/cycle-schedule`). Ticking *Use these dates every month from … on* stores a repeating pattern (`cycle_overrides["pattern"]`, day numbers clamped to short months) and clears one-off dates of later months. `GET /api/scheduled/washing/plants/{id}/cycles?month=YYYY-MM` returns a month's cycles; Site Engineers can read their own plant only.
+- **Past data**: the O&M team can record washing for any past date (it counts towards that month's cycles); Site Engineers keep the 45-day limit.
+- **Washing scope**: in Settings → Team access, washing is given to an Assignee like an equipment type ("💧 Washing (module cleaning)" = `Modules cleaning`).
+- **Assignee role only**: PM jobs, task reassignment and schedule edits refuse a person who is an O&M Head, Administration or Site Engineer; "Assign to" lists show active Assignees only. Older free-text names that match no portal user are left as they are.
+- **Plant search**: every plant drop-down (top bar, Site Issues, PM, washing, raise-issue wizard, Team access) opens a type-to-search list.

@@ -138,6 +138,9 @@ def create_issue_comment(issue_id:UUID,data:IssueCommentCreate,db:Annotated[Sess
     row=IssueRepository(db).by_id(issue_id)
     if not row: raise HTTPException(404,"Issue not found")
     _require_issue_action_scope(db,user,issue_id)
+    if row.status=="Closed":
+        # The O&M Head closing a ticket ends its conversation; the full history stays on the ticket.
+        raise HTTPException(409,"This ticket is closed. Reopen it to continue the conversation")
     evidence_ids={
         str(entry.get("id"))
         for entry in (row.legacy_payload or {}).get("evidence",[])
@@ -151,7 +154,7 @@ def create_issue_comment(issue_id:UUID,data:IssueCommentCreate,db:Annotated[Sess
     entry=IssueHistory(
         issue_id=row.id,action="issue.message",note=comment or "Shared photo update",
         actor_id=user.id,actor_name=user.display_name,
-        metadata_json={"evidence_ids":data.evidence_ids},
+        metadata_json={"evidence_ids":data.evidence_ids,"intent":data.intent,"role":user.role},
     )
     db.add(entry)
     row.updated_at=datetime.now(timezone.utc)

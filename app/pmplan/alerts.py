@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.core.timeutil import business_now
 from app.core.models import (
+    Notification,
     NotificationPreference,
     OMTask,
     PMAlertLog,
@@ -29,7 +30,9 @@ PM_ALERT_EVENTS: dict[str, dict[str, Any]] = {
     "pm_promise_missed": {"enabled": True, "in_app": True, "email": False},
     "pm_no_followup": {"enabled": True, "in_app": True, "email": False},
     "pm_weekly_summary": {"enabled": False, "in_app": True, "email": False},
+    "pm_daily_plan": {"enabled": True, "in_app": True, "email": False},
 }
+DAILY_PLAN_HOUR = 6          # the morning digest goes out from 06:00 plant time
 PM_TEAM_RECIPIENT_MODES = {"assignee_only", "assignee_and_head", "whole_team"}
 PM_SITE_ENGINEER_EVENTS = {
     "pm_due_soon", "pm_due_today", "pm_late_1d", "pm_late_3d", "pm_critical_7d",
@@ -302,7 +305,7 @@ def send_pm_alerts(db: Session, today: date, now: datetime | None = None) -> dic
 
     result = {
         "advance": 0, "due_today": 0, "escalated": 0,
-        "promise_missed": 0, "no_followup": 0, "weekly_summary": 0,
+        "promise_missed": 0, "no_followup": 0, "weekly_summary": 0, "daily_plan": 0,
     }
     open_tasks = list(db.scalars(select(OMTask).where(
         OMTask.status.in_(OPEN_STATUSES), OMTask.due_on.is_not(None),
@@ -410,7 +413,99 @@ def send_pm_alerts(db: Session, today: date, now: datetime | None = None) -> dic
             mode_cache=mode_cache, preference_cache=preference_cache,
         ):
             result["weekly_summary"] += 1
+    result["daily_plan"] = send_pm_daily_plan(db, today, now)
     return result
+
+
+def _on_day(task: OMTask, day: date) -> bool:
+    """A PM job is on a day's plan from its planned start to its due date (one day for unit jobs)."""
+    due = task.due_on
+    if due is None:
+        return False
+    start = task.start_on if task.start_on and task.start_on <= due else due
+    return start <= day <= due
+
+
+def _units(task: OMTask) -> int:
+    return 1 if task.unit_no else max(1, int(task.quantity or 1))
+
+
+def daily_plan_text(tasks: list[OMTask], plants: dict[UUID, Plant]) -> tuple[str, str]:
+    """('Today's PM plan · 2 plants · 6 units', 'Khorandi: Inverter ×4, WMS ×1 · Bhadla North: Transformer ×1')."""
+    by_plant: dict[str, dict[str, int]] = {}
+    for task in tasks:
+        plant = plants.get(task.plant_id) if task.plant_id else None
+        name = plant.plant_name if plant else "Unassigned plant"
+        kinds = by_plant.setdefault(name, {})
+        kind = task.task_type or "Equipment"
+        kinds[kind] = kinds.get(kind, 0) + _units(task)
+    total = sum(sum(kinds.values()) for kinds in by_plant.values())
+    title = f"Today's PM plan · {len(by_plant)} plant{'s' if len(by_plant) != 1 else ''} · {total} unit{'s' if total != 1 else ''}"
+    parts = [name + ": " + ", ".join(f"{kind} ×{n}" for kind, n in sorted(kinds.items(), key=lambda kv: (-kv[1], kv[0])))
+             for name, kinds in sorted(by_plant.items(), key=lambda kv: (-sum(kv[1].values()), kv[0]))]
+    message = " · ".join(parts)
+    if len(message) > 480:
+        message = message[:470].rsplit(" · ", 1)[0] + " · …"
+    return title, message
+
+
+def send_pm_daily_plan(db: Session, today: date, now: datetime | None = None) -> int:
+    """One morning message per person: which plants and equipment are on today's PM plan.
+
+    Assignees get their own jobs, Site Engineers the jobs at their plants, the O&M Head the whole portfolio.
+    Each person can switch it off (or add email) under PM alerts. Deduplicated per person per day."""
+    now = now or business_now()
+    if now.hour < DAILY_PLAN_HOUR:
+        return 0
+    todays = [task for task in db.scalars(select(OMTask).where(
+        OMTask.status.in_({"Scheduled", "In Progress"}), OMTask.due_on.is_not(None), OMTask.due_on >= today,
+    )) if _on_day(task, today)]
+    if not todays:
+        return 0
+    plants = {plant.id: plant for plant in db.scalars(select(Plant).where(Plant.id.in_({t.plant_id for t in todays if t.plant_id})))}
+    by_user: dict[UUID, tuple[User, list[OMTask]]] = {}
+
+    def add(user: User | None, tasks: list[OMTask]) -> None:
+        if user is None or not user.is_active or not tasks:
+            return
+        _, current = by_user.setdefault(user.id, (user, []))
+        seen = {t.id for t in current}
+        current.extend(t for t in tasks if t.id not in seen)
+
+    heads = list(db.scalars(select(User).where(User.role == "O&M Head", User.is_active.is_(True))))
+    mode_cache: dict[UUID | None, str | None] = {}
+    for_heads = [t for t in todays if _team_recipient_mode(db, t.plant_id, mode_cache) != "assignee_only"]
+    for user in heads:
+        add(user, for_heads)
+    for task in todays:
+        if task.assignee_user_id:
+            assignee = db.get(User, task.assignee_user_id)
+            if assignee and assignee.role == "Assignee":
+                add(assignee, [task])
+    for plant_id in {t.plant_id for t in todays if t.plant_id}:
+        for engineer in _users_for_plant(db, plant_id, {"Site Engineer"}):
+            add(engineer, [t for t in todays if t.plant_id == plant_id])
+
+    cache: dict[tuple[UUID, UUID | None], dict[str, Any]] = {}
+    sent = 0
+    for user, tasks in by_user.values():
+        in_app, email = _deliveries(db, [user], "pm_daily_plan", None, cache)
+        if not in_app and not email:
+            continue
+        key = f"pm-daily-plan:{today.isoformat()}"
+        already = db.scalar(select(func.count()).select_from(Notification).where(
+            Notification.user_id == user.id, Notification.dedupe_key == f"{key}:{user.id}"))
+        if already:
+            continue
+        title, message = daily_plan_text(tasks, plants)
+        notify_users(db, [user], event_type="pm_daily_plan", title=title, message=message,
+                     target_type="pm_day", target_id=today.isoformat(), dedupe_key=key)
+        db.flush()
+        for receiver in email:
+            send_pm_alert_email(to_email=receiver.email or "", name=receiver.display_name, title=title,
+                                message=message, work_order_no=tasks[0].work_order_no)
+        sent += 1
+    return sent
 
 
 def alert_log_out(row: PMAlertLog) -> dict[str, Any]:

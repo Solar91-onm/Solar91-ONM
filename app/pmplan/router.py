@@ -20,7 +20,7 @@ from typing import Annotated, Any, Literal
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from openpyxl import load_workbook
 from pydantic import BaseModel, Field, field_validator
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
 
 from app.core.timeutil import business_today, log_stamp
@@ -111,6 +111,7 @@ class ApplyIn(BaseModel):
     total_units: int | None = Field(default=None, ge=1, le=500)       # Number of Units (overrides the plant configuration)
     units_per_day: int | None = Field(default=None, ge=1, le=500)     # max units maintained per day (overrides it too)
     unit_numbers: list[int] | None = None                              # subset of units to maintain this cycle
+    spread_days: int | None = Field(default=None, ge=1, le=366)        # finish every unit within N days; each plant paces its own units
     save_unit_config: bool = False                                     # O&M Head: store total/per-day as the plant default
     dry_run: bool = False
 
@@ -202,12 +203,14 @@ def _units_for(db: Session, plant: Plant, tpl: dict[str, Any], per_unit: bool, u
     if total <= 1 and not refs and not (cfg or plan.get("total_units")):
         return [{"ref": None, "unit_no": None, "total": None, "day": None}]     # nothing known: one task, as before
     total = max(1, total)
-    per_day = plan.get("units_per_day") or (cfg.units_per_day if cfg else None) or tpl.get("units_per_day")
     nums = plan.get("unit_numbers") or list(range(1, total + 1))
     bad = [n for n in nums if n < 1 or n > total]
     if bad:
         raise HTTPException(422, f"Unit number(s) {sorted(set(bad))} are outside 1–{total} for {plant.plant_name}")
     nums = sorted(set(nums))
+    # "Finish within N days" works for any plant size: 8 units in 4 days = 2 a day, 1 unit in 4 days = day 1.
+    spread = plan.get("spread_days")
+    per_day = plan.get("units_per_day") or (-(-len(nums) // spread) if spread else None)         or (cfg.units_per_day if cfg else None) or tpl.get("units_per_day")
     if per_day and per_day > total:
         raise HTTPException(422, f"Units per day ({per_day}) cannot exceed the number of units ({total}) for {plant.plant_name}")
 
@@ -262,6 +265,8 @@ def _plan_tasks(db: Session, user: User, plants: list[Plant], tpl: dict[str, Any
         if user.role == "Assignee" and not equipment_scope_matches(db, user, plant.id, None, None, tpl["equipment_type"]):
             raise HTTPException(403, f"{tpl['equipment_type']} is outside your assigned equipment types")
         for p_name, p_user in people:
+            if p_user and p_user.role != "Assignee":
+                raise HTTPException(422, f"PM work can only be assigned to a user with the Assignee role ({p_name} is {p_user.role})")
             if p_user and p_user.role == "Assignee" and not equipment_scope_matches(
                     db, p_user, plant.id, None, None, tpl["equipment_type"]):
                 raise HTTPException(422, f"{p_name} is not assigned to {tpl['equipment_type']}")
@@ -353,6 +358,7 @@ def _summary(items: list[dict[str, Any]], skipped: int, dry_run: bool, db: Sessi
         "open_without_units": legacy,
         "sample": [{"plant": i["plant"].site_code, "name": i["name"], "assignee": i["assignee"],
                     "unit_no": i.get("unit_no"), "day": i.get("day")} for i in items[:8]],
+        "skipped_plants": [],
     }
 
 
@@ -372,7 +378,27 @@ def _upsert_template(db: Session, user: User, tpl: dict[str, Any]) -> PMTemplate
 
 def _plan_of(payload: ApplyIn) -> dict[str, Any]:
     return {"total_units": payload.total_units, "units_per_day": payload.units_per_day,
-            "unit_numbers": payload.unit_numbers}
+            "unit_numbers": payload.unit_numbers, "spread_days": payload.spread_days}
+
+
+def _asks_all_plants(values: list[str]) -> bool:
+    return any((v or "").strip().casefold() in {"all", "all plants"} for v in values)
+
+
+def _equipped_plants(db: Session, plants: list[Plant], equipment_type: str) -> tuple[list[Plant], list[Plant]]:
+    """For an "All plants" job, keep only plants that have this equipment (Equipment Register or saved unit counts).
+
+    If no plant has the equipment recorded anywhere, every plant is kept, as before, so a portfolio without a
+    register still gets its jobs."""
+    kind = equipment_type.casefold()
+    registered = {pid for (pid,) in db.execute(select(Equipment.plant_id).where(
+        func.lower(Equipment.equipment_type) == kind, Equipment.status != "inactive").distinct())}
+    configured = {pid for (pid,) in db.execute(select(PMUnitConfig.plant_id).where(
+        func.lower(PMUnitConfig.equipment_type) == kind, PMUnitConfig.total_units > 0))}
+    have = registered | configured
+    if not have:
+        return plants, []
+    return [p for p in plants if p.id in have], [p for p in plants if p.id not in have]
 
 
 def _save_config(db: Session, user: User, plant: Plant, etype: str, total: int | None, per_day: int | None) -> PMUnitConfig | None:
@@ -446,11 +472,14 @@ def apply_template(template_id: uuid.UUID, payload: ApplyIn, db: Annotated[Sessi
         raise HTTPException(404, "Template not found")
     tpl = {k: v for k, v in _template_out(row).items() if k != "id"}
     plants = _resolve_plants(db, payload.plants)
+    without: list[Plant] = []
+    if _asks_all_plants(payload.plants):
+        plants, without = _equipped_plants(db, plants, tpl["equipment_type"])
     items, skipped = _plan_tasks(db, user, plants, tpl, payload.assignees, payload.per_unit, payload.units, set(), {}, _plan_of(payload))
     if not payload.dry_run and items:
         _create_tasks(db, user, tpl, items, payload.start_date, str(row.id))
         db.commit()
-    return _summary(items, skipped, payload.dry_run, db, tpl)
+    return {**_summary(items, skipped, payload.dry_run, db, tpl), "skipped_plants": [p.plant_name for p in without]}
 
 
 # ───────────────────────── quick add ("Add PM task") ─────────────────────────
@@ -461,6 +490,10 @@ def quick_add(payload: QuickTaskIn, db: Annotated[Session, Depends(get_db)], use
         _require(user, TEMPLATE_WRITERS, "Only the O&M Head can save PM templates")
     tpl = _tpl_dict(payload)
     plants = _resolve_plants(db, payload.plants)
+    without: list[Plant] = []
+    if _asks_all_plants(payload.plants):
+        # An "All plants" Inverter job goes to plants that have inverters, not to every plant in the portfolio.
+        plants, without = _equipped_plants(db, plants, tpl["equipment_type"])
     if payload.save_unit_config:
         _require(user, TEMPLATE_WRITERS, "Only the O&M Head can save plant unit configuration")
     items, skipped = _plan_tasks(db, user, plants, tpl, payload.assignees, payload.per_unit, payload.units, set(), {}, _plan_of(payload))
@@ -468,10 +501,11 @@ def quick_add(payload: QuickTaskIn, db: Annotated[Session, Depends(get_db)], use
         tid = str(_upsert_template(db, user, tpl).id) if payload.save_template else None
         _create_tasks(db, user, tpl, items, payload.start_date, tid)
         if payload.save_unit_config:
+            spread_pace = -(-payload.total_units // payload.spread_days) if payload.total_units and payload.spread_days else None
             for plant in plants:
-                _save_config(db, user, plant, tpl["equipment_type"], payload.total_units, payload.units_per_day or tpl.get("units_per_day"))
+                _save_config(db, user, plant, tpl["equipment_type"], payload.total_units, payload.units_per_day or spread_pace or tpl.get("units_per_day"))
         db.commit()
-    return _summary(items, skipped, payload.dry_run, db, tpl)
+    return {**_summary(items, skipped, payload.dry_run, db, tpl), "skipped_plants": [p.plant_name for p in without]}
 
 
 # ───────────────────────── maintenance scope library (editable by the O&M Head) ─────────────────────────
@@ -517,7 +551,8 @@ def _scope_clean(payload: ScopeIn) -> dict[str, Any]:
 
 @router.get("/scope")
 def get_scope(db: Annotated[Session, Depends(get_db)], user: Annotated[User, Depends(get_current_user)]):
-    _require(user, TEMPLATE_WRITERS, "Only the O&M Head can view the maintenance scope")
+    # Assignees create PM jobs too and need the same equipment grouping; only the O&M Head can change it.
+    _require(user, CREATOR_ROLES, "The maintenance scope is available to the O&M Head and Assignees")
     row = db.scalar(select(PMScopeConfig))
     return {"customised": bool(row and row.config), **(row.config if row and row.config else {})}
 
@@ -579,8 +614,12 @@ def list_unit_config(db: Annotated[Session, Depends(get_db)], user: Annotated[Us
         return user.role != "Assignee" or equipment_scope_matches(db, user, pid, None, None, equipment_type)
     configs = [_config_out(c, plants.get(c.plant_id)) for c in db.scalars(select(PMUnitConfig))
                if visible(c.plant_id, c.equipment_type)]
-    register = [{"plant_id": str(pid), "equipment_type": et, "units": int(n or 0)} for pid, et, n in db.execute(
-        select(Equipment.plant_id, Equipment.equipment_type, func.sum(Equipment.quantity))
+    qty = func.coalesce(Equipment.quantity, 1)
+    critical = func.sum(case((func.lower(func.coalesce(Equipment.criticality, "")) == "high", qty), else_=0))
+    faulty = func.sum(case((func.lower(func.coalesce(Equipment.status, "")) == "fault", qty), else_=0))
+    register = [{"plant_id": str(pid), "equipment_type": et, "units": int(n or 0), "critical": int(c or 0), "faulty": int(f or 0)}
+                for pid, et, n, c, f in db.execute(
+        select(Equipment.plant_id, Equipment.equipment_type, func.sum(qty), critical, faulty)
         .where(Equipment.status != "inactive").group_by(Equipment.plant_id, Equipment.equipment_type))
         if et and visible(pid, et)]
     return {"configs": sorted(configs, key=lambda c: (c["plant"], c["equipment_type"])), "register": register}

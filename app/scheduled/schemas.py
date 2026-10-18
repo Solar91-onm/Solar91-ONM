@@ -163,6 +163,19 @@ class WashingReportUpdateRequest(BaseModel):
     remarks: str | None = Field(default=None, max_length=4000)
 
 
+class WashingCycleDates(BaseModel):
+    cycle_no: int = Field(ge=1, le=3)
+    start_date: date
+    due_date: date
+
+
+class WashingCycleScheduleRequest(BaseModel):
+    """All three cycles of one month; with apply_to_future the same days repeat every month from this one."""
+    month: str = Field(pattern=r"^\d{4}-(0[1-9]|1[0-2])$")
+    cycles: list[WashingCycleDates] = Field(min_length=3, max_length=3)
+    apply_to_future: bool = False
+
+
 class WashingCycleDateRequest(BaseModel):
     """Move one cycle's start date or deadline. A null date resets it to the default (start 1st / 11th / 21st; deadline 10th / 20th / month-end)."""
     month: str = Field(pattern=r"^\d{4}-(0[1-9]|1[0-2])$")

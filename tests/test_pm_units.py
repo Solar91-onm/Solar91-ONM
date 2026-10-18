@@ -83,7 +83,14 @@ def test_one_assignee_per_plant(client, db):
     head = login_user(client, db, role="O&M Head")
     _plant(db, "A_01", "Plant A"); _plant(db, "B_01", "Plant B")
     for n in ("Asha", "Ravi"):
-        db.add(User(auth_provider="t", external_subject=n, display_name=n, role="Administration")); db.commit()
+        person = User(auth_provider="t", external_subject=n, display_name=n, role="Assignee", is_active=True)
+        db.add(person); db.commit()
+        db.add(UserEquipmentTypeAssignment(user_id=person.id, equipment_type="Inverter")); db.commit()
+    db.add(User(auth_provider="t", external_subject="boss", display_name="Board Member", role="Administration", is_active=True)); db.commit()
+    refused = client.post("/api/pm-plan/tasks", json=_body(plants=["A_01"], assignees=["Board Member"]))
+    assert refused.status_code == 422 and "Assignee role" in refused.json()["detail"]
+    refused = client.post("/api/pm-plan/tasks", json=_body(plants=["A_01"], assignees=[head.display_name]))
+    assert refused.status_code == 422
     client.post("/api/pm-plan/tasks", json=_body(plants=["A_01", "B_01"], total_units=4, units_per_day=2, assignees=["Asha", "Ravi"]))
     by = {}
     for t in db.query(OMTask).join(Plant, OMTask.plant_id == Plant.id).add_columns(Plant.site_code):
@@ -208,3 +215,37 @@ def test_missing_migration_gives_clear_message(client, db):
     db.execute(text("ALTER TABLE om_tasks DROP COLUMN unit_no")); db.commit()
     r = client.get("/api/scheduled/tasks")
     assert r.status_code == 503 and r.json()["error"] == "database_migration_pending" and "SUPABASE_RUN_THIS.sql" in r.json()["detail"]
+
+
+def test_finish_within_days_paces_each_plant_by_its_own_units(client, db):
+    from app.core.models import Equipment
+    login_user(client, db)
+    big, small = _plant(db, "BIG_01", "Big"), _plant(db, "SML_01", "Small")
+    db.add_all([Equipment(plant_id=big.id, equipment_code=f"INV-{n}", equipment_name=f"Inverter {n}", equipment_type="Inverter") for n in range(1, 9)])
+    db.add(Equipment(plant_id=small.id, equipment_code="INV-1", equipment_name="Inverter 1", equipment_type="Inverter"))
+    db.commit()
+    res = client.post("/api/pm-plan/tasks", json=_body(plants=["BIG_01", "SML_01"], spread_days=4))
+    assert res.status_code == 200, res.text            # one unit at a plant is fine: no "per day > units" error
+    rows = db.query(OMTask).all()
+    big_days = sorted(t.due_on for t in rows if t.plant_id == big.id)
+    assert len(big_days) == 8 and len(set(big_days)) == 4      # 8 units in 4 days = 2 a day
+    assert [t.due_on for t in rows if t.plant_id == small.id] == [business_today()]
+
+
+def test_all_plants_job_skips_plants_without_that_equipment(client, db):
+    from app.core.models import Equipment
+    login_user(client, db)
+    with_inv, without = _plant(db, "INV_01", "Has inverters"), _plant(db, "NOI_01", "No inverters")
+    db.add(Equipment(plant_id=with_inv.id, equipment_code="INV-1", equipment_name="Inverter 1", equipment_type="Inverter", quantity=2, criticality="High"))
+    db.add(Equipment(plant_id=without.id, equipment_code="TR-1", equipment_name="Transformer 1", equipment_type="Transformer", status="fault"))
+    db.commit()
+    preview = client.post("/api/pm-plan/tasks", json=_body(plants=["All plants"], dry_run=True)).json()
+    assert preview["plants"] == 1 and preview["skipped_plants"] == ["No inverters"]
+    client.post("/api/pm-plan/tasks", json=_body(plants=["All plants"]))
+    assert {t.plant_id for t in db.query(OMTask).all()} == {with_inv.id}
+    # a type nobody has registered still goes to every plant, as before
+    wms = client.post("/api/pm-plan/tasks", json=_body(equipment_type="WMS", task_name="WMS clean", plants=["All plants"], dry_run=True)).json()
+    assert wms["plants"] == 2 and wms["skipped_plants"] == []
+    register = {(r["plant_id"], r["equipment_type"]): r for r in client.get("/api/pm-plan/unit-config").json()["register"]}
+    assert register[(str(with_inv.id), "Inverter")] == {"plant_id": str(with_inv.id), "equipment_type": "Inverter", "units": 2, "critical": 2, "faulty": 0}
+    assert register[(str(without.id), "Transformer")]["faulty"] == 1

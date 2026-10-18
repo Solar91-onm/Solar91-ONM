@@ -172,7 +172,7 @@ function createTask(){
   completion:null,evidence:[],linkedIssue:null,
   log:[{at:stamp(),text:"Created via recurrence builder — due date auto-calculated from recurrence rule; advance notification (3 days before) + due-date reminder scheduled",actor:OM_HEAD}]};
  S.tasks.unshift(t);revealNew("scheduled",t.id);emitEvent("task_assigned","Task assigned — "+t.name,t.plant+" · "+t.assignee,"task",t.id,"task_assigned:"+t.id);S.modal=null;persist();render();
- toast("Task created — assignee notified (in-app + email) with 3-day advance + due-date reminders (2.1.2).");
+ toast("Task created — assignee notified (in-app + email) with 3-day advance + due-date reminders.");
 }
 function importCSV(){
  const f=document.getElementById("csv-file")&&document.getElementById("csv-file").files[0];if(!f){toast("Choose an Excel or CSV schedule first.");return}
@@ -332,7 +332,7 @@ function reassignTask(){
  const{id}=S.modalCtx;const name=document.getElementById("rt-name").value;
  S.tasks=S.tasks.map(t=>t.id===id?{...t,assignee:name,log:[{at:stamp(),text:"Reassigned / delegated to "+name+" (original assignee unavailable) — change logged",actor:OM_HEAD},...t.log]}:t);
  emitEvent("task_assigned","Task assigned — "+S.tasks.find(x=>x.id===id).name,S.tasks.find(x=>x.id===id).plant+" · "+name,"task",id,"task_reassigned:"+id+":"+name+":"+TODAY);
- S.modal=null;persist();render();toast("Task reassigned — change logged (2.1.2).");
+ S.modal=null;persist();render();toast("Task reassigned — change logged.");
 }
 async function convertToIssue(id){
  const t=S.tasks.find(x=>x.id===id);if(!t||!t.completion)return;
@@ -374,7 +374,7 @@ function saveWashTableLog(){
  const freq=((S.washMeta||{})[t.plant]||{freq:14}).freq||14;
  S.washing=S.washing.map(x=>x.id===id?{...x,history:[...x.history,{type:"wash",date:TODAY,by}],rescheduledTo:null,nextDue:addDays(TODAY,freq)}:x);
  audit("Washing","Wash logged — "+t.tableId+" ("+t.plant+")",by,"pending","washed");
- S.modal=null;persist();render();toast("Wash logged — "+t.tableId+" · compliance updated (2.2.2).");
+ S.modal=null;persist();render();toast("Wash logged — "+t.tableId+" · compliance updated.");
 }
 function bulkWash(){
  const inv=parseInt(document.getElementById("bw-inv").value);
@@ -384,7 +384,7 @@ function bulkWash(){
  S.washing=S.washing.map(t=>{if(t.plant===S.washPlant&&(t.inv===inv||t.invSecondary===inv)&&!washedToday(t)){n++;return{...t,history:[...t.history,{type:"wash",date:TODAY,by}],rescheduledTo:null,nextDue:addDays(TODAY,freq)}}return t});
  audit("Washing","Bulk entry — Inverter "+inv+": "+n+" table(s) washed today",by,"pending","washed");
  S.modal=null;persist();render();
- toast("Bulk entry — INV-"+pad2(inv)+": "+n+" table(s) logged washed by "+by+"; per-table records stored (2.2.2).");
+ toast("Bulk entry — INV-"+pad2(inv)+": "+n+" table(s) logged washed by "+by+"; per-table records stored.");
 }
 function logException(){
  const{id}=S.modalCtx;const t=S.washing.find(x=>x.id===id);
@@ -398,7 +398,7 @@ function logException(){
  S.washing=S.washing.map(x=>x.id===id?{...x,history:[...x.history,{type:"exception",date:TODAY,by,reason,notes,rescheduledTo}],rescheduledTo:rescheduledTo||x.rescheduledTo,nextDue:rescheduledTo||x.nextDue}:x);
  audit("Washing","Exception — "+reason+" on "+t.tableId+(rain?" (auto-rescheduled "+fmtD(rescheduledTo)+")":""),by,"Pending",rain?"Pending — Rescheduled":"Exception");
  S.modal=null;persist();render();
- toast(rain?'Rain exception — flagged "Pending — Rescheduled"; system suggests next available date (2.2.3).':"Exception logged ("+reason+") — recorded distinctly from missed/pending, visible for transparency.");
+ toast(rain?'Rain exception — flagged "Pending — Rescheduled"; system suggests next available date.':"Exception logged ("+reason+") — recorded distinctly from missed/pending, visible for transparency.");
 }
 function saveWashFreq(){
  if(!scheduledAdmin()){toast("Only O&M Head can change the washing schedule.");return}
@@ -503,7 +503,7 @@ function createTicket(){
  if(tk.severity==="Critical")emitEvent("critical_ticket","Critical ticket raised — "+tk.id,tk.plant+" · "+tk.vertical,"issue",tk.id,"critical:"+tk.id);
  audit("Issues","Ticket "+tk.id+" created — "+tk.vertical+" · "+tk.severity,"System","—","Open");
  S.modal=null;persist();render();
- toast("Ticket "+tk.id+" created & timestamped."+(tk.severity==="Critical"?" Critical severity — immediate call/SMS alert issued (R1).":""));
+ toast("Ticket "+tk.id+" created & timestamped."+(tk.severity==="Critical"?" Critical severity — immediate call/SMS alert issued.":""));
 }
 
 function assignTicket(){
@@ -516,7 +516,7 @@ function assignTicket(){
   const vcontact=document.getElementById("at-vc").value.trim()||"—";
   const vresp=document.getElementById("at-vr").value.trim()||"—";
   patch={assignee:owner,vendor:{name:vname,contact:vcontact,expected:vresp},status:"Assigned",updated:stampISO(),
-   progress:[{at:stampISO(),note:"Tagged Vendor-Dependent — "+vname+" ("+vcontact+"); expected vendor response: "+vresp+". Vendor response time tracked separately (2.3.2).",parts:"—",hrs:0},...t.progress]};
+   progress:[{at:stampISO(),note:"Tagged Vendor-Dependent — "+vname+" ("+vcontact+"); expected vendor response: "+vresp+". Vendor response time tracked separately.",parts:"—",hrs:0},...t.progress]};
  }else{
   patch={assignee:who,status:"Assigned",updated:stampISO(),
    progress:[{at:stampISO(),note:"Assigned to "+who+(t.severity==="Critical"?" — immediate call/SMS alert issued in addition to app notification.":" — notified (push/SMS/email per severity)."),parts:"—",hrs:0},...t.progress]};
@@ -524,7 +524,7 @@ function assignTicket(){
  S.issues=S.issues.map(x=>x.id===id?{...x,...patch}:x);
  audit("Issues","Ticket "+id+" assigned → "+patch.assignee,OM_HEAD,t.status,"Assigned");
  emitEvent("ticket_assigned","Ticket assigned — "+id,(t.plant||"")+" · "+patch.assignee,"issue",id,"assigned:"+id+":"+patch.assignee);
- S.modal=null;persist();render();toast("Ticket assigned & assignee notified (2.3.2).");
+ S.modal=null;persist();render();toast("Ticket assigned & assignee notified.");
 }
 function ackTicket(id){S.issues=S.issues.map(t=>t.id===id?{...t,status:"Acknowledged",updated:stampISO(),progress:[{at:stampISO(),note:"Acknowledged by assignee.",parts:"—",hrs:0},...t.progress]}:t);audit("Issues",id+" → Acknowledged","","Assigned","Acknowledged");persist();render()}
 function startTicket(id){S.issues=S.issues.map(t=>t.id===id?{...t,status:"In Progress",progress:[{at:stampISO(),note:"Work started.",parts:"—",hrs:0},...t.progress]}:t);audit("Issues",id+" → In Progress",t(id).assignee||"","Acknowledged","In Progress");persist();render();
@@ -562,14 +562,14 @@ function verifyTicket(){
   progress:[{at:stampISO(),note:"Verified & formally closed by secondary reviewer ("+OM_HEAD+")"+(remarks?' — "'+remarks+'"':"")+". ETC "+(met?"met":"missed")+" (actual "+x.closure.resolutionHrs+" hrs).",parts:"—",hrs:0},...x.progress]}:x);
  audit("Issues",id+" closed (verified) — ETC "+(met?"met":"missed"),OM_HEAD,"Resolved","Closed");
  emitEvent("ticket_completed","Ticket completed — "+id,t.plant+" · "+t.vertical,"issue",id,"ticket_completed:"+id);
- S.modal=null;persist();render();toast("Ticket closed (verified) — ETC "+(met?"met ✓":"missed ✗")+" (2.3.3).");
+ S.modal=null;persist();render();toast("Ticket closed (verified) — ETC "+(met?"met ✓":"missed ✗")+".");
 }
 function reopenTicket(){
  const{id}=S.modalCtx;
  const reason=document.getElementById("ro-reason").value.trim()||"Issue recurred — reopened.";
  S.issues=S.issues.map(t=>t.id===id?{...t,status:"Open",reopenCount:(t.reopenCount||0)+1,progress:[{at:stampISO(),note:"Reopened by "+OM_HEAD+": "+reason,parts:"—",hrs:0},...t.progress]}:t);
  audit("Issues",id+" reopened — "+reason,OM_HEAD,"Closed","Open");
- S.modal=null;persist();render();toast("Ticket reopened — recurrence feeds chronic-problem detection (2.3.4).");
+ S.modal=null;persist();render();toast("Ticket reopened — recurrence feeds chronic-problem detection.");
 }
 /* --- 3.x actions --- */
 function approveESR(id){S.serviceRequests=S.serviceRequests.map(r=>r.id===id?{...r,status:"In Progress",approved:r.estimate,history:[stamp()+" · Approved by O&M Head",...r.history]}:r);
@@ -587,7 +587,7 @@ function reorder(id){const s=S.inventory.find(x=>x.id===id);
 function approvePTW(id,ok){S.ptw=S.ptw.map(p=>p.id===id?{...p,status:ok?"Approved":"Rejected"}:p);
  const p=S.ptw.find(x=>x.id===id);
  audit("Safety","PTW "+p.id+(ok?" approved (digital sign-off)":" rejected")+" — "+p.task,OM_HEAD,"Pending Approval",ok?"Approved":"Rejected");
- persist();render();toast(ok?"PTW approved — digital sign-off recorded; LOTO verified (3.5).":"PTW rejected.")}
+ persist();render();toast(ok?"PTW approved — digital sign-off recorded; LOTO verified.":"PTW rejected.")}
 function closePTW(id){S.ptw=S.ptw.map(p=>p.id===id?{...p,status:"Closed",closedAt:stampISO()}:p);
  audit("Safety","PTW closed — work complete, LOTO removed",OM_HEAD,"Approved","Closed");persist();render();toast("Permit closed.")}
 function reportIncident(){
@@ -596,7 +596,7 @@ function reportIncident(){
   desc:desc,by:OM_HEAD,at:stamp(),severity:document.getElementById("in-sev").value,action:"—"};
  S.incidents.unshift(inc);revealNew("inc",inc.id);
  audit("Safety",inc.type+" reported — "+inc.desc.slice(0,50),OM_HEAD,"—","Logged");
- S.modal=null;persist();render();toast("Safety report logged — kept separate from equipment Issues (3.5).");
+ S.modal=null;persist();render();toast("Safety report logged — kept separate from equipment Issues.");
 }
 function createInventory(){const item=document.getElementById("ni-item").value.trim();if(!item){toast("Item name is required.");return}const x={id:uid("INV"),item,cat:document.getElementById("ni-cat").value.trim()||"Other",plant:document.getElementById("ni-plant").value,store:document.getElementById("ni-store").value.trim()||"Main store",qty:Number(document.getElementById("ni-qty").value)||0,min:Number(document.getElementById("ni-min").value)||0,unit:document.getElementById("ni-unit").value.trim()||"pcs",reorderTo:Math.max(Number(document.getElementById("ni-min").value)||0,Number(document.getElementById("ni-qty").value)||0),onOrder:false};S.inventory.unshift(x);audit("Spares","Stock item added — "+item,OM_HEAD,"—",x.qty+" "+x.unit);S.modal=null;persist();render();toast("Inventory item added.")}
 function createVendor(){const name=document.getElementById("nv-name").value.trim();if(!name){toast("Vendor name is required.");return}S.vendors.unshift({id:uid("VEN"),name,type:document.getElementById("nv-type").value,scope:document.getElementById("nv-scope").value.trim()||"—",sla:document.getElementById("nv-sla").value.trim()||"—",contractEnd:document.getElementById("nv-end").value||null});audit("Vendors","Vendor added — "+name,OM_HEAD,"—","Active");S.modal=null;persist();render();toast("Vendor added. Performance will derive from vendor-linked tickets.")}
@@ -605,9 +605,9 @@ function createSLA(){const c={id:uid("SLA"),name:document.getElementById("ns-nam
 function renewDoc(id){const d=S.docs.find(x=>x.id===id);
  S.docs=S.docs.map(x=>x.id===id?{...x,expires:addDays(x.expires||TODAY,365)}:x);
  audit("Documents",d.name+" renewed — new expiry +1 yr",OM_HEAD,"expiring","+1 yr");
- persist();render();toast(d.name+" — renewal recorded; reminder chain reset (3.6).")}
+ persist();render();toast(d.name+" — renewal recorded; reminder chain reset.")}
 function toggleRule(id){S.rules=S.rules.map(r=>r.id===id?{...r,on:!r.on}:r);persist();render()}
-function syncQueue(){S.offlineQueue=S.offlineQueue.map(q=>({...q,status:"Synced"}));persist();render();toast("Field sync complete — queued records pushed, conflicts none (3.11).")}
+function syncQueue(){S.offlineQueue=S.offlineQueue.map(q=>({...q,status:"Synced"}));persist();render();toast("Field sync complete — queued records pushed, conflicts none.")}
 
 (function(){ /* inject the new styles automatically */
  const st=document.createElement("style");
@@ -686,7 +686,7 @@ function downloadReport(kind){
  const blob=new Blob(["\ufeff"+csv],{type:"text/csv;charset=utf-8"});
  const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="solar91-"+kind+"-report-"+TODAY+".csv";
  document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),800);
- audit("Reports","Downloaded "+(name?name[1]:"full analytics report pack")+" (3.10)",OM_HEAD);
+ audit("Reports","Downloaded "+(name?name[1]:"full analytics report pack")+"",OM_HEAD);
  toast("Report downloaded — solar91-"+kind+"-report-"+TODAY+".csv");
 }
 
@@ -1154,7 +1154,7 @@ function issueSpark(rows){
  const labels=rows.map((r,i)=>!(i%(Math.ceil(n/8)||1))?'<text x="'+x(i).toFixed(1)+'" y="'+(h-7)+'" text-anchor="middle" font-size="8.5" fill="#8A968F">'+(n>14?r.d.slice(8):r.d.slice(5))+'</text>':"").join("");
  const dots=k=>rows.map((r,i)=>'<circle cx="'+x(i).toFixed(1)+'" cy="'+y(r[k]||0).toFixed(1)+'" r="2.6" fill="'+({o:"#DC4C3E",c:"#16A34A",open:"#3B82F6"}[k])+'" stroke="#fff" stroke-width="1.2"/>').join("");
  const hits=rows.map((r,i)=>{const bw=(w-left-right)/Math.max(1,n-1);
-  return '<rect class="hit chart-hit" data-act="trendDay" data-id="'+r.d+'" x="'+(x(i)-bw/2).toFixed(1)+'" y="0" width="'+bw.toFixed(1)+'" height="'+h+'" data-tip="'+esc(r.d+"\nCreated "+r.o+"\nResolved "+r.c+"\nOpen "+(r.open||0)+"\nClick to focus this date")+'"/>'}).join("");
+  return '<rect class="hit chart-hit" data-act="trendDay" data-id="'+r.d+'" x="'+Math.max(0,x(i)-bw/2).toFixed(1)+'" y="0" width="'+(Math.min(w,x(i)+bw/2)-Math.max(0,x(i)-bw/2)).toFixed(1)+'" height="'+h+'" data-tip="'+esc(r.d+"\nCreated "+r.o+"\nResolved "+r.c+"\nOpen "+(r.open||0)+"\nClick to focus this date")+'"/>'}).join("");
  return '<div class="line-chart-wrap"><svg viewBox="0 0 '+w+' '+h+'" preserveAspectRatio="none"><defs><linearGradient id="ccOpenFill" x1="0" x2="0" y1="0" y2="1"><stop offset="0%" stop-color="#3B82F6" stop-opacity=".22"/><stop offset="100%" stop-color="#3B82F6" stop-opacity=".02"/></linearGradient></defs>'+grid+
   '<path class="cc-area" d="'+area+'" fill="url(#ccOpenFill)"/>'+
   '<path class="cc-line" d="'+openPath+'" fill="none" stroke="#3B82F6" stroke-width="2.2"/>'+
@@ -1271,31 +1271,33 @@ function ccPopup(title,meta,tone,open){
 function renderWork(){
  const who=S.workWho;
  const loads=engineerLoad();
- const src=who?(S.issues||[]).filter(t=>t.assignee===who):(S.issues||[]);
+ /* owned work only: an unassigned ticket is nobody's workload yet */
+ const src=who?(S.issues||[]).filter(t=>t.assignee===who):(S.issues||[]).filter(t=>t.assignee);
  const open=openTk(src),overdue=open.filter(isOverdueIssue),resolved=src.filter(t=>t.status==="Resolved"||t.status==="Closed");
+ const unowned=openTk(S.issues||[]).filter(t=>!t.assignee).length;
  const assigned=open.length;
  const openTasks=who?(S.tasks||[]).filter(t=>t.assignee===who&&t.status!=="Completed"):[];
  const tvs=t=>t.status==="Completed"?"Completed":taskOD(t)>0?"Overdue":t.status;
- let h='<div><h1 style="font-size:20px;font-weight:800">Work / Assignments</h1><p style="font-size:12.5px;color:var(--muted-foreground);margin:4px 0 12px">Engineer load from live issues and Preventive Maintenance work. Click a name to see only their work.</p></div>';
+ let h='<div><h1 style="font-size:20px;font-weight:800">Work / Assignments</h1><p style="font-size:12.5px;color:var(--muted-foreground);margin:4px 0 12px">Assignee workload from live issues and Preventive Maintenance work. Click a name to see only their work.'+(unowned&&!who?' <a href="#" onclick="goTab(\'issues\');siChip&&siChip(\'Unassigned\');return false">'+unowned+' open issue'+(unowned===1?'':'s')+' have no owner yet →</a>':'')+'</p></div>';
  if(who)h+='<div class="ccbar" style="margin-bottom:2px"><span class="kpi-label" style="flex:0 0 auto">VIEWING</span>'+
-  '<span class="pill pillsm gf-chip">Engineer: <b>'+esc(who)+'</b><button type="button" onclick="S.workWho=null;render()" title="Back to all engineers" style="border:0;background:none;color:inherit;cursor:pointer;font-size:13px;padding:0 0 0 5px">×</button></span>'+
-  '<button class="btn o sm" onclick="S.workWho=null;render()">← All engineers</button></div>';
+  '<span class="pill pillsm gf-chip">Assignee: <b>'+esc(who)+'</b><button type="button" onclick="S.workWho=null;render()" title="Back to everyone" style="border:0;background:none;color:inherit;cursor:pointer;font-size:13px;padding:0 0 0 5px">×</button></span>'+
+  '<button class="btn o sm" onclick="S.workWho=null;render()">← Everyone</button></div>';
  h+='<div class="kpis4">'+
   kpiTile("Assigned",assigned,who?"open issues · "+esc(who):"open owned work","var(--info)","")+
   kpiTile("Overdue",overdue.length,who?(overdue.length?"past ETC · "+esc(who):"none overdue — "+esc(who)):"past committed ETC","var(--danger)","")+
-  kpiTile("Resolved",resolved.length,who?"closed by "+esc(who):"closed by engineers","var(--success)","")+
-  kpiTile(who?"Open tasks":"Engineers",who?openTasks.length:loads.length,who?"preventive maintenance assigned":"in the pool","var(--foreground)","")+'</div>';
+  kpiTile("Resolved",resolved.length,who?"closed by "+esc(who):"closed by Assignees","var(--success)","")+
+  kpiTile(who?"Open tasks":"Assignees",who?openTasks.length:loads.length,who?"preventive maintenance assigned":"who can own work","var(--foreground)","")+'</div>';
  const mix=[{label:"Active",id:"active",n:assigned,color:"#3B82F6",act:""},{label:"Overdue",id:"overdue",n:overdue.length,color:"#DC4C3E",act:""},{label:"Resolved",id:"resolved",n:resolved.length,color:"#16A34A",act:""}];
  if(!who){
   const loadBars=loads.filter(r=>r.assigned||r.overdue).map(r=>({label:r.name,id:r.name,n:r.assigned}));
-  h+='<div class="kgrid" style="grid-template-columns:1.1fr .9fr;align-items:stretch"><div class="panel"><h2 style="font-size:14px;font-weight:700">Engineer workload</h2><p style="font-size:12.5px;color:var(--muted-foreground);margin:3px 0 10px">Open assigned issues · click a bar to open that engineer only</p>'+rankBars(loadBars,"workWho","#0F9F8C")+'</div><div class="panel">'+vizDonut("Overdue vs active",mix,{center:"tickets",note:"Assigned open work vs overdue vs resolved",empty:"No assigned work yet"})+'</div></div>';
+  h+='<div class="kgrid" style="grid-template-columns:1.1fr .9fr;align-items:stretch"><div class="panel"><h2 style="font-size:14px;font-weight:700">Assignee workload</h2><p style="font-size:12.5px;color:var(--muted-foreground);margin:3px 0 10px">Open assigned issues · click a bar to see that person only</p>'+rankBars(loadBars,"workWho","#0F9F8C")+'</div><div class="panel">'+vizDonut("Overdue vs active",mix,{center:"tickets",note:"Assigned open work vs overdue vs resolved",empty:"No assigned work yet"})+'</div></div>';
  }else{
   h+='<div class="panel" style="max-width:420px">'+vizDonut("Overdue vs active",mix,{center:"tickets",note:"Only "+esc(who)+" — issues assigned to this engineer",empty:"No assigned work for this engineer"})+'</div>';
  }
  h+='<div class="panel"><div class="row between wrap" style="margin-bottom:8px"><h2 style="font-size:15px;font-weight:700">Resolution trend'+(who?" — "+esc(who):"")+'</h2></div>'+issueSpark(issueTrendRows(S.trendDays||21,src))+'</div>';
  if(!who){
-  h+='<div class="panel no-stick" style="padding:0"><table class="dense"><thead><tr><th>Engineer</th><th>Assigned</th><th>Critical</th><th>Overdue</th><th>In progress</th><th>Resolved</th></tr></thead><tbody>'+
-   (loads.length?loads.map(r=>'<tr class="click" data-act="workWho" data-id="'+esc(r.name)+'"><td style="font-weight:600">'+esc(r.name)+'</td><td>'+r.assigned+'</td><td>'+(r.critical?badge(String(r.critical)):"0")+'</td><td>'+(r.overdue?'<b style="color:var(--danger)">'+r.overdue+'</b>':"0")+'</td><td>'+r.progress+'</td><td>'+r.resolved+'</td></tr>').join(""):'<tr><td colspan="6">'+emptyState("No engineers with workload","Assign issues to populate this view.")+'</td></tr>')+'</tbody></table></div>';
+  h+='<div class="panel no-stick" style="padding:0;overflow-x:auto"><table class="dense"><thead><tr><th>Assignee</th><th>Open issues</th><th>Critical</th><th>Overdue</th><th>In progress</th><th>Resolved</th><th>Open PM jobs</th></tr></thead><tbody>'+
+   (loads.length?loads.map(r=>'<tr class="click" data-act="workWho" data-id="'+esc(r.name)+'"><td style="font-weight:600">'+esc(r.name)+'</td><td>'+r.assigned+'</td><td>'+(r.critical?badge(String(r.critical)):"0")+'</td><td>'+(r.overdue?'<b style="color:var(--danger)">'+r.overdue+'</b>':"0")+'</td><td>'+r.progress+'</td><td>'+r.resolved+'</td><td>'+(r.tasks||0)+(r.tasksLate?' <small style="color:var(--danger)">('+r.tasksLate+' late)</small>':'')+'</td></tr>').join(""):'<tr><td colspan="7">'+emptyState("No Assignees yet","Give someone the Assignee role in Settings → Team access.")+'</td></tr>')+'</tbody></table></div>';
  }else{
   /* person detail — ISSUES */
   const mode=S.workIssueMode||"open";
@@ -2013,7 +2015,7 @@ console.log("[CC RESVIEW] loaded OK");
     tile.setAttribute("data-ccres","1");tile.style.cursor="pointer";tile.title="Resolution view — open vs resolved";
     tile.addEventListener("click",function(e){e.stopPropagation();e.preventDefault();ccResToggle()});
     var note=tile.querySelector(".s,.kpi-note,.cc-note2");
-    if(note)note.textContent=res+" of "+tot+" tickets resolved";
+    if(note&&S.view!=="work"&&S.view!=="plant")note.textContent=res+" of "+tot+" tickets resolved";   /* portfolio totals only on portfolio pages */
    }
    /* 2 · resolution view: summary strip + mark solved rows */
    if(!S.ccResView){var old=document.getElementById("cc-res-strip");if(old)old.remove();return}
@@ -2072,7 +2074,7 @@ console.log("[CC RESVIEW-X] loaded OK");
     tile.setAttribute("data-ccres","1");tile.style.cursor="pointer";tile.title="Resolution view — open vs resolved";
     tile.addEventListener("click",function(e){e.stopPropagation();e.preventDefault();ccResToggle()});
     var note=tile.querySelector(".s,.kpi-note,.cc-note2");
-    if(note)note.textContent=res+" of "+tot+" tickets resolved";
+    if(note&&S.view!=="work"&&S.view!=="plant")note.textContent=res+" of "+tot+" tickets resolved";   /* portfolio totals only on portfolio pages */
    }
   }catch(e){}
  }).observe(app,{childList:true,subtree:true});
