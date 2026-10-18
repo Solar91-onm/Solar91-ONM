@@ -22,3 +22,11 @@
 - `AI_ASSISTANT_ENABLED=true` and `OPENAI_API_KEY` enable optional model narration. Without those settings, supported questions use deterministic query answers and other requests use bounded live search. Live provider behavior was not tested here.
 - Generic natural-language search is intentionally a bounded record search, not a complete reporting query language. The assistant labels that limitation. Questions requiring an unsupported date/status breakdown should be answered only after adding a targeted, permission-scoped query and regression test.
 - Browser-local history is not synchronized between devices. Follow-up expansion uses the latest in-memory question; complex references after a full page reload may need clarification.
+
+## Copilot panel (October 2026)
+
+- The panel is a fixed side sheet with a start screen: a snapshot of open issues, issues past ETC, overdue PM and washing reports to review (counted from records already loaded in the page; every tile asks the server for the live answer), topic prompts by module, and recent questions.
+- A **Focus** plant selector rewrites the suggested prompts to include that plant (for example "Overdue issues at Sunfield Plant 02"); the server's existing plant matching answers them. It does not filter or alter records.
+- Answers are layered: headline count, answer text, optional AI context, breakdown bars, supporting records (first four, "Show all" for the rest), an "Open filtered register" action and "Go deeper" follow-ups limited to question types the server already answers.
+- Record cards show ticket / work-order references, never raw database UUIDs. Opening an issue record opens that ticket in the Site Issues module.
+- "New conversation" clears this user's browser-local history; "Copy answer" copies the visible answer text. Retention, per-user storage keys and read-only behaviour are unchanged.

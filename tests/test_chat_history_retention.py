@@ -192,5 +192,6 @@ def test_assistant_renders_layered_live_result_and_record_source():
         conversation = page.locator(".s91-assistant-conversation").inner_text()
         assert "Awaiting review" in conversation and "1" in conversation
         assert "Pending" in conversation and "Washing daily reports" in conversation
-        assert "WASHING · report-1" in conversation and "Reported by Site Engineer" in conversation
+        # The record card shows its module and its reference (report-1); raw database UUIDs are never shown.
+        assert "Washing" in conversation and "report-1" in conversation and "Reported by Site Engineer" in conversation
         browser.close()

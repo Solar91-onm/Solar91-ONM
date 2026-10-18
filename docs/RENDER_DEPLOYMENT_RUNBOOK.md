@@ -56,6 +56,14 @@ The application checks PostgreSQL connectivity for readiness but does not prove 
 
 Production startup retries transient PostgreSQL/Storage connection failures with exponential backoff capped at 60 seconds while readiness remains unavailable. Deterministic configuration errors and a missing or public Storage bucket do not retry. Startup verifies the configured bucket only; it never creates, changes, or deletes a bucket. Verify that the existing `scheduled-om-evidence` bucket is private before deployment; if it is missing or public, stop and investigate without recreating or changing it.
 
+### `relation "users" does not exist` / `/health/ready` returns `schema_missing`
+
+The service reached a PostgreSQL database that has no Solar91 tables. This usually happens after switching to a new Supabase project: `DATABASE_URL` points at the new project but its schema was never created, or it still points at a different project than the one holding the data.
+
+- Startup preflight now checks for the core tables (`users`, `plants`, `issues`, `om_tasks`), logs `ERROR: ... Solar91 tables are missing` with the user/host it used, keeps the portal unavailable, and re-checks with back-off. It becomes ready by itself once the schema exists; no redeploy is needed.
+- API requests that hit a missing core table return `503 database_schema_missing` with one concise log line per minute instead of a traceback on every refresh.
+- To fix: in Supabase SQL editor for the intended project run `select to_regclass('public.users');`. `NULL` means the schema is absent. Confirm you are on the right project first, then apply the approved migrations in order as described above. Moving existing data from the old project is a separate, explicitly approved step.
+
 ## Deploy and smoke test
 
 1. Review the Git diff and tests, then push the approved branch to GitHub.

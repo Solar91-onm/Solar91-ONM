@@ -229,22 +229,28 @@ function taAddForm(){
   +'<div><div class="lbl">Name</div><input class="inp" style="width:170px" placeholder="Full name" value="'+esc(TA.nw.name)+'" oninput="TA.nw.name=this.value"></div>'
   +'<div><div class="lbl">Email (they must sign in with this)</div><input class="inp" style="width:240px" placeholder="name@company.com" value="'+esc(TA.nw.email)+'" oninput="TA.nw.email=this.value"></div>'
   +'<div><div class="lbl">Role</div><select class="inp ta-role-select" style="width:160px" onchange="taNewRole(this.value)">'+TA_ROLES.filter(r=>r!=="Viewer").map(r=>'<option'+(TA.nw.role===r?" selected":"")+'>'+esc(r)+'</option>').join("")+'</select></div>'
-  +'<button class="btn p sm" onclick="taAddPerson()">Add person</button><button class="btn o sm" onclick="taToggleForm()">Cancel</button></div>'
+  +'<button class="btn p sm" '+(TA.adding?'disabled aria-busy="true"':'')+' onclick="taAddPerson()">'+(TA.adding?'<span class="gx-spin" aria-hidden="true"></span> Adding…':'Add person')+'</button><button class="btn o sm" onclick="taToggleForm()">Cancel</button></div>'
   +taNewScope()
   +'<div class="ta-form-note">Assignees need one or more equipment types (for example Inverter) — they then own that equipment in every plant. Site Engineers need exactly one plant. Administration and O&amp;M Head see all plants.</div></div>';
 }
 async function taAddPerson(){
+ if(TA.adding)return;
  const n=TA.nw,email=String(n.email||"").trim(),name=String(n.name||"").trim(),role=n.role;
  if(!email){toast("Enter the person's email.");return}
  const plant=taPlants().find(p=>p.dbId===n.plant);
  if(role==="Site Engineer"&&!plant){toast("Select the one plant for this Site Engineer.");return}
  if(role==="Assignee"&&!n.equipment_types.length){toast("Pick at least one equipment type for this Assignee.");return}
  try{
+  TA.adding=true;render();
   const r=await apiFetch("/api/users/invite",{method:"POST",body:{name,email,role,plants:role==="Site Engineer"?[plant.id]:[],equipment:role==="Assignee"?n.equipment_types.slice():[]}});
   toast((r.status==="created"?"Added ":"Updated ")+(r.name||r.email)+" as "+r.role+(r.email_sent?" — invite email sent to "+r.email:r.invited?" — email NOT sent ("+(r.email_note||"unknown reason")+"). Tell them to sign in with "+r.email:""));
+  /* show the saved person straight away from the server reply; the full list (with scope details) reloads in the background */
+  const shown=Object.assign({plants:role==="Site Engineer"&&plant?[{plant_id:plant.dbId,site_code:plant.id,plant_name:plant.name}]:[],equipment:[],equipment_types:role==="Assignee"?n.equipment_types.slice().sort():[],created_at:new Date().toISOString(),is_self:false},r);
+  if(Array.isArray(TA.users)){const i=TA.users.findIndex(u=>u.id===r.id);if(i>=0)TA.users[i]=Object.assign({},TA.users[i],shown);else TA.users.unshift(shown)}
   TA.nw={name:"",email:"",role:"Assignee",plant:"",equipment_types:[]};
-  TA.formOpen=false;await taLoad(true);
- }catch(e){toast("Not saved — "+e.message)}
+  TA.formOpen=false;TA.adding=false;render();
+  taLoad(true);
+ }catch(e){TA.adding=false;render();toast("Not saved — "+e.message)}
 }
 async function taImportFile(inp){
  const f=inp.files&&inp.files[0];if(!f)return;

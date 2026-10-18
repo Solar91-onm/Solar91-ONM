@@ -818,10 +818,15 @@ function ccKpiIcon(label,size){
  if(l.includes("today"))return I.sun(s);
  if(l.includes("mine"))return I.clipc(s);
  if(l.includes("equipment"))return I.gear(s);
+ if(l.includes("late")||l.includes("behind")||l.includes("due")||l.includes("upcoming"))return I.hist(s);
+ if(l.includes("completed")||l.includes("done")||l.includes("cycles"))return I.bcheck(s);
+ if(l.includes("awaiting")||l.includes("review")||l.includes("confirm"))return I.clipc(s);
+ if(l.includes("tables")||l.includes("wash")||l.includes("clean"))return I.drop(s);
  return I.gauge(s);
 }
 /* NEW KPI CARD — icon tile + watermark + big number (every page) */
-function kpiTile(label,value,note,color,act){
+function kpiTile(label,value,note,color,act,opts){
+ opts=opts||{};
  let on=false;
  if(act){
   const a=(act.match(/data-act="([^"]*)"/)||[])[1]||"",id=(act.match(/data-id="([^"]*)"/)||[])[1]||"";
@@ -836,12 +841,15 @@ function kpiTile(label,value,note,color,act){
   }else if(a==="chip")on=id==="all"?f.chip==="Open":f.chip===id;
   else if(a==="plantHealth")on=pl.health===id;
  }
+ if(typeof opts.on==="boolean")on=opts.on;
  const tint=CC_TINT[color]||"var(--muted)";
- return '<div class="cc-kpi2'+(act?" kpi-click":"")+(on?" kpi-active":"")+'" '+(act||"")+'>'+
+ /* --kt / --kt-soft give every card its own tone (accent edge, glow, active ring) instead of one green edge for all */
+ return '<div class="cc-kpi2'+(act?" kpi-click":"")+(on?" kpi-active":"")+(opts.cls?" "+opts.cls:"")+'" style="--kt:'+color+';--kt-soft:'+tint+'" '+(act?act+' role="button" tabindex="0" aria-pressed="'+on+'"':"")+'>'+
   '<span class="cc-wm" style="color:'+color+'">'+ccKpiIcon(label,46)+'</span>'+
   '<div class="cc-top"><span class="cc-ico2" style="background:'+tint+';color:'+color+'">'+ccKpiIcon(label,17)+'</span><span class="cc-lab2">'+label+'</span></div>'+
-  '<div class="cc-val2" style="color:'+color+'">'+value+'</div>'+
+  '<div class="cc-val2'+(String(value).replace(/<[^>]*>/g,"").length>6?" long":"")+'" style="color:'+color+'">'+value+'</div>'+
   '<div class="cc-note2">'+note+'</div>'+
+  (typeof opts.pct==="number"?'<div class="cc-meter2" aria-hidden="true"><i style="width:'+Math.max(0,Math.min(100,opts.pct))+'%"></i></div>':'')+
   (on?'<span class="cc-onbadge">ACTIVE</span>':'')+'</div>';
 }
 /* BENTO SIDE CARD — priority mix + workload (real data, clickable) */
@@ -1164,22 +1172,34 @@ function issueSpark(rows){
   '<div class="row" style="gap:14px;justify-content:flex-end;font-size:12.5px;color:var(--muted-foreground);margin-top:6px"><span class="row" style="gap:5px"><span class="dot" style="width:8px;height:8px;background:#DC4C3E"></span>Created</span><span class="row" style="gap:5px"><span class="dot" style="width:8px;height:8px;background:#16A34A"></span>Resolved</span><span class="row" style="gap:5px"><span class="dot" style="width:8px;height:8px;background:#3B82F6"></span>Open backlog</span><span class="muted">click a day to focus</span></div></div>';
 }
 
-/* ── DONUT v2 — rounded segments with gaps (every view) ── */
+/* ── DONUT v3 — rounded segments with gaps (every view) ──
+   Focus mode: when a KPI card, chip or slice has filtered the view to one slice, the ring keeps that
+   slice in its own colour, fades the rest, and the centre shows that slice's count. A slice with zero
+   records is drawn as a dashed ring in its colour with 0 in the centre, so "Warning" never shows up as
+   an all-green ring of every plant. */
 function vizDonut(title,slices,opts){
  opts=opts||{};
  const total=slices.reduce((s,x)=>s+(x.n||0),0),cx=88,cy=88,r=64,wd=15,C=2*Math.PI*r;
- let h='<div><h2 style="font-size:14px;font-weight:700">'+title+'</h2><p style="font-size:12.5px;color:var(--muted-foreground);margin:3px 0 12px">'+(opts.note||"Click a segment to filter")+'</p>';
- if(!total)return h+emptyState(opts.empty||"No records","Nothing to chart in the current filter.")+'</div>';
- const anySel=slices.some(s=>s.n&&s.act&&ccDonutOn(s.act,s.id));
+ const focus=slices.find(s=>s.act&&ccDonutOn(s.act,s.id))||null;
+ const noun=esc(opts.center||"records");
+ const note=focus?'Showing <b style="color:'+focus.color+'">'+esc(focus.label)+'</b> · '+(focus.n||0)+' of '+total+' '+noun+' · click it again to show all':(opts.note||"Click a segment to filter");
+ let h='<div class="viz-donut-card'+(focus?' is-focus':'')+'"'+(focus?' style="--viz-focus:'+focus.color+'"':'')+'><h2 style="font-size:14px;font-weight:700">'+title+'</h2><p class="viz-donut-note" style="font-size:12.5px;color:var(--muted-foreground);margin:3px 0 12px">'+note+'</p>';
+ if(!total&&!focus)return h+emptyState(opts.empty||"No records","Nothing to chart in the current filter.")+'</div>';
  let acc=0,circ="";
- slices.forEach(s=>{if(!s.n)return;
-  const full=s.n/total*C,on=s.act&&ccDonutOn(s.act,s.id),len=Math.max(full-4,4);
+ if(focus&&!focus.n){
+  circ='<circle class="donut-none" cx="'+cx+'" cy="'+cy+'" r="'+r+'" fill="none" stroke="'+focus.color+'" stroke-width="'+wd+'" stroke-linecap="round" stroke-dasharray="1.5 9"/>';
+ }else slices.forEach(s=>{if(!s.n)return;
+  const full=s.n/total*C,on=focus===s,len=Math.max(full-4,4);
   const act=s.act?' data-act="'+s.act+'" data-id="'+esc(s.id||s.label)+'"':"";
   circ+='<circle class="donut-seg2'+(on?" sel":"")+'" cx="'+cx+'" cy="'+cy+'" r="'+r+'" fill="none" stroke="'+s.color+'" stroke-width="'+(on?wd+3:wd)+'" stroke-linecap="round" stroke-dasharray="'+len.toFixed(2)+' '+(C-len).toFixed(2)+'" stroke-dashoffset="'+(-acc).toFixed(2)+'"'+act+' data-tip="'+esc(s.label+": "+s.n+" ("+Math.round(s.n/total*100)+"%) — click to filter")+'"/>';
   acc+=full;});
- return h+'<div class="viz-donut"><div class="viz-ring-wrap"><svg viewBox="0 0 176 176" class="'+(anySel?"has-sel2":"")+'" style="transform:rotate(-90deg)">'+circ+'</svg><div class="viz-ring-hole"><b>'+total+'</b><span>'+esc(opts.center||"total")+(ccFilterActive()?' · filtered':'')+'</span></div></div><div class="viz-legend">'+
-  slices.map(s=>{const on=s.act&&ccDonutOn(s.act,s.id);
-   return '<div class="viz-leg'+(on?" on":"")+'" '+(s.act?'data-act="'+s.act+'" data-id="'+esc(s.id||s.label)+'"':'')+' data-tip="'+esc(s.label+": "+s.n+(total?" ("+Math.round(s.n/total*100)+"%)":""))+'"><span class="dot" style="width:8px;height:8px;background:'+s.color+'"></span><span>'+esc(s.label)+'</span><b>'+s.n+'</b>'+(total?'<span class="pct">'+Math.round(s.n/total*100)+'%</span>':'')+'</div>'}).join("")+'</div></div></div>';
+ const pct=n=>total?Math.round(n/total*100):0;
+ const hole=focus
+  ?'<b style="color:'+focus.color+'">'+(focus.n||0)+'</b><span>'+esc(focus.label)+'</span><small>'+(!focus.n?'none of '+total+' '+noun:focus.n===total?'all '+total+' '+noun:pct(focus.n)+'% of '+total+' '+noun)+'</small>'
+  :'<b>'+total+'</b><span>'+noun+(ccFilterActive()?' · filtered':'')+'</span>';
+ return h+'<div class="viz-donut"><div class="viz-ring-wrap"><svg viewBox="0 0 176 176" class="'+(focus?"has-sel2":"")+'" style="transform:rotate(-90deg)">'+circ+'</svg><div class="viz-ring-hole">'+hole+'</div></div><div class="viz-legend">'+
+  slices.map(s=>{const on=focus===s;
+   return '<div class="viz-leg'+(on?" on":"")+(focus&&!on?" dim":"")+'" '+(s.act?'data-act="'+s.act+'" data-id="'+esc(s.id||s.label)+'" role="button" tabindex="0" aria-pressed="'+on+'"':'')+' style="--leg:'+s.color+'" data-tip="'+esc(s.label+": "+s.n+(total?" ("+pct(s.n)+"%)":""))+'"><span class="dot" style="width:8px;height:8px;background:'+s.color+'"></span><span>'+esc(s.label)+'</span><b>'+s.n+'</b>'+(total?'<span class="pct">'+pct(s.n)+'%</span>':'')+'</div>'}).join("")+'</div></div></div>';
 }
 
 /* ── BARS v2 — gradient fill, striped track, grow-in animation ── */
@@ -1579,7 +1599,7 @@ function bindUi(){
    if(id==="resolved"){if(stay){toggleStay("status","Resolved");return}drillIssues({status:"Resolved",chip:"all"});return}return}
   if(act==="ccChip"){e.preventDefault();stayFilter({chip:id});return}
   if(act==="donutHealth"){e.preventDefault();const next=((S.issF||{}).health===id)?"all":id;S.plF=Object.assign(S.plF||{},{health:next});if(S.view==="dashboard"){stayFilter({health:next});return}goView("plants");return}
-  if(act==="plantHealth"){e.preventDefault();S.plF=Object.assign(S.plF||{},{health:(S.plF&&S.plF.health)===id?"all":id});S.tablePages.plants=1;persist();render();return}
+  if(act==="plantHealth"){e.preventDefault();const nextHealth=(S.plF&&S.plF.health)===id?"all":id;S.plF=Object.assign(S.plF||{},{health:nextHealth});S.tablePages.plants=1;if(nextHealth!=="all")S._glanceScroll="plant-health-focus";persist();render();return}
   if(act==="donutStatus"){e.preventDefault();if(S.view==="dashboard"||(S.view==="om-module"&&S.omTab==="issues")){toggleStay("bucket",id);return}drillIssues({bucket:id});return}
   if(act==="issSev"){e.preventDefault();toggleStay("sev",id);return}
   if(act==="issAge"){e.preventDefault();toggleStay("aging",id);return}

@@ -11,7 +11,7 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from sqlalchemy import text
+from sqlalchemy import inspect as sa_inspect, text
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -293,9 +293,13 @@ def ready():
     try:
         with engine.connect() as conn:
             conn.execute(text("select 1"))
+            schema_ok = sa_inspect(conn).has_table("users")
     except Exception:
         logger.exception("Readiness check failed")
         return JSONResponse(status_code=503,content={"status":"database_unreachable"})
+    if not schema_ok:
+        logger.error("Readiness check: the database is reachable but the Solar91 schema (users table) is missing; apply database/migrations.")
+        return JSONResponse(status_code=503,content={"status":"schema_missing"})
     return {
         "status": "ready",
         "auth_provider": "clerk",
@@ -307,10 +311,24 @@ def ready():
 async def validation_error(request:Request,exc:RequestValidationError):
     return JSONResponse(status_code=422,content=jsonable_encoder({"error":"validation_error","detail":exc.errors()}, custom_encoder={ValueError: str}))
 
+_SCHEMA_MISSING_LOGGED={"at":0.0}
+
+def _is_missing_core_table(message:str)->bool:
+    """True when PostgreSQL/SQLite reports that a core Solar91 table does not exist (schema never applied)."""
+    return any(f'relation "{name}" does not exist' in message or f"no such table: {name}" in message for name in ("users","plants","issues","om_tasks"))
+
 @app.exception_handler(SQLAlchemyError)
 async def database_error(request:Request,exc:SQLAlchemyError):
-    logger.exception("Database error on %s",request.url.path)
     text=str(getattr(exc,"orig",exc)).lower()
+    if _is_missing_core_table(text):
+        # One concise line per minute instead of a full traceback on every page refresh.
+        import time
+        now=time.monotonic()
+        if now-_SCHEMA_MISSING_LOGGED["at"]>60:
+            _SCHEMA_MISSING_LOGGED["at"]=now
+            logger.error("Database schema missing on %s: %s. DATABASE_URL reaches a database without the Solar91 tables; apply database/migrations to that Supabase project.",request.url.path,text.splitlines()[0][:200])
+        return JSONResponse(status_code=503,content={"error":"database_schema_missing","detail":"The Solar91 database tables were not found. An administrator must connect the portal to the correct Supabase project or apply the database migrations."})
+    logger.exception("Database error on %s",request.url.path)
     if ("does not exist" in text or "no such column" in text or "no such table" in text) and any(k in text for k in ("unit_no","cycle_id","units_per_day","pm_unit_config","pm_scope_config","planned_due_on","missed_days","rolled_count","total_units","cycle_day")):
         return JSONResponse(status_code=503,content={"error":"database_migration_pending","detail":"The database is missing the latest Preventive Maintenance update. Run database/SUPABASE_RUN_THIS.sql in the Supabase SQL editor, then reload."})
     return JSONResponse(status_code=503,content={"error":"database_error","detail":"The database operation could not be completed."})

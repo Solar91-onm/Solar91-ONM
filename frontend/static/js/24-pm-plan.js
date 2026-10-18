@@ -109,8 +109,13 @@
   };
   window.openProblemScheduledTask=async function(){
     if(!canCreate()){toast("Site Engineer can execute assigned Preventive Maintenance work, but cannot create it.");return}
-    await loadTemplates();await loadUnitCfg();S.modal="pmQuickTask";S.modalCtx={};render();
+    S.modal="pmQuickTask";S.modalCtx={};render();
     setTimeout(()=>{try{window.pmQuickCfg()}catch(e){}},0);
+    Promise.all([loadTemplates(),loadUnitCfg()]).then(()=>{
+     if(S.modal!=="pmQuickTask")return;
+     const dl=document.getElementById("pq-sugg");if(dl)dl.innerHTML=suggestions(v("pq-type")).map(x=>'<option value="'+esc(x)+'"></option>').join("");
+     const total=document.getElementById("pq-total");if(total&&!total.value)try{window.pmQuickCfg()}catch(e){}
+    });
   };
   function quickModal(){
     const types=typeNames(),filteredType=S.pmLive&&S.pmLive.equipment&&S.pmLive.equipment!=="all"?S.pmLive.equipment:null;

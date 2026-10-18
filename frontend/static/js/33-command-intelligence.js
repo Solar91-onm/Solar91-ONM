@@ -38,6 +38,7 @@
  function positionAssistantPanel(root){
   const panel=root.querySelector('.s91-assistant-panel');if(!panel)return;
   panel.style.maxHeight='';
+  if(panel.classList.contains('s91-copilot'))return;
   const bounds=root.getBoundingClientRect(),panelWidth=panel.offsetWidth,panelHeight=panel.offsetHeight,gap=18,margin=8;
   panel.classList.toggle('s91-assistant-panel-left',bounds.right-panelWidth<margin);
   const aboveSpace=bounds.top-gap,belowSpace=window.innerHeight-bounds.bottom-gap;
@@ -73,7 +74,8 @@
  function pruneAssistantHistory(log,now=Date.now()){
   const cutoff=now-assistantRetentionMs;
   return (Array.isArray(log)?log:[]).map(entry=>({who:entry?.who==='user'?'user':'bot',text:String(entry?.text||'').trim(),action:Array.isArray(entry?.action)?entry.action.slice(0,2).map(String):null,
-   records:Array.isArray(entry?.records)?entry.records.slice(0,8).map(r=>({module:String(r?.module||''),id:String(r?.id||''),title:String(r?.title||'').slice(0,180),plant:String(r?.plant||'').slice(0,160),site_code:String(r?.site_code||'').slice(0,80),status:String(r?.status||'').slice(0,80),assignee:String(r?.assignee||'').slice(0,120),reporter:String(r?.reporter||'').slice(0,120),due:String(r?.due||'').slice(0,30)})):[],
+   q:String(entry?.q||'').slice(0,300),error:!!entry?.error,
+   records:Array.isArray(entry?.records)?entry.records.slice(0,20).map(r=>({module:String(r?.module||''),id:String(r?.id||''),ticket:String(r?.ticket||'').slice(0,80),title:String(r?.title||'').slice(0,180),plant:String(r?.plant||'').slice(0,160),site_code:String(r?.site_code||'').slice(0,80),status:String(r?.status||'').slice(0,80),assignee:String(r?.assignee||'').slice(0,120),reporter:String(r?.reporter||'').slice(0,120),due:String(r?.due||'').slice(0,30)})):[],
    summary:entry?.summary&&typeof entry.summary==='object'?{label:String(entry.summary.label||'Result').slice(0,100),value:entry.summary.value}:null,
    breakdown:Array.isArray(entry?.breakdown)?entry.breakdown.slice(0,8).map(b=>({label:String(b?.label||'').slice(0,100),value:b?.value})):[],
    source:String(entry?.source||'').slice(0,300),narration:String(entry?.narration||'').slice(0,1200),limited:!!entry?.limited,when:Number(entry?.when)}))
@@ -178,8 +180,101 @@
   if(e.target.closest('[data-s91-print-preview]')){window.print();return}
   if(e.target.closest('[data-s91-open-all-reports]')){document.getElementById('s91-report-root')?.remove();if(reportRole()){S.reportKind=previewState.kind;goView('reports');destination('.ops-report-table','Reports')}return}
  });
- const assistant={open:false,log:[],lastQuery:'',busy:false,userId:'',position:null,dragged:false,historyLoaded:false};
+ const assistant={open:false,log:[],lastQuery:'',busy:false,userId:'',position:null,dragged:false,historyLoaded:false,focus:'all',wide:false,expandedRecs:{}};
  const allowedAssistantRoles=['O&M Head','Assignee','Administration','Site Engineer'];
+
+ /* ---------- Ask Solar91 copilot: layered, interactive answers over the same grounded /api/field/ask contract ---------- */
+ const isUuid=v=>/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(v||''));
+ const MOD={issues:['Site issue','#DC4C3E','⚠'],pm:['Preventive maintenance','#16A34A','🛠'],washing:['Washing','#0891B2','💧'],plants:['Plant','#D97706','☀'],equipment:['Equipment','#7C3AED','⚙']};
+ const statusTone=st=>{const s=String(st||'').toLowerCase();return /overdue|breach|critical|rejected|no report/.test(s)?'bad':/open|pending|await|exception|warn/.test(s)?'warn':/progress|assigned|acknowledged|scheduled|due/.test(s)?'info':/resolved|closed|completed|confirmed|done|on track/.test(s)?'ok':'mute'};
+ const focusPlant=()=>assistant.focus&&assistant.focus!=='all'?assistant.focus:'';
+ const atPlant=q=>focusPlant()?q+' at '+focusPlant():q;
+ function promptGroups(){
+  const r=role(),wash=r!=='Administration';
+  const groups=[];
+  if(r==='Site Engineer')groups.push(['My work','#0F5C2E',['My pending work']]);
+  else if(r==='Assignee')groups.push(['My work','#0F5C2E',['My assigned work']]);
+  groups.push(['Site issues','#DC4C3E',[atPlant('How many open issues?'),atPlant('Overdue issues'),'Open issues by status this week','Open issues by status last week']]);
+  groups.push(['Preventive maintenance','#16A34A',[atPlant('Overdue PM tasks'),atPlant('Open PM tasks')]]);
+  if(wash)groups.push(['Washing','#0891B2',['Washing pending review','Tables cleaned today','Tables cleaned yesterday']]);
+  return groups;
+ }
+ function snapshot(){
+  if(!hasAppState())return[];
+  const fp=focusPlant(),inScope=x=>!fp||x.plant===fp;
+  const issues=(S.issues||[]).filter(inScope),open=issues.filter(t=>t.status!=='Resolved'&&t.status!=='Closed');
+  const overdue=typeof isOverdueIssue==='function'?open.filter(isOverdueIssue).length:0;
+  const pmLate=(S.tasks||[]).filter(t=>inScope(t)&&t.status!=='Completed'&&t.status!=='Cancelled'&&typeof taskOD==='function'&&taskOD(t)>0).length;
+  const wc=S._washCycles,review=wc&&wc.portfolio&&!fp?wc.portfolio.pending_reviews:null;
+  const tiles=[[open.length,'Open issues',atPlant('How many open issues?'),'#3B82F6'],[overdue,'Issues past ETC',atPlant('Overdue issues'),'#DC4C3E'],[pmLate,'PM overdue',atPlant('Overdue PM tasks'),'#F97316']];
+  if(role()!=='Administration')tiles.push([review==null?'—':review,'Washing to review','Washing pending review','#0891B2']);
+  return tiles;
+ }
+ function followups(entry){
+  const q=String(entry.q||'').toLowerCase(),plants=[...new Set((entry.records||[]).map(r=>r.plant).filter(Boolean))].slice(0,2);
+  const out=[],isIssue=/issue|ticket|fault/.test(q),isPm=/\bpm\b|maintenance|task/.test(q),isWash=/wash|clean|table/.test(q);
+  if(isIssue){
+   if(!/overdue/.test(q))out.push('Overdue issues');
+   if(!/status/.test(q))out.push('Open issues by status this week');
+   plants.forEach(pl=>{if(!q.includes(pl.toLowerCase()))out.push((/overdue/.test(q)?'Overdue issues at ':'Open issues at ')+pl)});
+   out.push('Overdue PM tasks'+(plants[0]?' at '+plants[0]:''));
+  }else if(isPm){
+   if(!/overdue/.test(q))out.push('Overdue PM tasks');
+   plants.forEach(pl=>{if(!q.includes(pl.toLowerCase()))out.push('Overdue PM tasks at '+pl)});
+   out.push('Overdue issues'+(plants[0]?' at '+plants[0]:''));
+  }else if(isWash&&role()!=='Administration'){
+   ['Washing pending review','Tables cleaned today','Tables cleaned yesterday'].forEach(x=>out.push(x));
+  }else out.push('How many open issues?','Overdue PM tasks',role()==='Site Engineer'?'My pending work':'Overdue issues');
+  return [...new Set(out)].filter(x=>x.toLowerCase()!==q).slice(0,4);
+ }
+ function recordCard(r){
+  const m=MOD[r.module]||['Record','#64748B','•'],ref=r.ticket||(!isUuid(r.id)?r.id:'');
+  const meta=[r.plant?esc91(r.plant)+(r.site_code?' · '+esc91(r.site_code):''):'',r.assignee?'👤 '+esc91(r.assignee):'',r.reporter?'Reported by '+esc91(r.reporter):'',r.due?'📅 '+esc91(r.due):''].filter(Boolean).join('<i>·</i>');
+  return '<button type="button" class="cp-rec" style="--m:'+m[1]+'" data-s91-record-kind="'+esc91(r.module)+'" data-s91-record-id="'+esc91(r.id)+'" data-s91-record-ticket="'+esc91(r.ticket||'')+'" data-s91-record-plant="'+esc91(r.plant||'')+'"><span class="cp-rec-ico" aria-hidden="true">'+m[2]+'</span><span class="cp-rec-main"><span class="cp-rec-top"><em>'+m[0]+'</em>'+(ref?'<b>'+esc91(ref)+'</b>':'')+(r.status?'<span class="cp-st '+statusTone(r.status)+'">'+esc91(r.status)+'</span>':'')+'</span><strong>'+esc91(r.title||r.equipment||'View record')+'</strong>'+(meta?'<small>'+meta+'</small>':'')+'</span><span class="cp-rec-go" aria-hidden="true">›</span></button>';
+ }
+ function answerCard(x,i){
+  if(x.who==='user')return '<div class="cp-q"><span>'+esc91(x.text)+'</span></div>';
+  const time=Number.isFinite(x.when)?new Date(x.when).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}):'';
+  if(/^Checking permitted live records/.test(x.text))return '<article class="cp-a cp-loading" aria-busy="true"><div class="cp-a-top"><span class="cp-orb sm"></span><span>Searching the records your role can access…</span></div><i class="cp-sk"></i><i class="cp-sk w70"></i><i class="cp-sk w45"></i></article>';
+  if(x.error)return '<article class="cp-a cp-err"><div class="cp-a-top"><span class="cp-orb sm"></span><span>Live data unavailable · '+time+'</span></div><p class="cp-text">'+esc91(x.text)+'</p>'+(x.q?'<div class="cp-follow"><button type="button" data-s91-question="'+esc91(x.q)+'">↻ Try again</button></div>':'')+'</article>';
+  if(!x.q&&!x.records?.length&&!x.summary)return '<article class="cp-a"><p class="cp-text">'+esc91(x.text).replace(/\n/g,'<br>')+'</p></article>';
+  const recs=x.records||[],all=assistant.expandedRecs&&assistant.expandedRecs[i],shown=all?recs:recs.slice(0,4);
+  const bd=(x.breakdown||[]).filter(b=>b&&b.label!=null),bdMax=Math.max(1,...bd.map(b=>Number(b.value)||0));
+  const follows=followups(x);
+  return '<article class="cp-a">'+
+   '<div class="cp-a-top"><span class="cp-orb sm"></span><span class="cp-mode">'+(x.narration?'AI summary of live records':'Live records')+'</span><span class="cp-time">'+time+'</span></div>'+
+   (x.summary&&x.summary.value!=null?'<div class="cp-hero"><strong>'+esc91(x.summary.value)+'</strong><span>'+esc91(x.summary.label||'Result')+'</span></div>':'')+
+   '<p class="cp-text">'+esc91(x.text).replace(/\n/g,'<br>')+'</p>'+
+   (x.narration?'<div class="cp-ai"><b>✦ AI context</b><p>'+esc91(x.narration)+'</p></div>':'')+
+   (bd.length?'<div class="cp-layer"><div class="cp-layer-h">Breakdown</div><div class="cp-bars">'+bd.map(b=>{const v=Number(b.value)||0;return '<div class="cp-bar"><span>'+esc91(b.label)+'</span><i><b style="width:'+Math.max(v?6:0,Math.round(100*v/bdMax))+'%"></b></i><strong>'+esc91(b.value)+'</strong></div>'}).join('')+'</div></div>':'')+
+   (recs.length?'<div class="cp-layer"><div class="cp-layer-h">Supporting records <b>'+recs.length+(x.limited?'+':'')+'</b></div><div class="cp-recs">'+shown.map(recordCard).join('')+'</div>'+(recs.length>4?'<button type="button" class="cp-more" data-cp-more="'+i+'">'+(all?'Show fewer':'Show all '+recs.length+' records')+'</button>':'')+'</div>':'')+
+   '<div class="cp-actions">'+(x.action?'<button type="button" class="cp-primary" data-s91-assist-go="'+x.action.join(':')+'">Open filtered register ↗</button>':'')+'<button type="button" data-cp-copy="'+i+'">Copy answer</button></div>'+
+   (follows.length?'<div class="cp-follow"><span>Go deeper</span>'+follows.map(f=>'<button type="button" data-s91-question="'+esc91(f)+'">'+esc91(f)+'</button>').join('')+'</div>':'')+
+   (x.source?'<small class="cp-src">'+esc91(x.source)+(x.limited?' · more records exist; open the register for the full list':'')+'</small>':'')+
+   '</article>';
+ }
+ function homeHtml(){
+  const name=(typeof AUTH_IDENTITY!=='undefined'&&AUTH_IDENTITY.name?String(AUTH_IDENTITY.name).split(/\s+/)[0]:'');
+  const hr=new Date().getHours(),greet=hr<12?'Good morning':hr<17?'Good afternoon':'Good evening';
+  const recent=[...new Set(assistant.log.filter(x=>x.who==='user').map(x=>x.text).reverse())].slice(0,5);
+  return '<div class="cp-home"><div class="cp-hello"><span class="cp-orb lg" aria-hidden="true"></span><div><b>'+greet+(name?', '+esc91(name):'')+'</b><span>Ask about site issues, maintenance, washing, a plant or a ticket. Every answer comes from live records your role can access.</span></div></div>'+
+   '<div class="cp-snap-h">Right now'+(focusPlant()?' at '+esc91(focusPlant()):'')+' <small>from records loaded on this page · tap for the live answer</small></div>'+
+   '<div class="cp-snap">'+snapshot().map(t=>'<button type="button" style="--c:'+t[3]+'" data-s91-question="'+esc91(t[2])+'"><b>'+esc91(t[0])+'</b><span>'+esc91(t[1])+'</span></button>').join('')+'</div>'+
+   promptGroups().map(g=>'<div class="cp-group" style="--c:'+g[1]+'"><h4>'+esc91(g[0])+'</h4><div>'+g[2].map(q=>'<button type="button" data-s91-question="'+esc91(q)+'">'+esc91(q)+'</button>').join('')+'</div></div>').join('')+
+   (recent.length?'<div class="cp-group cp-recent" style="--c:#64748B"><h4>Recent questions</h4><div>'+recent.map(q=>'<button type="button" data-s91-question="'+esc91(q)+'">↺ '+esc91(q)+'</button>').join('')+'</div></div>':'')+'</div>';
+ }
+ function copilotHtml(){
+  const plants=hasAppState()?(S.plants||[]).filter(pl=>role()!=='Site Engineer'||!S._sePlant||pl.name===S._sePlant):[];
+  const opts='<option value="all">All plants in my scope</option>'+plants.slice().sort((a,b)=>String(a.name).localeCompare(String(b.name))).map(pl=>'<option value="'+esc91(pl.name)+'"'+(assistant.focus===pl.name?' selected':'')+'>'+esc91((pl.id?pl.id+' · ':'')+pl.name)+'</option>').join('');
+  const conv=assistant.log.length?assistant.log.map(answerCard).join(''):homeHtml();
+  return '<section class="s91-assistant-panel s91-copilot'+(assistant.wide?' is-wide':'')+'" role="dialog" aria-label="Ask Solar91 operations copilot">'+
+   '<header class="cp-head"><span class="cp-orb" aria-hidden="true"></span><div><h2>Ask Solar91</h2><small>Operations copilot · live, role-scoped records · read-only</small></div>'+
+   '<div class="cp-head-tools">'+(assistant.log.length?'<button type="button" data-cp-new title="Start a new conversation" aria-label="New conversation">✎</button>':'')+'<button type="button" data-cp-wide title="'+(assistant.wide?'Narrow':'Widen')+' panel" aria-label="'+(assistant.wide?'Narrow':'Widen')+' panel">'+(assistant.wide?'⇥':'⇤')+'</button><button type="button" data-s91-assist="close" aria-label="Close assistant">×</button></div></header>'+
+   '<div class="cp-context"><label><span>Focus</span><select data-cp-plant aria-label="Focus suggestions on a plant">'+opts+'</select></label><span class="cp-badge">● Live</span></div>'+
+   '<div class="s91-assistant-conversation cp-body" aria-live="polite">'+conv+'</div>'+
+   '<form id="s91-assistant-form" class="cp-composer"><input id="s91-assistant-query" maxlength="300" aria-label="Ask an operations question" placeholder="Ask about issues, maintenance, washing, a plant or a ticket…" autocomplete="off"'+(assistant.busy?' disabled':'')+'><button type="submit" aria-label="Ask"'+(assistant.busy?' disabled':'')+'>'+(assistant.busy?'<span class="gx-spin" aria-hidden="true"></span>':'↑')+'</button></form>'+
+   '<p class="cp-foot">Tip: add a plant name or site code, e.g. “overdue issues at '+esc91((plants[0]&&plants[0].id)||'QA02')+'”. Answers never change data; edits happen in the module.</p></section>';
+ }
  function assistantRoot(){let root=document.getElementById('s91-assistant-root');if(!root){root=document.createElement('div');root.id='s91-assistant-root';document.body.append(root)}return root}
  function drawAssistant(){syncAssistantUser();const root=assistantRoot();root.hidden=!document.querySelector('#app .shell');
   const visible=hasAppState()&&allowedAssistantRoles.includes(role());
@@ -187,7 +282,7 @@
    role()==='Assignee'?['My assigned work','Overdue PM tasks','Open issues','Washing pending review']:
    role()==='O&M Head'?['How many open issues?','Overdue issues','Overdue PM tasks','Washing pending review']:
    ['How many open issues?','Overdue issues','Overdue PM tasks','Which issues are open?'];
-  root.innerHTML=visible?'<button class="s91-assistant-launch" data-s91-assist="toggle" aria-label="'+(assistant.open?'Close':'Open')+' operations answers" title="Drag to move · click to open"><span aria-hidden="true">⌕</span> Ask Solar91</button>'+(assistant.open?'<section class="s91-assistant-panel" role="region" aria-label="Solar91 operations answers"><header><div><span class="s91-eyebrow">LIVE SEARCH · OPTIONAL AI REASONING</span><h2>Ask Solar91</h2><small>Grounded in records your role can access · clickable sources</small></div><button type="button" data-s91-assist="close" aria-label="Close assistant">×</button></header><div class="s91-assistant-conversation" aria-live="polite"><div class="s91-assistant-msg bot">Ask about site problems, maintenance, panel washing, equipment IDs or due dates. I can show matching saved records and take you to the right register.</div>'+assistant.log.map(x=>'<div class="s91-assistant-msg '+x.who+'">'+esc91(x.text).replace(/\n/g,'<br>')+(x.summary&&x.summary.value!=null?'<div class="s91-assistant-summary"><b>'+esc91(x.summary.label||'Result')+'</b><strong>'+esc91(x.summary.value)+'</strong></div>':'')+(x.breakdown?.length?'<ul class="s91-assistant-breakdown">'+x.breakdown.map(b=>'<li><span>'+esc91(b.label)+'</span><b>'+esc91(b.value)+'</b></li>').join('')+'</ul>':'')+(x.narration?'<small class="s91-assistant-source"><b>AI context:</b> '+esc91(x.narration)+'</small>':'')+(x.source?'<small class="s91-assistant-source">Source: '+esc91(x.source)+(x.limited?' · first matching records shown':'')+'</small>':'')+(x.action?'<button type="button" data-s91-assist-go="'+x.action.join(':')+'">Open filtered register ↗</button>':'')+(x.records?.length?'<div class="s91-assistant-sources"><b>Supporting records</b>'+x.records.slice(0,8).map(r=>'<button type="button" data-s91-record-kind="'+esc91(r.module)+'" data-s91-record-id="'+esc91(r.id)+'" data-s91-record-plant="'+esc91(r.plant||'')+'"><span>'+esc91((r.module||'').toUpperCase())+' · '+esc91(r.id)+'</span><strong>'+esc91(r.title||r.equipment||'View record')+'</strong><small>'+esc91(r.plant)+(r.site_code?' · '+esc91(r.site_code):'')+(r.status?' · '+esc91(r.status):'')+(r.assignee?' · '+esc91(r.assignee):'')+(r.reporter?' · Reported by '+esc91(r.reporter):'')+(r.due?' · '+esc91(r.due):'')+'</small></button>').join('')+'</div>':'')+'</div>').join('')+'</div><div class="s91-assistant-suggestions">'+suggestions.map(q=>'<button type="button" data-s91-question="'+q+'">'+q+'</button>').join('')+'</div><form id="s91-assistant-form"><input id="s91-assistant-query" maxlength="300" aria-label="Ask an operations question" placeholder="Ask about any plant, issue, equipment, or module…" autocomplete="off"><button type="submit">Search</button></form><p class="s91-assistant-disclaimer">Read-only answers. Data questions use authorized live records; changes are always made in the actual module.</p></section>':''):'';
+  root.innerHTML=visible?'<button class="s91-assistant-launch" data-s91-assist="toggle" aria-label="'+(assistant.open?'Close':'Open')+' Ask Solar91" title="Drag to move · click to open"><span class="cp-orb sm" aria-hidden="true"></span> Ask Solar91</button>'+(assistant.open?copilotHtml():''):'';
   applyAssistantPosition(root);
   positionAssistantPanel(root);
   const launch=root.querySelector('.s91-assistant-launch');
@@ -232,16 +327,16 @@
    const result=await apiFetch('/api/field/ask',{method:'POST',body:JSON.stringify({question:expanded})});
    if(!allowedAssistantRoles.includes(role())||assistantUserId()!==requestUserId||assistant.userId!==requestUserId)return;
    assistant.lastQuery=expanded;
-   const recordAction=/\b(issue|ticket|fault)\b/i.test(expanded)?['issues',/overdue|late/i.test(expanded)?'overdue':'open']:
-    /\b(pm|maintenance|task)\b/i.test(expanded)?['pm',/overdue|late/i.test(expanded)?'overdue':'due']:
-    /\b(wash|clean|table)\b/i.test(expanded)?['washing',/pending|review|confirm/i.test(expanded)?'review':'late']:null;
+   const recordAction=/\b(issues?|tickets?|faults?)\b/i.test(expanded)?['issues',/overdue|late/i.test(expanded)?'overdue':'open']:
+    /\b(pm|maintenance|tasks?)\b/i.test(expanded)?['pm',/overdue|late/i.test(expanded)?'overdue':'due']:
+    /\b(wash\w*|clean\w*|tables?)\b/i.test(expanded)?['washing',/pending|review|confirm/i.test(expanded)?'review':'late']:null;
    assistant.log[position]={who:'bot',text:result.answer||'No matching saved record was found.',records:result.records||[],
      summary:result.summary||null,breakdown:result.breakdown||[],source:result.source||'',narration:result.narration||'',limited:!!result.limited||(result.records||[]).length>8,
-     action:recordAction,when:Date.now()};
+     action:recordAction,q:expanded,when:Date.now()};
    saveAssistantHistory(assistant.log);
   }catch(error){
    if(assistantUserId()!==requestUserId||assistant.userId!==requestUserId)return;
-   assistant.log[position]={who:'bot',text:'Live operational data could not be retrieved ('+(error.message||'connection error')+'). No current result is available. Please retry when the connection is restored.',when:Date.now()};
+   assistant.log[position]={who:'bot',error:true,q:expanded,text:'Live operational data could not be retrieved ('+(error.message||'connection error')+'). No current result is available. Please retry when the connection is restored.',when:Date.now()};
    saveAssistantHistory(assistant.log);
   }finally{
    if(assistantUserId()===requestUserId&&assistant.userId===requestUserId){
@@ -249,9 +344,13 @@
    }
   }
  }
- function openAssistantRecord(kind,id,plant){
+ function openAssistantRecord(kind,id,plant,ticket){
   assistant.open=false;drawAssistant();
-  if(kind==='issues'){if(typeof window.s91JumpToTicket==='function')window.s91JumpToTicket(id);else if(typeof goTab==='function')goTab('issues');return}
+  if(kind==='issues'){
+   const issue=hasAppState()?(S.issues||[]).find(t=>t.id===ticket||t.dbId===id||t.id===id):null;
+   if(issue&&typeof openIssue==='function'){openIssue(issue.id);return}
+   if(typeof drillIssues==='function'){drillIssues({q:ticket||id,chip:'all'});return}
+   if(typeof goTab==='function')goTab('issues');return}
   if(kind==='pm'){if(typeof S!=='undefined'){S.pmLive=S.pmLive||{};S.pmLive.query=id;S.pmLive.status='all';if(S.schedF)S.schedF.q=id}if(typeof goScheduledOM==='function')goScheduledOM('maintenance');return}
   if(kind==='washing'){if(typeof S!=='undefined'){S._washUi=S._washUi||{};S._washUi.q=plant||''}if(typeof washOpenRegister==='function')washOpenRegister();else if(typeof goScheduledOM==='function')goScheduledOM('washing');return}
   if(kind==='plants'||kind==='equipment'){if(role()==='Site Engineer'){if(typeof window.s91RadarFocus==='function')window.s91RadarFocus('all','all');return}if(typeof S!=='undefined'){S.plF=S.plF||{};S.plF.q=plant||id;}if(typeof goView==='function')goView('plants');return}
@@ -261,9 +360,14 @@
   if(assistant.dragged){assistant.dragged=false;e.preventDefault();return}
   const item=e.target.closest('[data-s91-assist]');if(item){assistant.open=item.dataset.s91Assist==='toggle'?!assistant.open:item.dataset.s91Assist!=='close';drawAssistant();return}
   const question=e.target.closest('[data-s91-question]');if(question){assistant.open=true;ask(question.dataset.s91Question);return}
-  const record=e.target.closest('[data-s91-record-kind]');if(record){openAssistantRecord(record.dataset.s91RecordKind,record.dataset.s91RecordId,record.dataset.s91RecordPlant);return}
+  const record=e.target.closest('[data-s91-record-kind]');if(record){openAssistantRecord(record.dataset.s91RecordKind,record.dataset.s91RecordId,record.dataset.s91RecordPlant,record.dataset.s91RecordTicket);return}
+  if(e.target.closest('[data-cp-new]')){assistant.log=[];assistant.expandedRecs={};assistant.lastQuery='';saveAssistantHistory([]);drawAssistant();return}
+  if(e.target.closest('[data-cp-wide]')){assistant.wide=!assistant.wide;drawAssistant();return}
+  const more=e.target.closest('[data-cp-more]');if(more){const i=Number(more.dataset.cpMore);assistant.expandedRecs=assistant.expandedRecs||{};assistant.expandedRecs[i]=!assistant.expandedRecs[i];const c=document.querySelector('.cp-body'),top=c?c.scrollTop:0;drawAssistant();const n=document.querySelector('.cp-body');if(n)n.scrollTop=top;return}
+  const copy=e.target.closest('[data-cp-copy]');if(copy){const x=assistant.log[Number(copy.dataset.cpCopy)];if(x){const lines=[x.text].concat(x.summary&&x.summary.value!=null?[x.summary.label+': '+x.summary.value]:[]).concat((x.breakdown||[]).map(b=>'- '+b.label+': '+b.value)).concat((x.records||[]).map(r=>'- '+[r.ticket||(!isUuid(r.id)?r.id:''),r.title,r.plant,r.status].filter(Boolean).join(' · ')));try{navigator.clipboard.writeText(lines.join('\n')).then(()=>{if(typeof toast==='function')toast('Answer copied')},()=>{if(typeof toast==='function')toast('Copy is not available in this browser')})}catch(err){if(typeof toast==='function')toast('Copy is not available in this browser')}}return}
   const go=e.target.closest('[data-s91-assist-go]');if(go){const [kind,queue]=go.dataset.s91AssistGo.split(':');assistant.open=false;drawAssistant();window.s91OpenQueue(kind,queue);return}
  });
+ document.addEventListener('change',e=>{if(!e.target.matches||!e.target.matches('[data-cp-plant]'))return;assistant.focus=e.target.value||'all';drawAssistant()});
  document.addEventListener('submit',e=>{if(e.target.id!=='s91-assistant-form')return;e.preventDefault();ask(document.getElementById('s91-assistant-query')?.value)});
  document.addEventListener('keydown',e=>{if(e.key==='Escape'&&document.getElementById('s91-report-root'))document.getElementById('s91-report-root').remove();else if(e.key==='Escape'&&assistant.open){assistant.open=false;drawAssistant()}});
  document.addEventListener('keydown',e=>{

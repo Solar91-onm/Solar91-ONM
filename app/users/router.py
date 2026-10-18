@@ -85,26 +85,30 @@ def list_users(
     by_user: dict[UUID, list[dict]] = {}
     for uid, pid, code, name in rows:
         by_user.setdefault(uid, []).append({"plant_id": str(pid), "site_code": code, "plant_name": name})
+    # Equipment and equipment-type scope for every user in two queries (not two per user): the Team & Access
+    # screen reloads this list after each change, so per-user round trips to the database made it slow.
+    equipment_by_user: dict[UUID, list[dict]] = {}
+    for uid, eid, code, name, pid, site_code, plant_name, status in db.execute(
+        select(UserEquipmentAssignment.user_id, UserEquipmentAssignment.equipment_id, Equipment.equipment_code,
+               Equipment.equipment_name, Equipment.plant_id, Plant.site_code, Plant.plant_name, Equipment.status)
+        .join(Equipment, Equipment.id == UserEquipmentAssignment.equipment_id)
+        .join(Plant, Plant.id == Equipment.plant_id)
+        .order_by(Plant.site_code, Equipment.equipment_code, Equipment.equipment_name)
+    ).all():
+        equipment_by_user.setdefault(uid, []).append(
+            {"equipment_id": str(eid), "equipment_code": code, "equipment_name": name,
+             "plant_id": str(pid), "site_code": site_code, "plant_name": plant_name, "status": status})
+    types_by_user: dict[UUID, list[str]] = {}
+    for uid, equipment_type in db.execute(
+        select(UserEquipmentTypeAssignment.user_id, UserEquipmentTypeAssignment.equipment_type)
+    ).all():
+        types_by_user.setdefault(uid, []).append(equipment_type)
     result = []
     for u in db.scalars(select(User).order_by(User.display_name)):
         item = out(u)
         item["plants"] = by_user.get(u.id, [])
-        equipment_rows = db.execute(
-            select(UserEquipmentAssignment.equipment_id, Equipment.equipment_code,
-                   Equipment.equipment_name, Equipment.plant_id, Plant.site_code, Plant.plant_name,
-                   Equipment.status)
-            .join(Equipment, Equipment.id == UserEquipmentAssignment.equipment_id)
-            .join(Plant, Plant.id == Equipment.plant_id)
-            .where(UserEquipmentAssignment.user_id == u.id)
-            .order_by(Plant.site_code, Equipment.equipment_code, Equipment.equipment_name)
-        ).all()
-        item["equipment"] = [
-            {"equipment_id": str(eid), "equipment_code": code, "equipment_name": name,
-             "plant_id": str(pid), "site_code": site_code, "plant_name": plant_name, "status": status}
-            for eid, code, name, pid, site_code, plant_name, status in equipment_rows
-        ]
-        item["equipment_types"] = sorted(db.scalars(
-            select(UserEquipmentTypeAssignment.equipment_type).where(UserEquipmentTypeAssignment.user_id == u.id)))
+        item["equipment"] = equipment_by_user.get(u.id, [])
+        item["equipment_types"] = sorted(types_by_user.get(u.id, []))
         item["created_at"] = u.created_at.isoformat() if getattr(u, "created_at", None) else None
         item["is_self"] = u.id == user.id
         result.append(item)

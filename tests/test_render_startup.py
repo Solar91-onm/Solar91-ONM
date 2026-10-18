@@ -94,3 +94,53 @@ def test_deploy_setup_does_not_retry_permanent_configuration_failure(monkeypatch
         assert app.state.bootstrap_ready is False
     finally:
         app.state.bootstrap_ready = original_ready
+
+
+def test_readiness_reports_missing_schema_without_marking_app_ready(client, monkeypatch):
+    import app.main as main_module
+
+    original_ready = app.state.bootstrap_ready
+    app.state.bootstrap_ready = True
+
+    class NoTables:
+        def has_table(self, _name):
+            return False
+
+    monkeypatch.setattr(main_module, "sa_inspect", lambda _conn: NoTables())
+    try:
+        response = client.get("/health/ready")
+        assert response.status_code == 503
+        assert response.json() == {"status": "schema_missing"}
+    finally:
+        app.state.bootstrap_ready = original_ready
+
+
+def test_missing_core_table_error_returns_clear_503_message(client, monkeypatch):
+    from sqlalchemy.exc import ProgrammingError
+
+    def boom():
+        raise ProgrammingError("SELECT users.id FROM users", {}, RuntimeError('relation "users" does not exist'))
+
+    route = "/api/__schema_probe"
+    app.add_api_route(route, boom, methods=["GET"])
+    try:
+        response = client.get(route)
+        assert response.status_code == 503
+        assert response.json()["error"] == "database_schema_missing"
+        assert "relation" not in response.text
+    finally:
+        app.router.routes = [r for r in app.router.routes if getattr(r, "path", None) != route]
+
+
+def test_preflight_lists_missing_core_tables():
+    import importlib.util
+    from pathlib import Path
+    from sqlalchemy import create_engine, text
+
+    spec = importlib.util.spec_from_file_location("preflight_under_test", Path(__file__).resolve().parents[1] / "scripts" / "preflight.py")
+    preflight = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(preflight)
+    engine = create_engine("sqlite://")
+    with engine.begin() as conn:
+        conn.execute(text("create table users (id integer primary key)"))
+        assert preflight.missing_core_tables(conn) == ["plants", "issues", "om_tasks"]

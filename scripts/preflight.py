@@ -6,10 +6,20 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.engine import make_url
 
 from app.core.config import get_settings
+
+
+# Tables every request needs. If they are missing, the database is reachable but the Solar91 schema has not
+# been applied (for example a new Supabase project); the portal would fail every sign-in with "relation does not exist".
+CORE_TABLES = ("users", "plants", "issues", "om_tasks")
+
+
+def missing_core_tables(conn) -> list[str]:
+    inspector = inspect(conn)
+    return [name for name in CORE_TABLES if not inspector.has_table(name)]
 
 
 def bad(value: str | None) -> bool:
@@ -76,8 +86,17 @@ def main() -> int:
         engine = create_engine(settings.database_url, pool_pre_ping=True)
         with engine.connect() as conn:
             conn.execute(text("select 1"))
+            missing = missing_core_tables(conn)
         engine.dispose()
         print("OK: Supabase PostgreSQL connection succeeded.")
+        if missing:
+            u = make_url(settings.database_url)
+            print("ERROR: The database is reachable but the Solar91 tables are missing: " + ", ".join(missing) + ".")
+            print(f"USED: user={u.username} host={u.host} port={u.port} database={u.database}")
+            print("HINT: confirm DATABASE_URL points to the Supabase project that holds Solar91 data. If this is a new, "
+                  "empty project, follow 'Database migration safety' in docs/RENDER_DEPLOYMENT_RUNBOOK.md to apply the "
+                  "approved migrations in order. The portal stays unavailable and re-checks automatically.")
+            return 3
     except Exception as exc:
         print(f"ERROR: Database connection failed ({type(exc).__name__}). Check DATABASE_URL and Supabase network access.")
         try:
