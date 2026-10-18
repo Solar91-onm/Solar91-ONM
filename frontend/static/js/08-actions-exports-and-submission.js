@@ -1599,7 +1599,7 @@ function bindUi(){
    if(id==="resolved"){if(stay){toggleStay("status","Resolved");return}drillIssues({status:"Resolved",chip:"all"});return}return}
   if(act==="ccChip"){e.preventDefault();stayFilter({chip:id});return}
   if(act==="donutHealth"){e.preventDefault();const next=((S.issF||{}).health===id)?"all":id;S.plF=Object.assign(S.plF||{},{health:next});if(S.view==="dashboard"){stayFilter({health:next});return}goView("plants");return}
-  if(act==="plantHealth"){e.preventDefault();const nextHealth=(S.plF&&S.plF.health)===id?"all":id;S.plF=Object.assign(S.plF||{},{health:nextHealth});S.tablePages.plants=1;if(nextHealth!=="all")S._glanceScroll="plant-health-focus";persist();render();return}
+  if(act==="plantHealth"){e.preventDefault();const nextHealth=(S.plF&&S.plF.health)===id?"all":id;S.plF=Object.assign(S.plF||{},{health:nextHealth});S.tablePages.plants=1;if(nextHealth!=="all")S._glanceScroll="plant-register-anchor";persist();render();return}
   if(act==="donutStatus"){e.preventDefault();if(S.view==="dashboard"||(S.view==="om-module"&&S.omTab==="issues")){toggleStay("bucket",id);return}drillIssues({bucket:id});return}
   if(act==="issSev"){e.preventDefault();toggleStay("sev",id);return}
   if(act==="issAge"){e.preventDefault();toggleStay("aging",id);return}

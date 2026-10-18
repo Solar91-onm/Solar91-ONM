@@ -241,38 +241,12 @@ function dbStatusBanner(){
  const n=(S.plants||[]).length;
  return '<div class="bn-info banner" style="margin-bottom:12px;border-color:var(--success)">🗄️ <b>Database:</b> FastAPI → Supabase PostgreSQL is the source of truth ('+n+' plant'+(n===1?"":"s")+' loaded).</div>';
 }
-/* Right-hand panel of the Plants health row. With no health filter it ranks plants by open issues; when a
-   Healthy / Warning / Critical card or slice is active it lists exactly those plants and why each one is
-   in that state (open, critical and overdue counts use the same rules as plantHealthOf). */
-function plantHealthFocusPanel(sp,open,plantBars){
- const sel=(S.plF||{}).health;
- if(!sel||sel==="all")return '<h2 style="font-size:14px;font-weight:700">Open issues by plant</h2><p style="font-size:12.5px;color:var(--muted-foreground);margin:3px 0 10px">Click a bar to open the plant</p>'+rankBars(plantBars,"barPlant","#D97706");
- const TONE={Healthy:"#16A34A",Warning:"#D97706",Critical:"#DC4C3E"},color=TONE[sel]||"var(--primary)";
- const rows=sp.filter(p=>plantHealth(p)===sel).map(p=>{
-  const oi=open.filter(t=>t.plant===p.name);
-  return{p,open:oi.length,crit:oi.filter(t=>t.severity==="Critical").length,od:oi.filter(isOverdueIssue).length};
- }).sort((a,b)=>b.crit-a.crit||b.od-a.od||b.open-a.open||String(a.p.name).localeCompare(String(b.p.name)));
- const head='<div class="phf-head" style="--phf:'+color+'"><div><h2 style="font-size:14px;font-weight:700">'+esc(sel)+' plants</h2><p style="font-size:12.5px;color:var(--muted-foreground);margin:3px 0 0">'+(sel==="Healthy"?"No open issues at these plants":sel==="Warning"?"Open issues, none critical or badly overdue":"Critical issue, 2+ overdue or 3+ open issues")+' · click a plant to open it</p></div><span class="phf-count">'+rows.length+'</span></div>';
- if(!rows.length)return head+'<div class="phf-empty" style="--phf:'+color+'"><span class="phf-empty-ico">'+(sel==="Healthy"?"!":"✓")+'</span><b>No '+esc(sel.toLowerCase())+' plants right now</b><small>'+(sel==="Healthy"?"Every plant in scope has at least one open issue.":"None of the "+sp.length+" plants in scope is "+esc(sel.toLowerCase())+".")+'</small><button type="button" class="btn o sm" data-act="plantHealth" data-id="'+esc(sel)+'">Show all plants</button></div>';
- const chip=(n,label,cls)=>n?'<span class="phf-chip '+cls+'">'+n+' '+label+'</span>':'';
- const list=rows.slice(0,8).map(r=>'<button type="button" class="phf-row" data-act="plant" data-id="'+esc(r.p.id)+'" style="--phf:'+color+'"><i class="phf-dot"></i><span class="phf-name"><b>'+esc(r.p.name||r.p.id)+'</b><small>'+esc(r.p.id||"")+(plantProject(r.p)?' · '+esc(plantProject(r.p)):'')+'</small></span><span class="phf-why">'+(r.open?chip(r.crit,"critical","crit")+chip(r.od,"overdue","od")+chip(r.open,"open","open"):'<span class="phf-chip ok">no open issues</span>')+'</span><span class="phf-go" aria-hidden="true">›</span></button>').join("");
- const more=rows.length>8?'<button type="button" class="phf-more" onclick="scrollToPlantRegister()">+'+(rows.length-8)+' more in the plant register below ↓</button>':'';
- return head+'<div class="phf-list">'+list+'</div>'+more;
-}
 function renderPlants(){
  const sp=dashScope();
  const pl=plantListRows(sp),size=12,plPage=Math.min(S.tablePages.plants||1,Math.max(1,Math.ceil(pl.length/size)));S.tablePages.plants=plPage;const plRows=pl.slice((plPage-1)*size,plPage*size);
  const unspecifiedN=sp.filter(p=>plantDcKw(p)==null).length;
- const totalDckW=totalPlantCapacitykW(sp,"capacitykW");
- const totalAckW=totalPlantCapacitykW(sp,"acCapacitykW");
- const health={Healthy:0,Warning:0,Critical:0};sp.forEach(p=>{health[plantHealth(p)]++});
- const healthSlices=[{label:"Healthy",id:"Healthy",n:health.Healthy,color:"#16A34A",act:"plantHealth"},{label:"Warning",id:"Warning",n:health.Warning,color:"#D97706",act:"plantHealth"},{label:"Critical",id:"Critical",n:health.Critical,color:"#DC4C3E",act:"plantHealth"}];
- const open=openTk(S.issues||[]);
- const plantBars=sp.map(p=>({label:p.name||p.id,id:p.id,n:open.filter(t=>t.plant===p.name).length})).filter(x=>x.n).sort((a,b)=>b.n-a.n).slice(0,8);
  return '<div class="row between wrap" style="align-items:flex-end;gap:10px"><div><h1 style="font-size:20px;font-weight:800">Plants</h1><p style="font-size:12.5px;color:var(--muted-foreground);margin:4px 0 0">'+sp.length+' plant'+(sp.length===1?"":"s")+' · health from live issues · click a row for plant detail</p></div><div class="row wrap" style="gap:8px">'+(unspecifiedN?'<span class="pill pillsm" style="background:var(--warning-soft);color:var(--warning-strong)">'+unspecifiedN+' capacity not specified</span>':'')+'<button class="btn p sm" onclick="openModal(\'addPlant\')">'+I.plus(13)+' Add Plant</button><button class="btn o sm" onclick="openModal(\'commission\')">'+I.plus(13)+' New plant (commissioning)</button><button class="btn o sm" onclick="openModal(\'addPlantColumn\')">'+I.plus(13)+' Add Column</button></div></div>'+
   (typeof s91PlantPulse==="function"?s91PlantPulse(sp):"")+
-  '<div class="kpis8">'+kpiTile("Total",sp.length,"register","var(--foreground)","")+kpiTile("Healthy",health.Healthy,"no open issues","var(--success)",'data-act="plantHealth" data-id="Healthy"',{pct:sp.length?Math.round(100*health.Healthy/sp.length):0})+kpiTile("Warning",health.Warning,"plants with open issues","var(--warning)",'data-act="plantHealth" data-id="Warning"',{pct:sp.length?Math.round(100*health.Warning/sp.length):0})+kpiTile("Critical",health.Critical,"critical / overdue / 3+ open","var(--danger)",'data-act="plantHealth" data-id="Critical"',{pct:sp.length?Math.round(100*health.Critical/sp.length):0})+kpiTile("Total DC capacity",s91Mw(totalDckW)+" MWp",(unspecifiedN?unspecifiedN+" plant"+(unspecifiedN===1?"":"s")+" without DC value":"all plants"),"var(--info)","")+kpiTile("Total AC capacity",s91Mw(totalAckW)+" MW",sp.filter(p=>plantAcKw(p)==null).length+" without AC value","var(--info)","")+'</div>'+
-  '<div id="plant-health-focus" class="kgrid plant-health-focus" style="grid-template-columns:1fr 1fr;align-items:stretch"><div class="panel">'+vizDonut("Plant health",healthSlices,{center:"plants",note:"Derived from open / critical / overdue issues · click a card or slice to focus",empty:"No plants"})+'</div><div class="panel">'+plantHealthFocusPanel(sp,open,plantBars)+'</div></div>'+
   plantImportPanel()+
   '<div id="plant-register-anchor" class="panel no-stick" style="padding:0"><div class="row between wrap" style="padding:16px 20px 0;align-items:flex-end;gap:10px"><div><h2 style="font-size:15px;font-weight:600">Plant register</h2><p style="font-size:12px;color:var(--muted-foreground);margin:3px 0 12px">Search, filter and page. Blank capacity stays Not specified.</p></div><div class="row wrap" style="gap:8px"><button class="btn o sm" onclick="exportPlantRegistryCSV()">'+I.dl(13)+' Export CSV ('+pl.length+')</button><button class="btn o sm" onclick="exportPlantRegistryExcel()">'+I.dl(13)+' Export Excel ('+pl.length+')</button></div></div>'+
   plantListBar()+'<div style="overflow-x:auto"><table class="dense"><thead>'+plantTableHead()+'</thead><tbody>'+

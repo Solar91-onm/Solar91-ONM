@@ -67,20 +67,25 @@
    notSetUp:wc?(wc.unconfigured||[]).filter(p=>pick.has(p.plant)).length:0};
  }
 
- /* ---------- gauge (270° dial with Low / Moderate / High bands and a needle) ---------- */
+ /* ---------- gauge (270° dial with Low / Moderate / High bands and a needle) ----------
+    Higher is always better: 0 sits in the red Low band and 100 in the green High band. The bands are a faint track;
+    a solid arc fills from 0 up to the value in its band colour, so a rising score visibly moves toward green. */
  function gauge(o){
   const cx=60,cy=56,r=38,A=a=>[cx+r*Math.cos(a*Math.PI/180),cy+r*Math.sin(a*Math.PI/180)];
   const ang=v=>135+270*Math.max(0,Math.min(100,v))/100;
-  const arc=(v1,v2,color)=>{const a1=ang(v1)+1.2,a2=ang(v2)-1.2,p1=A(a1),p2=A(a2);return '<path d="M'+p1[0].toFixed(2)+' '+p1[1].toFixed(2)+' A'+r+' '+r+' 0 '+(a2-a1>180?1:0)+' 1 '+p2[0].toFixed(2)+' '+p2[1].toFixed(2)+'" stroke="'+color+'" stroke-width="9" fill="none" stroke-linecap="butt"/>'};
+  const arc=(v1,v2,color,cls,gap)=>{gap=gap==null?1.2:gap;const a1=ang(v1)+gap,a2=ang(v2)-gap;if(a2<=a1)return "";const p1=A(a1),p2=A(a2);return '<path d="M'+p1[0].toFixed(2)+' '+p1[1].toFixed(2)+' A'+r+' '+r+' 0 '+(a2-a1>180?1:0)+' 1 '+p2[0].toFixed(2)+' '+p2[1].toFixed(2)+'" stroke="'+color+'" stroke-width="9" fill="none" stroke-linecap="butt" class="'+(cls||"")+'"/>'};
   const ticks=[0,20,40,60,80,100].map(v=>{const a=ang(v)*Math.PI/180,x=cx+(r+11)*Math.cos(a),y=cy+(r+11)*Math.sin(a);return '<text x="'+x.toFixed(1)+'" y="'+(y+2.5).toFixed(1)+'" text-anchor="middle">'+v+'</text>'}).join("");
   let needle="";
   if(typeof o.value==="number"){const a=ang(o.value)*Math.PI/180,x=cx+(r-9)*Math.cos(a),y=cy+(r-9)*Math.sin(a);needle='<line x1="'+cx+'" y1="'+cy+'" x2="'+x.toFixed(2)+'" y2="'+y.toFixed(2)+'" class="pp-needle"/><circle cx="'+cx+'" cy="'+cy+'" r="4.2" class="pp-hub"/>'}
-  const tone=typeof o.value!=="number"?"var(--gx-mut)":o.value>=o.high?"#16A34A":o.value>=o.low?"#F97316":"#DC2626";
+  const has=typeof o.value==="number";
+  const tone=!has?"var(--gx-mut)":o.value>=o.high?"#16A34A":o.value>=o.low?"#F97316":"#DC2626";
+  const track=has?arc(0,o.low,"#DC2626","pp-track")+arc(o.low,o.high,"#F97316","pp-track")+arc(o.high,100,"#22C55E","pp-track"):arc(0,100,"var(--gx-line)","",0);
+  const fill=has&&o.value>0?arc(0,o.value,tone==="#16A34A"?"#22C55E":tone,"pp-fill",0):"";
   const band=typeof o.value!=="number"?"No data":o.value>=o.high?"High":o.value>=o.low?"Moderate":"Low";
   return '<button type="button" class="pp-card pp-gauge" onclick="s91PulseGo(\''+o.go+'\')" title="'+h(o.tip)+'"><div class="pp-gauge-top"><b>'+h(o.title)+'</b>'+
-   '<div class="pp-legend"><span><i style="background:#16A34A"></i>High</span><span><i style="background:#F97316"></i>Moderate</span><span><i style="background:#DC2626"></i>Low</span></div></div>'+
+   '<div class="pp-legend"><span><i style="background:#DC2626"></i>Low &lt;'+o.low+'%</span><span><i style="background:#F97316"></i>Moderate '+o.low+'–'+(o.high-1)+'%</span><span><i style="background:#16A34A"></i>High ≥'+o.high+'%</span></div></div>'+
    '<div class="pp-gauge-body"><div class="pp-gauge-copy"><strong style="color:'+tone+'">'+(typeof o.value==="number"?o.value+"%":"—")+'</strong><small>'+h(o.sub)+'</small><em class="pp-band" style="--c:'+tone+'">'+band+'</em></div>'+
-   '<svg class="pp-dial" viewBox="0 0 120 104" aria-hidden="true"><circle cx="'+cx+'" cy="'+cy+'" r="'+(r-6)+'" class="pp-dial-face"/>'+arc(0,o.low,"#DC2626")+arc(o.low,o.high,"#F97316")+arc(o.high,100,"#22C55E")+ticks+'<text x="'+cx+'" y="'+(cy+19)+'" text-anchor="middle" class="pp-dial-unit">(0-100%)</text>'+needle+'</svg></div></button>';
+   '<svg class="pp-dial" viewBox="0 0 120 104" aria-hidden="true"><circle cx="'+cx+'" cy="'+cy+'" r="'+(r-6)+'" class="pp-dial-face"/>'+track+fill+ticks+'<text x="'+cx+'" y="'+(cy+19)+'" text-anchor="middle" class="pp-dial-unit">(0-100%)</text>'+needle+'</svg></div></button>';
  }
 
  /* ---------- grouped capsule bars (activity) ---------- */
@@ -193,53 +198,6 @@
    '<button type="button" onclick="s91PulseGo(\'wash\')"><span>Tables cleaned today</span><b>'+(d.wc?d.tablesToday:"—")+'</b></button></article>';
  }
 
- /* ---------- every plant side by side (All plants view) ----------
-    One pass over issues, PM tasks and the washing overview; health uses the same rules as plantHealthOf. */
- function allPlantsCard(sp){
-  const f=st(),by=new Map();
-  sp.forEach(p=>by.set(p.name,{p,open:0,crit:0,od:0,pmTotal:0,pmOver:0,wash:null,thr:85,washLate:false,washState:"none"}));
-  (S.issues||[]).forEach(t=>{const r=by.get(t.plant);if(!r||t.status==="Closed"||t.status==="Resolved")return;r.open++;if(t.severity==="Critical")r.crit++;if(isOverdueIssue(t))r.od++});
-  (S.tasks||[]).forEach(t=>{const r=by.get(t.plant);if(!r||t.status==="Cancelled")return;r.pmTotal++;if(t.status!=="Completed"&&taskOD(t)>0)r.pmOver++});
-  const wc=S._washCycles;
-  if(wc){(wc.plants||[]).forEach(w=>{const r=by.get(w.plant);if(!r)return;r.washState="set";r.wash=typeof w.weekly_compliance_percent==="number"?w.weekly_compliance_percent:null;r.thr=w.compliance_threshold_percent||85;r.washLate=!!(w.overdue_bucket&&w.overdue_bucket!=="on_track")});
-   (wc.unconfigured||[]).forEach(w=>{const r=by.get(w.plant);if(r)r.washState="unset"})}
-  const rows=[...by.values()].map(r=>{
-   r.health=r.crit||r.od>=2||r.open>=3?"Critical":r.open?"Warning":"Healthy";
-   /* health ranks first (Critical, then Warning, then Healthy); within a health level, more urgent work ranks higher */
-   r.score=(r.health==="Critical"?100000:r.health==="Warning"?50000:0)+r.crit*100+r.od*20+r.pmOver*6+r.open*3+(r.washLate?15:0)+(typeof r.wash==="number"&&r.wash<r.thr?(r.thr-r.wash)/5:0);
-   return r;
-  });
-  const count=k=>rows.filter(r=>r.health===k).length;
-  const sortKey=f.allSort||"worst",healthKey=f.allHealth||"all";
-  const SORTS={worst:(a,b)=>b.score-a.score,name:(a,b)=>String(a.p.name).localeCompare(String(b.p.name)),issues:(a,b)=>b.open-a.open||b.crit-a.crit,pm:(a,b)=>b.pmOver-a.pmOver||b.pmTotal-a.pmTotal,wash:(a,b)=>(a.wash==null?999:a.wash)-(b.wash==null?999:b.wash)};
-  const list=rows.filter(r=>healthKey==="all"||r.health===healthKey).sort((a,b)=>(SORTS[sortKey]||SORTS.worst)(a,b)||String(a.p.name).localeCompare(String(b.p.name)));
-  const TONE={Critical:"#DC2626",Warning:"#D97706",Healthy:"#16A34A"};
-  const chip=(key,label,n,color)=>'<button type="button" class="pp-hchip'+(healthKey===key?" on":"")+'" style="--c:'+color+'" onclick="s91PulseAll(\'allHealth\',\''+key+'\')" aria-pressed="'+(healthKey===key)+'"><i></i>'+label+' <b>'+n+'</b></button>';
-  const washBehind=rows.filter(r=>r.washLate).length;
-  const washCell=r=>{
-   if(!wc)return '<span class="pp-muted">'+(S._washCycleError?"Unavailable":"Loading…")+'</span>';
-   if(r.washState==="unset")return '<span class="pp-muted">Not set up</span>';
-   if(r.washState!=="set"||r.wash==null)return '<span class="pp-muted">No data</span>';
-   const c=r.wash>=r.thr?"#16A34A":r.wash>=r.thr-15?"#D97706":"#DC2626";
-   return '<b style="color:'+c+'">'+r.wash+'%</b><span class="pp-mbar"><i style="width:'+Math.min(100,r.wash)+'%;background:'+c+'"></i><u style="left:'+Math.min(100,r.thr)+'%"></u></span>'+(r.washLate?'<small class="pp-late">behind a deadline</small>':'<small>target '+r.thr+'%</small>');
-  };
-  const pmCell=r=>{
-   if(!r.pmTotal)return '<span class="pp-muted">No PM jobs</span>';
-   const ok=pct(r.pmTotal-r.pmOver,r.pmTotal),c=ok>=90?"#16A34A":ok>=70?"#F97316":"#DC2626";
-   return '<b style="color:'+(r.pmOver?"#DC2626":"inherit")+'">'+r.pmOver+'<em> / '+r.pmTotal+'</em></b><span class="pp-mbar"><i style="width:'+ok+'%;background:'+c+'"></i></span><small>'+ok+'% on schedule</small>';
-  };
-  const issueCell=r=>r.open?'<b>'+r.open+'</b><span class="pp-tags">'+(r.crit?'<em class="crit">'+r.crit+' critical</em>':'')+(r.od?'<em class="od">'+r.od+' past ETC</em>':'')+'</span>':'<span class="pp-ok">None open</span>';
-  const body=list.length?list.map(r=>'<button type="button" class="pp-prow" onclick="s91PulseFocus('+h(JSON.stringify(String(r.p.name)))+')" title="Focus the pulse on '+h(r.p.name)+'">'+
-    '<span class="pp-pname"><i style="background:'+TONE[r.health]+'"></i><span><b>'+h(r.p.name||r.p.id)+'</b><small>'+h(r.p.id||"")+'</small></span></span>'+
-    '<span class="pp-phealth" style="--c:'+TONE[r.health]+'">'+r.health+'</span>'+
-    '<span class="pp-pcell">'+issueCell(r)+'</span><span class="pp-pcell">'+pmCell(r)+'</span><span class="pp-pcell">'+washCell(r)+'</span><span class="pp-go" aria-hidden="true">›</span></button>').join("")
-   :'<div class="pp-empty">No plants match this health filter.</div>';
-  return '<article class="pp-card pp-all" id="pp-all-plants"><header class="pp-head"><div><h3>Plant-by-plant status</h3><p>Every plant in scope side by side · click a plant to focus the pulse on it</p></div>'+
-   '<label class="pp-sort"><span>Sort</span><select aria-label="Sort plants" onchange="s91PulseAll(\'allSort\',this.value)">'+[["worst","Needs attention first"],["name","Name A–Z"],["issues","Most open issues"],["pm","Most overdue PM"],["wash","Lowest washing compliance"]].map(o=>'<option value="'+o[0]+'"'+(sortKey===o[0]?" selected":"")+'>'+o[1]+'</option>').join("")+'</select></label></header>'+
-   '<div class="pp-hchips">'+chip("all","All plants",rows.length,"#0F5C2E")+chip("Critical","Critical",count("Critical"),TONE.Critical)+chip("Warning","Warning",count("Warning"),TONE.Warning)+chip("Healthy","Healthy",count("Healthy"),TONE.Healthy)+(wc?'<span class="pp-hnote">'+washBehind+' behind on washing</span>':'')+'</div>'+
-   '<div class="pp-plist" role="list"><div class="pp-phead" aria-hidden="true"><span>Plant</span><span>Health</span><span>Site issues</span><span>PM overdue</span><span>Washing</span><span></span></div>'+body+'</div></article>';
- }
-
  /* ---------- main ---------- */
  window.s91PlantPulse=function(sp){
   try{
@@ -257,7 +215,11 @@
    const pmPts=lineB("pm").map(b=>({label:b.label,tip:b.start===b.end?fmtD(b.end):fmtD(b.start)+" – "+fmtD(b.end),v:d.tasks.filter(t=>{if(!t.due||t.due>=b.end)return false;const c=doneDay(t);if(c)return c>b.end;return t.status!=="Completed"}).length}));
    const scopeName=f.plant==="all"?"All plants":f.plant;
    const isAll=f.plant==="all";
-   return '<section class="pp" id="plant-pulse" aria-label="Plant operations pulse"><div class="pp-top"><div><span class="pp-eyebrow">OPERATIONS PULSE · '+h(isAll?"ALL PLANTS ("+sp.length+")":scopeName.toUpperCase())+'</span><h2>Site Issues, Preventive Maintenance &amp; Washing at a glance</h2><p>Live status from the loaded records · click any card to open the matching work for '+(isAll?"all plants together":"this plant")+'.'+(isAll?' <a href="#pp-all-plants" onclick="event.preventDefault();document.getElementById(\'pp-all-plants\').scrollIntoView({behavior:\'smooth\',block:\'start\'})">See every plant ↓</a>':'')+'</p></div>'+
+   const capSet=isAll?sp:sp.filter(p=>p.name===f.plant);
+   const capBadge=(label,field,unit,getKw)=>{const missing=capSet.filter(p=>getKw(p)==null).length,kw=totalPlantCapacitykW(capSet,field);
+    return '<span class="pp-cap" title="'+h((isAll?"Total "+label+" capacity of all "+capSet.length+" plants":label+" capacity of "+scopeName)+(missing?" · "+missing+" plant"+(missing===1?"":"s")+" without "+label+" value":""))+'"><em>'+label+'</em><b>'+(missing===capSet.length?"—":s91Mw(kw)+" "+unit)+'</b></span>'};
+   const caps='<div class="pp-caps">'+capBadge("DC","capacitykW","MWp",plantDcKw)+capBadge("AC","acCapacitykW","MW",plantAcKw)+'</div>';
+   return '<section class="pp" id="plant-pulse" aria-label="Plant operations pulse"><div class="pp-top"><div><span class="pp-eyebrow">OPERATIONS PULSE · '+h(isAll?"ALL PLANTS ("+sp.length+")":scopeName.toUpperCase())+'</span><h2>Site Issues, Preventive Maintenance &amp; Washing at a glance</h2><p>Live status from the loaded records · click any card to open the matching work for '+(isAll?"all plants together":"this plant")+'.</p>'+caps+'</div>'+
     '<div class="pp-scope"><button type="button" class="pp-allbtn'+(isAll?" on":"")+'" onclick="s91PulsePlant(\'all\')" aria-pressed="'+isAll+'"><span aria-hidden="true">▦</span> All plants <b>'+sp.length+'</b></button>'+
     '<label class="pp-plant'+(isAll?"":" on")+'"><span>One plant</span><select aria-label="Choose one plant for the operations pulse" onchange="s91PulsePlant(this.value)">'+plantOpts+'</select></label></div></div>'+
     (isAll?'':'<div class="pp-single"><span>Showing <b>'+h(scopeName)+'</b> only</span><button type="button" onclick="s91PulsePlant(\'all\')">← Back to all '+sp.length+' plants</button></div>')+
@@ -270,7 +232,7 @@
     '<div class="pp-row pp-row-3">'+
      lineCard({key:"issues",range:f.issues,title:"Open site issues",sub:"Backlog at the end of each period",nowLabel:"open now",color:"#1F5FA8",points:issuePts,go:"issues",upIsBad:true,avg:false})+
      lineCard({key:"pm",range:f.pm,title:"Overdue preventive maintenance",sub:"Work orders past due at the end of each period",nowLabel:"overdue now",color:"#E0403A",points:pmPts,go:"pm",upIsBad:true,avg:true})+
-     batteryCard(d)+'</div>'+(isAll?allPlantsCard(sp):'')+'</section>';
+     batteryCard(d)+'</div></section>';
   }catch(error){
    console.error("[Plant pulse]",error);
    return '<div class="bn-warn banner">The operations pulse could not be drawn: '+h(error.message)+'. The plant register below is unaffected.</div>';
@@ -278,8 +240,6 @@
  };
 
  window.s91PulsePlant=function(v){st().plant=v||"all";render()};
- window.s91PulseFocus=function(name){st().plant=name||"all";S._glanceScroll="plant-pulse";render()};
- window.s91PulseAll=function(key,v){const f=st();f[key]=key==="allHealth"&&f[key]===v?"all":v;render()};
  window.s91PulseRange=function(key,v){st()[key]=v;render()};
  window.s91PulseSeries=function(k){const f=st();f.show[k]=!f.show[k];render()};
  window.s91PulseGo=function(key){

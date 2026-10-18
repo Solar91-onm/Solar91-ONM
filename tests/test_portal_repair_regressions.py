@@ -209,7 +209,8 @@ def test_plant_capacity_saved_through_api_and_rendered_with_units(client, db):
     render = (ROOT / "frontend/static/js/02-core-render-and-dashboard.js").read_text(encoding="utf-8")
     assert 'apiFetch("/api/plants",{method:"POST"' in core
     assert "_ccmw2" not in actions, "the DOM rewrite that mixed kW/MW labels must stay removed"
-    assert 'kpiTile("Total DC capacity",s91Mw(totalDckW)+" MWp"' in render
+    assert 'kpiTile("DC capacity",plantDcKw(p)!=null?kWStr(plantDcKw(p))+" kWp"' in render
+    assert 's91Mw(plantDcKw(p))+" MWp"' in render
 
 
 # ---------------------------------------------------------------- exports
