@@ -6,7 +6,7 @@
  const KINDS=window.s91UploadKinds=window.s91UploadKinds||{};
  const role=()=>S._roleLabel||S.currentRole||(typeof AUTH_IDENTITY!=="undefined"&&AUTH_IDENTITY.role)||"";
  const canRaise=()=>["O&M Head","Assignee","Site Engineer"].includes(role());
- const tone={Critical:"crit",Medium:"warn",Low:"ok"};
+ const tone={Critical:"crit",Medium:"warn"};
  KINDS.issues={
   tabLabel:"Site issues",allowed:canRaise,
   title:"Upload site issues",subtitle:"Raise many tickets from one spreadsheet instead of one by one.",

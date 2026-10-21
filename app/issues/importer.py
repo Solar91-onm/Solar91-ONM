@@ -38,7 +38,7 @@ SHEET = "Site issues"
 HEADERS = ("Site code", "Plant name", "Issue category", "Problem", "Description", "Severity", "Equipment / unit",
            "Occurred on", "Target date", "Assignee email", "Maker", "Impact", "Remarks")
 # Same default deadlines as the Raise Issue form (ETC_HRS in frontend/static/js/00-auth-data-and-imports.js).
-ETC_HOURS = {"Critical": 48, "Medium": 96, "Low": 240}
+ETC_HOURS = {"Critical": 48, "Medium": 96}
 ALIASES = {
     "site_code": {"Site code", "Plant code", "Site", "Code"},
     "category": {"Issue category", "Category", "Vertical", "Equipment type", "Asset"},
@@ -54,7 +54,7 @@ ALIASES = {
     "remarks": {"Remarks", "Remark", "Current status", "Current situation", "Status remarks", "Notes", "Comments"},
 }
 _CATEGORIES = {value.casefold(): value for value in EQUIPMENT_TYPES}
-_SEVERITY_ORDER = ("Critical", "Medium", "Low")
+_SEVERITY_ORDER = ("Critical", "Medium")
 
 
 def _norm(value: Any) -> str:
@@ -81,9 +81,9 @@ def template_bytes(db: Session, user: User) -> bytes:
     guide.title = "How to fill"
     for text in (
         "One row is one issue (ticket). Fill the 'Site issues' sheet; the lists for drop-downs are on the 'Lists' sheet.",
-        "Required: Site code, Issue category, Description and Severity (Critical, Medium or Low).",
+        "Required: Site code, Issue category, Description and Severity (Critical or Medium; an old 'Low' is read as Medium).",
         "Occurred on: the day the fault happened (DD-MM-YYYY). Blank means today.",
-        "Target date: when it should be fixed. Blank uses the usual deadline (Critical 2 days, Medium 4 days, Low 10 days).",
+        "Target date: when it should be fixed. Blank uses the usual deadline (Critical 2 days, Medium 4 days).",
         "Assignee email: optional. It must be an active Assignee; the ticket then starts as Assigned instead of Open.",
         "Equipment / unit: optional code or name of the unit, e.g. INV-03. A registered unit of the plant is linked automatically.",
         "Remarks: optional. What is going on right now (e.g. 'Vendor called, spare expected Friday'). It becomes the ticket's first message.",
@@ -118,7 +118,7 @@ def template_bytes(db: Session, user: User) -> bytes:
     last = MAX_ISSUE_ROWS + 1
     validations = [
         (DataValidation(type="list", formula1=f"'Lists'!$A$2:$A${max(2, len(category_list) + 1)}", allow_blank=True), f"C2:C{last}"),
-        (DataValidation(type="list", formula1='"Critical,Medium,Low"', allow_blank=True), f"F2:F{last}"),
+        (DataValidation(type="list", formula1='"Critical,Medium"', allow_blank=True), f"F2:F{last}"),
         (DataValidation(type="list", formula1=f"'Lists'!$C$2:$C${max(2, len(assignees) + 1)}", allow_blank=True), f"J2:J{last}"),
         (DataValidation(type="list", formula1=f"'Lists'!$D$2:$D${max(2, len(plants) + 1)}", allow_blank=True), f"A2:A{last}"),
     ]
@@ -201,9 +201,9 @@ def import_issues(db: Session, user: User, filename: str, content: bytes, *, dry
         elif len(description) > 4000:
             errors.append("Description must be 4000 characters or fewer")
         severity_text = cell_text(get("severity"))
-        severity = normalize_issue_severity(next((s for s in (*ISSUE_SEVERITIES, "High") if s.casefold() == severity_text.casefold()), None))
+        severity = normalize_issue_severity(severity_text)
         if severity not in ISSUE_SEVERITIES:
-            errors.append("Severity must be Critical, Medium or Low")
+            errors.append("Severity must be Critical or Medium")
         problem, equipment_ref = cell_text(get("problem")), cell_text(get("equipment"))
         maker, impact, remarks = cell_text(get("maker")), cell_text(get("impact")), cell_text(get("remarks"))
         for label, value, limit in (("Problem", problem, 160), ("Equipment / unit", equipment_ref, 255),

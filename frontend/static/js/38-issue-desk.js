@@ -13,7 +13,7 @@
  const isHead=()=>role()==="O&M Head";
  const issue=id=>(S.issues||[]).find(x=>x.id===id);
  const q=s=>String(s==null?"":s).replace(/\\/g,"\\\\").replace(/'/g,"\\'");
- const PRI={Critical:"#DC4C3E",High:"#DC4C3E",Medium:"#3B82F6",Low:"#94A3B8"};
+ const PRI=SEV_COLOR;
  const STEPS=[["Open","Open"],["Acknowledged","Acknowledged"],["In Progress","In progress"],["Pending Vendor","Waiting parts"],["Resolved","Resolved"],["Closed","Closed"]];
  const INTENT={work_done:["Work done","✓"],question:["Question","?"],blocked:["Blocked","!"],confirm:["Confirmed","✓"]};
  const drafts=()=>{if(!S._idkDraft)S._idkDraft={};return S._idkDraft};
@@ -159,7 +159,7 @@
   return '<details class="idk-menu"><summary aria-label="More actions" title="More actions">⋯</summary><div>'+items.join("")+'</div></details>';
  }
  function deskHtml(t){
-  const pri=t.severity==="High"?"Critical":t.severity,si=stepIndex(t.status),p=typeof plantRec==="function"?plantRec(t.plant):null;
+  const pri=issueLevel(t),si=stepIndex(t.status),p=typeof plantRec==="function"?plantRec(t.plant):null;
   const steps='<ol class="idk-steps">'+STEPS.map((s,i)=>{if(i===3&&t.status!=="Pending Vendor")return "";const st=i<si?"done":i===si?"now":"";return '<li class="'+st+'"><i>'+(i<si?"✓":"")+'</i>'+esc(s[1])+'</li>'}).join("")+'</ol>';
   const n=(t.activity||[]).filter(a=>a.action==="issue.message").length;
   return '<div class="idk-ov" onclick="if(event.target===this)closeModal()"><div class="idk" role="dialog" aria-modal="true" aria-label="Ticket '+esc(t.id)+'">'+

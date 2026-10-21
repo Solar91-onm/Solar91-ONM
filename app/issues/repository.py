@@ -4,6 +4,7 @@ from sqlalchemy import String, and_, cast, exists, func, or_, select
 from sqlalchemy.orm import Session, aliased
 
 from app.core.models import Equipment, Issue, Plant, User
+from app.issues.schemas import SEVERITY_STORED_AS
 from app.plants.codes import normalize_site_code
 
 
@@ -48,8 +49,7 @@ class IssueRepository:
             stmt = stmt.where(or_(Issue.assigned_to == assigned_user.id, *text_conditions))
         if plant_id: stmt = stmt.where(Issue.plant_id == plant_id)
         if status: stmt = stmt.where(Issue.status == status)
-        if severity == "Critical": stmt = stmt.where(Issue.severity.in_(("Critical", "High")))
-        elif severity: stmt = stmt.where(Issue.severity == severity)
+        if severity: stmt = stmt.where(Issue.severity.in_(SEVERITY_STORED_AS.get(severity, (severity,))))
         if assignee: stmt = stmt.where(Issue.assignee_text == assignee)
         if vertical: stmt = stmt.where(Issue.vertical == vertical)
         if maker: stmt = stmt.where(Issue.maker == maker)

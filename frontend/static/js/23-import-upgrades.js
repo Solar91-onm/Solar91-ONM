@@ -74,7 +74,7 @@
    const OK=["Open","Assigned","Acknowledged","In Progress","Pending Vendor","Resolved","Closed"];
    rows.forEach((r,ln)=>{const p=findPlant(g(r,"plant"));if(!p){skipped.push("row "+(ln+2)+" · unknown plant \""+g(r,"plant")+"\"");return}
     const want=g(r,"id");if(want&&S.issues.some(x=>x.id===want)){dup++;return}
-    const sev=SEV.find(x=>x.toLowerCase()===g(r,"sev").toLowerCase())||"Medium";
+    const sev=SEV.find(x=>x===normalizeIssueSeverity(g(r,"sev")))||"Medium";
     const occ=pdate(g(r,"occ"))||TODAY,resd=pdate(g(r,"resolved"));
     let status=OK.find(x=>x.toLowerCase()===g(r,"status").toLowerCase())||(resd?"Resolved":(g(r,"who")?"Assigned":"Open"));
     if(resd&&status!=="Closed")status="Resolved";

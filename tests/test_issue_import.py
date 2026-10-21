@@ -88,7 +88,7 @@ def test_problems_block_every_row(client, db):
     assert body["saved"] == 0
     assert [p["row"] for p in body["problems"]] == [3, 4, 5, 6, 7, 8, 9]
     joined = " ".join(e for p in body["problems"] for e in p["errors"])
-    for expected in ("not found", "not a portal category", "Description is required", "Critical, Medium or Low",
+    for expected in ("not found", "not a portal category", "Description is required", "Critical or Medium",
                      "future", "not an active Assignee", "Same issue as row 2"):
         assert expected in joined
     assert db.query(Issue).count() == 0

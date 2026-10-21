@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 from app.core.spreadsheet import neutralise_formulas
 from app.core.config import get_settings
 from app.core.database import get_db
+from app.issues.schemas import normalize_issue_severity
 from app.core.models import (
     AuditLog, Equipment, EquipmentDocument, Issue, OMTask, Plant, User,
     UserEquipmentTypeAssignment,
@@ -227,7 +228,7 @@ def equipment_detail(equipment_id:UUID,db:Annotated[Session,Depends(get_db)],use
         "equipment":_equipment_out(db,row),
         "assignment_history":[{"at":a.created_at.isoformat() if a.created_at else None,"by":a.actor_name,"action":a.action,"before":a.before_state,"after":a.after_state,"metadata":a.metadata_json or {}} for a in history if (a.action or "").lower().find("move")>=0 or (a.before_state or {}).get("in_charge_user_id")!=(a.after_state or {}).get("in_charge_user_id")],
         "maintenance":[{"id":t.work_order_no,"name":t.task_name,"status":t.status,"due_on":t.due_on.isoformat() if t.due_on else None,"actual_completed_on":t.actual_completed_on.isoformat() if t.actual_completed_on else None} for t in tasks[:100]],
-        "issues":[{"id":str(i.id),"ticket_no":i.ticket_no,"status":i.status,"severity":"Critical" if i.severity=="High" else i.severity,"created_at":i.created_at.isoformat() if i.created_at else None} for i in issues[:100]],
+        "issues":[{"id":str(i.id),"ticket_no":i.ticket_no,"status":i.status,"severity":normalize_issue_severity(i.severity),"created_at":i.created_at.isoformat() if i.created_at else None} for i in issues[:100]],
         "issue_metrics":{"open_count":len(open_issues),"mttr_hours":round(sum(repair_hours)/len(repair_hours),1) if repair_hours else None,"mtbf_hours":None},
         "documents":[{"id":str(d.id),"kind":d.kind,"name":d.original_name,"content_type":d.content_type,"size":d.size_bytes,"created_at":d.created_at.isoformat() if d.created_at else None,"url":f"/api/equipment/{row.id}/documents/{d.id}"} for d in docs],
     }

@@ -70,7 +70,7 @@
       '</label>';
     }).join("");
 
-    var sevBadge = (typeof badge==="function") ? badge(t.severity) : xesc(t.severity);
+    var sevBadge = (typeof badge==="function") ? badge(issueLevel(t)) : xesc(t.severity);
     var stBadge  = (typeof badge==="function") ? badge(t.status)   : xesc(t.status);
     var closeIc = (typeof I!=="undefined" && I.x) ? I.x(18) : "×";
 
@@ -491,7 +491,7 @@
       '</label>';
     }).join("");
 
-    var sevBadge = (typeof badge==="function") ? badge(t.severity) : xesc(t.severity);
+    var sevBadge = (typeof badge==="function") ? badge(issueLevel(t)) : xesc(t.severity);
     var stBadge  = (typeof badge==="function") ? badge(t.status)   : xesc(t.status);
     var closeIc = (typeof I!=="undefined" && I.x) ? I.x(18) : "×";
 

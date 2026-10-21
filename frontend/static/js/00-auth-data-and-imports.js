@@ -530,7 +530,7 @@ function areaChart(data){
   (hasT?'<text x="'+(w-pad)+'" y="30" text-anchor="end" font-size="11" fill="var(--muted-foreground)">– – PV Syst target</text>':'')+'</svg>';
 }
 /* ---------- badges ---------- */
-const TONE={Healthy:"success",Completed:"success",Approved:"success",Available:"success",Active:"success",Resolved:"success",Verified:"success","On track":"success","Active O&M":"success","Washed today":"success",Synced:"success",Compliant:"success","Closed (verified)":"success","Ready for Approval":"success",Warning:"warning",Attention:"warning",High:"warning",Medium:"warning",Pending:"warning","Pending Review":"warning","Approval Pending":"warning","Pending Approval":"warning","Nearing ETC":"warning","Pending sync":"warning",Queued:"warning","Due soon":"warning",Exception:"warning","Pending — Rescheduled":"warning","Pending Vendor":"warning","Changes Requested":"warning","In Progress":"info",Acknowledged:"info",Requested:"info",Assigned:"info","Submitted for Review":"info",Submitted:"info",Ordered:"info",Client:"info",Critical:"danger",Overdue:"danger",Breached:"danger",Expired:"danger",Rejected:"danger",Open:"danger",Breach:"danger",Low:"muted",Normal:"muted",Scheduled:"muted","Not Started":"muted",Closed:"muted",Internal:"muted",OK:"muted","N/A":"muted","—":"muted",Region:"muted","Own projects":"muted","Assigned items":"muted","Assigned tickets":"muted",Site:"muted",Portfolio:"info"};
+const TONE={Healthy:"success",Completed:"success",Approved:"success",Available:"success",Active:"success",Resolved:"success",Verified:"success","On track":"success","Active O&M":"success","Washed today":"success",Synced:"success",Compliant:"success","Closed (verified)":"success","Ready for Approval":"success",Warning:"warning",Attention:"warning",High:"warning",Medium:"warning",Pending:"warning","Pending Review":"warning","Approval Pending":"warning","Pending Approval":"warning","Nearing ETC":"warning","Pending sync":"warning",Queued:"warning","Due soon":"warning",Exception:"warning","Pending — Rescheduled":"warning","Pending Vendor":"warning","Changes Requested":"warning","In Progress":"info",Acknowledged:"info",Requested:"info",Assigned:"info","Submitted for Review":"info",Submitted:"info",Ordered:"info",Client:"info",Solved:"success",Critical:"danger",Overdue:"danger",Breached:"danger",Expired:"danger",Rejected:"danger",Open:"danger",Breach:"danger",Low:"muted",Normal:"muted",Scheduled:"muted","Not Started":"muted",Closed:"success",Internal:"muted",OK:"muted","N/A":"muted","—":"muted",Region:"muted","Own projects":"muted","Assigned items":"muted","Assigned tickets":"muted",Site:"muted",Portfolio:"info"};
 function bg(st){const t=TONE[st]||"muted";return {success:"b-success",warning:"b-warning",info:"b-info",danger:"b-danger",muted:"b-muted"}[t]}
 function badge(st){return '<span class="badge '+bg(st)+'">'+esc(st)+'</span>'}
 
@@ -1423,13 +1423,19 @@ const VERTICALS=["Inverter", "Module", "Transformer", "Aux. Transformer", "VCB P
 /* old category names (saved data from earlier versions) -> new vertical list */
 const VERT_MIGRATE={"Module/String":"Module","Combiner Box":"String","SCADA/Monitoring":"RMS","Civil/Structural":"Boundary wall","Security":"CCTV","Grid/Evacuation":"Transmission line","Weather Damage":"Other"};
 const SUBCATS={"Inverter": ["Fault code", "Communication loss", "Fan failure", "IGBT failure", "FirmWare"], "Module": ["Hotspot", "Glass breakage", "Delamination / discolouration", "Connector burn"], "Transformer": ["Oil leak", "DGA abnormality", "Bushing", "Tap changer"], "Aux. Transformer": ["Oil leak", "Tripping", "Bushing"], "VCB Panel": ["Breaker trip", "Relay fault", "Spring charging failure", "Terminal heating"], "VCB-Kiosk": ["Breaker trip", "Relay fault", "Door / enclosure damage"], "ACCB Panel": ["Breaker trip", "Terminal heating", "Metering fault"], "Switchyard - Plant side": ["Isolator fault", "CT / PT issue", "Insulator damage", "Earth switch"], "Switchyard - GSS side": ["Isolator fault", "CT / PT issue", "Insulator damage", "Breaker"], "Transmission line": ["Feeder trip", "Conductor damage", "Insulator damage", "Tower / pole damage"], "RMS": ["Communication loss", "Data gap", "Sensor failure"], "WMS": ["Sensor failure", "Communication loss", "Data gap", "Calibration"], "CCTV": ["Camera outage", "DVR / NVR failure", "Recording gap"], "Boundary wall": ["Crack / settlement", "Collapse", "Fence breach"], "String": ["Fuse failure", "String underperformance", "Terminal loose", "Cable damage"], "Earthing": ["High resistance", "Pit damage", "Loose connection"], "LA": ["Lightning strike damage", "Loose connection", "Counter fault"], "Water pipe line": ["Leakage", "Blockage", "Pump failure"], "Vegetation": ["Overgrowth", "Shading on modules", "Fire risk"], "Modules cleaning": ["Missed cleaning", "Water shortage", "Equipment failure"], "ABT meters": ["Communication loss", "Meter fault", "Data mismatch"], "Street Light": ["Fixture failure", "Cable fault", "Timer / control fault"], "MMS": ["Structure corrosion", "Loose bolts", "Foundation damage", "Tracker fault"], "Other": ["Other"]};
-const SEV=["Critical","Medium","Low"];
-const SEV_RANK={Critical:0,Medium:1,Low:2};
-const ETC_HRS={Critical:48,Medium:96,Low:240};
-function normalizeIssueSeverity(severity){return severity==="High"?"Critical":severity}
+/* Issues have two levels, Critical and Medium. Older records may say High (= Critical) or Low (= Medium).
+   A resolved or closed issue is shown as the green "Solved" level instead of its old priority (issueLevel). */
+const SEV=["Critical","Medium"];
+const SEV_RANK={Critical:0,Medium:1,Solved:2};
+const ETC_HRS={Critical:48,Medium:96};
+const ISSUE_LEVELS=["Critical","Medium","Solved"];
+const SEV_COLOR={Critical:"#DC4C3E",Medium:"#3B82F6",Solved:"#16A34A"};
+function normalizeIssueSeverity(severity){const s=String(severity==null?"":severity).trim().toLowerCase();return s==="critical"||s==="high"?"Critical":s==="medium"||s==="low"?"Medium":severity}
 function isCriticalIssue(issue){return normalizeIssueSeverity(issue&&issue.severity)==="Critical"}
+function issueSolved(issue){return !!issue&&(issue.status==="Resolved"||issue.status==="Closed")}
+function issueLevel(issue){return issueSolved(issue)?"Solved":(normalizeIssueSeverity(issue&&issue.severity)||"Medium")}
 function etcHrs(sev){const n=Number(ETC_HRS[normalizeIssueSeverity(sev)]);return Number.isFinite(n)&&n>0?n:48}
-function sevOpts(sel){return SEV.map(s=>'<option'+(sel===s?" selected":"")+'>'+s+'</option>').join("")}
+function sevOpts(sel){const v=normalizeIssueSeverity(sel);return SEV.map(s=>'<option'+(v===s?" selected":"")+'>'+s+'</option>').join("")}
 const VERT_BASE={};
 const TEAM_POOL=[];
 const ISSUE_ASSIGNEES=[];

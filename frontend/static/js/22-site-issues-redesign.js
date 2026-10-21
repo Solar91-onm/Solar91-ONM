@@ -2,8 +2,8 @@
 /* Site Issues — redesigned register. Reuses the existing data helpers (filterIssues, blankIssF, issueQuickActs, …). */
 (function(){
  if(typeof renderIssues!=="function")return;
- const PRI={Critical:"#DC4C3E",High:"#D97706",Medium:"#3B82F6",Low:"#94A3B8"};
- const STC={Open:"#3B82F6",Assigned:"#6675D9","In Progress":"#0F9F8C",Resolved:"#16A34A",Closed:"#94A3B8"};
+ const PRI=Object.assign({High:SEV_COLOR.Critical,Low:SEV_COLOR.Medium},SEV_COLOR);
+ const STC={Open:"#3B82F6",Assigned:"#6675D9","In Progress":"#0F9F8C",Resolved:"#16A34A",Closed:"#15803D"};
  const AGEC={"0–1 days":"#3B82F6","2–3 days":"#0F9F8C","4–7 days":"#D97706","8–14 days":"#EA7B24","15+ days":"#DC4C3E"};
  const AGES=Object.keys(AGEC);
  const STAT=["Open","Assigned","Acknowledged","In Progress","Pending Vendor","Resolved","Closed"];
@@ -34,16 +34,16 @@
 
  /* ================= grouping, plant snapshot, sites matrix, priority chart ================= */
  const GROUP_PAGE=10;
- const SEVS=["Critical","Medium","Low"];
+ const SEVS=ISSUE_LEVELS; /* Critical, Medium, and green Solved for resolved/closed tickets */
  let triGroups=[];
  const siOpen=()=>{if(!(S.siOpenGroups instanceof Set))S.siOpenGroups=new Set();return S.siOpenGroups};
  const isOpenT=t=>t.status!=="Closed"&&t.status!=="Resolved";
- const sevOf=t=>t.severity==="High"?"Critical":(SEVS.includes(t.severity)?t.severity:"Low");
+ const sevOf=issueLevel;
  function siGroups(list){
   const map=new Map();
   (list||[]).forEach(t=>{const vert=t.vertical||"Other",key=(t.plant||"")+"|"+vert;
    if(!map.has(key))map.set(key,{key,plant:t.plant||"",vert,items:[]});map.get(key).items.push(t)});
-  return [...map.values()].map(g=>{g.worst=g.items.map(sevOf).sort((a,b)=>(SEV_RANK[a]??9)-(SEV_RANK[b]??9))[0]||"Low";return g});
+  return [...map.values()].map(g=>{g.worst=g.items.map(sevOf).sort((a,b)=>(SEV_RANK[a]??9)-(SEV_RANK[b]??9))[0]||"Medium";return g});
  }
  function siUnitCodes(items){
   const out=[];items.forEach(t=>{const u=Array.isArray(t.units)&&t.units.length?t.units.map(x=>x.code||x.name):(t.equip&&t.equip!=="—"?String(t.equip).split(/\s*,\s*/):[]);u.forEach(c=>{if(c&&!out.includes(c))out.push(c)})});
@@ -55,7 +55,7 @@
   return esc(t.equip||"—")+(t.maker?'<div class="si-sub">'+esc(t.maker)+'</div>':'');
  }
  function siRow(t,cls){
-  const p=plantRec(t.plant),sla=slaState(t),age=issueAgeDays(t),ab=ageBucket(t),c=PRI[t.severity]||"#ccc";
+  const p=plantRec(t.plant),sla=slaState(t),age=issueAgeDays(t),ab=ageBucket(t),c=PRI[issueLevel(t)]||"#ccc";
   return '<tr class="si-r click'+cls+(sla==="breach"?" od":"")+(S.flashId===t.id?" flash-new":"")+'" data-rid="'+esc(t.id)+'" data-act="issue" data-id="'+esc(t.id)+'">'+
    '<td style="--c:'+c+'"><div class="si-id">'+esc(t.id)+'<small>'+esc(t.vertical||"")+(t.sub?" · "+esc(t.sub):"")+'</small></div>'+(t.desc?'<div class="si-desc">'+esc(String(t.desc).slice(0,90))+'</div>':'')+'</td>'+
    '<td><div style="font-weight:600">'+esc(p?p.id:t.plant)+'</div><div class="si-sub">'+esc(p?p.name:"")+'</div></td>'+
@@ -66,7 +66,7 @@
    '<td>'+badge(t.status)+(sla==="breach"?" "+badge("Overdue"):"")+etcLabel(t)+'</td>'+
    '<td class="oi-action-cell"><div class="oi-row-actions">'+issueQuickActs(t)+'</div></td></tr>';
  }
- const MIXC={Open:"#3B82F6",Assigned:"#6675D9",Acknowledged:"#8B5CF6","In Progress":"#0F9F8C","Pending Vendor":"#D97706",Resolved:"#16A34A",Closed:"#94A3B8"};
+ const MIXC={Open:"#3B82F6",Assigned:"#6675D9",Acknowledged:"#8B5CF6","In Progress":"#0F9F8C","Pending Vendor":"#D97706",Resolved:"#16A34A",Closed:"#15803D"};
  function siStatusMix(items){
   const order=Object.keys(MIXC),cnt={};
   items.forEach(t=>{cnt[t.status]=(cnt[t.status]||0)+1});
@@ -124,7 +124,7 @@
    '<button type="button" class="btn o sm" onclick="siSet({plant:\'all\',vert:\'all\'})">All plants</button></div>';
   if(!groups.length)return h+'<div class="si-plant-empty">✓ No issues recorded at this plant.</div></div>';
   h+='<div class="si-plant-grid">'+groups.map(g=>{const o=g.items.filter(isOpenT),done=g.items.length-o.length,on=f.vert===g.vert,units=siUnitCodes(o);
-   const worst=o.length?siGroups(o)[0].worst:"Low";
+   const worst=o.length?siGroups(o)[0].worst:"Medium";
    return '<button type="button" class="si-eq'+(on?" on":"")+(o.length?"":" ok")+'" style="--c:'+(o.length?PRI[worst]:"#16A34A")+'" onclick="siToggle(\'vert\',\''+q(g.vert)+'\')"><div class="si-eq-h"><b>'+esc(g.vert)+'</b><span class="si-eq-n">'+(o.length?o.length+" open":"✓ clear")+'</span></div>'+
     (o.length?siStatusMix(o):'')+
     '<small>'+(units.length?esc(units.slice(0,5).join(", "))+(units.length>5?" +"+(units.length-5):"")+' · ':'')+(o.length?'worst '+esc(worst)+' · oldest '+Math.max.apply(null,o.map(issueAgeDays))+'d':'')+(done?(o.length?' · ':'')+done+' done':'')+'</small></button>'}).join("")+'</div></div>';
@@ -136,8 +136,8 @@
   types.sort((a,b)=>typeCount(b)-typeCount(a)||a.localeCompare(b));
   plants.sort((a,b)=>plantCount(b)-plantCount(a)||a.localeCompare(b));
   if(!plants.length)return '<div class="si-empty"><div class="ico">✓</div><b>No issues in view</b><p>Change the filters to see plants here.</p></div>';
-  const TINT={Critical:"rgba(220,76,62,.16)",Medium:"rgba(59,130,246,.14)",Low:"rgba(148,163,184,.2)"};
-  let h='<div class="si-mx-wrap"><div class="si-mx-legend"><span>Number = open tickets · colour = worst priority</span>'+SEVS.map(k=>'<span><i style="background:'+PRI[k]+'"></i>'+k+'</span>').join("")+'<span><i class="ok"></i>All done</span></div><div class="si-scroll"><table class="si-mx"><thead><tr><th class="pl">Plant</th>'+types.map(k=>'<th title="'+esc(k)+'">'+esc(k)+'</th>').join("")+'<th class="tot">Open</th></tr></thead><tbody>';
+  const TINT={Critical:"rgba(220,76,62,.16)",Medium:"rgba(59,130,246,.14)"};
+  let h='<div class="si-mx-wrap"><div class="si-mx-legend"><span>Number = open tickets · colour = worst priority</span>'+SEV.map(k=>'<span><i style="background:'+PRI[k]+'"></i>'+k+'</span>').join("")+'<span><i class="ok"></i>All done</span></div><div class="si-scroll"><table class="si-mx"><thead><tr><th class="pl">Plant</th>'+types.map(k=>'<th title="'+esc(k)+'">'+esc(k)+'</th>').join("")+'<th class="tot">Open</th></tr></thead><tbody>';
   plants.forEach(pn=>{const p=plantRec(pn);
    h+='<tr><th class="pl"><button type="button" onclick="S.issView=\'list\';siSet({plant:\''+q(pn)+'\'})"><b>'+esc(p?p.id:pn)+'</b><small>'+esc(p?p.name:"")+'</small></button></th>';
    types.forEach(k=>{const items=list.filter(t=>t.plant===pn&&(t.vertical||"Other")===k);
@@ -153,14 +153,14 @@
  function siPriorityChart(list,by,f){
   const scope=S.siChartScope==="all"?list:list.filter(isOpenT);
   const keyOf=t=>by==="plant"?(t.plant||"—"):(t.vertical||"Other");
-  const map=new Map();scope.forEach(t=>{const k=keyOf(t);if(!map.has(k))map.set(k,{k,Critical:0,Medium:0,Low:0,n:0});const r=map.get(k);r[sevOf(t)]++;r.n++});
+  const map=new Map();scope.forEach(t=>{const k=keyOf(t);if(!map.has(k))map.set(k,{k,Critical:0,Medium:0,Solved:0,n:0});const r=map.get(k);r[sevOf(t)]++;r.n++});
   let rows=[...map.values()].sort((a,b)=>b.Critical-a.Critical||b.n-a.n||a.k.localeCompare(b.k));
   if(!rows.length)return '<div class="si-empty"><div class="ico">✓</div><b>'+(S.siChartScope==="all"?"No tickets in view":"No open tickets in view")+'</b><p>Nothing to chart for the current filters.</p></div>';
-  if(rows.length>12){const rest=rows.slice(11),o={k:"Other ("+rest.length+")",Critical:0,Medium:0,Low:0,n:0,other:true};rest.forEach(r=>{SEVS.forEach(s=>{o[s]+=r[s]});o.n+=r.n});rows=rows.slice(0,11).concat([o])}
-  const max=Math.max.apply(null,rows.map(r=>r.n)),tot={Critical:0,Medium:0,Low:0};rows.forEach(r=>SEVS.forEach(s=>{tot[s]+=r[s]}));
+  if(rows.length>12){const rest=rows.slice(11),o={k:"Other ("+rest.length+")",Critical:0,Medium:0,Solved:0,n:0,other:true};rest.forEach(r=>{SEVS.forEach(s=>{o[s]+=r[s]});o.n+=r.n});rows=rows.slice(0,11).concat([o])}
+  const max=Math.max.apply(null,rows.map(r=>r.n)),tot={Critical:0,Medium:0,Solved:0};rows.forEach(r=>SEVS.forEach(s=>{tot[s]+=r[s]}));
   const label=r=>{if(by!=="plant"||r.other)return '<b>'+esc(r.k)+'</b>';const p=plantRec(r.k);return '<b>'+esc(p?p.id:r.k)+'</b> <small>'+esc(p?p.name:"")+'</small>'};
   const filt=(r,s)=>(by==="plant"?"siSet({plant:\'"+q(r.k)+"\'":"siSet({vert:\'"+q(r.k)+"\'")+(s?",sev:\'"+s+"\'":"")+"})";
-  return '<div class="si-pc"><div class="si-pc-lg">'+SEVS.map(s=>'<span><i style="background:'+PRI[s]+'"></i>'+s+' <b>'+tot[s]+'</b></span>').join("")+'</div>'+
+  return '<div class="si-pc"><div class="si-pc-lg">'+(S.siChartScope==="all"?SEVS:SEV).map(s=>'<span><i style="background:'+PRI[s]+'"></i>'+s+' <b>'+tot[s]+'</b></span>').join("")+'</div>'+
    rows.map(r=>'<div class="si-pc-row"><button type="button" class="si-pc-l" '+(r.other?"disabled":'onclick="'+filt(r,"")+'"')+' title="'+esc(r.k)+'">'+label(r)+'</button><div class="si-pc-bar">'+
     SEVS.filter(s=>r[s]).map(s=>'<button type="button" class="si-pc-seg" style="width:'+(r[s]/max*100).toFixed(2)+'%;--c:'+PRI[s]+'" data-tip="'+esc(r.k)+' · '+s+': '+r[s]+' of '+r.n+'" aria-label="'+esc(r.k)+' '+s+' '+r[s]+'" '+(r.other?"disabled":'onclick="'+filt(r,s)+'"')+'>'+(r[s]/max>=.07?'<span>'+r[s]+'</span>':'')+'</button>').join("")+
     '</div><b class="si-pc-n">'+r.n+'</b></div>').join("")+'</div>';
@@ -236,13 +236,12 @@
    return '<div class="si-dn"><h3>'+title+'</h3><div class="body"><div class="ring'+(anyOn?" has-on":"")+'"><svg viewBox="0 0 120 120"><circle cx="60" cy="60" r="'+R+'" fill="none" stroke="#EEF2EF" stroke-width="14"/>'+segs+'</svg><div class="ctr"><b>'+centerN+'</b><small>'+centerL+'</small></div></div>'+
     '<div class="lg">'+items.map(x=>'<button type="button" class="'+(onKey(x)?"on":"")+'" onclick="'+click(x)+'"><i style="background:'+x.c+'"></i><span>'+esc(x.l)+'</span><b>'+x.n+'</b></button>').join("")+'</div></div></div>'};
   const pBase=without(["sev"]),sBase=without(["bucket","status"]),dBase=without(["sla","chip"]);
-  const pI=SEV.map(x=>({l:x,n:openTk(pBase).filter(t=>t.severity===x).length,c:PRI[x]}));
+  const pI=ISSUE_LEVELS.map(x=>({l:x,n:pBase.filter(t=>issueLevel(t)===x).length,c:PRI[x]}));
   const sI=["Open","Assigned","In Progress","Resolved"].map(x=>({l:x,n:sBase.filter(t=>statusBucket(t)===x||(x==="Resolved"&&statusBucket(t)==="Closed")).length,c:STC[x]}));
   const dOpen=openTk(dBase),dOver=dOpen.filter(isOverdueIssue).length,dDone=dBase.length-dOpen.length;
-  const dI=[{l:"On time",n:dOpen.length-dOver,c:"#16A34A",k:"ontime"},{l:"Overdue",n:dOver,c:"#DC4C3E",k:"overdue"},{l:"Done",n:dDone,c:"#94A3B8",k:"done"}];
-  const open0=openTk(pBase).length;
+  const dI=[{l:"On time",n:dOpen.length-dOver,c:"#3B82F6",k:"ontime"},{l:"Overdue",n:dOver,c:"#DC4C3E",k:"overdue"},{l:"Done",n:dDone,c:SEV_COLOR.Solved,k:"done"}];
   h+='<div class="si-dns">'+
-   donut("Priority",pI,open0,"open",x=>f.sev===x.l,x=>"siToggle(\'sev\',\'"+q(x.l)+"\')")+
+   donut("Priority",pI,pBase.length,"issues",x=>f.sev===x.l,x=>"siToggle(\'sev\',\'"+q(x.l)+"\')")+
    donut("Status",sI,sBase.length,"issues",x=>f.bucket===x.l,x=>"siBucket(\'"+q(x.l)+"\')")+
    donut("Deadline",dI,dOpen.length?Math.round(100*(dOpen.length-dOver)/dOpen.length)+"%":"—","on time",x=>f.sla===x.k,x=>"siToggle(\'sla\',\'"+x.k+"\')")+'</div>';
 
@@ -302,7 +301,7 @@
     catch(error){console.error("Solar91: issue trend failed independently of register",error);chartHtml='<div class="si-empty" role="alert"><b>Trend chart unavailable</b><p>Issues are still available. Change the date range or refresh to retry.</p></div>'}
    }else chartHtml=siPriorityChart(filterIssues(all,Object.assign({},f,{sev:"all"})),chartBy,f);
   }
-  h+='<div class="si-trend"><div class="si-trend-h"><div><h3>'+(chartBy==="trend"?"Issue trend":"Issues by priority")+'</h3><span class="si-sub">'+(chartBy==="trend"?"Created, resolved and open backlog":"Critical, Medium and Low "+(S.siChartScope==="all"?"tickets (all statuses)":"open tickets")+" per "+(chartBy==="plant"?"plant":"equipment type")+" · click a bar to filter")+'</span></div><div class="si-trend-tools">'+
+  h+='<div class="si-trend"><div class="si-trend-h"><div><h3>'+(chartBy==="trend"?"Issue trend":"Issues by priority")+'</h3><span class="si-sub">'+(chartBy==="trend"?"Created, resolved and open backlog":(S.siChartScope==="all"?"Critical, Medium and Solved tickets (all statuses)":"Critical and Medium open tickets")+" per "+(chartBy==="plant"?"plant":"equipment type")+" · click a bar to filter")+'</span></div><div class="si-trend-tools">'+
    (chartBy!=="trend"?'<div class="si-seg"><button type="button" class="'+(S.siChartScope!=="all"?"on":"")+'" onclick="S.siChartScope=\'open\';render()">Open</button><button type="button" class="'+(S.siChartScope==="all"?"on":"")+'" onclick="S.siChartScope=\'all\';render()">All</button></div>':'')+
    '<div class="si-seg">'+[["equipment","By equipment"],["plant","By plant"],["trend","Trend"]].map(([k,l])=>'<button type="button" class="'+(chartBy===k?"on":"")+'" onclick="S.siChartBy=\''+k+'\';S.siTrend=true;render()">'+l+'</button>').join("")+
    '<button type="button" onclick="siTrend()">'+(S.siTrend===false?"Show":"Hide")+'</button></div></div></div>'+chartHtml+'</div>';

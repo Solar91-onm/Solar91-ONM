@@ -31,10 +31,10 @@ function m26Board(){
   items.slice(0,CAP).forEach(t=>{
    const p=plantRec(t.plant),age=issueAgeDays(t),late=slaState(t)==="breach";
    const title=t.title||t.summary||t.description||t.desc||t.vertical||t.id;
-   h+='<div class="m26-card sev-'+esc(t.severity||"Low")+'" data-rid="'+esc(t.id)+'" data-act="issue" data-id="'+esc(t.id)+'" tabindex="0">'
+   h+='<div class="m26-card sev-'+esc(issueLevel(t))+'" data-rid="'+esc(t.id)+'" data-act="issue" data-id="'+esc(t.id)+'" tabindex="0">'
     +'<div class="t">'+esc(String(title).slice(0,70))+'</div>'
     +'<div class="s">'+esc(t.id)+' · '+esc(p?p.id:t.plant)+(t.equip?' · '+esc(t.equip):'')+'</div>'
-    +'<div class="f">'+badge(t.severity||"Low")+(late?badge("Overdue"):"")+'<span class="age">'+age+'d</span>'
+    +'<div class="f">'+badge(issueLevel(t))+(late?badge("Overdue"):"")+'<span class="age">'+age+'d</span>'
     +(t.assignee?'<span class="m26-av" title="'+esc(t.assignee)+'">'+esc(ccIni(t.assignee))+'</span>':'<span class="oi-unassigned">Unassigned</span>')
     +'</div></div>';
   });
@@ -52,7 +52,7 @@ if(typeof renderIssues==="function"){
   if(i<0)return '<div class="m26 m26-issues">'+h+'</div>';
   const mode=S.issView==="board"?"board":"list";
   let dn="";try{const L=filterIssues(S.issues,Object.assign(blankIssF(),S.issF||{}));const cnt=f=>L.filter(f).length,bk=t=>statusBucket(t);
-   dn='<div class="m26-dnrow">'+m26Donut("Priority mix","select a bar below to filter",[{l:"Critical",v:cnt(t=>normalizeIssueSeverity(t.severity)==="Critical"),c:"#DC4C3E"},{l:"Medium",v:cnt(t=>normalizeIssueSeverity(t.severity)==="Medium"),c:"#3B82F6"},{l:"Low",v:cnt(t=>normalizeIssueSeverity(t.severity)==="Low"),c:"#94A3B8"}],L.length,"issues")
+   dn='<div class="m26-dnrow">'+m26Donut("Priority mix","select a bar below to filter",ISSUE_LEVELS.map(k=>({l:k,v:cnt(t=>issueLevel(t)===k),c:SEV_COLOR[k]})),L.length,"issues")
    +m26Donut("Workflow status","current distribution",[{l:"Open",v:cnt(t=>bk(t)==="Open"),c:"#3B82F6"},{l:"Assigned",v:cnt(t=>bk(t)==="Assigned"),c:"#6675D9"},{l:"In progress",v:cnt(t=>bk(t)==="In Progress"),c:"#0F9F8C"},{l:"Resolved",v:cnt(t=>bk(t)==="Resolved"||bk(t)==="Closed"),c:"#16A34A"}],cnt(t=>bk(t)!=="Resolved"&&bk(t)!=="Closed"),"open")
    +m26Donut("Ownership","who is on it",[{l:"Assigned",v:cnt(t=>!!t.assignee),c:"#16A34A"},{l:"Unassigned",v:cnt(t=>!t.assignee),c:"#DC4C3E"}],cnt(t=>!t.assignee),"unassigned")+'</div>'}catch(e){dn=""}
   const bar='<div class="m26-bar"><div class="m26-seg" role="group" aria-label="Issue view">'
@@ -191,7 +191,7 @@ function m26Hub(){
  const ws=m26WashSummary();
  const washRedN=ws.cycle?ws.late.length:(typeof washLinked==="function"?washLinked():wash).filter(t=>wColor(t)==="red"&&!washedToday(t)&&!excToday(t)).length;
  const critUn=crit.filter(t=>!t.assignee).length;
- const sevN=k=>open.filter(t=>normalizeIssueSeverity(t.severity)===k).length,med=sevN("Medium"),low=sevN("Low");
+ const sevN=k=>open.filter(t=>normalizeIssueSeverity(t.severity)===k).length,med=sevN("Medium"),solved=issues.filter(issueSolved).length;
  const mwTxt=v=>v>0?(v>=10?Math.round(v):v.toFixed(2))+" MW":"—";
  const nav=on=>on?' onclick="'+on+'" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();'+on.replace(/"/g,"&quot;")+'}" role="button" tabindex="0"':'';
  /* segmented bar: parts [{v,c,l}] */
@@ -224,7 +224,7 @@ function m26Hub(){
  const kpi=(cls,label,val,sub,visual,on)=>'<div class="cx-kpi '+cls+'"'+nav(on)+'><div class="cx-kpi-top"><span>'+label+'</span>'+(on?'<em aria-hidden="true">→</em>':'')+'</div><div class="cx-kpi-v">'+val+'</div>'+visual+'<div class="cx-kpi-s">'+sub+'</div></div>';
  h+='<div class="cx-kpis">'
   +kpi("k-health","Plant health",'<b>'+hc.Healthy+'</b><small>/ '+plants.length+' healthy</small>',(hc.Warning+hc.Critical)?(hc.Critical?hc.Critical+' critical · ':'')+hc.Warning+' warning':'No plant needs attention',seg([{v:hc.Healthy,c:"#34D399",l:"Healthy"},{v:hc.Warning,c:"#FBBF24",l:"Warning"},{v:hc.Critical,c:"#F87171",l:"Critical"}]),"m26Nav('plants')")
-  +kpi("k-issues","Open issues",'<b>'+open.length+'</b><small>'+crit.length+' critical</small>',od.length+' overdue · '+un.length+' unassigned',seg([{v:crit.length,c:"#F87171",l:"Critical"},{v:med,c:"#60A5FA",l:"Medium"},{v:low,c:"#CBD5E1",l:"Low"}]),"m26Nav('issues')")
+  +kpi("k-issues","Open issues",'<b>'+open.length+'</b><small>'+crit.length+' critical</small>',od.length+' overdue · '+un.length+' unassigned',seg([{v:crit.length,c:"#F87171",l:"Critical"},{v:med,c:"#60A5FA",l:"Medium"}]),"m26Nav('issues')")
   +kpi("k-pm","Maintenance on time",'<b>'+(pmPct==null?'—':pmPct+'%')+'</b>',dueWk+' due this week'+(tOd.length?' · '+tOd.length+' late':''),'<div class="cx-bar"><i style="width:'+(pmPct||0)+'%;background:#34D399"></i></div>',"m26Nav('pm')")
   +kpi("k-wash","Washing on track",'<b>'+(ws.cycle?(ws.pct==null?'—':ws.pct+'%'):(wPct==null?'—':wPct+'%'))+'</b>',ws.cycle?(ws.late.length?ws.late.length+' behind deadline':'all plants on track')+' · '+ws.done+' month done':wRed+' tables overdue','<div class="cx-bar"><i style="width:'+((ws.cycle?ws.pct:wPct)||0)+'%;background:#38BDF8"></i></div>',"m26Nav('wash')")
   +'</div></section>';
@@ -263,7 +263,7 @@ function m26Hub(){
  /* ---- work lanes: issues · maintenance · washing ---- */
  const lane=(cls,ico,title,big,bigSub,parts,on,cta)=>'<section class="cx-card cx-lane '+cls+'"><header><span class="cx-lane-ic">'+ico+'</span><h2>'+title+'</h2><button type="button" class="cx-link" onclick="'+on+'">'+cta+' →</button></header><div class="cx-lane-big"><b>'+big+'</b><span>'+bigSub+'</span></div>'+seg(parts)+'<ul class="cx-legend">'+parts.map(p=>'<li><i style="background:'+p.c+'"></i>'+esc(p.l)+'<b>'+p.v+'</b></li>').join("")+'</ul></section>';
  h+='<div class="cx-lanes">'
-  +lane("l-issues","⚠","Site issues",open.length,"open",[{l:"Critical",v:crit.length,c:"#DC4C3E"},{l:"Medium",v:med,c:"#3B82F6"},{l:"Low",v:low,c:"#94A3B8"}],"m26Nav('issues')","Open register")
+  +lane("l-issues","⚠","Site issues",open.length,"open",[{l:"Critical",v:crit.length,c:"#DC4C3E"},{l:"Medium",v:med,c:"#3B82F6"},{l:"Solved",v:solved,c:"#16A34A"}],"m26Nav('issues')","Open register")
   +lane("l-pm","🛠","Maintenance",pmPct==null?"—":pmPct+"%","on time",[{l:"Done",v:tDone,c:"#16A34A"},{l:"Overdue",v:tOd.length,c:"#DC4C3E"},{l:"Upcoming",v:Math.max(0,tasks.length-tDone-tOd.length),c:"#CBD5D0"}],"m26Nav('pm')","Open planner")
   +(ws.cycle?lane("l-wash","💧","Panel washing",ws.pct==null?"—":ws.pct+"%","plants on track",[{l:"On track",v:Math.max(0,ws.ok-ws.done),c:"#16A34A"},{l:"Month done",v:ws.done,c:"#0E9F6E"},{l:"Behind deadline",v:ws.late.length,c:"#DC4C3E"}],"m26Nav('wash')","Open washing")
    :lane("l-wash","💧","Panel washing",wPct==null?"—":wPct+"%","tables compliant",[{l:"Compliant",v:wOk,c:"#16A34A"},{l:"Overdue",v:wRed,c:"#DC4C3E"},{l:"Due soon",v:Math.max(0,wash.length-wOk-wRed),c:"#F5C76B"}],"m26Nav('wash')","Open washing"))

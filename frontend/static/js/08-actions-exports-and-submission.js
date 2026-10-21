@@ -676,7 +676,7 @@ function reportRowsExport(kind){
   push("MTBF / MTTR BY EQUIPMENT");push("Equipment","MTBF (h)","MTTR (h)","Failures 90d");
   EQUIP_MTB.forEach(e=>push(e.type,e.mtbf,e.mttr,e.fl));push([]);
   push("SLA COMPLIANCE");push("SLA","Adherence %");
-  push("Critical Issues ("+etcHrs("Critical")+"h)",slaMetPct("Critical"));push("Medium Issues ("+etcHrs("Medium")+"h)",slaMetPct("Medium"));push("Low Issues ("+etcHrs("Low")+"h)",slaMetPct("Low"));push("Wash Frequency",washCompliancePct());push("PM On-Time",pmOnTimePct());}
+  push("Critical Issues ("+etcHrs("Critical")+"h)",slaMetPct("Critical"));push("Medium Issues ("+etcHrs("Medium")+"h)",slaMetPct("Medium"));push("Wash Frequency",washCompliancePct());push("PM On-Time",pmOnTimePct());}
  return R;
 }
 function downloadReport(kind){
@@ -804,7 +804,7 @@ function ccDonutOn(act,id){
 })();
 
 const CC_TINT={"var(--success)":"var(--success-soft)","var(--warning)":"var(--warning-soft)","var(--danger)":"var(--danger-soft)","var(--info)":"var(--info-soft)","var(--foreground)":"var(--muted)","var(--primary)":"var(--secondary)"};
-const CC_PC={Critical:"#DC4C3E",Medium:"#3B82F6",Low:"#94A3B8"};
+const CC_PC=SEV_COLOR;
 function ccIni(n){return String(n||"—").split(/\s+/).map(w=>w[0]||"").join("").slice(0,2).toUpperCase()}
 function ccKpiIcon(label,size){
  const l=String(label).toLowerCase(),s=size||17;
@@ -854,8 +854,8 @@ function kpiTile(label,value,note,color,act,opts){
 }
 /* BENTO SIDE CARD — priority mix + workload (real data, clickable) */
 function ccSideCard(issues){
- const f=S.issF||{},P=["Critical","Medium","Low"];
- const cnt=p=>issues.filter(t=>normalizeIssueSeverity(t.severity)===p).length;
+ const f=S.issF||{},P=ISSUE_LEVELS;
+ const cnt=p=>issues.filter(t=>issueLevel(t)===p).length;
  const total=P.reduce((a,p)=>a+cnt(p),0);
  let inner="";
  if(total){
@@ -971,7 +971,7 @@ function renderDashboard(){
  h+='<div class="panel no-stick" style="padding:0"><div style="padding:14px 16px 0"><div class="row between wrap"><div><h2 style="font-size:15px;font-weight:700">Needs attention</h2><p style="font-size:12px;color:var(--muted-foreground);margin:3px 0 10px">Critical and overdue issues first</p></div>'+(canOpenIssues?'<button class="btn g sm" data-act="go" data-id="issues">All issues</button>':"")+'</div></div>';
  if(!attnRows.length)h+=emptyState("No critical issues","Nothing overdue or unassigned in the current filter.");
  else{h+='<div style="overflow-x:auto"><table class="dense"><thead><tr><th>Plant</th><th>Issue</th><th>Equipment / maker</th><th>Priority</th><th>Age</th><th>Assignee</th><th>Status</th></tr></thead><tbody>'+
-  attnRows.slice(0,12).map(t=>{const p=plantRec(t.plant);return '<tr class="click" data-act="issue" data-id="'+esc(t.id)+'" title="Open issue"><td><div style="font-weight:600">'+(p?esc(p.name):esc(t.plant||"—"))+'</div><div style="font-size:12px;color:var(--muted-foreground)">'+(p?esc(p.id):"")+'</div></td><td><div style="font-weight:600">'+esc(t.id)+'</div><div style="font-size:12px;color:var(--muted-foreground)">'+esc(t.vertical)+'</div></td><td>'+esc(t.equip||"—")+(t.maker?'<div style="font-size:12px;color:var(--muted-foreground)">'+esc(t.maker)+'</div>':'')+'</td><td>'+badge(t.severity)+'</td><td class="nowrap">'+esc(ageBucket(t))+'</td><td>'+(t.assignee?esc(t.assignee):'<span style="color:var(--danger);font-weight:600">Unassigned</span>')+'</td><td>'+badge(t.status)+(isOverdueIssue(t)?' '+badge("Overdue"):"")+'</td></tr>'}).join("")+'</tbody></table></div>';}
+  attnRows.slice(0,12).map(t=>{const p=plantRec(t.plant);return '<tr class="click" data-act="issue" data-id="'+esc(t.id)+'" title="Open issue"><td><div style="font-weight:600">'+(p?esc(p.name):esc(t.plant||"—"))+'</div><div style="font-size:12px;color:var(--muted-foreground)">'+(p?esc(p.id):"")+'</div></td><td><div style="font-weight:600">'+esc(t.id)+'</div><div style="font-size:12px;color:var(--muted-foreground)">'+esc(t.vertical)+'</div></td><td>'+esc(t.equip||"—")+(t.maker?'<div style="font-size:12px;color:var(--muted-foreground)">'+esc(t.maker)+'</div>':'')+'</td><td>'+badge(issueLevel(t))+'</td><td class="nowrap">'+esc(ageBucket(t))+'</td><td>'+(t.assignee?esc(t.assignee):'<span style="color:var(--danger);font-weight:600">Unassigned</span>')+'</td><td>'+badge(t.status)+(isOverdueIssue(t)?' '+badge("Overdue"):"")+'</td></tr>'}).join("")+'</tbody></table></div>';}
  h+='</div>';
  return h;
 }
@@ -1033,9 +1033,9 @@ function renderIssues(){
  const sorted=filtered.slice().sort((a,b)=>f.sort==="created"?String(b.created).localeCompare(String(a.created)):f.sort==="severity"?(SEV_RANK[a.severity]??9)-(SEV_RANK[b.severity]??9):f.sort==="age"?issueAgeDays(b)-issueAgeDays(a):new Date(a.etc)-new Date(b.etc));
  const issueRows=pageRows("issues",sorted,LIST_SIZE);
  const days=S.trendDays||10;
- const priorityColors={Critical:"#DC4C3E",Medium:"#3B82F6",Low:"#94A3B8"};
- const statusColors={Open:"#3B82F6",Assigned:"#6675D9","In Progress":"#0F9F8C",Resolved:"#16A34A",Closed:"#94A3B8"};
- const prioritySlices=SEV.map(s=>({label:s,id:s,n:filtered.filter(t=>t.severity===s).length,color:priorityColors[s],act:"issSev"})).filter(x=>x.n>0);
+ const priorityColors=SEV_COLOR;
+ const statusColors={Open:"#3B82F6",Assigned:"#6675D9","In Progress":"#0F9F8C",Resolved:"#16A34A",Closed:"#15803D"};
+ const prioritySlices=ISSUE_LEVELS.map(s=>({label:s,id:s,n:filtered.filter(t=>issueLevel(t)===s).length,color:priorityColors[s],act:"issSev"})).filter(x=>x.n>0);
  const statusOrder=["Open","Assigned","In Progress","Resolved","Closed"];
  const statusSlices=[...new Set(filtered.map(statusBucket))].sort((a,b)=>statusOrder.indexOf(a)-statusOrder.indexOf(b)).map(b=>({label:b,id:b,n:filtered.filter(t=>statusBucket(t)===b).length,color:statusColors[b]||"#94A3B8",act:"donutStatus"})).filter(x=>x.n>0);
  const ageColors={"0–1 days":"#3B82F6","2–3 days":"#0F9F8C","4–7 days":"#D97706","8–14 days":"#EA7B24","15+ days":"#DC4C3E"};
@@ -1062,7 +1062,7 @@ function renderIssues(){
   '<div class="row wrap" style="gap:8px;align-items:flex-end">'+
   '<div class="field oi-search-field" style="min-width:230px;flex:2"><label class="lbl" for="issue-filter-search">Search issues</label><div class="oi-search"><span aria-hidden="true">⌕</span><input id="issue-filter-search" name="issue_search" class="inp" aria-label="Search issues" value="'+esc(f.q)+'" placeholder="Ticket, plant, maker, description…" oninput="S.issF.q=this.value;S.tablePages.issues=1;renderSoon()"/></div></div>'+
   '<div class="field"><label class="lbl" for="issue-filter-plant">Plant</label>'+sel("plant",[["all","All plants"]].concat(S.plants.map(p=>[p.name,p.name])))+'</div>'+
-  '<div class="field"><label class="lbl" for="issue-filter-sev">Priority</label>'+sel("sev",[["all","All priority"]].concat(SEV.map(s=>[s,s])))+'</div>'+
+  '<div class="field"><label class="lbl" for="issue-filter-sev">Priority</label>'+sel("sev",[["all","All priority"]].concat(ISSUE_LEVELS.map(s=>[s,s])))+'</div>'+
   '<div class="field"><label class="lbl" for="issue-filter-status">Status</label>'+sel("status",[["all","All statuses"]].concat(STAT.map(s=>[s,s])))+'</div>'+
   '<div class="field"><label class="lbl" for="issue-filter-assignee">Assignee</label>'+sel("assignee",[["all","All assignees"],["Unassigned","Unassigned"]].concat(people.map(s=>[s,s])))+'</div>'+
   '<button class="btn o sm" style="margin-bottom:1px" onclick="S.issMore=!S.issMore;render()">'+(advOpen?"Hide extra filters":"More filters"+(advCount?" ("+advCount+")":""))+' '+I.chev(12)+'</button>'+
@@ -1088,7 +1088,7 @@ function renderIssues(){
    h+='<div class="panel oi-triage"><div class="row between wrap" style="gap:8px;margin-bottom:8px"><div><div class="kpi-label">NEEDS ASSIGNMENT</div><h2 style="font-size:15px;font-weight:700">Triage queue — '+need.length+' issue'+(need.length>1?'s':'')+' waiting for an owner</h2></div>'
     +(crit?'<span class="pill pillsm b-danger">'+crit+' critical</span>':'')+'</div>'
     +need.slice(0,6).map(t=>{const sla=slaState(t),pl=plantRec(t.plant);
-     return '<div class="oi-tri-row" style="border-left-color:'+(priorityColors[t.severity]||"#ccc")+'"><div class="oi-tri-main" data-act="issue" data-id="'+esc(t.id)+'" title="Open issue"><div><b>'+esc(t.id)+'</b> '+badge(t.severity)+(sla==="breach"?' '+badge("Overdue"):'')+'</div>'
+     return '<div class="oi-tri-row" style="border-left-color:'+(priorityColors[issueLevel(t)]||"#ccc")+'"><div class="oi-tri-main" data-act="issue" data-id="'+esc(t.id)+'" title="Open issue"><div><b>'+esc(t.id)+'</b> '+badge(issueLevel(t))+(sla==="breach"?' '+badge("Overdue"):'')+'</div>'
       +'<div class="oi-tri-meta">'+esc(t.plant||"—")+(t.equip&&t.equip!=="—"?' · '+esc(t.equip):'')+' · '+esc(t.vertical||"")+' · raised '+ago(t)+((etcInfo(t)||{}).txt?' · <b class="oi-etc-i '+etcInfo(t).cls+'">'+esc(etcInfo(t).txt)+'</b>':'')+'</div>'
       +(t.desc?'<div class="oi-tri-desc">'+esc(String(t.desc).slice(0,110))+(String(t.desc).length>110?'…':'')+'</div>':'')+'</div>'
       +'<div class="oi-tri-assign" onclick="event.stopPropagation()"><select class="sel" id="oi-qa-'+esc(t.id)+'">'+opts+'</select><button class="btn p sm" onclick="oiQuickAssign(\''+esc(t.id)+'\')">Assign</button></div></div>'}).join("")
@@ -1113,7 +1113,7 @@ function renderIssues(){
   h+='<tr class="click oi-issue-row oi-priority-'+esc(t.severity||"other").toLowerCase()+' '+(S.flashId===t.id?' flash-new':'')+'" data-rid="'+esc(t.id)+'" data-act="issue" data-id="'+esc(t.id)+'"><td class="oi-ticket-cell" style="border-left:3px solid '+(priorityColors[t.severity]||"#ccc")+'"><b>'+esc(t.id)+'</b></td>'+
   '<td><div style="font-weight:500">'+esc(p?p.id:t.plant)+'</div><div style="font-size:12px;color:var(--muted-foreground)">'+esc(p?p.name:"")+'</div></td>'+
   '<td>'+esc(t.equip||"—")+(t.maker?'<div style="font-size:12px;color:var(--muted-foreground)">'+esc(t.maker)+'</div>':'')+'</td>'+
-  '<td>'+esc(t.vertical)+'</td><td class="oi-priority-cell">'+badge(t.severity)+'</td><td class="nowrap"><span class="oi-age '+ageClass+'">'+age+'d</span><small class="oi-age-bucket">'+esc(ageBucket(t))+'</small></td>'+
+  '<td>'+esc(t.vertical)+'</td><td class="oi-priority-cell">'+badge(issueLevel(t))+'</td><td class="nowrap"><span class="oi-age '+ageClass+'">'+age+'d</span><small class="oi-age-bucket">'+esc(ageBucket(t))+'</small></td>'+
   '<td>'+(t.assignee?'<span class="oi-assignee"><i aria-hidden="true">'+esc(ccIni(t.assignee))+'</i><span data-act="workWho" data-id="'+esc(t.assignee)+'">'+esc(t.assignee)+'</span></span>':'<span class="oi-unassigned">Unassigned</span>')+'</td>'+
   '<td>'+badge(t.status)+(sla==="breach"?" "+badge("Overdue"):"")+etcLabel(t)+'</td><td class="oi-action-cell"><div class="oi-row-actions">'+issueQuickActs(t)+'</div></td></tr>';});
  h+='</tbody></table></div>'+tablePager("issues",filtered.length,LIST_SIZE)+'</div>';
@@ -1328,7 +1328,7 @@ function renderWork(){
    '<div class="row wrap" style="gap:6px">'+[["open","Open ("+open.length+")"],["all","All ("+src.length+")"]].map(([id,l])=>'<button class="pill sev-pill'+(mode===id?" active":"")+'" onclick="S.workIssueMode=\''+id+'\';render()">'+l+'</button>').join("")+'</div></div></div>';
   if(rows.length)h+='<div style="overflow-x:auto"><table class="dense"><thead><tr><th>Issue</th><th>Plant</th><th>Priority</th><th>Status</th><th>Age</th><th>Action</th></tr></thead><tbody>'+
    rows.map(t=>{const sla=slaState(t);
-    return '<tr class="click" data-act="issue" data-id="'+esc(t.id)+'"><td style="font-weight:600">'+esc(t.id)+'<div style="font-size:12px;color:var(--muted-foreground)">'+esc(t.vertical)+'</div></td><td>'+esc(t.plant)+'</td><td>'+badge(t.severity)+'</td><td>'+badge(t.status)+(sla==="breach"?" "+badge("Overdue"):"")+'</td><td class="nowrap" style="'+(sla==="breach"?"color:var(--danger);font-weight:700":"")+'">'+esc(ageBucket(t))+'</td><td>'+issueQuickActs(t)+'</td></tr>'}).join("")+'</tbody></table></div>';
+    return '<tr class="click" data-act="issue" data-id="'+esc(t.id)+'"><td style="font-weight:600">'+esc(t.id)+'<div style="font-size:12px;color:var(--muted-foreground)">'+esc(t.vertical)+'</div></td><td>'+esc(t.plant)+'</td><td>'+badge(issueLevel(t))+'</td><td>'+badge(t.status)+(sla==="breach"?" "+badge("Overdue"):"")+'</td><td class="nowrap" style="'+(sla==="breach"?"color:var(--danger);font-weight:700":"")+'">'+esc(ageBucket(t))+'</td><td>'+issueQuickActs(t)+'</td></tr>'}).join("")+'</tbody></table></div>';
   else h+=emptyState("No "+(mode==="open"?"open ":"")+"issues for this engineer","Switch to All, or assign work from the issue register.");
   h+='</div>';
   /* person detail — SCHEDULED TASKS */
@@ -1427,7 +1427,7 @@ function ccDoImport(){
    if(!pname){skipped.push("row "+(ln+2)+" · no plant");return}
    if(!plantRec(pname)){skipped.push("row "+(ln+2)+" · unknown plant \""+pname+"\"");return}
    const rawSev=col.severity>=0?r[col.severity]:"Medium";
-   const sev=SEV.includes(rawSev)?rawSev:"Medium";
+   const sev=SEV.includes(normalizeIssueSeverity(rawSev))?normalizeIssueSeverity(rawSev):"Medium";
    let status=col.status>=0?r[col.status]:"Open";
    if(!["Open","Assigned","Acknowledged","In Progress","Pending Vendor","Resolved","Closed"].includes(status))status="Open";
    const oc=col.occurred>=0&&/^\d{4}-\d{2}-\d{2}$/.test(r[col.occurred]||"")?r[col.occurred]+"T09:00":stampISO();
@@ -1500,7 +1500,7 @@ function filterIssues(list,f){f=f||S.issF||blankIssF();
  const base=(list||[]).filter(t=>{
   const p=plantRec(t.plant),site=p?p.id:"",project=plantProject(p);
   if(f.plant!=="all"&&t.plant!==f.plant)return false;
-  if(f.sev!=="all"&&t.severity!==f.sev)return false;
+  if(f.sev!=="all"&&issueLevel(t)!==f.sev)return false;
   if(f.vert!=="all"&&t.vertical!==f.vert)return false;
   if(f.assignee==="Unassigned"&&t.assignee)return false;
   if(f.assignee!=="all"&&f.assignee!=="Unassigned"&&(t.assignee||"")!==f.assignee)return false;
@@ -1548,7 +1548,7 @@ function ccOpenIssuesPanel(){
    '<td style="font-weight:600">'+esc(t.id)+'<div style="font-size:12px;color:var(--muted-foreground)">'+esc(t.vertical)+'</div></td>'+
    '<td><div style="font-weight:500">'+esc(t.plant)+'</div><div style="font-size:12px;color:var(--muted-foreground)">'+(p?esc(p.id):"")+'</div></td>'+
    '<td>'+esc(t.equip||"—")+(t.maker?'<div style="font-size:12px;color:var(--muted-foreground)">'+esc(t.maker)+'</div>':'')+'</td>'+
-   '<td>'+badge(t.severity)+'</td>'+
+   '<td>'+badge(issueLevel(t))+'</td>'+
    '<td class="nowrap" style="'+(isOverdueIssue(t)?"color:var(--danger);font-weight:700":"")+'">'+esc(ageBucket(t))+'</td>'+
    '<td>'+(t.assignee?esc(t.assignee):'<span style="color:var(--danger);font-weight:600">Unassigned</span>')+'</td>'+
    '<td class="nowrap">'+badge(t.status)+(isOverdueIssue(t)?' '+badge("Overdue"):"")+'</td>'+
@@ -1651,7 +1651,7 @@ function ccCloseDialog(id){
  o.addEventListener("click",function(e){if(e.target===o)o.remove()});
  o.innerHTML='<div class="modal" style="max-width:470px">'+
   '<div class="modal-h"><div><h3 style="font-size:16px;font-weight:600;margin:0">Close ticket — '+esc(t.id)+'?</h3>'+
-  '<p style="font-size:12px;color:var(--muted-foreground);margin:4px 0 0">'+esc(t.plant)+' · '+badge(t.severity)+' '+badge(t.status)+' — closes directly, skipping the Resolve step</p></div>'+
+  '<p style="font-size:12px;color:var(--muted-foreground);margin:4px 0 0">'+esc(t.plant)+' · '+badge(issueLevel(t))+' '+badge(t.status)+' — closes directly, skipping the Resolve step</p></div>'+
   '<button class="btn" style="border:none;color:var(--muted-foreground)" onclick="document.getElementById(\'cc-close-ovl\').remove()">'+I.x(18)+'</button></div>'+
   '<div class="modal-b"><div class="field" style="margin:0"><span class="lbl">Closure remarks — why is this ticket being closed? (optional)</span>'+
   '<textarea id="dc-rem" class="txt" rows="3" placeholder="e.g. Duplicate of another ticket / resolved on call / not reproducible…"></textarea></div>'+

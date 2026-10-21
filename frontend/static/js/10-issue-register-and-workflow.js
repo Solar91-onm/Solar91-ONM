@@ -601,7 +601,7 @@
       '</label>';
     }).join("");
 
-    var sev = (typeof badge==="function") ? badge(t.severity) : xesc(t.severity);
+    var sev = (typeof badge==="function") ? badge(issueLevel(t)) : xesc(t.severity);
     var st  = (typeof badge==="function") ? badge(t.status)   : xesc(t.status);
     var closeIc = (typeof I!=="undefined" && I.x) ? I.x(18) : "×";
 

@@ -165,7 +165,7 @@
     var plant = (typeof plantRec === "function" ? plantRec(t.plant) : null);
     var proj = (plant && typeof plantProject === "function") ? plantProject(plant) : "";
     var since = t.updateRequestedAt;
-    var sevColor = { Critical:"#b91c1c", Medium:"#0369a1", Low:"#475569" }[normalizeIssueSeverity(t.severity)] || "#374151";
+    var sevColor = { Critical:"#b91c1c", Medium:"#0369a1", Solved:"#15803d" }[issueLevel(t)] || "#374151";
 
     ov.innerHTML =
       '<div class="cc-ring-card">'+
@@ -177,7 +177,7 @@
           '<div class="cc-ring-row"><span>Plant</span><b>'+xesc(t.plant||"—")+'</b></div>'+
           (proj?'<div class="cc-ring-row"><span>Project</span><b>'+xesc(proj)+'</b></div>':'')+
           '<div class="cc-ring-row"><span>Equipment</span><b>'+xesc(t.equip||"—")+'</b></div>'+
-          '<div class="cc-ring-row"><span>Priority</span><b style="color:'+sevColor+'">'+xesc(t.severity||"—")+'</b></div>'+
+          '<div class="cc-ring-row"><span>Priority</span><b style="color:'+sevColor+'">'+xesc(issueLevel(t))+'</b></div>'+
           '<div class="cc-ring-row"><span>Asked by</span><b>'+xesc(t.updateRequestedBy||"—")+'</b></div>'+
         '</div>'+
         (msg ? '<div class="cc-ring-msg">"'+xesc(msg)+'"</div>' : '')+

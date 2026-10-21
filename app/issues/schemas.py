@@ -6,17 +6,23 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-ISSUE_SEVERITIES = {"Critical", "Medium", "Low"}
+ISSUE_SEVERITIES = {"Critical", "Medium"}
+# Issues have two levels. Older rows, files and clients may still say High or Low: High reads as Critical and
+# Low as Medium, so nothing stored needs rewriting.
+_SEVERITY_ALIASES = {"critical": "Critical", "high": "Critical", "medium": "Medium", "low": "Medium"}
+SEVERITY_STORED_AS = {"Critical": ("Critical", "High"), "Medium": ("Medium", "Low")}
 
 
 def normalize_issue_severity(value: Any) -> Any:
-    return "Critical" if value == "High" else value
+    if isinstance(value, str):
+        return _SEVERITY_ALIASES.get(value.strip().casefold(), value)
+    return value
 
 
 def validate_issue_severity(value: Any) -> Any:
     normalized = normalize_issue_severity(value)
     if normalized not in ISSUE_SEVERITIES:
-        raise ValueError("severity must be Critical, Medium or Low")
+        raise ValueError("severity must be Critical or Medium")
     return normalized
 
 

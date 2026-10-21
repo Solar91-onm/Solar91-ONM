@@ -17,6 +17,7 @@ from sqlalchemy import and_, exists, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
+from app.issues.schemas import SEVERITY_STORED_AS
 from app.core.models import AuditLog, Equipment, Issue, IssueHistory, OMTask, Plant, User, WashingTable, WashingConfig, WashingDailyReport
 from app.core.security import (
     WASHING_TYPE,
@@ -136,7 +137,7 @@ def field_overview(
                     "status": "Overdue" if due < today else "Due today" if due == today else "Upcoming"})
     def issue_out(t: Issue):
         return {"id": str(t.id), "ticket": t.ticket_no, "plant": plant_names.get(str(t.plant_id), ""),
-                "description": t.description[:240], "severity": t.severity, "status": t.status,
+                "description": t.description[:240], "severity": _normal_severity(t.severity), "status": t.status,
                 "assignee": t.assignee_text or "Unassigned", "equipment": t.equipment_ref or t.vertical or "", "due": t.etc_at.date().isoformat() if t.etc_at else None}
     def task_out(t: OMTask):
         due = t.planned_due_on or t.due_on
@@ -150,7 +151,7 @@ def field_overview(
         "issues": [issue_out(t) for t in issues[:limit]],
         "tasks": [task_out(t) for t in tasks[:limit]],
         "washing": washing[:limit],
-        "summary": {"open_issues": len(issues), "critical_issues": sum(t.severity == "Critical" for t in issues),
+        "summary": {"open_issues": len(issues), "critical_issues": sum(_normal_severity(t.severity) == "Critical" for t in issues),
                     "due_tasks": sum((t.planned_due_on or t.due_on or date.max) <= today for t in tasks),
                     "overdue_tasks": sum((t.planned_due_on or t.due_on or date.max) < today for t in tasks),
                     "washing_due": sum(x["due"] == today.isoformat() for x in washing),
@@ -231,7 +232,8 @@ _MODULE_WORDS = {
     "plants": "plants", "sites": "plants",
     "equipment": "equipment", "equipments": "equipment", "asset": "equipment", "assets": "equipment",
 }
-_SEVERITY_WORDS = {"critical": "Critical", "urgent": "Critical", "high": "Critical", "medium": "Medium", "moderate": "Medium", "low": "Low", "minor": "Low"}
+_SEVERITY_WORDS = {"critical": "Critical", "urgent": "Critical", "high": "Critical", "medium": "Medium", "moderate": "Medium", "low": "Medium", "minor": "Medium",
+                   "solved": "Solved"}
 # multi-word phrases first; values are status filter keys
 _STATUS_PHRASES = (
     ("in progress", "in progress"), ("waiting for parts", "pending vendor"), ("pending vendor", "pending vendor"),
@@ -299,8 +301,11 @@ def parse_search_query(text: str, plants: list[Plant]) -> dict:
 
 
 def _normal_severity(value: str | None) -> str:
+    """Two issue levels (old High = Critical, old Low = Medium); "Solved" is the level search shows for resolved tickets."""
     text = str(value or "").strip().casefold()
-    return "Critical" if text in {"critical", "high"} else "Medium" if text == "medium" else "Low" if text else ""
+    if text == "solved":
+        return "Solved"
+    return "Critical" if text in {"critical", "high"} else "Medium" if text else ""
 
 
 def _status_matches(entry: dict, key: str) -> bool:
@@ -413,7 +418,7 @@ def run_operational_search(db: Session, user: User, q: str = "", *, limit: int =
             etc = issue.etc_at if issue.etc_at is None or issue.etc_at.tzinfo else issue.etc_at.replace(tzinfo=timezone.utc)
             add('issues', str(issue.id), issue.plant_id, issue.description, issue.status,
                 issue.etc_at.date().isoformat() if issue.etc_at else None, issue.equipment_ref or issue.vertical or '',
-                ticket=issue.ticket_no, severity=_normal_severity(issue.severity), assignee=(issue.assignee_text or '').strip(),
+                ticket=issue.ticket_no, severity=_normal_severity(issue.severity) if active else "Solved", assignee=(issue.assignee_text or '').strip(),
                 active=active, overdue=bool(active and etc and etc < now),
                 extra=' '.join(filter(None, [issue.vertical, issue.subcategory, issue.maker])), recency=-index)
     if 'pm' in wanted_modules:
@@ -495,7 +500,7 @@ def run_operational_search(db: Session, user: User, q: str = "", *, limit: int =
         for hits, exact, e in scored:
             e['_score'] = hits + (100 if exact else 0)
             entries.append(e)
-    sev_rank = {'Critical': 0, 'Medium': 1, 'Low': 2, '': 3}
+    sev_rank = {'Critical': 0, 'Medium': 1, 'Solved': 2, '': 3}
     # _recency is 0 for the most recently updated record of a module and more negative for older ones
     orders = {
         'relevance': lambda e: (-e.get('_score', 0), not e['active'], not e['overdue'], sev_rank.get(e['severity'], 3),
@@ -687,7 +692,7 @@ def _assistant_fact_answer(db: Session, user: User, question: str) -> dict | Non
         task_rows = list(db.scalars(task_stmt.order_by(OMTask.due_on, OMTask.work_order_no).limit(10)))
         names = {p.id: p.plant_name for p in plants}
         records = [{"module": "issues", "id": str(row.id), "ticket": row.ticket_no, "title": row.description[:180],
-                    "plant": names.get(row.plant_id, ""), "status": row.status, "severity": row.severity,
+                    "plant": names.get(row.plant_id, ""), "status": row.status, "severity": _normal_severity(row.severity),
                     "due": row.etc_at.date().isoformat() if row.etc_at else None, "assignee": row.assignee_text or user.display_name} for row in issue_rows]
         records.extend({"module": "pm", "id": row.work_order_no, "title": row.task_name,
                     "plant": names.get(row.plant_id, ""), "status": row.status,
@@ -720,7 +725,7 @@ def _assistant_fact_answer(db: Session, user: User, question: str) -> dict | Non
         rows = list(db.scalars(stmt.order_by(Issue.updated_at.desc()).limit(20)))
         names = {p.id: p.plant_name for p in plants}
         records = [{"module": "issues", "id": str(row.id), "title": row.description[:180], "ticket": row.ticket_no,
-                    "plant": names.get(row.plant_id, ""), "status": row.status, "severity": row.severity,
+                    "plant": names.get(row.plant_id, ""), "status": row.status, "severity": _normal_severity(row.severity),
                     "due": row.etc_at.date().isoformat() if row.etc_at else None, "assignee": row.assignee_text or "Unassigned"} for row in rows]
         return {"answer": f"{count} open issues in {date_note}, grouped by status.",
                 "summary": {"label": "Open issues", "value": count}, "breakdown": breakdown, "records": records,
@@ -740,7 +745,7 @@ def _assistant_fact_answer(db: Session, user: User, question: str) -> dict | Non
         # severity, "unassigned" and equipment words narrow the exact count too (e.g. "open critical inverter issues")
         parsed = parse_search_query(question, plants)
         if parsed["severities"]:
-            wanted = {value.casefold() for value in parsed["severities"]} | ({"high"} if "Critical" in parsed["severities"] else set())
+            wanted = {stored.casefold() for value in parsed["severities"] for stored in SEVERITY_STORED_AS.get(value, (value,))}
             stmt = stmt.where(func.lower(Issue.severity).in_(wanted))
         unassigned = "unassigned" in parsed["statuses"]
         if unassigned:
@@ -754,7 +759,7 @@ def _assistant_fact_answer(db: Session, user: User, question: str) -> dict | Non
         rows = list(db.scalars(stmt.order_by(Issue.updated_at.desc()).limit(20)))
         names = {p.id: p.plant_name for p in plants}
         records = [{"module": "issues", "id": str(row.id), "title": row.description[:180], "ticket": row.ticket_no,
-                    "plant": names.get(row.plant_id, ""), "status": row.status, "severity": row.severity,
+                    "plant": names.get(row.plant_id, ""), "status": row.status, "severity": _normal_severity(row.severity),
                     "due": row.etc_at.date().isoformat() if row.etc_at else None, "assignee": row.assignee_text or "Unassigned"} for row in rows]
         detail = " ".join([value.casefold() for value in parsed["severities"]] + (["unassigned"] if unassigned else []) + narrow)
         label = ("Overdue open" if "overdue" in q else "Open") + (f" {detail}" if detail else "") + " issues" + (" assigned to you" if "assigned to me" in q or "my work" in q else "")
