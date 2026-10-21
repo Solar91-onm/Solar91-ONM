@@ -39,7 +39,9 @@ function renderReportsHub(){
 const TA_ROLES=["O&M Head","Assignee","Administration","Site Engineer","Viewer"];
 const TA_ROLE_HELP={"O&M Head":"Full administration, all plants","Assignee":"O&M team — owns chosen equipment types (e.g. Inverter) across ALL plants","Administration":"Read-only Command Center and reports","Site Engineer":"Exactly ONE plant, own-plant workflow","Viewer":"Pending — no access until a role is assigned"};
 const TA_ROLE_CLS={"O&M Head":"om-head","Assignee":"assignee","Administration":"ceo-cto","Site Engineer":"site-engineer","Viewer":"viewer"};
-const TA={users:null,loading:false,error:null,draft:{},open:{},q:{},selOnly:{},filter:"all",saving:{},formOpen:false,nw:{name:"",email:"",role:"Assignee",plant:"",equipment_types:[]}};
+/* TA_PAGE bounds how many people are drawn at once: every row carries dropdowns, so drawing hundreds made each redraw slow. */
+const TA_PAGE=50;
+const TA={users:null,loading:false,error:null,draft:{},open:{},q:{},selOnly:{},filter:"all",search:"",limit:TA_PAGE,edit:{},saving:{},formOpen:false,nw:{name:"",email:"",role:"Assignee",plant:"",equipment_types:[]}};
 
 async function taLoad(force){
  if(AUTH_IDENTITY.role!=="O&M Head")return;
@@ -59,6 +61,19 @@ function taPlants(){
  TA._pl=ps.filter(p=>p.dbId).slice().sort((a,b)=>String(a.id).localeCompare(String(b.id)));
  TA._plSrc=ps;TA._plLen=ps.length;TA._plIdx={};TA._pl.forEach((p,i)=>TA._plIdx[p.dbId]=i);
  return TA._pl;
+}
+/* plant <option> list built once per plant list (not once per Site Engineer row); `sel` marks the chosen plant */
+function taPlantOptions(sel){
+ const plants=taPlants();
+ if(TA._plOptsSrc!==plants){TA._plOptsSrc=plants;TA._plOpts=plants.map(p=>'<option value="'+esc(p.dbId)+'">'+esc(p.id+" · "+p.name)+'</option>').join("")}
+ if(!sel)return TA._plOpts;
+ const tag='<option value="'+esc(sel)+'">';
+ return TA._plOpts.replace(tag,tag.slice(0,-1)+' selected>');
+}
+function taFillPlants(el){
+ if(el.dataset.full)return;
+ const v=el.value;el.dataset.full="1";
+ el.innerHTML='<option value="">— select ONE plant —</option>'+taPlantOptions(v);el.value=v;
 }
 /* each plant gets a stable colour (pc0…pc7) so the same plant looks the same everywhere in this panel */
 function taPlantCls(plantDbId){taPlants();const i=TA._plIdx[plantDbId];return i==null?"pcx":"pc"+(i%8)}
@@ -141,10 +156,18 @@ async function taSave(id){
  if(u.is_self&&d.role!=="O&M Head"){toast("You cannot remove your own O&M Head access.");return}
  TA.saving[id]=true;taRefreshRow(id);
  try{
-  await apiFetch("/api/users/"+encodeURIComponent(id)+"/access",{method:"PUT",body:{role:d.role,plant_ids,equipment_types}});
+  const r=await apiFetch("/api/users/"+encodeURIComponent(id)+"/access",{method:"PUT",body:{role:d.role,plant_ids,equipment_types}});
   toast((u.name||u.email||"User")+" is now "+d.role+(plant_ids.length?" · 1 plant":"")+(d.role==="Assignee"?" · "+equipment_types.length+" equipment type"+(equipment_types.length===1?"":"s")+" across all plants":""));
-  delete TA.draft[id];TA.saving[id]=false;await taLoad(true);
+  /* the reply is the saved row: update this one person instead of reloading everyone (which also dropped other rows' unsaved edits) */
+  const pl=taPlants();
+  taMerge(id,{role:r.role,active:r.active,equipment_types:(r.equipment_types||[]).slice().sort(),
+   plants:(r.plant_ids||[]).map(pid=>{const p=pl.find(x=>x.dbId===pid);return {plant_id:pid,site_code:p?p.id:"",plant_name:p?p.name:""}})});
+  delete TA.draft[id];TA.saving[id]=false;render();
  }catch(e){TA.saving[id]=false;toast("Not saved — "+e.message);taRefreshRow(id)}
+}
+function taMerge(id,patch){
+ const i=(TA.users||[]).findIndex(x=>x.id===id);
+ if(i>=0)TA.users[i]=Object.assign({},TA.users[i],patch);
 }
 async function taResendInvite(id){
  const u=taUser(id);if(!u)return;
@@ -155,8 +178,50 @@ async function taResendInvite(id){
 async function taToggleActive(id,on){
  const u=taUser(id);if(!u)return;
  if(!on&&!confirm("Deactivate "+(u.name||u.email)+"? They will be locked out immediately."))return;
- try{await apiFetch("/api/users/"+encodeURIComponent(id)+"/active",{method:"PATCH",body:{is_active:on}});toast((on?"Activated ":"Deactivated ")+(u.name||u.email));await taLoad(true)}
+ try{const r=await apiFetch("/api/users/"+encodeURIComponent(id)+"/active",{method:"PATCH",body:{is_active:on}});toast((on?"Activated ":"Deactivated ")+(u.name||u.email));taMerge(id,{active:r.active});render()}
  catch(e){toast("Not changed — "+e.message)}
+}
+
+/* ---- correct a person's name / email (email only before their first sign-in) ---- */
+function taEditStart(id){
+ const u=taUser(id);if(!u)return;
+ TA.edit[id]={name:u.name||"",email:u.email||""};taRefreshRow(id);
+ setTimeout(()=>{const e=document.getElementById("ta-en-"+id);if(e){e.focus();e.select()}},0);
+}
+function taEditCancel(id){delete TA.edit[id];taRefreshRow(id)}
+function taEditKey(e,id){if(e.key==="Enter"){e.preventDefault();taSaveProfile(id)}else if(e.key==="Escape")taEditCancel(id)}
+async function taSaveProfile(id){
+ const u=taUser(id),ed=TA.edit[id],key="profile:"+id;
+ if(!u||!ed||TA.saving[key])return;
+ const name=String(ed.name||"").replace(/\s+/g," ").trim(),email=String(ed.email||"").trim();
+ const nameChanged=name!==(u.name||""),emailChanged=!!u.invited&&email!==(u.email||"");
+ if(!name){toast("Name cannot be empty.");return}
+ if(emailChanged&&!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)){toast("Enter a valid email address.");return}
+ if(!nameChanged&&!emailChanged){taEditCancel(id);toast("Nothing changed.");return}
+ const body={expected_name:u.name||"",expected_email:u.email||""};
+ if(nameChanged)body.name=name;
+ if(emailChanged)body.email=email;
+ TA.saving[key]=true;taRefreshRow(id);
+ try{
+  const r=await apiFetch("/api/users/"+encodeURIComponent(id)+"/profile",{method:"PATCH",body});
+  taMerge(id,{name:r.name,email:r.email,invited:r.invited,active:r.active,role:r.role});
+  delete TA.edit[id];TA.saving[key]=false;
+  if(nameChanged)taRenameLocal(id,u.name,r.name);
+  render();
+  toast("Saved "+r.name+(nameChanged&&r.renamed_assignments?" — name updated on "+r.renamed_assignments+" assigned ticket"+(r.renamed_assignments===1?"":"s")+"/task"+(r.renamed_assignments===1?"":"s"):"")
+   +(emailChanged?(r.email_sent?" — new invite sent to "+r.email:" — invite email NOT sent ("+(r.email_note||"unknown reason")+"). Tell them to sign in with "+r.email):""));
+ }catch(e){
+  TA.saving[key]=false;toast("Not saved — "+e.message);
+  if(e.status===409&&/changed by someone else/i.test(e.message)){delete TA.edit[id];taLoad(true)}else taRefreshRow(id);
+ }
+}
+/* The server renamed the person's tickets/tasks; mirror that in memory so open lists show the new name without a reload. */
+function taRenameLocal(id,oldName,newName){
+ const was=String(oldName||"").trim().toLowerCase(),fix=t=>String(t||"").trim().toLowerCase()===was;
+ (S.issues||[]).forEach(t=>{if(t.assignedTo===id&&fix(t.assignee))t.assignee=newName});
+ (S.tasks||[]).forEach(t=>{if(t.assigneeUserId===id&&fix(t.assignee))t.assignee=newName});
+ if(typeof AUTH_IDENTITY!=="undefined"&&AUTH_IDENTITY.userId===id)AUTH_IDENTITY.name=newName;
+ if(typeof refreshTeamPool==="function")refreshTeamPool().catch(()=>{});
 }
 
 /* ---- equipment TYPE selector (shared by the user rows and the Add-person form) ----
@@ -189,7 +254,8 @@ function taScopeCell(u,d){
  const plants=taPlants();
  if(d.role==="Site Engineer"){
   const cur=plants.find(p=>p.dbId===d.plant_ids[0]);
-  return '<div class="ta-box'+(cur?"":" warn")+'"><select class="inp" style="min-width:230px;font-size:12px" onchange="taSetOnePlant(\''+id+'\',this.value)"><option value="">— select ONE plant —</option>'+plants.map(p=>'<option value="'+esc(p.dbId)+'"'+(d.plant_ids[0]===p.dbId?" selected":"")+'>'+esc(p.id+" · "+p.name)+'</option>').join("")+'</select>'
+  /* only the chosen plant is drawn; the full list is filled in when the dropdown is opened (taFillPlants) */
+  return '<div class="ta-box'+(cur?"":" warn")+'"><select class="inp" style="min-width:230px;font-size:12px" aria-label="Plant for this Site Engineer" onfocus="taFillPlants(this)" onpointerdown="taFillPlants(this)" onchange="taSetOnePlant(\''+id+'\',this.value)"><option value="">— select ONE plant —</option>'+(cur?'<option value="'+esc(cur.dbId)+'" selected>'+esc(cur.id+" · "+cur.name)+'</option>':'')+'</select>'
    +(cur?'<span class="ta-chip '+taPlantCls(cur.dbId)+'"><i></i>'+esc(cur.id+" · "+cur.name)+'</span>':'<span>A Site Engineer must have exactly one plant</span>')+'</div>';
  }
  /* Assignee → equipment types across all plants */
@@ -197,11 +263,23 @@ function taScopeCell(u,d){
 }
 
 /* ---- one person = one <tbody> holding a summary row + a (hidden until opened) equipment-picker row ---- */
+function taPersonCell(u,ini){
+ const id=esc(u.id),ed=TA.edit[u.id];
+ if(!ed)return '<td><div class="ta-person"><span class="ta-av">'+esc(ini)+'</span><div><div class="ta-name">'+esc(u.name||"—")+(u.is_self?' <span class="badge b-info">You</span>':"")+(u.invited?' <span class="badge b-warning">Not Signed In Yet</span> ':"")+'</div><div class="ta-mail">'+esc(u.email||"")+'</div>'
+  +'<button type="button" class="ta-edit-link" title="Correct this person\'s name'+(u.invited?' or email':'')+'" onclick="taEditStart(\''+id+'\')">✎ Edit details</button></div></div></td>';
+ const busy=!!TA.saving["profile:"+u.id];
+ return '<td><div class="ta-edit">'
+  +'<label class="lbl" for="ta-en-'+id+'">Name</label><input id="ta-en-'+id+'" class="inp" maxlength="255" autocomplete="off" value="'+esc(ed.name)+'" oninput="TA.edit[\''+id+'\'].name=this.value" onkeydown="taEditKey(event,\''+id+'\')"'+(busy?' disabled':'')+'>'
+  +'<label class="lbl" for="ta-ee-'+id+'">Email</label><input id="ta-ee-'+id+'" class="inp" type="email" maxlength="240" autocomplete="off" autocapitalize="off" spellcheck="false" value="'+esc(ed.email)+'"'
+  +(u.invited&&!busy?' oninput="TA.edit[\''+id+'\'].email=this.value" onkeydown="taEditKey(event,\''+id+'\')"':' disabled')+'>'
+  +'<div class="ta-help">'+(u.invited?'Not signed in yet. Fixing the email sends a fresh invite to the new address.':'Email is locked: they sign in with this verified address.')+'</div>'
+  +'<div class="ta-edit-actions"><button type="button" class="btn p sm" '+(busy?'disabled aria-busy="true" ':'')+'onclick="taSaveProfile(\''+id+'\')">'+(busy?'Saving…':'Save')+'</button><button type="button" class="btn o sm" '+(busy?'disabled ':'')+'onclick="taEditCancel(\''+id+'\')">Cancel</button></div></div></td>';
+}
 function taSummaryRow(u){
  const d=taDraft(u),dirty=taDirty(u),busy=!!TA.saving[u.id],id=esc(u.id);
  const ini=String(u.name||u.email||"?").trim().split(/[\s@._-]+/).filter(Boolean).slice(0,2).map(x=>x[0]).join("").toUpperCase()||"?";
  return '<tr class="ta-row '+taRoleCls(d.role)+(dirty?" dirty":"")+(u.active?"":" off")+'" id="ta-row-'+id+'">'
-  +'<td><div class="ta-person"><span class="ta-av">'+esc(ini)+'</span><div><div class="ta-name">'+esc(u.name||"—")+(u.is_self?' <span class="badge b-info">You</span>':"")+(u.invited?' <span class="badge b-warning">Not Signed In Yet</span> ':"")+'</div><div class="ta-mail">'+esc(u.email||"")+'</div></div></div></td>'
+  +taPersonCell(u,ini)
   +'<td><select class="inp ta-role-select" '+(busy?"disabled ":"")+'onchange="taSetRole(\''+id+'\',this.value)">'+TA_ROLES.map(r=>'<option value="'+esc(r)+'"'+(d.role===r?" selected":"")+'>'+esc(r)+'</option>').join("")+'</select><div class="ta-help">'+esc(TA_ROLE_HELP[d.role]||"")+'</div></td>'
   +'<td>'+taScopeCell(u,d)+'</td>'
   +'<td><button '+(u.is_self?"disabled ":"")+'onclick="taToggleActive(\''+id+'\','+(!u.active)+')" class="ta-switch'+(u.active?" on":"")+'" title="'+(u.active?"Active — click to deactivate":"Inactive — click to activate")+'"><span></span></button></td>'
@@ -218,9 +296,9 @@ function taNewRole(role){
  const f=document.getElementById("ta-new-form");if(f)f.outerHTML=taAddForm();
 }
 function taNewScope(){
- const r=TA.nw.role,plants=taPlants();
+ const r=TA.nw.role;
  if(r==="Assignee")return '<div class="ta-form-scope"><div class="ta-form-label">Equipment types this person is responsible for <span>— covers every plant</span></div>'+taTypeBox("new")+'</div>';
- if(r==="Site Engineer")return '<div class="ta-form-scope"><div class="ta-form-label">Plant <span>— exactly one</span></div><select class="inp" style="min-width:260px" onchange="TA.nw.plant=this.value"><option value="">— select ONE plant —</option>'+plants.map(p=>'<option value="'+esc(p.dbId)+'"'+(TA.nw.plant===p.dbId?" selected":"")+'>'+esc(p.id+" · "+p.name)+'</option>').join("")+'</select></div>';
+ if(r==="Site Engineer")return '<div class="ta-form-scope"><div class="ta-form-label">Plant <span>— exactly one</span></div><select class="inp" style="min-width:260px" onchange="TA.nw.plant=this.value"><option value="">— select ONE plant —</option>'+taPlantOptions(TA.nw.plant)+'</select></div>';
  return '<div class="ta-form-scope"><div class="ta-box" style="display:inline-flex"><b>All plants (portfolio)</b><span>'+(r==="O&M Head"?"Full administration":"Read-only portfolio view")+'</span></div></div>';
 }
 function taAddForm(){
@@ -273,17 +351,37 @@ function teamAccessPanel(){
  if(TA.error)return wrap('<div style="padding:0 16px 16px"><div class="bn-warn banner">Could not load users: '+esc(TA.error)+'</div><button class="btn o sm" onclick="TA.error=null;taLoad(true)">Retry</button></div>');
  if(!TA.users)return wrap('<div style="padding:0 16px 16px;font-size:12px;color:var(--muted-foreground)">Loading team…</div>');
  const pending=TA.users.filter(u=>u.role==="Viewer"&&u.active).length;
- let rows=TA.users.slice().sort((a,b)=>(a.role==="Viewer"?0:1)-(b.role==="Viewer"?0:1)||String(a.name).localeCompare(String(b.name)));
- if(TA.filter==="pending")rows=rows.filter(u=>u.role==="Viewer");
- else if(TA.filter!=="all")rows=rows.filter(u=>u.role===TA.filter);
- const filt='<select class="inp" style="width:170px;font-size:12px" onchange="TA.filter=this.value;render()"><option value="all"'+(TA.filter==="all"?" selected":"")+'>All people ('+TA.users.length+')</option><option value="pending"'+(TA.filter==="pending"?" selected":"")+'>Pending ('+pending+')</option>'+TA_ROLES.filter(r=>r!=="Viewer").map(r=>'<option value="'+esc(r)+'"'+(TA.filter===r?" selected":"")+'>'+esc(r)+'</option>').join("")+'</select>';
- let h='<div style="padding:0 16px 10px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">'+filt+(pending?'<span class="badge b-warning">'+pending+' waiting for a role</span>':'')+'<button class="btn o sm" onclick="taLoad(true)">Refresh</button><button class="btn p sm" onclick="taToggleForm()">+ Add person</button><button class="btn o sm" title="Columns: Name, Email, Role, Plants (Site Engineer) or Equipment types e.g. Inverter|Module (Assignee)" onclick="document.getElementById(\'ta-file\').click()">Import from Excel</button><input type="file" id="ta-file" accept=".xlsx,.xlsm,.csv" style="display:none" onchange="taImportFile(this)"></div>'+taAddForm();
- h+='<div class="ta-table-wrap" style="overflow:auto"><table class="dense ta-table"><thead><tr><th>Person</th><th>Role</th><th>Scope · equipment type / plant</th><th>Active</th><th>Status</th></tr></thead>';
- if(!rows.length)h+='<tbody><tr><td colspan="5" style="color:var(--muted-foreground);padding:14px">No people match this filter.</td></tr></tbody>';
- rows.forEach(u=>{h+=taUserBody(u)});
- h+='</table></div>';
+ const filt='<select class="inp" style="width:170px;font-size:12px" aria-label="Filter people by role" onchange="TA.filter=this.value;TA.limit=TA_PAGE;taRefreshTable()"><option value="all"'+(TA.filter==="all"?" selected":"")+'>All people ('+TA.users.length+')</option><option value="pending"'+(TA.filter==="pending"?" selected":"")+'>Pending ('+pending+')</option>'+TA_ROLES.filter(r=>r!=="Viewer").map(r=>'<option value="'+esc(r)+'"'+(TA.filter===r?" selected":"")+'>'+esc(r)+'</option>').join("")+'</select>';
+ const find='<input class="inp" type="search" style="width:220px;font-size:12px" placeholder="Search name or email" aria-label="Search people by name or email" autocomplete="off" value="'+esc(TA.search)+'" oninput="taSearch(this.value)">';
+ let h='<div style="padding:0 16px 10px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">'+find+filt+(pending?'<span class="badge b-warning">'+pending+' waiting for a role</span>':'')+'<button class="btn o sm" onclick="taLoad(true)">Refresh</button><button class="btn p sm" onclick="taToggleForm()">+ Add person</button><button class="btn o sm" title="Columns: Name, Email, Role, Plants (Site Engineer) or Equipment types e.g. Inverter|Module (Assignee)" onclick="document.getElementById(\'ta-file\').click()">Import from Excel</button><input type="file" id="ta-file" accept=".xlsx,.xlsm,.csv" style="display:none" onchange="taImportFile(this)"></div>'+taAddForm();
+ h+=taTableHtml();
  return wrap(h);
 }
+const TA_COLLATE=new Intl.Collator(undefined,{sensitivity:"base",numeric:true});
+function taRows(){
+ const q=String(TA.search||"").trim().toLowerCase();
+ let rows=TA.users.filter(u=>u.active||TA.showRemoved);
+ if(TA.filter==="pending")rows=rows.filter(u=>u.role==="Viewer");
+ else if(TA.filter!=="all")rows=rows.filter(u=>u.role===TA.filter);
+ if(q)rows=rows.filter(u=>(String(u.name||"")+" "+String(u.email||"")).toLowerCase().includes(q));
+ return rows.sort((a,b)=>(a.role==="Viewer"?0:1)-(b.role==="Viewer"?0:1)||TA_COLLATE.compare(String(a.name||""),String(b.name||"")));
+}
+/* Only the first TA.limit matching people are drawn; "Show more" adds another page. */
+function taTableHtml(){
+ const rows=taRows(),shown=rows.slice(0,TA.limit),left=rows.length-shown.length;
+ let h='<div id="ta-table-wrap" class="ta-table-wrap" style="overflow:auto"><table class="dense ta-table"><thead><tr><th>Person</th><th>Role</th><th>Scope · equipment type / plant</th><th>Access</th><th>Status</th></tr></thead>';
+ if(!rows.length)h+='<tbody><tr><td colspan="5" style="color:var(--muted-foreground);padding:14px">'+(TA.search.trim()?'No one matches “'+esc(TA.search.trim())+'”. <button class="btn o sm" onclick="taSearch(\'\',true)">Clear search</button>':'No people match this filter.')+'</td></tr></tbody>';
+ shown.forEach(u=>{h+=taUserBody(u)});
+ h+='</table>';
+ if(left>0)h+='<div class="ta-more"><span>Showing '+shown.length+' of '+rows.length+' people</span><button class="btn o sm" onclick="taShowMore()">Show '+Math.min(TA_PAGE,left)+' more</button></div>';
+ return h+'</div>';
+}
+function taRefreshTable(){const el=document.getElementById("ta-table-wrap");if(el)el.outerHTML=taTableHtml();else render()}
+function taSearch(v,clearBox){
+ TA.search=String(v||"");TA.limit=TA_PAGE;taRefreshTable();
+ if(clearBox){const box=document.querySelector('.ta-panel input[type="search"]');if(box){box.value="";box.focus()}}
+}
+function taShowMore(){TA.limit+=TA_PAGE;taRefreshTable()}
 
 
 function renderSettings(){

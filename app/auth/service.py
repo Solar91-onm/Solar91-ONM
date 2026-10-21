@@ -170,7 +170,7 @@ def upsert_clerk_user(
             user.auth_provider = "clerk"
             user.external_subject = subject
             user.email = email
-            if name:
+            if name and not (user.metadata_json or {}).get("name_set_by_head"):
                 user.display_name = name
             if user.role == "Viewer" and email.casefold() in settings.admin_emails:
                 user.role = "O&M Head"

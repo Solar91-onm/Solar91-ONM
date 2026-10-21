@@ -9,13 +9,14 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from openpyxl import load_workbook
 from pydantic import BaseModel, Field
-from sqlalchemy import delete, func, select
+from sqlalchemy import and_, delete, func, or_, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.auth.emails import canonical_email, is_gmail_family
 from app.core.config import get_settings
 from app.core.database import get_db
-from app.core.models import AuditLog, Equipment, Plant, User, UserEquipmentAssignment, UserEquipmentTypeAssignment, UserPlantAssignment
+from app.core.models import AuditLog, Equipment, Issue, OMTask, Plant, User, UserEquipmentAssignment, UserEquipmentTypeAssignment, UserPlantAssignment
 from app.core.security import require_csrf, require_permission
 from app.plants.codes import normalize_site_code, plant_code_index
 from app.users.router import PORTFOLIO_ROLES, _active_head_count, out
@@ -54,6 +55,14 @@ class InviteIn(BaseModel):
     role: str
     plants: list[str] = Field(default_factory=list, max_length=500)  # site codes or plant names
     equipment: list[str] = Field(default_factory=list, max_length=2000)  # equipment TYPES, e.g. "Inverter"
+
+
+class ProfileIn(BaseModel):
+    """Correct a person's name or (before their first sign-in) email. expected_* is what the editor saw."""
+    name: str | None = Field(default=None, max_length=255)
+    email: str | None = Field(default=None, max_length=240)
+    expected_name: str | None = Field(default=None, max_length=255)
+    expected_email: str | None = Field(default=None, max_length=320)
 
 
 def _norm_code(value) -> str:
@@ -213,6 +222,108 @@ def resend_invite(
         raise HTTPException(409, "This person has already signed in")
     sent, reason = _email_invite(db, actor, target)
     return {"email_sent": sent, "email_note": reason}
+
+
+def _email_owner(db: Session, email: str, exclude_id: UUID) -> User | None:
+    """Another user who already has this mailbox (same rule as sign-in: case-insensitive, Gmail dots/+tags ignored)."""
+    found = db.scalar(select(User).where(func.lower(User.email) == email.lower(), User.id != exclude_id))
+    if found is None and is_gmail_family(email):
+        wanted = canonical_email(email)
+        found = next((u for u in db.scalars(select(User).where(
+            User.id != exclude_id, User.email.ilike("%@gmail.com") | User.email.ilike("%@googlemail.com")))
+            if canonical_email(u.email) == wanted), None)
+    return found
+
+
+def _carry_name_to_assignments(db: Session, user: User, old_name: str, new_name: str) -> int:
+    """Issues and PM tasks keep the assignee's name as text, and scope checks match on it. Rename that text on the
+    person's own rows, plus unlinked rows carrying exactly the old name when no one else has that name.
+    updated_at is kept: a name correction is not ticket activity."""
+    key = old_name.strip().casefold()
+    if not key:
+        return 0
+    name_is_unique = not db.scalar(select(func.count()).select_from(User).where(
+        User.id != user.id, func.lower(func.trim(User.display_name)) == key))
+    changed = 0
+    for model, link in ((Issue, Issue.assigned_to), (OMTask, OMTask.assignee_user_id)):
+        same_text = func.lower(func.trim(func.coalesce(model.assignee_text, ""))) == key
+        owned = link == user.id
+        where = or_(owned, and_(link.is_(None), same_text)) if name_is_unique else owned
+        result = db.execute(update(model).where(where, same_text)
+                            .values(assignee_text=new_name, updated_at=model.updated_at)
+                            .execution_options(synchronize_session=False))
+        changed += result.rowcount or 0
+    return changed
+
+
+@router.patch("/{user_id}/profile", dependencies=[Depends(require_csrf)])
+def update_profile(
+    user_id: UUID,
+    data: ProfileIn,
+    db: Annotated[Session, Depends(get_db)],
+    actor: Annotated[User, Depends(require_permission("users.manage"))],
+):
+    """Fix a wrongly typed name or email. Email can only change before the person's first sign-in: after that
+    their Clerk-verified address is their login identity."""
+    target = db.get(User, user_id)
+    if not target:
+        raise HTTPException(404, "User not found")
+    if (data.expected_name is not None and data.expected_name != (target.display_name or "")) or \
+            (data.expected_email is not None and data.expected_email != (target.email or "")):
+        raise HTTPException(409, "This person was changed by someone else. Reload the list and try again.")
+
+    name = " ".join((data.name or "").split()) if data.name is not None else target.display_name
+    email = (data.email or "").strip() if data.email is not None else (target.email or "")
+    if not name:
+        raise HTTPException(422, "Name cannot be empty")
+    name_changed = name != target.display_name
+    email_changed = email != (target.email or "")
+    if not name_changed and not email_changed:
+        return {**out(target), "email_sent": False, "email_note": "Nothing changed", "renamed_assignments": 0}
+
+    invited = (target.external_subject or "").startswith(INVITE_PREFIX)
+    if email_changed:
+        if not invited:
+            raise HTTPException(409, "This person already signs in with this verified email, so it cannot be changed here. "
+                                     "To use a different address, add them again with the new email.")
+        if not EMAIL_RE.match(email):
+            raise HTTPException(422, "Invalid email address")
+        other = _email_owner(db, email, target.id)
+        if other:
+            raise HTTPException(409, f"{other.display_name or other.email} already uses this email")
+    if name_changed:
+        clash = db.scalar(select(User).where(
+            User.id != target.id, User.is_active.is_(True), func.lower(func.trim(User.display_name)) == name.casefold()))
+        if clash:
+            raise HTTPException(409, f"Another active person is already called {name}. Add a surname or initial so "
+                                     "their tickets cannot be mixed up.")
+
+    before = {"name": target.display_name, "email": target.email}
+    renamed = 0
+    if name_changed:
+        renamed = _carry_name_to_assignments(db, target, target.display_name or "", name)
+        target.display_name = name
+        # Keep the corrected name when the person later links their sign-in (see upsert_clerk_user).
+        target.metadata_json = {**(target.metadata_json or {}), "name_set_by_head": True}
+    if email_changed:
+        target.email = email
+        target.external_subject = INVITE_PREFIX + canonical_email(email)
+    db.add(AuditLog(
+        user_id=actor.id, actor_name=actor.display_name, action="Edited user details",
+        module="Users", entity_type="user", entity_id=str(target.id),
+        before_state=before, after_state={"name": target.display_name, "email": target.email},
+        metadata_json={"target_email": target.email, "renamed_assignments": renamed},
+    ))
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(409, "Another person already uses this email") from exc
+    db.refresh(target)
+    sent, reason = False, "Email not changed"
+    if email_changed and target.is_active:
+        sent, reason = _email_invite(db, actor, target)
+    return {**out(target), "email_sent": sent, "email_note": reason, "renamed_assignments": renamed}
 
 
 @router.post("/invite", status_code=201, dependencies=[Depends(require_csrf)])
