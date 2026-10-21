@@ -564,12 +564,16 @@
     previous cycle was completed (the 1st for cycle 1) until it is completed; the open cycle runs until today. */
  function sheetCycles(mc){
   const today=todayIso(),last=mc.last_day<today?mc.last_day:today;let start=mc.first_day,open=false;
-  return mc.cycles.map(c=>{
+  const out=mc.cycles.map(c=>{
    const s=start;
    if(c.state==="Completed"&&c.completed_on){start=addDays(c.completed_on,1);return{c,kind:"done",start:s,end:c.completed_on}}
    if(!open){open=true;return{c,kind:"open",start:s,end:last}}
    return{c,kind:"later",start:null,end:null};
   });
+  /* all three cycles complete (e.g. robot cleaning finished early): later days can still be recorded, as extra washing on the last cycle */
+  const lastCycle=out[out.length-1];
+  if(lastCycle&&out.every(x=>x.kind==="done")&&last>lastCycle.start){lastCycle.kind="open";lastCycle.extra=true;lastCycle.end=last}
+  return out;
  }
  function sheetModel(p,mc){
   const today=todayIso(),minDate=isField()?addDays(today,-SE_BACK_DAYS):"0000-00-00",photoFrom=addDays(today,-(PHOTO_DAYS-1));
@@ -594,8 +598,8 @@
   return{cyc,cur,pick,rows,total,recorded,fresh,newTables,left:Math.max(0,total-recorded),pending,ready};
  }
  function sheetFoot(m){
-  const team=!isField(),over=m.newTables>m.left,days=m.fresh.length?plural(m.fresh.length,"day"):"days";
-  const sum=m.fresh.length?'<b>'+plural(m.fresh.length,"day")+'</b> to save · '+plural(m.newTables,"table")+(over?' · <b class="wx-over">only '+m.left+' left in cycle '+m.pick+'</b>':' · '+(m.left-m.newTables)+' left after this'):'Type the tables cleaned on each day, or choose a reason if no work was done.';
+  const team=!isField(),over=!m.cur.extra&&m.newTables>m.left,days=m.fresh.length?plural(m.fresh.length,"day"):"days";
+  const sum=m.fresh.length?'<b>'+plural(m.fresh.length,"day")+'</b> to save · '+plural(m.newTables,"table")+(m.cur.extra?' · extra washing (all 3 cycles complete)':over?' · <b class="wx-over">only '+m.left+' left in cycle '+m.pick+'</b>':' · '+(m.left-m.newTables)+' left after this'):'Type the tables cleaned on each day, or choose a reason if no work was done.';
   return '<span>'+sum+'</span><button type="button" class="btn p" id="wx-sheet-save" onclick="washSheetSubmit()"'+(m.fresh.length&&!S._washSheetSaving?'':' disabled')+'>'+(S._washSheetSaving?'Saving…':team?'Save '+days+' as confirmed':'Submit '+days+' for confirmation')+'</button>';
  }
  function sheetRow(r){
@@ -623,9 +627,9 @@
   if(!mc||mc.loading)return nav+'<div class="wc-empty">Loading '+h(monthName(month))+'…</div>';
   if(mc.error)return nav+'<div class="bn-warn banner">'+h(mc.error)+'</div>';
   const m=sheetModel(p,mc),team=!isField(),c=m.cur;
-  const picker='<div class="wx-cpick" role="tablist" aria-label="Cycle">'+m.cyc.map(x=>'<button type="button" role="tab" aria-selected="'+(x.c.cycle_no===m.pick)+'" class="'+(x.c.cycle_no===m.pick?'on':'')+'" onclick="washSheetCycle('+x.c.cycle_no+')"><b>Cycle '+x.c.cycle_no+'</b><span>'+(x.kind==="done"?"Completed "+fmt(x.c.completed_on):x.kind==="open"?(x.c.late_days&&team?x.c.late_days+" d late":"Open now"):"Not started")+'</span></button>').join("")+'</div>';
+  const picker='<div class="wx-cpick" role="tablist" aria-label="Cycle">'+m.cyc.map(x=>'<button type="button" role="tab" aria-selected="'+(x.c.cycle_no===m.pick)+'" class="'+(x.c.cycle_no===m.pick?'on':'')+'" onclick="washSheetCycle('+x.c.cycle_no+')"><b>Cycle '+x.c.cycle_no+'</b><span>'+(x.extra?"Done "+fmt(x.c.completed_on)+" · add extra":x.kind==="done"?"Completed "+fmt(x.c.completed_on):x.kind==="open"?(x.c.late_days&&team?x.c.late_days+" d late":"Open now"):"Not started")+'</span></button>').join("")+'</div>';
   if(c.kind==="later")return nav+picker+'<div class="wc-empty">Cycle '+m.pick+' opens once cycle '+(m.pick-1)+' is complete. Washing done now counts towards the open cycle.</div>';
-  const head='<p class="sub"><b>Cycle '+m.pick+'</b> · planned '+fmt(c.c.start_date)+' → '+fmt(c.c.due_date)+' · '+m.recorded+' of '+m.total+' tables recorded'+(c.c.pending?' ('+c.c.pending+' awaiting confirmation)':'')+' · <b>'+m.left+' left</b>.'+(c.kind==="open"?(team?' Your entries are saved as confirmed.':' The O&amp;M Head or the plant\'s Assignee confirms your entries. Days in the last '+PHOTO_DAYS+' days need before and after photos.'):'')+'</p>';
+  const head='<p class="sub"><b>Cycle '+m.pick+'</b> · planned '+fmt(c.c.start_date)+' → '+fmt(c.c.due_date)+' · '+m.recorded+' of '+m.total+' tables recorded'+(c.c.pending?' ('+c.c.pending+' awaiting confirmation)':'')+' · <b>'+m.left+' left</b>.'+(mc.summary&&mc.summary.confirmed_tables?' Tables washed <b>'+mc.summary.times_washed+' time'+(mc.summary.times_washed===1?'':'s')+'</b> this month'+(mc.summary.extra_times?' ('+mc.summary.extra_times+' extra after the 3 cycles)':'')+'.':'')+(c.extra?' <b>All 3 cycles are complete.</b> Days you add now are saved as extra washing.':'')+(c.kind==="open"?(team?' Your entries are saved as confirmed.':' The O&amp;M Head or the plant\'s Assignee confirms your entries. Days in the last '+PHOTO_DAYS+' days need before and after photos.'):'')+'</p>';
   const review=m.pending.length?'<div class="wc-flow-note wx-review"><div><b>'+plural(m.pending.length,"day")+' awaiting your confirmation</b><p>'+m.pending.reduce((a,x)=>a+x.tables_cleaned,0)+' tables'+(m.pending.length>m.ready.length?' · '+(m.pending.length-m.ready.length)+' still need before/after photos':'')+'. Use <b>Open</b> on a day to see its photos or to reject it with a note.</p></div>'+(m.ready.length?'<button type="button" class="btn p sm" onclick="washSheetConfirm()"'+(S._washSheetConfirming?' disabled':'')+'>'+(S._washSheetConfirming?'Confirming…':'Confirm '+plural(m.ready.length,"day"))+'</button>':'')+'</div>':'';
   const th='<tr><th>Date</th><th>Tables cleaned</th><th>Not done reason</th><th>Remarks</th><th>Photos</th><th>Status</th><th>Total</th><th></th></tr>';
   const body=m.rows.length?m.rows.map(sheetRow).join(""):'<tr><td colspan="8" class="wc-empty">'+(month>thisMonth?'No days to fill yet.':'No days in this cycle yet.')+'</td></tr>';
@@ -663,7 +667,7 @@
   }
   if(problems.length){toast(problems.slice(0,3).join(" · ")+(problems.length>3?" · and "+(problems.length-3)+" more":""));return}
   if(!entries.length){toast("Type the tables cleaned on at least one day.");return}
-  if(m.newTables>m.left){toast("Only "+m.left+" table(s) are left in cycle "+m.pick+"; you entered "+m.newTables+".");return}
+  if(!m.cur.extra&&m.newTables>m.left){toast("Only "+m.left+" table(s) are left in cycle "+m.pick+"; you entered "+m.newTables+".");return}
   const st=sheetState(p.plant_id,mc.month);
   S._washSheetSaving=true;const foot=document.getElementById("wx-sheet-foot");if(foot)foot.innerHTML=sheetFoot(m);
   let saved=null;const failed=[];
@@ -755,7 +759,7 @@
   if(when>todayIso()){toast("The date cannot be in the future.");return}
   const fb=Array.from((document.getElementById("wc-before")||{}).files||[]),fa=Array.from((document.getElementById("wc-after")||{}).files||[]);
   if(!nd&&(!Number.isInteger(count)||count<1)){toast("Enter how many tables you cleaned today.");return}
-  if(!nd&&sameMonth&&count>left){toast("Only "+left+" table(s) are left in this cycle.");return}
+  if(!nd&&sameMonth&&count>left&&(p.cycles_this_month||0)<3){toast("Only "+left+" table(s) are left in this cycle.");return}
   if(nd&&!d.exception){toast("Choose the reason the work was not done.");return}
   if(fb.length>5||fa.length>5){toast("Choose no more than 5 before and 5 after photos.");return}
   if(!nd&&isField()&&(!fb.length||!fa.length)){toast("Add at least one before photo and one after photo so the O&M team can verify the report.");return}

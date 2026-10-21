@@ -179,3 +179,76 @@ def test_month_template_is_prefilled_and_round_trips(client, db):
 
     assert client.get(f"{BASE}/daily-template?month=2999-01").status_code == 422
     assert client.get(f"{BASE}/daily-template?month=bad").status_code == 422
+
+
+def test_days_after_all_three_cycles_are_saved_as_extra_washing(client, db):
+    """Robot cleaning can finish a month's three cycles early; later days must still be recorded, not refused."""
+    plant = _plant(db)  # 4 tables per cycle
+    head, _assignee = _setup_cycle_users(client, db, plant)
+    conftest._CURRENT_USER = head
+    d1, d2, d3, d4, d5 = _days(5)
+    text = ("Site code,Date,Tables cleaned,Remarks\n"
+            f"CYCLE01,{_d(d1)},4,\nCYCLE01,{_d(d2)},4,\nCYCLE01,{_d(d3)},4,\n"
+            f"CYCLE01,{_d(d4)},4,Robot run\nCYCLE01,{_d(d5)},2,\n")
+    preview = _upload(client, _csv(text), True).json()
+    assert preview["problems"] == [] and preview["new"] == 5 and preview["extra"] == 2
+    assert "extra washing" in preview["rows"][3]["detail"] and "Cycle 3" in preview["rows"][3]["detail"]
+    assert _upload(client, _csv(text), False).json()["saved"] == 5
+    db.expire_all()
+    reports = db.query(WashingDailyReport).order_by(WashingDailyReport.report_date).all()
+    assert [r.cycle_no for r in reports] == [1, 2, 3, 3, 3]
+    assert [r.cycle_completed for r in reports] == [True, True, True, False, False]
+
+    month = d1.strftime("%Y-%m")
+    cycles = client.get(f"{BASE}/plants/{plant.id}/cycles", params={"month": month}).json()["cycles"]
+    assert [c["state"] for c in cycles] == ["Completed"] * 3 and cycles[2]["completed_on"] == d3.isoformat()
+
+
+def test_cycle_sheet_and_engineer_review_accept_extra_washing(client, db):
+    plant = _plant(db)
+    head, assignee = _setup_cycle_users(client, db, plant)
+    conftest._CURRENT_USER = head
+    d1, d2, d3, d4, d5 = _days(5)
+    sheet = client.post(f"{BASE}/daily-reports/sheet", json={"plant_id": str(plant.id), "entries": [
+        {"report_date": day.isoformat(), "job_status": "Done", "tables_cleaned": 4} for day in (d1, d2, d3, d4)]})
+    assert sheet.status_code == 200, sheet.text
+    assert [r["cycle_no"] for r in sheet.json()["reports"]] == [1, 2, 3, 3]
+
+    _engineer(client, db, plant)
+    extra = _upload(client, _csv(f"Site code,Date,Tables cleaned\nCYCLE01,{_d(d5)},4\n"), False).json()
+    assert extra["saved"] == 1 and extra["review_status"] == "Pending"
+    report = db.query(WashingDailyReport).filter_by(report_date=d5).one()
+    conftest._CURRENT_USER = assignee
+    before = db.query(Notification).filter_by(event_type="washing_cycle_completed").count()
+    review = client.post(f"{BASE}/daily-reports/{report.id}/review", json={"decision": "Confirm"})
+    assert review.status_code == 200, review.text
+    db.expire_all()
+    assert db.query(WashingDailyReport).filter_by(report_date=d5).one().cycle_completed is False
+    assert db.query(Notification).filter_by(event_type="washing_cycle_completed").count() == before
+
+
+def test_monthly_summary_counts_how_many_times_tables_were_washed(client, db):
+    plant = _plant(db)  # 4 tables per cycle
+    head, _assignee = _setup_cycle_users(client, db, plant)
+    conftest._CURRENT_USER = head
+    d1, d2, d3, d4, d5 = _days(5)
+    text = ("Site code,Date,Tables cleaned,Not done reason\n"
+            f"CYCLE01,{_d(d1)},4,\nCYCLE01,{_d(d2)},4,\nCYCLE01,{_d(d3)},4,\n"
+            f"CYCLE01,{_d(d4)},6,\nCYCLE01,{_d(d5)},,Rain\n")
+    assert _upload(client, _csv(text), False).json()["saved"] == 5
+    month = d1.strftime("%Y-%m")
+
+    summary = client.get(f"{BASE}/plants/{plant.id}/cycles", params={"month": month}).json()["summary"]
+    assert (summary["cycles_completed"], summary["confirmed_tables"], summary["times_washed"]) == (3, 18, 4.5)
+    assert (summary["extra_tables"], summary["extra_times"], summary["days_worked"], summary["days_not_done"]) == (6, 1.5, 4, 1)
+
+    book = load_workbook(BytesIO(client.get(f"{BASE}/daily-template?month={month}").content))
+    rows = list(book["Monthly summary"].iter_rows(values_only=True))
+    header = rows[0]
+    row = dict(zip(header, rows[1]))
+    assert row["Site code"] == "CYCLE01" and row["Cycles completed (of 3)"] == 3
+    assert row["Times washed"] == 4.5 and row["Extra washes after 3 cycles"] == 1.5 and row["Extra tables after 3 cycles"] == 6
+    assert row["Cycle 3 done on"].date() == d3
+    # the summary sheet is ignored on upload: the downloaded workbook uploads cleanly
+    again = _upload(client, {"file": ("month.xlsx", BytesIO(client.get(f"{BASE}/daily-template?month={month}").content).getvalue(), XLSX)}, True).json()
+    assert again["problems"] == [] and again["unchanged"] == 5

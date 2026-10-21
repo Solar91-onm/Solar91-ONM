@@ -842,11 +842,38 @@ def _completing_row(rows, total_tables: int):
     return None
 
 
-def _open_cycle_no(done: set[int]) -> int | None:
-    """The cycle new work counts towards: the one after the highest completed cycle (None once all are complete)."""
-    if len(done) >= MONTHLY_CYCLE_TARGET:
-        return None
-    return max(done, default=0) + 1
+def _month_wash_summary(reports, table_count: int) -> dict:
+    """How much washing a plant did in one month, for records and the monthly sheet.
+
+    `times_washed` counts full washes of every table (confirmed tables ÷ tables per cycle), so robot cleaning that
+    goes past the three cycles shows e.g. 4.5. `extra_times` is the part done after all three cycles were complete
+    (that work is recorded on cycle 3); it is a count for the record, never an extra cycle."""
+    active = [r for r in reports if r.review_status in ("Pending", "Confirmed")]
+    confirmed = [r for r in active if r.review_status == "Confirmed"]
+    completed_on = {r.cycle_no: r.report_date for r in sorted(confirmed, key=lambda r: r.report_date) if r.cycle_completed}
+    cycles_completed = len(completed_on)
+    confirmed_tables = sum(r.tables_cleaned for r in confirmed)
+    last_cycle_tables = sum(r.tables_cleaned for r in confirmed if r.cycle_no == MONTHLY_CYCLE_TARGET)
+    extra_tables = max(0, last_cycle_tables - table_count) if cycles_completed >= MONTHLY_CYCLE_TARGET and table_count else 0
+    return {
+        "tables_per_cycle": table_count,
+        "cycles_completed": min(cycles_completed, MONTHLY_CYCLE_TARGET),
+        "cycle_completed_on": {n: completed_on[n].isoformat() for n in sorted(completed_on)},
+        "confirmed_tables": confirmed_tables,
+        "pending_tables": sum(r.tables_cleaned for r in active if r.review_status == "Pending"),
+        "times_washed": round(confirmed_tables / table_count, 1) if table_count else 0,
+        "extra_tables": extra_tables,
+        "extra_times": round(extra_tables / table_count, 1) if table_count else 0,
+        "days_worked": len({r.report_date for r in active if r.job_status == "Done"}),
+        "days_not_done": len({r.report_date for r in active if r.job_status != "Done"}),
+    }
+
+
+def _open_cycle_no(done: set[int]) -> int:
+    """The cycle new work counts towards: the one after the highest completed cycle. Once all three are complete
+    (e.g. robot cleaning finished the month early) further washing is still recorded, as extra work on the last cycle;
+    it never re-opens or adds a cycle."""
+    return min(max(done, default=0) + 1, MONTHLY_CYCLE_TARGET)
 
 
 def _ordered_codes(db: Session, plant_id: UUID) -> list[str]:
@@ -872,10 +899,7 @@ def _next_open_cycle(db: Session, plant_id: UUID, month: str, exclude_report_id:
     )
     if exclude_report_id:
         stmt = stmt.where(WashingDailyReport.id != exclude_report_id)
-    cycle_no = _open_cycle_no(set(db.scalars(stmt)))
-    if cycle_no is None:
-        raise HTTPException(409, "All three washing cycles for that month are complete")
-    return cycle_no
+    return _open_cycle_no(set(db.scalars(stmt)))
 
 
 def _locked_report_plant(db: Session, user: User, plant_id: UUID) -> tuple[Plant, WashingConfig, bool, int]:
@@ -1238,6 +1262,7 @@ def month_cycles(db: Session, user: User, plant_id: UUID, month: str) -> dict:
         "plant_id": str(plant.id), "plant": plant.plant_name, "site_code": plant.site_code, "month": month,
         "first_day": first.isoformat(), "last_day": first.replace(day=last).isoformat(), "table_count": table_count,
         "cycles": cycles, "pattern": _pattern_out(config), "can_edit": manager,
+        "summary": _month_wash_summary(month_reports, table_count),
         # every report of the month (rejected ones included) so the cycle sheet can show each day on one row
         "reports": [_report_out(r, plant, user, config, manager, table_count) for r in month_reports],
         "today": today.isoformat(),
@@ -1322,13 +1347,21 @@ def review_daily_report(db: Session, user: User, report_id: UUID, payload: Washi
     db.flush()
     cycle_completed = False
     if report.review_status == "Confirmed":
+        already_complete = db.scalar(select(WashingDailyReport.id).where(
+            WashingDailyReport.plant_id == plant.id,
+            WashingDailyReport.cycle_month == report.cycle_month,
+            WashingDailyReport.cycle_no == report.cycle_no,
+            WashingDailyReport.review_status == "Confirmed",
+            WashingDailyReport.cycle_completed.is_(True),
+            WashingDailyReport.id != report.id,
+        ).limit(1)) is not None  # extra washing after the month's last cycle was already complete
         total_confirmed = db.scalar(select(func.coalesce(func.sum(WashingDailyReport.tables_cleaned), 0)).where(
             WashingDailyReport.plant_id == plant.id,
             WashingDailyReport.cycle_month == report.cycle_month,
             WashingDailyReport.cycle_no == report.cycle_no,
             WashingDailyReport.review_status == "Confirmed",
         )) or 0
-        if total_confirmed >= total_tables:
+        if not already_complete and total_confirmed >= total_tables:
             report.cycle_completed = True
             cycle_completed = True
 

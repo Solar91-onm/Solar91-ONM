@@ -33,10 +33,12 @@ from app.plants.codes import normalize_site_code, plant_code_index
 from app.scheduled.schemas import WashingSheetEntry
 from app.scheduled.washing_cycles import (
     MAX_BACKDATE_DAYS,
+    MONTHLY_CYCLE_TARGET,
     _completing_row,
     _day_label,
     _is_washing_manager,
     _month_key,
+    _month_wash_summary,
     _notify_wash,
     _open_cycle_no,
     _plant_table_count,
@@ -49,6 +51,9 @@ MAX_HISTORY_DAYS = 730  # the cycle sheet shows months up to two years back; old
 MAX_TABLES = 5000
 SHEET = "Daily washing"
 HEADERS = ("Site code", "Plant name", "Date", "Tables cleaned", "Not done reason", "Remarks", "Saved in portal")
+SUMMARY_HEADERS = ("Site code", "Plant name", "Tables per cycle", "Cycles completed (of 3)", "Cycle 1 done on",
+                   "Cycle 2 done on", "Cycle 3 done on", "Tables cleaned (confirmed)", "Tables awaiting review",
+                   "Times washed", "Extra washes after 3 cycles", "Extra tables after 3 cycles", "Days worked", "Days not done")
 NOT_DONE_REASONS: tuple[str, ...] = get_args(get_args(WashingSheetEntry.model_fields["exception_reason"].annotation)[0])
 ALIASES = {
     "site_code": {"Site code", "Plant code", "Site", "Code", "Site id"},
@@ -121,11 +126,13 @@ def daily_template_bytes(db: Session, user: User, month: str | None = None, plan
         raise HTTPException(422, f"That would be more than {MAX_DAILY_ROWS} rows; choose fewer plants")
 
     saved: dict[tuple[UUID, date], WashingDailyReport] = {}
+    month_reports: dict[UUID, list[WashingDailyReport]] = {}
     if found:
         for report in db.scalars(select(WashingDailyReport).where(
             WashingDailyReport.plant_id.in_([plant.id for plant, _config in found]),
             WashingDailyReport.cycle_month == month_key,
         ).order_by(WashingDailyReport.created_at)):
+            month_reports.setdefault(report.plant_id, []).append(report)
             key = (report.plant_id, report.report_date)
             current = saved.get(key)
             # a pending or confirmed report wins over an older rejected one for the same day
@@ -144,6 +151,8 @@ def daily_template_bytes(db: Session, user: User, month: str | None = None, plan
         f"Dates may be typed as DD-MM-YYYY. Site Engineers can enter the last {MAX_BACKDATE_DAYS} days for their own plant.",
         "Entries by the O&M Head or a washing Assignee are saved as confirmed; a Site Engineer's entries wait for review.",
         "You can also add your own rows (any plant and date) with the same columns.",
+        "The 'Monthly summary' sheet is for reading only: cycles completed, tables cleaned and how many times the tables were washed.",
+        "Washing done after all 3 cycles are complete (e.g. robot cleaning) is saved and counted under 'Extra washes after 3 cycles'.",
     ):
         guide.append([text])
     guide.column_dimensions["A"].width = 110
@@ -177,6 +186,25 @@ def daily_template_bytes(db: Session, user: User, month: str | None = None, plan
         sheet.add_data_validation(validation)
     tables.add(f"D2:D{last_row}")
     reasons.add(f"E2:E{last_row}")
+
+    summary = workbook.create_sheet("Monthly summary")
+    summary.append(SUMMARY_HEADERS)
+    for cell in summary[1]:
+        cell.font = Font(bold=True)
+    summary.freeze_panes = "C2"
+    for plant, config in found:
+        info = _month_wash_summary(month_reports.get(plant.id, []), _plant_table_count(db, plant.id, config))
+        done_on = [info["cycle_completed_on"].get(n) for n in range(1, MONTHLY_CYCLE_TARGET + 1)]
+        summary.append([
+            plant.site_code, plant.plant_name, info["tables_per_cycle"], info["cycles_completed"],
+            *[date.fromisoformat(value) if value else None for value in done_on],
+            info["confirmed_tables"], info["pending_tables"], info["times_washed"], info["extra_times"],
+            info["extra_tables"], info["days_worked"], info["days_not_done"],
+        ])
+        for column in (5, 6, 7):
+            summary.cell(summary.max_row, column).number_format = "DD-MM-YYYY"
+    for index, width in enumerate((14, 30, 14, 14, 14, 14, 14, 18, 18, 14, 18, 18, 12, 14), start=1):
+        summary.column_dimensions[summary.cell(1, index).column_letter].width = width
     workbook.active = 1
     neutralise_formulas(workbook)
     buffer = io.BytesIO()
@@ -334,11 +362,11 @@ def import_daily(db: Session, user: User, filename: str, content: bytes, *, dry_
         plant, day = record["plant"], record["date"]
         month = _month_key(day)
         rows_of_month = state.setdefault((plant.id, month), [])
-        cycle_no = _open_cycle_no({row.cycle_no for row in rows_of_month if row.cycle_completed})
-        if cycle_no is None:
-            record["errors"].append(f"All three washing cycles of {day.strftime('%B %Y')} are already complete for {plant.site_code}")
-            continue
+        done = {row.cycle_no for row in rows_of_month if row.cycle_completed}
+        cycle_no = _open_cycle_no(done)
         record["cycle_no"] = cycle_no
+        # all three cycles already complete (e.g. robot cleaning): the day is still saved, as extra work on cycle 3
+        record["extra"] = len(done) >= MONTHLY_CYCLE_TARGET
         if manager:
             planned = _Planned(day, (1, sequence), record["tables"], cycle_no)
             rows_of_month.append(planned)
@@ -353,7 +381,9 @@ def import_daily(db: Session, user: User, filename: str, content: bytes, *, dry_
         if record["errors"]:
             continue
         record["detail"] = f"{_describe(record['job_status'], record['tables'], record['reason'])} · Cycle {record['cycle_no']}"
-        if record.get("planned") is not None and record["planned"].cycle_completed:
+        if record.get("extra"):
+            record["detail"] += " · extra washing (all 3 cycles already complete)"
+        elif record.get("planned") is not None and record["planned"].cycle_completed:
             record["detail"] += " · completes the cycle"
 
     for record in records:
@@ -369,6 +399,7 @@ def import_daily(db: Session, user: User, filename: str, content: bytes, *, dry_
         "problems": problems,
         "plants": len({r["plant"].id for r in to_save}),
         "tables": sum(r["tables"] for r in to_save),
+        "extra": sum(1 for r in to_save if r.get("extra")),
         "review_status": "Confirmed" if manager else "Pending",
         "saved": 0,
         "rows": [{

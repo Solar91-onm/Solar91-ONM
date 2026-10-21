@@ -123,7 +123,7 @@
   columns:[["Site code",r=>h(r.site_code)],["Date",r=>h(dateText(r.date))]],
   actionLabel:a=>a==="New"?"Will save":a==="Unchanged"?"Already saved":a,
   canSave:p=>Number(p.new||0)>0,
-  readyText:p=>p.new+" day"+(p.new===1?"":"s")+" for "+p.plants+" plant"+(p.plants===1?"":"s")+" ("+p.tables+" tables) "+(p.review_status==="Confirmed"?"will be saved as confirmed.":"will be sent to the O&M team for review."),
+  readyText:p=>p.new+" day"+(p.new===1?"":"s")+" for "+p.plants+" plant"+(p.plants===1?"":"s")+" ("+p.tables+" tables"+(p.extra?"; "+p.extra+" day"+(p.extra===1?"":"s")+" as extra washing after all 3 cycles were complete":"")+") "+(p.review_status==="Confirmed"?"will be saved as confirmed.":"will be sent to the O&M team for review."),
   saveLabel:"Save washing days",
   savedText:r=>r.saved+" washing day"+(r.saved===1?"":"s")+" saved"+(r.review_status==="Confirmed"?".":" and sent for review."),
   afterSave:refreshWashing
