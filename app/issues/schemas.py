@@ -87,6 +87,14 @@ class AssignmentRequest(BaseModel):
     note: str | None = None
 
 
+class BulkAssignRequest(BaseModel):
+    """Assign many tickets to one Assignee in a single transaction (O&M Head)."""
+    issue_ids: list[UUID] = Field(min_length=1, max_length=500)
+    assigned_to: UUID
+    reassign: bool = False                    # also move tickets that already have a different assignee
+    note: str | None = Field(default=None, max_length=1000)
+
+
 class ProgressRequest(BaseModel):
     note: str = Field(min_length=1, max_length=4000)
     parts: str | None = None
@@ -165,6 +173,11 @@ class IssueCommentCreate(BaseModel):
 class IssueStatusRequest(BaseModel):
     status: str
     note: str | None = None
+
+
+class StepBackRequest(BaseModel):
+    """Move a ticket back one workflow stage; the reason is kept in the ticket history."""
+    reason: str = Field(min_length=3, max_length=1000)
 
 
 class ReopenRequest(BaseModel):

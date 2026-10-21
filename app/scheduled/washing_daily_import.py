@@ -215,12 +215,13 @@ def daily_template_bytes(db: Session, user: User, month: str | None = None, plan
 # ───────────────────────── upload ─────────────────────────
 @dataclass
 class _Planned:
-    """A confirmed report (saved or about to be) used to work out cycle numbers before anything is written."""
+    """A report (saved or about to be) used to work out cycle numbers before anything is written."""
     report_date: date
     order: tuple
     tables_cleaned: int
     cycle_no: int
     cycle_completed: bool = False
+    confirmed: bool = True       # only confirmed reports complete a cycle; pending ones still fill it
 
 
 def _whole_number(text: str) -> int:
@@ -353,24 +354,30 @@ def import_daily(db: Session, user: User, filename: str, content: bytes, *, dry_
     new_records = sorted((r for r in candidates if not r["errors"] and r["action"] == "New"),
                          key=lambda r: (str(r["plant"].id), r["date"]))
     state: dict[tuple[UUID, str], list[_Planned]] = {}
+    # Same rule as _cycle_for_new_work: a cycle is full once it is confirmed complete or its recorded tables
+    # (confirmed + awaiting confirmation) reach the plant's table count; new days go to the cycle after it.
     for report in existing:
-        if report.review_status == "Confirmed":
-            state.setdefault((report.plant_id, report.cycle_month), []).append(_Planned(
-                report.report_date, (0, report.created_at.timestamp() if report.created_at else 0.0),
-                report.tables_cleaned, report.cycle_no, bool(report.cycle_completed)))
+        state.setdefault((report.plant_id, report.cycle_month), []).append(_Planned(
+            report.report_date, (0, report.created_at.timestamp() if report.created_at else 0.0),
+            report.tables_cleaned, report.cycle_no, bool(report.cycle_completed) and report.review_status == "Confirmed",
+            report.review_status == "Confirmed"))
     for sequence, record in enumerate(new_records):
         plant, day = record["plant"], record["date"]
         month = _month_key(day)
         rows_of_month = state.setdefault((plant.id, month), [])
+        recorded: dict[int, int] = {}
+        for row in rows_of_month:
+            recorded[row.cycle_no] = recorded.get(row.cycle_no, 0) + (row.tables_cleaned or 0)
         done = {row.cycle_no for row in rows_of_month if row.cycle_completed}
+        done |= {n for n, tables in recorded.items() if totals[plant.id] > 0 and tables >= totals[plant.id]}
         cycle_no = _open_cycle_no(done)
         record["cycle_no"] = cycle_no
         # all three cycles already complete (e.g. robot cleaning): the day is still saved, as extra work on cycle 3
         record["extra"] = len(done) >= MONTHLY_CYCLE_TARGET
+        planned = _Planned(day, (1, sequence), record["tables"], cycle_no, confirmed=manager)
+        rows_of_month.append(planned)
         if manager:
-            planned = _Planned(day, (1, sequence), record["tables"], cycle_no)
-            rows_of_month.append(planned)
-            cycle_rows = sorted((row for row in rows_of_month if row.cycle_no == cycle_no), key=lambda row: (row.report_date, row.order))
+            cycle_rows = sorted((row for row in rows_of_month if row.cycle_no == cycle_no and row.confirmed), key=lambda row: (row.report_date, row.order))
             for row in cycle_rows:
                 row.cycle_completed = False
             completing = _completing_row(cycle_rows, totals[plant.id])

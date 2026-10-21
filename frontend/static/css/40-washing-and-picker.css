@@ -201,3 +201,7 @@ select.pp-open{outline:2px solid var(--wx-pri);outline-offset:1px}
  html body .topbar .live-pill{display:none!important}
  html body .topbar select.inp{width:122px!important;max-width:122px!important;min-width:0!important}
 }
+/* cycle sheet: where the typed days complete the cycle and which days start the next one */
+.wx-roll{color:var(--wx-ok,#15803D)}
+.wx-run.next{color:#2563EB;font-weight:700}
+.wx-run{white-space:nowrap}

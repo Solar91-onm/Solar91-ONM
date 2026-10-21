@@ -7,7 +7,7 @@
  const AGEC={"0–1 days":"#3B82F6","2–3 days":"#0F9F8C","4–7 days":"#D97706","8–14 days":"#EA7B24","15+ days":"#DC4C3E"};
  const AGES=Object.keys(AGEC);
  const STAT=["Open","Assigned","Acknowledged","In Progress","Pending Vendor","Resolved","Closed"];
- const FILTER_LABELS={plant:"Plant",site:"Site code",project:"Project",vert:"Issue type",equip:"Equipment",maker:"Maker",assignee:"Assignee",status:"Status",aging:"Age of issue"};
+ const FILTER_LABELS={plant:"Plant",site:"Site code",project:"Project",district:"District",vert:"Issue type",equip:"Equipment",maker:"Maker",assignee:"Assignee",status:"Status",aging:"Age of issue"};
  const F=()=>{const f=Object.assign(blankIssF(),S.issF||{});S.issF=f;return f};
  const q=s=>String(s).replace(/\\/g,"\\\\").replace(/'/g,"\\'");
 
@@ -55,12 +55,14 @@
   return esc(t.equip||"—")+(t.maker?'<div class="si-sub">'+esc(t.maker)+'</div>':'');
  }
  function siRow(t,cls){
-  const p=plantRec(t.plant),sla=slaState(t),age=issueAgeDays(t),ab=ageBucket(t),c=PRI[issueLevel(t)]||"#ccc";
+  const p=plantRec(t.plant),sla=slaState(t),age=issueAgeDays(t),ab=ageBucket(t),c=PRI[issueLevel(t)]||"#ccc",prob=String(t.desc||t.sub||t.vertical||"Issue").trim();
   return '<tr class="si-r click'+cls+(sla==="breach"?" od":"")+(S.flashId===t.id?" flash-new":"")+'" data-rid="'+esc(t.id)+'" data-act="issue" data-id="'+esc(t.id)+'">'+
-   '<td style="--c:'+c+'"><div class="si-id">'+esc(t.id)+'<small>'+esc(t.vertical||"")+(t.sub?" · "+esc(t.sub):"")+'</small></div>'+(t.desc?'<div class="si-desc">'+esc(String(t.desc).slice(0,90))+'</div>':'')+'</td>'+
+   /* the problem leads (bold), the equipment sits under it, the ticket ID is on the right */
+   '<td style="--c:'+c+'"><div class="si-prob"><b title="'+esc(prob)+'">'+esc(prob.slice(0,120))+'</b><span class="si-tid">'+esc(t.id)+'</span></div>'+
+   '<div class="si-eqline">'+esc(t.vertical||"Other")+(t.sub&&t.sub!==prob?' · '+esc(t.sub):'')+(t.equip&&t.equip!=="—"?' · '+esc(t.equip):'')+'</div></td>'+
    '<td><div style="font-weight:600">'+esc(p?p.id:t.plant)+'</div><div class="si-sub">'+esc(p?p.name:"")+'</div></td>'+
    '<td>'+siUnitsCell(t)+'</td>'+
-   '<td><span class="si-pri" style="--c:'+c+'"><i></i>'+esc(t.severity)+'</span></td>'+
+   '<td><span class="si-pri" style="--c:'+c+'"><i></i>'+esc(issueLevel(t))+'</span></td>'+
    '<td class="si-age" style="--c:'+(AGEC[ab]||"#94A3B8")+'"><b>'+age+'d</b><div class="tr"><i style="width:'+Math.min(100,Math.round(age/15*100))+'%"></i></div></td>'+
    '<td>'+(t.assignee?'<span class="si-av"><i>'+esc(ccIni(t.assignee))+'</i>'+esc(t.assignee)+'</span>':'<span class="si-un">⚑ Unassigned</span>')+'</td>'+
    '<td>'+badge(t.status)+(sla==="breach"?" "+badge("Overdue"):"")+etcLabel(t)+'</td>'+
@@ -93,6 +95,21 @@
  window.siGroupSelect=function(el){
   (el.dataset.ids||"").split(",").filter(Boolean).forEach(id=>{const cb=document.querySelector('.cc-rowcb[data-tid="'+id+'"]');if(cb)cb.checked=el.checked;if(typeof ccToggleSel==="function"){try{ccToggleSel(id,{checked:el.checked})}catch(e){}}});
  };
+ /* O&M Head: assign every ticket the current filters show (plant, district, equipment, type, age…) in one go */
+ const siAssignable=t=>["Open","Assigned","Acknowledged"].includes(t.status);
+ function siAssignMatchingButton(filtered){
+  if(!scheduledAdmin())return "";
+  const list=filtered.filter(siAssignable),un=list.filter(t=>!t.assignee).length;
+  if(!list.length)return "";
+  return '<button type="button" class="btn p sm si-assign-all" onclick="siAssignMatching()" title="Assign the tickets shown by the current filters to one person">⚑ Assign '+(un||list.length)+(un?' unassigned':'')+' in view</button>';
+ }
+ window.siAssignMatching=function(){
+  if(!scheduledAdmin()){toast("Only the O&M Head can assign tickets.");return}
+  const list=filterIssues(S.issues||[],F()).filter(siAssignable);
+  if(!list.length){toast("No ticket in view can be assigned (work has started or it is finished).");return}
+  const tags=Array.from(document.querySelectorAll(".si-active .si-tag")).map(x=>x.firstChild&&x.firstChild.textContent).filter(Boolean);
+  S.modal="bulkAssign";S.modalCtx={ids:list.map(t=>t.id),scope:tags.length?tags.join(" · "):"All tickets in view"};render();
+ };
  window.siGroupBulkAssign=function(ids){
   if(!scheduledAdmin()){toast("Only the O&M Head can assign tickets.");return}
   const list=String(ids||"").split(",").filter(Boolean);if(!list.length)return;
@@ -109,12 +126,12 @@
   const person=pool.find(a=>a.id===who);
   if(!person){toast("Choose an Assignee from the list.");return}
   const btn=sel&&sel.nextElementSibling;if(btn){btn.disabled=true;btn.textContent="Assigning…"}
-  let ok=0;const failed=[];
-  for(const t of g.items.slice()){
-   if(typeof postIssue!=="function")break;
-   const row=await postIssue(t.id,t.assignee?"/reassign":"/assign",{assigned_to:person.id,assignee_text:person.name,note:"Assigned from the triage queue"});
-   if(row)ok++;else failed.push(t.id);
-  }
+  /* one request for the whole group (server: one transaction, one notification) */
+  let r;
+  try{r=await apiFetch("/api/issues/bulk-assign",{method:"POST",body:{issue_ids:g.items.map(t=>t.dbId).filter(Boolean),assigned_to:person.id,reassign:true,note:"Assigned from the triage queue"}})}
+  catch(e){if(btn){btn.disabled=false;btn.textContent="Assign"}toast("Not assigned — "+(e.message||"error"));return}
+  (r.assigned||[]).forEach(row=>applyIssueRow(row,(S.issues||[]).find(x=>x.id===row.ticket_no)));
+  const failed=(r.skipped||[]).map(x=>x.ticket_no||"?"),ok=(r.assigned||[]).length;
   render();toast(ok+" ticket"+(ok===1?"":"s")+" assigned to "+person.name+(failed.length?" · not changed: "+failed.join(", "):" — notified."));
  };
  function siPlantSnapshot(plantName,all,f){
@@ -176,9 +193,9 @@
  renderIssues=function(){
   const f=F(),all=S.issues||[],filtered=filterIssues(all,f),openAll=openTk(all),openF=openTk(filtered);
   const people=[...new Set(all.map(t=>t.assignee).filter(Boolean).concat(TEAM_POOL))].sort();
-  const sites=[...new Set((S.plants||[]).map(p=>p.id))].sort(),projs=[...new Set((S.plants||[]).map(plantProject).filter(Boolean))].sort();
+  const districts=[...new Set((S.plants||[]).map(p=>String(p.district||"").trim()).filter(Boolean))].sort(),sites=[...new Set((S.plants||[]).map(p=>p.id))].sort(),projs=[...new Set((S.plants||[]).map(plantProject).filter(Boolean))].sort();
   const makers=[...new Set(all.map(t=>t.maker).filter(Boolean))].sort(),equips=[...new Set(all.map(t=>t.equip).filter(Boolean))].sort();
-  const advKeys=["site","project","maker","equip","vert","aging"];
+  const advKeys=["site","project","district","maker","equip","vert","aging"];
   const advCount=advKeys.filter(k=>f[k]&&f[k]!=="all").length+(f.from?1:0)+(f.to?1:0);
   const total=Math.max(1,all.length);
   const cnt={Open:openAll.length,Critical:openAll.filter(t=>t.severity==="Critical").length,Overdue:openAll.filter(isOverdueIssue).length,
@@ -205,10 +222,10 @@
    sel("plant",(S.plants||[]).map(p=>[p.name,p.name]),"All plants")+
    '<select class="si-sel" aria-label="Sort" onchange="siSet({sort:this.value})">'+[["etc","↕ Due soonest"],["severity","↕ Highest priority"],["age","↕ Oldest first"],["created","↕ Newest first"]].map(([v,l])=>'<option value="'+v+'"'+(f.sort===v?" selected":"")+'>'+l+'</option>').join("")+'</select>'+
    '<button type="button" class="si-more'+(S.issMore?" open":"")+(advCount||f.assignee!=="all"||f.status!=="all"?" on":"")+'" onclick="siMore()"><span>☰</span> Filters'+((advCount+(f.assignee!=="all"?1:0)+(f.status!=="all"?1:0))?' <em>'+(advCount+(f.assignee!=="all"?1:0)+(f.status!=="all"?1:0))+'</em>':'')+' <i class="car">'+I.chev(12)+'</i></button></div>'+
-   '<div class="si-chips">'+chip("all","All",all.length)+chip("Open","Open",cnt.Open)+chip("Unassigned","Unassigned",cnt.Unassigned)+chip("Overdue","Overdue",cnt.Overdue)+chip("Today","Today",cnt.Today)+chip("Mine","My issues",cnt.Mine)+'</div>';
+   '<div class="si-chips">'+chip("all","All",all.length)+chip("Open","Open",cnt.Open)+chip("Unassigned","Unassigned",cnt.Unassigned)+chip("Overdue","Overdue",cnt.Overdue)+chip("Today","Today",cnt.Today)+chip("Mine","My issues",cnt.Mine)+siAssignMatchingButton(filtered)+'</div>';
   /* ---- LAYER 2 · detailed filters (collapsed until asked, grouped by meaning) ---- */
   if(S.issMore)h+='<div class="si-panel">'+
-   '<div class="si-grp"><div class="gh"><i>📍</i>Where</div>'+fld("Site code",sel("site",sites.map(x=>[x,x]),"All sites"))+fld("Project",sel("project",projs.map(x=>[x,x]),"All projects"))+'</div>'+
+   '<div class="si-grp"><div class="gh"><i>📍</i>Where</div>'+(districts.length?fld("District",sel("district",districts.map(x=>[x,x]),"All districts")):"")+fld("Site code",sel("site",sites.map(x=>[x,x]),"All sites"))+fld("Project",sel("project",projs.map(x=>[x,x]),"All projects"))+'</div>'+
    '<div class="si-grp"><div class="gh"><i>⚙</i>What</div>'+fld("Issue type",sel("vert",VERTICALS.map(v=>[v,v]),"All types"))+(equips.length?fld("Equipment",sel("equip",equips.map(x=>[x,x]),"All equipment")):"")+(makers.length?fld("Maker",sel("maker",makers.map(x=>[x,x]),"All makers")):"")+'</div>'+
    '<div class="si-grp"><div class="gh"><i>👤</i>Who & stage</div>'+fld("Assignee",sel("assignee",[["Unassigned","Unassigned"]].concat(people.map(x=>[x,x])),"Anyone"))+fld("Status",sel("status",STAT.map(x=>[x,x]),"Any status"))+'</div>'+
    '<div class="si-grp"><div class="gh"><i>🗓</i>When</div>'+fld("Age of issue",sel("aging",AGES.map(x=>[x,x]),"Any age"))+'<div class="si-dates">'+fld("From",'<input id="issue-filter-from" name="occurred_from" type="date" value="'+esc(f.from)+'" onchange="siSet({from:this.value})"/>')+fld("To",'<input id="issue-filter-to" name="occurred_to" type="date" value="'+esc(f.to)+'" onchange="siSet({to:this.value})"/>')+'</div></div>'+
@@ -218,7 +235,7 @@
   if(f.q)T("“"+f.q+"”","{q:\'\'}");
   if(f.chip!=="all")T(f.chip==="Mine"?"My issues":f.chip,"{chip:\'all\'}");
   if(f.sla&&f.sla!=="all")T({overdue:"Overdue",ontime:"On time",done:"Done"}[f.sla],"{sla:\'all\'}");
-  [["plant","Plant"],["sev","Priority"],["status","Status"],["assignee","Assignee"],["bucket","Stage"],["site","Site"],["project","Project"],["maker","Maker"],["equip","Equipment"],["vert","Type"],["aging","Age"]].forEach(([k,l])=>{if(f[k]&&f[k]!=="all")T(l+": "+(k==="equip"&&typeof equipmentFilterLabel==="function"?equipmentFilterLabel(f[k]):f[k]),"{"+k+":\'all\'}")});
+  [["plant","Plant"],["sev","Priority"],["status","Status"],["assignee","Assignee"],["bucket","Stage"],["district","District"],["site","Site"],["project","Project"],["maker","Maker"],["equip","Equipment"],["vert","Type"],["aging","Age"]].forEach(([k,l])=>{if(f[k]&&f[k]!=="all")T(l+": "+(k==="equip"&&typeof equipmentFilterLabel==="function"?equipmentFilterLabel(f[k]):f[k]),"{"+k+":\'all\'}")});
   if(f.from)T("From "+f.from,"{from:\'\'}");if(f.to)T("To "+f.to,"{to:\'\'}");
   const hasF=tags.length>0||!!f.queue;
   h+=(hasF?'<div class="si-active"><span class="si-lbl">Showing</span>'+tags.join("")+'<button type="button" class="si-clear" onclick="S.issF=blankIssF();S.tablePages.issues=1;render()">Clear all</button></div>':'')+'</div>';
@@ -281,7 +298,7 @@
   if(mode==="board"&&typeof m26Board==="function"){tb+='<div style="padding:0 12px 12px">'+m26Board()+'</div>'}
   else if(mode==="sites"){tb+=siSitesMatrix(filtered)}
   else{
-   tb+='<div class="si-scroll"><table class="si-t dense"><thead><tr><th>Issue</th><th>Plant / site</th><th>Equipment</th>'+th("Priority","severity")+th("Age","age")+'<th>Assignee</th>'+th("Status / due","etc")+'<th>Action</th></tr></thead><tbody>';
+   tb+='<div class="si-scroll"><table class="si-t dense"><thead><tr><th>Problem · equipment · ID</th><th>Plant / site</th><th>Equipment</th>'+th("Priority","severity")+th("Age","age")+'<th>Assignee</th>'+th("Status / due","etc")+'<th>Action</th></tr></thead><tbody>';
    if(!pageGroups.length)tb+='<tr><td colspan="9"><div class="si-empty"><div class="ico">'+(all.length?"⌕":"✓")+'</div><b>'+(all.length?"No issues match these filters":"No issues raised yet")+'</b><p>'+(all.length?"Try removing a filter or searching with different words.":"When a fault is reported at a plant it will appear here, ranked by priority.")+'</p>'+(all.length&&hasF?'<button class="btn o sm" onclick="S.issF=blankIssF();S.tablePages.issues=1;render()">Clear all filters</button>':'<button class="btn p sm" onclick="openModal(\'newTicket\')">'+I.plus(12)+' Raise Issue</button>')+'</div></td></tr>';
    pageGroups.forEach(g=>{
     if(g.items.length===1){tb+=siRow(g.items[0],"");return}

@@ -101,3 +101,35 @@
  .tk-steps li span{display:none}
  .tk-steps li.on span{display:inline}
 }
+
+/* Bulk assignment (Site Issues · "Assign … in view", selected rows, group Assign all) */
+.si-chips .si-assign-all{margin-left:auto}
+.ba-sum{display:flex;gap:10px;flex-wrap:wrap}
+.ba-sum>div{flex:1;min-width:120px;border:1px solid var(--border);border-radius:10px;padding:10px 12px;background:var(--card)}
+.ba-sum b{display:block;font-size:20px;font-weight:800;color:var(--foreground)}
+.ba-sum span{font-size:12px;color:var(--muted-foreground)}
+.ba-types{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+.ba-chip{display:inline-flex;align-items:center;border-radius:999px;padding:3px 10px;font-size:12px;font-weight:700;background:var(--secondary);color:var(--foreground);border:1px solid var(--border)}
+.ba-re{display:flex;align-items:center;gap:8px;margin-top:12px;font-size:13px;cursor:pointer}
+@media (max-width:640px){.si-chips .si-assign-all{margin-left:0;width:100%}}
+
+/* Session navigation (44-session-nav.js): ← → in the top bar, and the "restored draft" bar in dialogs */
+.topbar > .s91-titlecell{display:flex;align-items:center;gap:10px}
+.s91-crumb{min-width:0}
+.s91-nav{display:inline-flex;gap:4px;flex-shrink:0}
+.s91-nav-b{width:32px;height:32px;border-radius:9px;border:1px solid var(--border);background:var(--card);color:var(--foreground);font-size:16px;font-weight:700;line-height:1;cursor:pointer;display:grid;place-items:center}
+.s91-nav-b:hover:not(:disabled){border-color:var(--primary);color:var(--primary)}
+.s91-nav-b:focus-visible{outline:2px solid var(--primary);outline-offset:2px}
+.s91-nav-b:disabled{opacity:.35;cursor:default}
+.s91-draft-bar{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin:0 0 12px;padding:8px 12px;border-radius:10px;background:#EEF6FF;border:1px solid #C9DDF6;color:#1E3A5F;font-size:12.5px}
+:root[data-theme="dark"] .s91-draft-bar{background:#16243a;border-color:#2a4365;color:#cfe0f5}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .s91-draft-bar{background:#16243a;border-color:#2a4365;color:#cfe0f5}}
+.s91-nav.float{position:fixed;left:12px;bottom:calc(74px + env(safe-area-inset-bottom));z-index:55;padding:4px;border-radius:12px;background:var(--card);border:1px solid var(--border);box-shadow:0 6px 18px rgba(16,24,20,.18)}
+.s91-nav.float .s91-nav-b{width:38px;height:38px}
+.s91-nav[hidden]{display:none}
+
+/* Issues register: the problem leads in bold, equipment under it, the ticket ID on the right */
+#app .m26-issues .si-t .si-prob,.si-prob{display:flex;align-items:baseline;gap:12px;min-width:0;max-width:440px}
+.si-prob b{flex:1;min-width:0;font-size:13.5px;font-weight:800;color:var(--si-ink,var(--foreground));white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.si-tid{flex:0 0 auto;margin-left:auto;font-size:12px;font-weight:600;color:var(--si-mut,var(--muted-foreground));white-space:nowrap;font-variant-numeric:tabular-nums}
+.si-eqline{margin-top:2px;max-width:440px;font-size:12px;color:var(--si-mut,var(--muted-foreground));white-space:nowrap;overflow:hidden;text-overflow:ellipsis}

@@ -1043,7 +1043,7 @@ function renderIssues(){
  const trendRows=issueTrendRows(days,filterIssues(S.issues,Object.assign({},f,{from:"",to:""})));
  const trendTotal=trendRows.reduce((sum,row)=>sum+row.o,0),trendAverage=trendRows.length?(trendTotal/trendRows.length).toFixed(1):"0.0",trendPeak=Math.max(0,...trendRows.map(row=>row.o));
  const advOpen=S.issMore;
- const advCount=[f.site,f.project,f.maker,f.equip,f.vert,f.aging].filter(v=>v&&v!=="all").length+(f.from?1:0)+(f.to?1:0);
+ const advCount=[f.site,f.project,f.district,f.maker,f.equip,f.vert,f.aging].filter(v=>v&&v!=="all").length+(f.from?1:0)+(f.to?1:0);
  const hasActiveFilters=advCount>0||!!f.q||!!f.from||!!f.to||!!f.queue||f.chip!=="all"||f.bucket!=="all"||f.status!=="all"||f.sev!=="all"||f.assignee!=="all"||f.plant!=="all"||f.health!=="all";
  const queueLabels={critical:"Critical open issues",overdue:"Overdue non-critical issues",other:"Other open issues"};
  let h='<div class="oi-header row between wrap"><div class="oi-header-copy"><div class="kpi-label">SOLAR OPERATIONS · LIVE REGISTER</div><h1>Site Issues</h1><p>Prioritize field faults, assign ownership, and track resolution across your plants.</p></div><div class="oi-header-actions"><div class="oi-live-summary"><span class="oi-live-dot"></span><div><b>'+openTk(filtered).length+' open</b><small>'+filtered.length+' issues in view</small></div></div><button class="btn p oi-raise-button" onclick="openModal(\'newTicket\')">'+I.plus(14)+' Raise Issue</button></div></div>';
@@ -1508,6 +1508,7 @@ function filterIssues(list,f){f=f||S.issF||blankIssF();
   else if(f.status!=="all"&&f.status!=="Closed (verified)"&&t.status!==f.status)return false;
   if(f.site!=="all"&&site!==f.site)return false;
   if(f.project!=="all"&&project!==f.project)return false;
+  if(f.district&&f.district!=="all"&&String((p&&p.district)||"")!==f.district)return false;
   if(ccEquipmentCategory(f.equip)?!ccEquipmentCategoryMatches(ccEquipmentCategory(f.equip),t,t.plant):!equipmentFilterMatches(t.equip,f.equip,t.plant))return false;
   if(f.aging!=="all"&&ageBucket(t)!==f.aging)return false;
   if(f.maker!=="all"&&(t.maker||"")!==f.maker)return false;

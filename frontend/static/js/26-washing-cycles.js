@@ -594,12 +594,23 @@
   });
   const total=mc.table_count||p.table_count||0,recorded=rows.reduce((a,r)=>a+r.mine.filter(x=>x.job_status==="Done").reduce((b,x)=>b+x.tables_cleaned,0),0);
   const fresh=rows.filter(r=>r.editable&&(r.n>0||r.draft.reason)),newTables=fresh.reduce((a,r)=>a+r.n,0);
+  /* Which cycle each typed day counts towards, exactly as the server decides it (days in date order, on top of
+     what is already recorded): once the cycle's count is reached, later days start the next cycle by themselves. */
+  const rolls=!cur.extra&&total>0;let base=recorded,nextTables=0,completesOn=null;
+  rows.forEach(r=>{
+   r.runText=(r.mine.length||r.n)?String(r.run):"";
+   if(!r.editable||!r.n)return;
+   if(rolls&&base>=total){r.toNext=true;nextTables+=r.n;r.runText="→ C"+Math.min(pick+1,3)+" · "+nextTables;return}
+   base+=r.n;r.runText=String(base);
+   if(rolls&&base>=total&&!completesOn){completesOn=r.date;r.runText=base+" ✓ completes C"+pick}
+  });
   const pending=rows.flatMap(r=>r.mine.filter(x=>x.can_review)),ready=pending.filter(x=>!(x.photos_required&&(!x.has_before||!x.has_after)));
-  return{cyc,cur,pick,rows,total,recorded,fresh,newTables,left:Math.max(0,total-recorded),pending,ready};
+  return{cyc,cur,pick,rows,total,recorded,fresh,newTables,left:Math.max(0,total-recorded),pending,ready,nextTables,completesOn};
  }
  function sheetFoot(m){
-  const team=!isField(),over=!m.cur.extra&&m.newTables>m.left,days=m.fresh.length?plural(m.fresh.length,"day"):"days";
-  const sum=m.fresh.length?'<b>'+plural(m.fresh.length,"day")+'</b> to save · '+plural(m.newTables,"table")+(m.cur.extra?' · extra washing (all 3 cycles complete)':over?' · <b class="wx-over">only '+m.left+' left in cycle '+m.pick+'</b>':' · '+(m.left-m.newTables)+' left after this'):'Type the tables cleaned on each day, or choose a reason if no work was done.';
+  const team=!isField(),over=!m.cur.extra&&m.newTables>=m.left&&m.left>=0&&!!m.completesOn,days=m.fresh.length?plural(m.fresh.length,"day"):"days";
+  const roll=over?' · <b class="wx-roll">cycle '+m.pick+' completes'+(m.pick<3?(m.nextTables?'</b> · '+plural(m.nextTables,"table")+' on later days start cycle '+(m.pick+1):'</b> · cycle '+(m.pick+1)+' starts next'):'</b>'+(m.nextTables?' · '+plural(m.nextTables,"table")+' recorded as extra washing':''))+(isField()?' (once confirmed)':''):'';
+  const sum=m.fresh.length?'<b>'+plural(m.fresh.length,"day")+'</b> to save · '+plural(m.newTables,"table")+(m.cur.extra?' · extra washing (all 3 cycles complete)':over?roll:' · '+(m.left-m.newTables)+' left after this'):'Type the tables cleaned on each day, or choose a reason if no work was done.';
   return '<span>'+sum+'</span><button type="button" class="btn p" id="wx-sheet-save" onclick="washSheetSubmit()"'+(m.fresh.length&&!S._washSheetSaving?'':' disabled')+'>'+(S._washSheetSaving?'Saving…':team?'Save '+days+' as confirmed':'Submit '+days+' for confirmation')+'</button>';
  }
  function sheetRow(r){
@@ -618,7 +629,7 @@
    '<td><input class="wx-in wx-num" type="number" min="1" max="5000" inputmode="numeric" placeholder="0" value="'+h(d.tables||"")+'" aria-label="Tables cleaned on '+dayName(r.date)+'" oninput="washSheetInput(\''+id+'\',\'tables\',this)"/></td>'+
    '<td><select class="wx-in" aria-label="Reason not done on '+dayName(r.date)+'" onchange="washSheetInput(\''+id+'\',\'reason\',this)"><option value="">—</option>'+REASONS.map(x=>'<option'+(d.reason===x?" selected":"")+'>'+x+'</option>').join("")+'</select></td>'+
    '<td><input class="wx-in" maxlength="4000" placeholder="Remarks" value="'+h(d.remarks||"")+'" aria-label="Remarks for '+dayName(r.date)+'" oninput="washSheetInput(\''+id+'\',\'remarks\',this)"/></td>'+
-   '<td class="wx-pics">'+pic("before")+pic("after")+(r.needsPhotos?'<small>needed</small>':'')+'</td><td></td><td class="wx-run" id="wx-run-'+id+'">'+(r.n?r.run:"")+'</td><td></td></tr>';
+   '<td class="wx-pics">'+pic("before")+pic("after")+(r.needsPhotos?'<small>needed</small>':'')+'</td><td></td><td class="wx-run'+(r.toNext?' next':'')+'" id="wx-run-'+id+'">'+(r.n?h(r.runText):"")+'</td><td></td></tr>';
  }
  function sheetHtml(p){
   const thisMonth=(data().today||"").slice(0,7),month=S.washMonth||thisMonth,mc=monthCache()[p.plant_id+"|"+month];
@@ -642,7 +653,7 @@
  window.washSheetInput=function(date,field,el){
   const x=sheetCtx();if(!x)return;const st=sheetState(x.p.plant_id,x.mc.month),r=st.rows[date]=st.rows[date]||{tables:"",reason:"",remarks:""};r[field]=el.value;
   const m=sheetModel(x.p,x.mc);
-  m.rows.forEach(row=>{const c=document.getElementById("wx-run-"+row.date);if(c)c.textContent=(row.mine.length||row.n)?row.run:""});
+  m.rows.forEach(row=>{const c=document.getElementById("wx-run-"+row.date);if(c){c.textContent=row.runText||"";c.classList.toggle("next",!!row.toNext)}});
   const foot=document.getElementById("wx-sheet-foot");if(foot)foot.innerHTML=sheetFoot(m);
  };
  window.washSheetPhotos=function(date,kind,input){
@@ -667,7 +678,6 @@
   }
   if(problems.length){toast(problems.slice(0,3).join(" · ")+(problems.length>3?" · and "+(problems.length-3)+" more":""));return}
   if(!entries.length){toast("Type the tables cleaned on at least one day.");return}
-  if(!m.cur.extra&&m.newTables>m.left){toast("Only "+m.left+" table(s) are left in cycle "+m.pick+"; you entered "+m.newTables+".");return}
   const st=sheetState(p.plant_id,mc.month);
   S._washSheetSaving=true;const foot=document.getElementById("wx-sheet-foot");if(foot)foot.innerHTML=sheetFoot(m);
   let saved=null;const failed=[];
@@ -678,6 +688,7 @@
     try{await upload(rep.id,f.before||[],"before");await upload(rep.id,f.after||[],"after")}catch(e){failed.push(dayName(rep.report_date))}
    }
    S.washSheet={key:st.key,rows:{},files:{}};
+   if(m.completesOn)S.washSheetCycle=null;      // the cycle just completed: show the one that opened
    toast((isField()?plural(saved.saved,"day")+" submitted for O&M confirmation":plural(saved.saved,"day")+" saved and confirmed")+(failed.length?". Photo upload failed for "+failed.join(", ")+" — open that day to add them.":"."));
   }catch(e){toast(detailOf(e,"Could not save the washing sheet."))}
   finally{
@@ -759,7 +770,6 @@
   if(when>todayIso()){toast("The date cannot be in the future.");return}
   const fb=Array.from((document.getElementById("wc-before")||{}).files||[]),fa=Array.from((document.getElementById("wc-after")||{}).files||[]);
   if(!nd&&(!Number.isInteger(count)||count<1)){toast("Enter how many tables you cleaned today.");return}
-  if(!nd&&sameMonth&&count>left&&(p.cycles_this_month||0)<3){toast("Only "+left+" table(s) are left in this cycle.");return}
   if(nd&&!d.exception){toast("Choose the reason the work was not done.");return}
   if(fb.length>5||fa.length>5){toast("Choose no more than 5 before and 5 after photos.");return}
   if(!nd&&isField()&&(!fb.length||!fa.length)){toast("Add at least one before photo and one after photo so the O&M team can verify the report.");return}
@@ -770,7 +780,9 @@
    await upload(saved.id,fb,"before");await upload(saved.id,fa,"after");
    const inOverlay=S.modal==="washingPlantDetails";
    if(!inOverlay)S.modal=null;
-   S.washReportDraft={status:"Done",tables:"",exception:"",remarks:"",date:""};refreshPlantMonths(p.plant_id);await loadOverview();render();toast(isField()?"Washing report submitted for O&M confirmation.":"Washing record saved and confirmed"+(!nd&&(!fb.length||!fa.length)?". Add before/after photos from the report card when you have them.":"."));
+   S.washReportDraft={status:"Done",tables:"",exception:"",remarks:"",date:""};refreshPlantMonths(p.plant_id);await loadOverview();render();const closes=!nd&&sameMonth&&left>0&&count>=left&&(p.cycles_this_month||0)<3;
+   if(closes)toast("Cycle "+p.current_cycle+(isField()?" reaches all "+p.table_count+" tables (completes once confirmed)":" complete")+" — the next days count towards cycle "+Math.min((p.current_cycle||1)+1,3)+".");
+   toast(isField()?"Washing report submitted for O&M confirmation.":"Washing record saved and confirmed"+(!nd&&(!fb.length||!fa.length)?". Add before/after photos from the report card when you have them.":"."));
   }catch(e){
    if(saved){S.washDetailsPlant=p.plant_id;S.washReportPlant=p.plant_id;S.modal="washingPlantDetails";S.modalCtx={};S.washReportDraft={status:"Done",tables:"",exception:"",remarks:"",date:""};await loadOverview().catch(()=>{});render();toast("Report saved, but photo upload failed. Retry the missing photo from this report card. "+detailOf(e));return}
    toast(detailOf(e));

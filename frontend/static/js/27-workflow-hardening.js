@@ -88,30 +88,56 @@
   if(row){render();toast(id+" assigned to "+person.name+" — notified.")}
  };
 
- /* ---- Bulk assign / bulk close ---- */
+ /* ---- Bulk assign / bulk close ----
+    Bulk assignment is ONE server request (POST /api/issues/bulk-assign, one transaction) instead of one per ticket. */
+ const ASSIGNABLE=["Open","Assigned","Acknowledged"];
  function bulkAssignModal(){
-  const ids=(S.modalCtx||{}).ids||[];
-  return modal("Assign "+ids.length+" ticket(s)","Every selected ticket is assigned to the chosen Assignee.",
-   '<div class="field"><span class="lbl">Assign to</span><select id="ba-who" class="inp" onchange="S.modalCtx=Object.assign({},S.modalCtx,{who:this.value})"><option value="">Select an Assignee</option>'+assigneeOptionsHtml("",(S.modalCtx||{}).who||"")+'</select></div>',
-   '<button class="btn o" onclick="closeModal()">Cancel</button><button class="btn p" onclick="bulkAssignGo()">Assign all</button>');
+  const ctx=S.modalCtx||{},tickets=(ctx.ids||[]).map(issue).filter(Boolean);
+  const ok=tickets.filter(t=>ASSIGNABLE.includes(t.status)),un=ok.filter(t=>!t.assignee),taken=ok.filter(t=>t.assignee);
+  const blocked=tickets.length-ok.length,send=ctx.reassign?ok.length:un.length;
+  const types={};ok.forEach(t=>{const k=t.vertical||"Other";types[k]=(types[k]||0)+1});
+  const typeList=Object.entries(types).sort((a,b)=>b[1]-a[1]);
+  const person=people().find(a=>a.id===ctx.who);
+  const missing=person?typeList.map(x=>x[0]).filter(k=>!handles(person,k)):[];
+  const busy=!!ctx.busy;
+  const body=(ctx.scope?'<div class="bn-info banner" style="margin-bottom:12px"><b>Tickets in view:</b> '+esc(ctx.scope)+'</div>':'')
+   +'<div class="ba-sum"><div><b>'+un.length+'</b><span>unassigned</span></div><div><b>'+taken.length+'</b><span>already have someone</span></div>'+(blocked?'<div><b>'+blocked+'</b><span>work started / finished — skipped</span></div>':'')+'</div>'
+   +(typeList.length?'<div class="ba-types">'+typeList.slice(0,8).map(([k,n])=>'<span class="ba-chip">'+esc(k)+' · '+n+'</span>').join("")+(typeList.length>8?'<span class="ba-chip">+'+(typeList.length-8)+' more</span>':'')+'</div>':'')
+   +'<div class="field" style="margin-top:12px"><span class="lbl">Assign to</span><select id="ba-who" class="inp" '+(busy?'disabled ':'')+'onchange="S.modalCtx=Object.assign({},S.modalCtx,{who:this.value});render()"><option value="">Select an Assignee</option>'+assigneeOptionsHtml(typeList.length===1?typeList[0][0]:"",ctx.who||"")+'</select></div>'
+   +(missing.length?'<div class="bn-warn banner" style="margin-top:10px">'+esc(person.name)+' does not cover <b>'+missing.map(esc).join(", ")+'</b> yet. Assigning gives them that equipment type at every plant, as with single assignment.</div>':'')
+   +(taken.length?'<label class="ba-re"><input type="checkbox" '+(ctx.reassign?'checked ':'')+(busy?'disabled ':'')+'onchange="S.modalCtx=Object.assign({},S.modalCtx,{reassign:this.checked});render()"> Also reassign the '+taken.length+' ticket'+(taken.length===1?'':'s')+' that already have someone</label>':'');
+  return modal("Assign tickets in bulk",send+" ticket"+(send===1?"":"s")+" will be assigned · the Assignee gets one notification",body,
+   '<button class="btn o" '+(busy?'disabled ':'')+'onclick="closeModal()">Cancel</button><button class="btn p" '+(busy||!send?'disabled ':'')+(busy?'aria-busy="true" ':'')+'onclick="bulkAssignGo()">'+(busy?'Assigning…':'Assign '+send+' ticket'+(send===1?'':'s'))+'</button>');
  }
  window.ccBatchAssign=function(){
   if(!headOnly("assign tickets"))return;
   const set=S.ccBatch||new Set();if(!set.size)return;
-  S.modal="bulkAssign";S.modalCtx={ids:Array.from(set)};render();
+  S.modal="bulkAssign";S.modalCtx={ids:Array.from(set),scope:set.size+" selected ticket"+(set.size===1?"":"s")};render();
  };
  window.bulkAssignGo=async function(){
-  const ctx=S.modalCtx||{},person=people().find(a=>a.id===(field("ba-who")||ctx.who));
+  const ctx=S.modalCtx||{};if(ctx.busy)return;
+  const person=people().find(a=>a.id===(field("ba-who")||ctx.who));
   if(!person){toast("Choose an Assignee.");return}
-  let ok=0;const failed=[];
-  for(const id of ctx.ids||[]){
-   const t=issue(id);if(!t)continue;
-   if(!["Open","Assigned","Acknowledged"].includes(t.status)){failed.push(id+" ("+t.status+")");continue}
-   const row=await postIssue(id,t.assignee?"/reassign":"/assign",{assigned_to:person.id,assignee_text:person.name,note:"Bulk assigned"});
-   if(row)ok++;else failed.push(id);
+  const tickets=(ctx.ids||[]).map(issue).filter(t=>t&&ASSIGNABLE.includes(t.status)&&(ctx.reassign||!t.assignee));
+  const ids=tickets.map(t=>t.dbId).filter(Boolean),stale=tickets.filter(t=>!t.dbId).map(t=>t.id);
+  if(!ids.length){toast(stale.length?"Reload the page before assigning these tickets.":"Nothing to assign.");return}
+  S.modalCtx=Object.assign({},ctx,{busy:true,who:person.id});render();
+  let assigned=[],skipped=[];
+  try{
+   for(let i=0;i<ids.length;i+=500){
+    const r=await apiFetch("/api/issues/bulk-assign",{method:"POST",body:{issue_ids:ids.slice(i,i+500),assigned_to:person.id,reassign:!!ctx.reassign}});
+    assigned=assigned.concat(r.assigned||[]);skipped=skipped.concat(r.skipped||[]);
+   }
+  }catch(e){
+   /* earlier batches (if any) were saved; show them and report the failure */
+   assigned.forEach(row=>applyIssueRow(row,(S.issues||[]).find(x=>x.id===row.ticket_no)));
+   S.modalCtx=Object.assign({},S.modalCtx,{busy:false});render();
+   toast((assigned.length?assigned.length+" assigned, then it stopped: ":"Not assigned — ")+(e.message||"error"));return;
   }
-  S.ccBatch=new Set();S.modal=null;render();
-  toast(ok+" ticket(s) assigned to "+person.name+(failed.length?" · not changed: "+failed.join(", "):""));
+  assigned.forEach(row=>applyIssueRow(row,(S.issues||[]).find(x=>x.id===row.ticket_no)));
+  S.ccBatch=new Set();S.modal=null;S.modalCtx=null;render();
+  const skip=skipped.concat(stale.map(id=>({ticket_no:id,reason:"reload needed"})));
+  toast(assigned.length+" ticket"+(assigned.length===1?"":"s")+" assigned to "+person.name+(skip.length?" · "+skip.length+" not changed: "+skip.slice(0,4).map(x=>(x.ticket_no||"?")+" ("+x.reason+")").join(", ")+(skip.length>4?" …":""):""));
  };
  window.ccBatchClose=async function(){
   if(!headOnly("close tickets"))return;

@@ -14,7 +14,12 @@
  const issue=id=>(S.issues||[]).find(x=>x.id===id);
  const q=s=>String(s==null?"":s).replace(/\\/g,"\\\\").replace(/'/g,"\\'");
  const PRI=SEV_COLOR;
- const STEPS=[["Open","Open"],["Acknowledged","Acknowledged"],["In Progress","In progress"],["Pending Vendor","Waiting parts"],["Resolved","Resolved"],["Closed","Closed"]];
+ const STEPS=[["Open","Open"],["Assigned","Assigned"],["Acknowledged","Acknowledged"],["In Progress","In progress"],["Pending Vendor","Waiting parts"],["Resolved","Resolved"],["Closed","Closed"]];
+ const PENDING_STEP=4;
+ /* one stage back (same rules as POST /api/issues/{id}/step-back); Closed uses Reopen instead */
+ const BACK={Assigned:"Open",Acknowledged:"Assigned","In Progress":"Acknowledged","Pending Vendor":"In Progress",Resolved:"In Progress"};
+ const backTarget=t=>{const to=BACK[t.status];return to==="Assigned"&&!t.assignee?"Open":to};
+ const canStepBack=t=>!!BACK[t.status]&&canWork(t)&&(t.status!=="Assigned"||isHead());
  const INTENT={work_done:["Work done","✓"],question:["Question","?"],blocked:["Blocked","!"],confirm:["Confirmed","✓"]};
  const drafts=()=>{if(!S._idkDraft)S._idkDraft={};return S._idkDraft};
 
@@ -25,7 +30,7 @@
  }
  const canWork=t=>isHead()||(role()==="Assignee"&&mineAssigned(t));
  const canMessage=()=>["O&M Head","Assignee","Site Engineer"].includes(role());
- const stepIndex=s=>{const i=STEPS.findIndex(x=>x[0]===s);return s==="Assigned"?0:i<0?0:i};
+ const stepIndex=s=>{if(s==="Pending Parts/Vendor")s="Pending Vendor";const i=STEPS.findIndex(x=>x[0]===s);return i<0?0:i};
  const timeOf=v=>{try{const d=new Date(v);return isNaN(d)?"":d.toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})}catch(e){return ""}};
  const dayOf=v=>{try{const d=new Date(v);if(isNaN(d))return "";const k=d.toISOString().slice(0,10);return k===TODAY?"Today":k===addDays(TODAY,-1)?"Yesterday":d.toLocaleDateString([],{day:"numeric",month:"short",year:"numeric"})}catch(e){return ""}};
  const ini=n=>typeof ccIni==="function"?ccIni(n||"?"):String(n||"?").slice(0,2).toUpperCase();
@@ -42,6 +47,7 @@
    case "issue.closed":case "issue.closed_directly":return "<b>Closed</b> by "+who+note;
    case "issue.reopened":return "<b>Reopened</b> by "+who+note;
    case "issue.reset":return "Reset to Open by "+who;
+   case "issue.stepped_back":return "<b>Moved back to "+esc(a.status_to==="Pending Vendor"?"waiting for parts":a.status_to||"an earlier stage")+"</b> by "+who+note;
    case "issue.etc_changed":return "Deadline changed by "+who+note;
    case "issue.dates_changed":return "Dates changed by "+who+note;
    case "issue.edited":return "Details corrected by "+who+note;
@@ -97,13 +103,16 @@
   if(t.status==="Closed"){text="Closed by the O&M Head. The conversation is read-only; the full history is kept.";if(isHead())btns=b("Reopen","openModal('reopen',{id:'"+id+"'})","o")}
   else if(t.status==="Open"&&!t.assignee){text="Needs an owner. The O&M Head assigns an Assignee.";if(isHead())btns=b("Assign owner","openModal('assign',{id:'"+id+"'})")}
   else if(t.status==="Open"||t.status==="Assigned"){text="Waiting for <b>"+who+"</b> to acknowledge.";if(work)btns=b("Acknowledge","idkAct('"+id+"','ack')")}
-  else if(t.status==="Acknowledged"){text="<b>"+who+"</b> acknowledged. Work starts next.";if(work)btns=b("Start work","idkAct('"+id+"','start')")}
+  else if(t.status==="Acknowledged"){const by=((acts.filter(x=>x.status_to==="Acknowledged").pop())||{}).actor;
+   text=(by&&t.assignee&&by!==t.assignee?"<b>"+esc(by)+"</b> acknowledged for <b>"+who+"</b>":"<b>"+who+"</b> acknowledged")+". Work starts next.";if(work)btns=b("Start work","idkAct('"+id+"','start')")}
   else if(t.status==="In Progress"){
    text=done?"<b>"+esc(done.actor||"Site engineer")+"</b> reported the work is done. "+(work?"Check it and submit the resolution.":"Waiting for "+who+" to confirm."):"Work in progress. Site Engineers post updates here; <b>"+who+"</b> confirms.";
    if(work)btns=b(done?"Confirm & resolve":"Submit resolution","openModal('resolve',{id:'"+id+"'})")+b("Log work","openModal('progress',{id:'"+id+"'})","o")+b("Waiting for parts","idkAct('"+id+"','pending')","o");
   }
   else if(t.status==="Pending Vendor"){text="On hold, waiting for parts or the vendor.";if(work)btns=b("Resume work","idkAct('"+id+"','resume')")+b("Submit resolution","openModal('resolve',{id:'"+id+"'})","o")}
   else if(t.status==="Resolved"){text="Fix submitted. Waiting for the O&M Head to verify and close.";if(isHead())btns=b("Verify & close","openModal('verify',{id:'"+id+"'})")+b("Reopen","openModal('reopen',{id:'"+id+"'})","o")}
+  /* the O&M Head (any ticket) and the ticket's Assignee can take it back one stage when the result did not hold */
+  if(canStepBack(t))btns+=b("↩ Back to "+esc(backTarget(t)==="In Progress"?"In progress":backTarget(t)),"idkAct('"+id+"','back')","g");
   return '<div class="idk-next'+(done&&t.status==="In Progress"?" hot":"")+'"><span class="idk-next-t">'+text+'</span>'+(btns?'<span class="idk-next-a">'+btns+'</span>':'')+'</div>';
  }
  function composerHtml(t){
@@ -160,7 +169,7 @@
  }
  function deskHtml(t){
   const pri=issueLevel(t),si=stepIndex(t.status),p=typeof plantRec==="function"?plantRec(t.plant):null;
-  const steps='<ol class="idk-steps">'+STEPS.map((s,i)=>{if(i===3&&t.status!=="Pending Vendor")return "";const st=i<si?"done":i===si?"now":"";return '<li class="'+st+'"><i>'+(i<si?"✓":"")+'</i>'+esc(s[1])+'</li>'}).join("")+'</ol>';
+  const steps='<ol class="idk-steps">'+STEPS.map((s,i)=>{if(i===PENDING_STEP&&si!==PENDING_STEP)return "";const st=i<si?"done":i===si?"now":"";return '<li class="'+st+'"><i>'+(i<si?"✓":"")+'</i>'+esc(s[1])+'</li>'}).join("")+'</ol>';
   const n=(t.activity||[]).filter(a=>a.action==="issue.message").length;
   return '<div class="idk-ov" onclick="if(event.target===this)closeModal()"><div class="idk" role="dialog" aria-modal="true" aria-label="Ticket '+esc(t.id)+'">'+
    '<header class="idk-h"><div class="idk-title"><span class="idk-pri" style="--c:'+(PRI[pri]||"#94A3B8")+'"><i></i>'+esc(pri)+'</span><h2>'+esc(t.id)+' <span>· '+esc(t.vertical||"Issue")+'</span></h2><p>'+esc(p?p.id+" · "+p.name:t.plant||"")+'</p></div>'+
@@ -212,6 +221,12 @@
    else if(step==="start")row=await postIssue(id,"/start");
    else if(step==="pending")row=await postIssue(id,"/status",{status:"Pending Vendor",note:message||"Waiting for spare parts / vendor."});
    else if(step==="resume")row=await postIssue(id,"/status",{status:"In Progress",note:message||"Resumed — parts/vendor received."});
+   else if(step==="back"){
+    /* the typed message (if any) is the reason; otherwise ask for one. It is saved in the ticket history. */
+    const to=backTarget(t),reason=(message||prompt("Why move "+t.id+" back to "+to+"? This is saved in the ticket history.")||"").trim();
+    if(reason.length<3){toast("Write a short reason to move the ticket back.");return}
+    row=await postIssue(id,"/step-back",{reason});if(row)drafts()[id]="";
+   }
    if(row){if(step==="pending"||step==="resume")drafts()[id]="";S._idkStick=true;render();toast(id+" is now "+(row.status==="Pending Vendor"?"waiting for parts / vendor":row.status)+".")}
   }catch(e){toast(e.message||"Could not update the ticket.")}
   finally{sending=false}

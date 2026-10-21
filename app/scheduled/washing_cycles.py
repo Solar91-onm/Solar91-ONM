@@ -902,6 +902,27 @@ def _next_open_cycle(db: Session, plant_id: UUID, month: str, exclude_report_id:
     return _open_cycle_no(set(db.scalars(stmt)))
 
 
+def _cycle_for_new_work(db: Session, plant_id: UUID, month: str, total_tables: int) -> int:
+    """The cycle a newly entered day counts towards. A cycle is full once it is confirmed complete OR the tables
+    recorded on it (confirmed + awaiting confirmation) reach the plant's table count, so the next cycle starts the
+    moment the count is reached: no separate save, and a Site Engineer need not wait for the O&M review to go on.
+    The day that reaches the count stays whole in that cycle (one report per date); later days go to the next one."""
+    recorded: dict[int, int] = {}
+    full: set[int] = set()
+    for cycle_no, tables, completed, status in db.execute(select(
+        WashingDailyReport.cycle_no, WashingDailyReport.tables_cleaned, WashingDailyReport.cycle_completed, WashingDailyReport.review_status,
+    ).where(
+        WashingDailyReport.plant_id == plant_id,
+        WashingDailyReport.cycle_month == month,
+        WashingDailyReport.review_status.in_(["Pending", "Confirmed"]),
+    )):
+        recorded[cycle_no] = recorded.get(cycle_no, 0) + (tables or 0)
+        if completed and status == "Confirmed":
+            full.add(cycle_no)
+    full |= {n for n, tables in recorded.items() if total_tables > 0 and tables >= total_tables}
+    return _open_cycle_no(full)
+
+
 def _locked_report_plant(db: Session, user: User, plant_id: UUID) -> tuple[Plant, WashingConfig, bool, int]:
     """Who may submit daily washing reports for a plant; locks the plant's washing config so concurrent
     submissions for the same plant run one after another (no duplicate days, correct cycle numbers)."""
@@ -927,7 +948,7 @@ def _add_report(
     """Create one daily report (no commit, no notification). Returns the report and whether it completed a cycle."""
     _validate_report_date(user, manager, report_date)
     month = _month_key(report_date)
-    cycle_no = _next_open_cycle(db, plant.id, month)
+    cycle_no = _cycle_for_new_work(db, plant.id, month, total_tables)
     # Teams only report HOW MANY tables they cleaned that day. The plant's number is a target, never a limit,
     # so nothing is rejected for being above or below it and no individual tables are tracked.
     report = WashingDailyReport(

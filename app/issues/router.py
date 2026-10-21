@@ -16,7 +16,7 @@ from app.core.models import Issue, IssueHistory, User, UserEquipmentTypeAssignme
 from app.core.security import ensure_equipment_scope, ensure_plant_scope, equipment_scope_matches, get_current_user, is_head, require_csrf, require_permission, text_is_current_user, user_scoped_equipment_types, user_scoped_plant_ids
 from app.issues import importer as issue_importer
 from app.issues.repository import IssueRepository
-from app.issues.schemas import AssignmentRequest, CloseRequest, IssueCommentCreate, IssueCreate, IssueDatesUpdate, IssueETCUpdate, IssueOut, IssueStatusRequest, IssueStepCreate, IssueStepUpdate, IssueUpdate, IssueDeleteRequest, IssueRestoreRequest, ProgressRequest, ResolveRequest, ReopenRequest, normalize_issue_severity
+from app.issues.schemas import AssignmentRequest, BulkAssignRequest, CloseRequest, StepBackRequest, IssueCommentCreate, IssueCreate, IssueDatesUpdate, IssueETCUpdate, IssueOut, IssueStatusRequest, IssueStepCreate, IssueStepUpdate, IssueUpdate, IssueDeleteRequest, IssueRestoreRequest, ProgressRequest, ResolveRequest, ReopenRequest, normalize_issue_severity
 from app.issues.service import IssueService
 from app.storage.service import SupabaseStorage
 
@@ -272,6 +272,13 @@ def reset_issue(issue_id:UUID,db:Annotated[Session,Depends(get_db)],user:Annotat
     _require_issue_action_scope(db,user,issue_id)
     return IssueService(db).reset(issue_id,user)
 
+@router.post("/bulk-assign",dependencies=[Depends(require_csrf)])
+def bulk_assign_issues(data:BulkAssignRequest,db:Annotated[Session,Depends(get_db)],user:Annotated[User,Depends(require_permission("issues.manage"))]):
+    """Assign up to 500 tickets to one Assignee in one transaction (O&M Head only)."""
+    result=IssueService(db).bulk_assign(data,user)
+    return {"assigned":[IssueOut.model_validate(row).model_dump(mode="json") for row in result["assigned"]],
+            "skipped":result["skipped"],"assignee":result["assignee"]}
+
 @router.post("/{issue_id}/assign",response_model=IssueOut,dependencies=[Depends(require_csrf)])
 def assign_issue(issue_id:UUID,data:AssignmentRequest,db:Annotated[Session,Depends(get_db)],user:Annotated[User,Depends(require_permission("issues.manage"))]): return IssueService(db).assign(issue_id,data,user,False)
 
@@ -319,6 +326,13 @@ def transition_issue_status(issue_id:UUID, data:IssueStatusRequest, db:Annotated
         raise HTTPException(422, "Unsupported issue status")
     _require_issue_workflow_scope(db,user,issue_id)
     return IssueService(db).transition(issue_id,status,user,note=(data.note or "").strip() or None)
+
+@router.post("/{issue_id}/step-back",response_model=IssueOut,dependencies=[Depends(require_csrf)])
+def step_back_issue(issue_id:UUID,data:StepBackRequest,db:Annotated[Session,Depends(get_db)],user:Annotated[User,Depends(require_permission("issues.progress"))]):
+    """Move a ticket back one stage: the O&M Head on any ticket, an Assignee on their own ticket."""
+    _require_issue_workflow_role(user)
+    _require_issue_workflow_scope(db,user,issue_id)
+    return IssueService(db).step_back(issue_id,data,user)
 
 @router.post("/{issue_id}/reopen",response_model=IssueOut,dependencies=[Depends(require_csrf)])
 def reopen_issue(issue_id:UUID,db:Annotated[Session,Depends(get_db)],user:Annotated[User,Depends(require_permission("issues.manage"))],data:ReopenRequest|None=None):

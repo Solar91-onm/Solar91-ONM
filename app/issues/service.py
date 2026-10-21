@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from app.core.models import AuditLog, Equipment, InventoryItem, InventoryMovement, Issue, IssueETCChange, IssueHistory, IssueStep, Plant, User, UserEquipmentTypeAssignment
 from app.core.security import EQUIPMENT_TYPES, resolve_equipment_id
 from app.issues.repository import IssueRepository
-from app.issues.schemas import AssignmentRequest, CloseRequest, IssueCreate, IssueUpdate, ProgressRequest, ResolveRequest
+from app.issues.schemas import AssignmentRequest, BulkAssignRequest, CloseRequest, StepBackRequest, IssueCreate, IssueUpdate, ProgressRequest, ResolveRequest
 
 
 logger=logging.getLogger(__name__)
@@ -376,6 +376,65 @@ class IssueService:
         )
         self.db.refresh(row); return row
 
+    def bulk_assign(self,data:BulkAssignRequest,user:User)->dict:
+        """Assign many tickets in ONE transaction with the same rules as assign(); tickets that cannot be assigned are
+        skipped with a reason. The Assignee gets one summary notification instead of one per ticket."""
+        if user.role!="O&M Head":
+            raise HTTPException(403,"Only the O&M Head can assign tickets in bulk")
+        target=self._resolve_assignee(data.assigned_to,None)
+        ids=list(dict.fromkeys(data.issue_ids))
+        self.db.flush()
+        rows={row.id:row for row in self.db.scalars(
+            select(Issue).where(Issue.id.in_(ids),Issue.deleted_at.is_(None)).order_by(Issue.id).with_for_update())}
+        assigned:list[Issue]=[]; skipped:list[dict]=[]
+        for issue_id in ids:
+            row=rows.get(issue_id)
+            if row is None:
+                skipped.append({"id":str(issue_id),"ticket_no":None,"reason":"Not found or deleted"}); continue
+            if row.status not in {"Open","Assigned","Acknowledged"}:
+                skipped.append({"id":str(row.id),"ticket_no":row.ticket_no,"reason":f"{row.status} — work has started or it is finished"}); continue
+            if row.assigned_to==target.id:
+                skipped.append({"id":str(row.id),"ticket_no":row.ticket_no,"reason":f"Already assigned to {target.display_name}"}); continue
+            already=row.assigned_to is not None or bool((row.assignee_text or "").strip())
+            if already and not data.reassign:
+                skipped.append({"id":str(row.id),"ticket_no":row.ticket_no,"reason":f"Already assigned to {row.assignee_text or 'someone'}"}); continue
+            self._ensure_assignee_scope(target,user,row.plant_id,row.equipment_id,row.equipment_ref,row.vertical)
+            self.db.flush()   # a newly granted equipment type must be visible to the next ticket's scope check
+            before=row.status; previous=row.assignee_text
+            row.assignee_text=target.display_name; row.assigned_to=target.id; row.status="Assigned"; row.updated_at=datetime.now(timezone.utc)
+            self._history(row,"issue.reassigned" if already else "issue.assigned",user,note=data.note or "Bulk assigned",
+                          status_from=before,status_to="Assigned",metadata={"from_assignee":previous,"to_assignee":target.display_name,"bulk":True})
+            assigned.append(row)
+        self.db.commit()
+        if assigned:
+            self._notify_bulk(target,user,assigned)
+        for row in assigned:
+            self.db.refresh(row)
+        return {"assigned":assigned,"skipped":skipped,"assignee":target.display_name}
+
+    def _notify_bulk(self,target:User,actor:User,rows:list[Issue])->None:
+        """One summary per person (the Assignee, and each other person who raised some of the tickets)."""
+        try:
+            from app.notifications.service import create_notification
+            def numbers(items): return ", ".join(r.ticket_no for r in items[:8])+(f" and {len(items)-8} more" if len(items)>8 else "")
+            stamp=datetime.now(timezone.utc).isoformat()
+            create_notification(self.db,user_id=target.id,event_type="ticket_assigned",
+                                title=f"{len(rows)} ticket{'s' if len(rows)!=1 else ''} assigned to you",message=numbers(rows),
+                                target_type="issue",target_id=rows[0].ticket_no,dedupe_key=f"issue-bulk-assign:{target.id}:{stamp}")
+            by_creator:dict={}
+            for r in rows:
+                if r.created_by and r.created_by not in {actor.id,target.id}:
+                    by_creator.setdefault(r.created_by,[]).append(r)
+            for creator,items in by_creator.items():
+                create_notification(self.db,user_id=creator,event_type="ticket_assigned",
+                                    title=f"{len(items)} of your ticket{'s' if len(items)!=1 else ''} assigned to {target.display_name}",
+                                    message=numbers(items),target_type="issue",target_id=items[0].ticket_no,
+                                    dedupe_key=f"issue-bulk-assign:{creator}:{stamp}")
+            self.db.commit()
+        except Exception:
+            self.db.rollback()
+            logger.exception("Bulk assignment notification failed; the assignments themselves were saved")
+
     def transition(self,issue_id,next_status:str,user:User,note:str|None=None,resolve:ResolveRequest|None=None):
         row=self.repo.by_id(issue_id,for_update=True)
         if not row: raise HTTPException(404,"Issue not found")
@@ -720,6 +779,47 @@ class IssueService:
         )
         self.db.refresh(issue)
         return issue
+
+    # One stage back. Closed tickets use reopen(); Open has nothing before it.
+    STEP_BACK={"Assigned":"Open","Acknowledged":"Assigned","In Progress":"Acknowledged",
+               "Pending Vendor":"In Progress","Pending Parts/Vendor":"In Progress","Resolved":"In Progress"}
+
+    def step_back(self,issue_id,data:StepBackRequest,user:User):
+        """The O&M Head (any ticket) or the ticket's Assignee moves it back one stage when the result did not hold,
+        e.g. a "done" report that turned out wrong. Callers check role and ticket scope first."""
+        row=self.repo.by_id(issue_id,for_update=True)
+        if not row: raise HTTPException(404,"Issue not found")
+        before=row.status
+        target=self.STEP_BACK.get(before)
+        if target is None:
+            raise HTTPException(409,"A closed ticket is reopened instead" if before=="Closed" else f"A ticket that is {before} has no earlier stage")
+        if target=="Assigned" and row.assigned_to is None and not (row.assignee_text or "").strip():
+            target="Open"
+        reason=data.reason.strip()
+        metadata={"reason":reason}
+        if before=="Assigned":
+            if user.role!="O&M Head":
+                raise HTTPException(403,"Only the O&M Head can take a ticket back from its Assignee")
+            metadata["from_assignee"]=row.assignee_text
+            row.assigned_to=None; row.assignee_text=None
+        if before=="Resolved":
+            # the fix did not hold: the submitted resolution leaves the ticket but stays in its history
+            metadata["withdrawn_resolution"]=row.closure; metadata["withdrawn_fixed_on"]=row.fixed_on.isoformat() if row.fixed_on else None
+            row.closure=None; row.fixed_on=None
+        row.status=target; row.updated_at=datetime.now(timezone.utc)
+        self._history(row,"issue.stepped_back",user,note=reason,status_from=before,status_to=target,metadata=metadata)
+        self.db.commit()
+        self._notify(
+            plant_id=row.plant_id,
+            assigned_to=row.assigned_to if row.assigned_to!=user.id else None,
+            event_type="issue_stepped_back",
+            title=f"Ticket moved back to {target} — {row.ticket_no}",
+            message=f"{user.display_name}: {reason}"[:240],
+            target_id=row.ticket_no,
+            include_heads=user.role!="O&M Head",
+            dedupe_key=f"issue-step-back:{row.id}:{row.updated_at.isoformat()}",
+        )
+        self.db.refresh(row); return row
 
     def reopen(self,issue_id,data:dict,user:User):
         row=self.repo.by_id(issue_id,for_update=True)
