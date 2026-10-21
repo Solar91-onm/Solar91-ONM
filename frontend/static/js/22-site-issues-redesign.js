@@ -189,6 +189,7 @@
   let h='<div class="si-head"><div><div class="kpi-label">SOLAR OPERATIONS · LIVE REGISTER</div><h1>Site Issues</h1><p>Prioritize field faults, assign ownership, and track resolution across your plants.</p></div>'+
    '<div class="si-head-r"><div class="si-live"><i></i><div><b>'+openF.length+' open</b><small>'+filtered.length+' of '+all.length+' in view</small></div></div>'+
    (typeof AUTH_IDENTITY!=="undefined"&&AUTH_IDENTITY.role==="O&M Head"?'<button class="btn o sm" onclick="s91OpenDeletedTickets()" title="Restore tickets removed by mistake">Deleted tickets</button>':'')+
+   (typeof AUTH_IDENTITY!=="undefined"&&["O&M Head","Assignee","Site Engineer"].includes(AUTH_IDENTITY.role)&&typeof issueUploadOpen==="function"?'<button class="btn o sm" onclick="issueUploadOpen()" title="Raise many tickets from one spreadsheet">Upload Excel</button>':'')+
    '<button class="btn p oi-raise-button" onclick="openModal(\'newTicket\')">'+I.plus(14)+' Raise Issue</button></div></div>';
 
   /* ---- LAYER 1 · search + quick views (always visible, light) ---- */

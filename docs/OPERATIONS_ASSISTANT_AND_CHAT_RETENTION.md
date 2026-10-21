@@ -37,3 +37,7 @@
 - Optional parameters `module`, `severity`, `status` (comma-separated), `plant` (site code or name) and `sort` (`relevance`, `priority`, `due`, `recent`) add to the parsed filters. The response adds `filters` (what was applied) and `facets` (counts by module, status, severity and top plants over all matches). Scope, the safe-field list and the 500-records-per-module bound are unchanged; a plant outside the user's scope matches nothing.
 - `POST /api/field/ask`: the exact-count issue answers ("open/overdue/unassigned issues") also apply severity and equipment words, e.g. "open critical inverter issues at FE01". The search fallback describes the applied filters and returns `filters`, `facets` and `partial`.
 - Panel: search answers show removable filter chips, "Narrow to" facets with counts, a sort switch and an in-result text filter; a refinement replaces that answer in place with a fresh scoped `/search` call. Typing in the composer suggests matching tickets, work orders and plants already loaded for the user. The start screen has quick searches. The assistant remains read-only.
+
+## Roles (October 2026)
+
+- Ask Solar91 (`POST /api/field/ask` and its refinement search `GET /api/field/search`) is available to the O&M Head, Assignees and Administration only. Site Engineers receive 403 and do not see the sidebar button or the floating launcher. The Site Engineer field overview (`GET /api/field/overview`) is unchanged.

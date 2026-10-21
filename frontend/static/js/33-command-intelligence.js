@@ -181,7 +181,7 @@
   if(e.target.closest('[data-s91-open-all-reports]')){document.getElementById('s91-report-root')?.remove();if(reportRole()){S.reportKind=previewState.kind;goView('reports');destination('.ops-report-table','Reports')}return}
  });
  const assistant={open:false,log:[],lastQuery:'',busy:false,userId:'',position:null,dragged:false,historyLoaded:false,focus:'all',wide:false,expandedRecs:{}};
- const allowedAssistantRoles=['O&M Head','Assignee','Administration','Site Engineer'];
+ const allowedAssistantRoles=['O&M Head','Assignee','Administration'];  /* Site Engineers do not get the chatbot */
 
  /* ---------- Ask Solar91 copilot: layered, interactive answers over the same grounded /api/field/ask contract ---------- */
  const isUuid=v=>/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(v||''));

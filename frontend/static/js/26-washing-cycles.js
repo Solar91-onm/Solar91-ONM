@@ -31,6 +31,7 @@
   S._washCycleLoading=apiFetch("/api/scheduled/washing/overview"+(S._washReportDays?"?report_days="+S._washReportDays:"")).then(d=>{S._washCycles=d;S._washCycleError=null;S._washCycleLoading=null;if(onWashing())render();return d}).catch(e=>{S._washCycleLoading=null;S._washCycleError=e;if(onWashing())render();throw e});
   return S._washCycleLoading;
  }
+ window.washCyclesReload=loadOverview;
  window.washCyclesEnsureLoaded=function(){if(!S._washCycles&&!S._washCycleLoading&&!S._washCycleError)loadOverview().catch(()=>{})};
  window.washHasData=()=>!!(S._washCycles&&((S._washCycles.plants||[]).length));
  window.washDueCount=()=>{const m=data().overdue_matrix||{};return (m["1d"]||0)+(m["3d"]||0)+(m["7d"]||0)};
@@ -333,7 +334,8 @@
   const done=pf.cycles_completed_month||0,target=pf.cycles_target_month||0,late=(m["1d"]||0)+(m["3d"]||0)+(m["7d"]||0);
   const howTo=head?"Every plant needs 3 full washing cycles a month (all tables each time), due by the 10th, 20th and month-end — the dates can be changed per plant. Site Engineers report the tables cleaned each day; once all tables are confirmed the next cycle starts automatically.":"Report how many tables you cleaned each day with before and after photos. When all tables are cleaned and confirmed, the next cycle starts automatically.";
   const header='<div class="wx-head"><div class="wx-title"><span class="wx-ico" aria-hidden="true">💧</span><div><h1>Plant washing</h1><p>'+allN+' plant'+(allN===1?'':'s')+' · 3 cycles a month <span class="wx-info" tabindex="0" title="'+h(howTo)+'">ⓘ How it works</span></p></div></div>'+
-   (head?'<div class="wx-actions"><button class="btn o sm" onclick="washImportExport()">Export Excel</button><button class="btn o sm" onclick="washImportOpen()">Upload Excel</button><button class="btn p sm" onclick="openWashingSetup()">+ Set up a plant</button></div>':'')+'</div>';
+   (head?'<div class="wx-actions"><button class="btn o sm" onclick="washImportExport()">Export Excel</button><button class="btn o sm" onclick="washImportOpen()">Upload Excel</button><button class="btn p sm" onclick="openWashingSetup()">+ Set up a plant</button></div>':
+    field?'<div class="wx-actions"><button class="btn o sm" onclick="washImportOpen(\'washDaily\')">Upload Excel</button></div>':'')+'</div>';
   const cyPct=target?Math.round(100*done/target):0;
   /* ---- "At a glance" overview: donut, cycle bars and KPI cards filter the plant list and scroll to it ---- */
   const G=window.s91Glance;

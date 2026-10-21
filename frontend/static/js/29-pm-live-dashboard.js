@@ -291,7 +291,8 @@
   const plantPicker=f.plantOpen?'<div class="pml-picker-menu"><input id="pml-plant-search" placeholder="Search plants…" value="'+escape(f.plantQuery)+'" data-pml-input="plant-search"><div><button type="button" data-pml-plant="all">All plants <small>'+tasks.length+' active jobs</small></button>'+
    scopedPlants().filter(plant=>(plant.name+" "+plant.id).toLowerCase().includes(f.plantQuery.toLowerCase())).map(plant=>'<button type="button" data-pml-plant="'+escape(plant.name)+'">'+escape(plant.id||"")+' '+escape(plant.name)+'<small>'+tasks.filter(task=>task.plant===plant.name&&taskStatus(task)==="Overdue").length+' overdue</small></button>').join("")+'</div></div>':"";
   const alertsButton='<button type="button" class="btn o sm" data-pml-action="alerts">Alerts</button>';
-  const uploadButton=["O&M Head","Administration"].includes(role)&&typeof pmImportPick==="function"?'<button type="button" class="btn o sm" onclick="pmImportPick()">Import CSV / Excel</button><button type="button" class="btn o sm" onclick="pmDownloadCsvTemplate()">CSV template</button>':"";
+  /* the PM plan import is O&M Head only on the server (PLANNER_ROLES); Administration is read-only */
+  const uploadButton=role==="O&M Head"&&typeof pmImportPick==="function"?'<button type="button" class="btn o sm" onclick="pmImportPick()">Import CSV / Excel</button><a class="btn o sm" href="/static/templates/PM_Task_Plan_Template.xlsx" download>Excel template</a><button type="button" class="btn o sm" onclick="pmDownloadCsvTemplate()">CSV template</button>':"";
   const unitsButton=canCreate&&typeof pmOpenUnitCfg==="function"?'<button type="button" class="btn o sm" onclick="pmOpenUnitCfg()">Unit counts</button>':"";
   const addButton=canCreate?'<button type="button" class="btn p sm" onclick="openProblemScheduledTask()">+ Add job</button>':"";
   /* ---- "At a glance" overview: every card, slice, column and bar filters the register and scrolls to it ---- */

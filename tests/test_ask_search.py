@@ -54,11 +54,15 @@ def test_plant_status_and_explicit_filters(client, db):
 
 
 def test_search_never_leaves_the_engineers_plant(client, db):
+    from app.field.router import run_operational_search
     head, engineer, plants = fixture_data(client, db)
     conftest._CURRENT_USER = db.get(User, engineer.id)
-    other = client.get(SEARCH, params={'q': 'issues at FE02'}).json()
+    # Ask Solar91 is not offered to Site Engineers; the search itself still keeps them to their own plant.
+    assert client.get(SEARCH, params={'q': 'inspect'}).status_code == 403
+    engineer = db.get(User, engineer.id)
+    other = run_operational_search(db, engineer, 'issues at FE02')
     assert other['records'] == []
-    own = client.get(SEARCH, params={'q': 'inspect'}).json()
+    own = run_operational_search(db, engineer, 'inspect')
     assert own['records'] and all(r['site_code'] == 'FE01' for r in own['records'])
     assert set(own['facets']['plant']) == {'FE01'}
     assert all('secret' not in r and 'active' not in r for r in own['records'])

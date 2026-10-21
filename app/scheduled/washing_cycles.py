@@ -824,16 +824,29 @@ def _refresh_cycle_completion(db: Session, plant_id: UUID, month: str, cycle_no:
     ).order_by(WashingDailyReport.report_date, WashingDailyReport.created_at)))
     for row in rows:
         row.cycle_completed = False
-    done = False
+    completing = _completing_row(rows, total_tables)
+    if completing is not None:
+        completing.cycle_completed = True
+    db.flush()
+    return completing is not None
+
+
+def _completing_row(rows, total_tables: int):
+    """The report on which a cycle's running confirmed total first reaches the plant's table count (None while the
+    cycle is still open). `rows` are the cycle's confirmed reports ordered by report date, then entry time."""
     running = 0
     for row in rows:
         running += row.tables_cleaned
         if total_tables > 0 and running >= total_tables:
-            row.cycle_completed = True
-            done = True
-            break
-    db.flush()
-    return done
+            return row
+    return None
+
+
+def _open_cycle_no(done: set[int]) -> int | None:
+    """The cycle new work counts towards: the one after the highest completed cycle (None once all are complete)."""
+    if len(done) >= MONTHLY_CYCLE_TARGET:
+        return None
+    return max(done, default=0) + 1
 
 
 def _ordered_codes(db: Session, plant_id: UUID) -> list[str]:
@@ -859,10 +872,10 @@ def _next_open_cycle(db: Session, plant_id: UUID, month: str, exclude_report_id:
     )
     if exclude_report_id:
         stmt = stmt.where(WashingDailyReport.id != exclude_report_id)
-    done = set(db.scalars(stmt))
-    if len(done) >= MONTHLY_CYCLE_TARGET:
+    cycle_no = _open_cycle_no(set(db.scalars(stmt)))
+    if cycle_no is None:
         raise HTTPException(409, "All three washing cycles for that month are complete")
-    return max(done, default=0) + 1
+    return cycle_no
 
 
 def _locked_report_plant(db: Session, user: User, plant_id: UUID) -> tuple[Plant, WashingConfig, bool, int]:

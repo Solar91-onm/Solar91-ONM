@@ -42,13 +42,14 @@ def test_live_search_scopes_plant_and_equipment(client, db):
         Equipment(plant_id=UUID(plants[0]['id']), equipment_name='Inv alpha',equipment_code='INV-0001',equipment_type='Inverter'),
         Equipment(plant_id=UUID(plants[1]['id']), equipment_name='Inv beta',equipment_code='INV-0002',equipment_type='Inverter'),
     ]);db.commit()
+    from app.field.router import run_operational_search
     conftest._CURRENT_USER=db.get(User,engineer.id)
-    res=client.get('/api/field/search',params={'q':'Inverter'})
-    assert res.status_code==200
-    assert all(row['plant']=='Field FE01' for row in res.json()['records'])
-    assert all('secret' not in row for row in res.json()['records'])
-    res=client.get('/api/field/search',params={'q':'INV-0002'})
-    assert res.json()['records']==[]
+    assert client.get('/api/field/search',params={'q':'Inverter'}).status_code==403  # no Ask Solar91 for Site Engineers
+    engineer=db.get(User,engineer.id)
+    res=run_operational_search(db,engineer,'Inverter')
+    assert res['records'] and all(row['plant']=='Field FE01' for row in res['records'])
+    assert all('secret' not in row for row in res['records'])
+    assert run_operational_search(db,engineer,'INV-0002')['records']==[]
     conftest._CURRENT_USER=db.get(User,head.id)
     assert any(row['id']=='INV-0002' for row in client.get('/api/field/search',params={'q':'INV-0002'}).json()['records'])
     viewer=User(auth_provider='test',external_subject='unapproved',email='unapproved@solar91.test',display_name='Unapproved',role='Viewer',is_active=True)
@@ -69,8 +70,16 @@ def test_assistant_is_live_role_scoped_and_read_only(client, db, monkeypatch):
     monkeypatch.delenv('OPENAI_API_KEY', raising=False)
     head, engineer, plants=fixture_data(client,db)
     conftest._CURRENT_USER=db.get(User,engineer.id)
+    assert client.post('/api/field/ask',json={'question':'Inspect combiner'}).status_code==403  # no Ask Solar91 for Site Engineers
+    module_worker=User(auth_provider='test',external_subject='ask-module',email='ask-module@solar91.test',display_name='Module worker',role='Assignee',is_active=True)
+    db.add(module_worker);db.commit()
+    db.add(UserEquipmentTypeAssignment(user_id=module_worker.id,equipment_type='Module'));db.commit()
+    conftest._CURRENT_USER=db.get(User,module_worker.id)
+    scoped=client.post('/api/field/ask',json={'question':'Inspect combiner'}).json()
+    assert not any('combiner' in str(x.get('title','')).lower() for x in scoped['records'])  # inverter issues are outside a Module scope
+    conftest._CURRENT_USER=db.get(User,head.id)
     before=db.query(__import__('app.core.models',fromlist=['Issue']).Issue).count()
-    response=client.post('/api/field/ask',json={'question':'Inspect combiner','recent_questions':['Show issues']})
+    response=client.post('/api/field/ask',json={'question':'Inspect combiner at FE01','recent_questions':['Show issues']})
     assert response.status_code==200,response.text
     data=response.json()
     assert data['mode']=='grounded-search'
@@ -93,14 +102,21 @@ def test_assistant_exact_overdue_issue_count_is_scoped_and_bounded(client, db):
                      vertical='Inverter',etc_at=datetime.combine(today-timedelta(days=1),datetime.min.time())))
     db.commit()
     conftest._CURRENT_USER=db.get(User,engineer.id)
+    assert client.post('/api/field/ask',json={'question':'How many overdue issues?'}).status_code==403
+    conftest._CURRENT_USER=db.get(User,head.id)
     response=client.post('/api/field/ask',json={'question':'How many overdue issues?'})
     assert response.status_code==200,response.text
     data=response.json()
     assert data['mode']=='grounded-query'
-    assert data['total']==501
-    assert data['summary']=={'label':'Overdue open issues','value':501}
+    assert data['total']==503
+    assert data['summary']=={'label':'Overdue open issues','value':503}
     assert len(data['records'])==20 and data['limited'] is True
-    assert all(row['plant']=='Field FE01' for row in data['records'])
+    module_worker=User(auth_provider='test',external_subject='ask-overdue-module',email='ask-overdue@solar91.test',display_name='Module worker',role='Assignee',is_active=True)
+    db.add(module_worker);db.commit()
+    db.add(UserEquipmentTypeAssignment(user_id=module_worker.id,equipment_type='Module'));db.commit()
+    conftest._CURRENT_USER=db.get(User,module_worker.id)
+    scoped=client.post('/api/field/ask',json={'question':'How many overdue issues?'}).json()
+    assert scoped['total']==0 and scoped['records']==[]  # every overdue issue is an inverter issue
 
 
 def test_assistant_washing_counts_are_date_accurate_and_permission_scoped(client, db):
@@ -118,6 +134,8 @@ def test_assistant_washing_counts_are_date_accurate_and_permission_scoped(client
     ])
     db.commit()
     conftest._CURRENT_USER=db.get(User,engineer.id)
+    assert client.post('/api/field/ask',json={'question':'Which washing records are awaiting confirmation?'}).status_code==403
+    conftest._CURRENT_USER=db.get(User,head.id)
     response=client.post('/api/field/ask',json={'question':f'How many washing tables were cleaned at Field FE01 on {today.isoformat()}?'})
     assert response.status_code==200,response.text
     data=response.json()
@@ -140,7 +158,7 @@ def test_assistant_washing_counts_are_date_accurate_and_permission_scoped(client
 def test_optional_ai_receives_only_current_question_and_scoped_records(client, db, monkeypatch):
     import httpx
     head, engineer, plants=fixture_data(client,db)
-    conftest._CURRENT_USER=db.get(User,engineer.id)
+    conftest._CURRENT_USER=db.get(User,head.id)
     monkeypatch.setenv('AI_ASSISTANT_ENABLED','true')
     monkeypatch.setenv('OPENAI_API_KEY','test-only')
     sent={}
@@ -152,7 +170,7 @@ def test_optional_ai_receives_only_current_question_and_scoped_records(client, d
         sent.update(kwargs['json'])
         return Response()
     monkeypatch.setattr(httpx,'post',post)
-    response=client.post('/api/field/ask',json={'question':'Inspect combiner','recent_questions':['expired private chat']})
+    response=client.post('/api/field/ask',json={'question':'Inspect combiner at FE01','recent_questions':['expired private chat']})
     assert response.status_code==200 and response.json()['mode']=='AI-grounded'
     assert response.json()['answer'].startswith('I found 1 matching record')
     assert response.json()['narration']=='One authorized inverter issue is available.'

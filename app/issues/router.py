@@ -14,6 +14,7 @@ from app.core.config import get_settings
 from app.core.database import get_db
 from app.core.models import Issue, IssueHistory, User, UserEquipmentTypeAssignment
 from app.core.security import ensure_equipment_scope, ensure_plant_scope, equipment_scope_matches, get_current_user, is_head, require_csrf, require_permission, text_is_current_user, user_scoped_equipment_types, user_scoped_plant_ids
+from app.issues import importer as issue_importer
 from app.issues.repository import IssueRepository
 from app.issues.schemas import AssignmentRequest, CloseRequest, IssueCommentCreate, IssueCreate, IssueDatesUpdate, IssueETCUpdate, IssueOut, IssueStatusRequest, IssueStepCreate, IssueStepUpdate, IssueUpdate, IssueDeleteRequest, IssueRestoreRequest, ProgressRequest, ResolveRequest, ReopenRequest, normalize_issue_severity
 from app.issues.service import IssueService
@@ -35,6 +36,16 @@ def list_issue_assignees(db:Annotated[Session,Depends(get_db)],user:Annotated[Us
     for user_id,equipment_type in type_rows:
         by_user.setdefault(user_id,[]).append(equipment_type)
     return [{"id":str(row.id),"name":row.display_name,"equipment_types":by_user.get(row.id,[])} for row in rows]
+
+@router.get("/import/template")
+def issue_upload_template(db:Annotated[Session,Depends(get_db)],user:Annotated[User,Depends(require_permission("issues.create"))]):
+    return Response(content=issue_importer.template_bytes(db,user),
+                    media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={"Content-Disposition":'attachment; filename="Site_Issues_Template.xlsx"'})
+
+@router.post("/import",dependencies=[Depends(require_csrf)])
+def upload_issues(db:Annotated[Session,Depends(get_db)],user:Annotated[User,Depends(require_permission("issues.create"))],file:UploadFile=File(...),dry_run:bool=True):
+    return issue_importer.import_issues(db,user,file.filename or "",file.file.read(issue_importer.MAX_ISSUE_BYTES+1),dry_run=dry_run)
 
 @router.get("/pulse")
 def issues_pulse(db:Annotated[Session,Depends(get_db)],user:Annotated[User,Depends(get_current_user)]):

@@ -26,6 +26,8 @@ from app.core.security import (
 
 router = APIRouter(prefix="/api/field", tags=["Field Desk"])
 LIVE_ROLES = {"O&M Head", "Assignee", "Site Engineer", "Administration"}
+# Ask Solar91 (the chatbot: /ask and its /search refinements) is for the O&M Head, Assignees and Administration only.
+ASSISTANT_ROLES = {"O&M Head", "Assignee", "Administration"}
 ACTIVE_ISSUE_STATUSES = {"Open", "Assigned", "Acknowledged", "In Progress", "Pending Vendor", "Pending Parts/Vendor"}
 ACTIVE_TASK_STATUSES = {"Scheduled", "In Progress"}
 
@@ -33,6 +35,12 @@ ACTIVE_TASK_STATUSES = {"Scheduled", "In Progress"}
 def _authorize(user: User):
     if user.role not in LIVE_ROLES or not user.is_active:
         raise HTTPException(403, "An approved operational role is required")
+
+
+def _authorize_assistant(user: User):
+    _authorize(user)
+    if user.role not in ASSISTANT_ROLES:
+        raise HTTPException(403, "Ask Solar91 is available to the O&M Head, Assignees and Administration")
 
 
 def _issue_allowed(db: Session, user: User, issue: Issue, plant_ids: set[UUID] | None,
@@ -322,6 +330,7 @@ def search_operational_records(
     plant: str | None = Query(None, max_length=120),
     sort: str = Query("relevance", pattern="^(relevance|priority|due|recent)$"),
 ):
+    _authorize_assistant(user)
     return run_operational_search(db, user, q, limit=limit, module=module, severity=severity, status=status, plant=plant, sort=sort)
 
 
@@ -789,7 +798,7 @@ def ask_operational_assistant(
     LLM mode is opt-in and sends only already-authorized, safe fields. Neither
     mode may perform writes to issues, tasks, equipment or permissions.
     """
-    _authorize(user)
+    _authorize_assistant(user)
     question = payload.question.strip()
     facts = _assistant_fact_answer(db, user, question)
     if facts is not None:
