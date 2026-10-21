@@ -288,7 +288,7 @@ def _plan_tasks(db: Session, user: User, plants: list[Plant], tpl: dict[str, Any
 
 
 def _create_tasks(db: Session, user: User, tpl: dict[str, Any], items: list[dict[str, Any]], start: date,
-                  template_id: str | None) -> None:
+                  template_id: str | None, remarks: str | None = None) -> None:
     hours = tpl.get("est_hours")
     sop = (tpl.get("steps") or "").strip()
     checks = tpl.get("checks") or []
@@ -320,7 +320,8 @@ def _create_tasks(db: Session, user: User, tpl: dict[str, Any], items: list[dict
             problem_source="PM template",
             log=[{"at": log_stamp(),
                   "text": "Created from PM plan" + (f" — {it['day']} day workload" if it.get("unit_no") else ""),
-                  "actor": user.display_name}],
+                  "actor": user.display_name}]
+                + ([{"at": log_stamp(), "text": f"Remarks: {remarks}", "actor": user.display_name}] if remarks else []),
             legacy_payload={"template_id": template_id, "checks": checks}, created_by=user.id))
         if who_user:
             first_by_user.setdefault(who_user.id, wo)
@@ -743,6 +744,8 @@ def _header_key(text: Any) -> str | None:
     h = str(text or "").strip().casefold()
     if not h:
         return None
+    if "remark" in h or "current status" in h or "current situation" in h:
+        return "remarks"
     if "equipment" in h:
         return "type"
     if "plant" in h:
@@ -916,6 +919,8 @@ def _clean_row(cell: dict[str, Any]) -> tuple[dict[str, Any] | None, list[str]]:
         checks = _parse_checks(cell.get("checks"))
     except ValueError as exc:
         errors.append(str(exc))
+    if len(str(cell.get("remarks") or "").strip()) > 2000:
+        errors.append("Remarks must be 2000 characters or fewer")
     if errors:
         return None, errors
     tpl = {"equipment_type": equipment_type, "task_name": task, "steps": str(cell.get("steps") or "").strip() or None,
@@ -986,6 +991,6 @@ async def import_plan(db: Annotated[Session, Depends(get_db)], user: Annotated[U
     for cell, tpl, plants, items, start in plan:
         row = _upsert_template(db, user, tpl)
         if items:
-            _create_tasks(db, user, tpl, items, start, str(row.id))
+            _create_tasks(db, user, tpl, items, start, str(row.id), str(cell.get("remarks") or "").strip() or None)
     db.commit()
     return result

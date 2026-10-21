@@ -327,7 +327,7 @@
   }
 
   window.pmDownloadCsvTemplate=function(){
-    const cells=["Equipment type","Plant(s)","Task - what to do","Frequency - when","Safety needed","Est. time (hours)","No. of units","Units per day","Start date","Assignee"];
+    const cells=["Equipment type","Plant(s)","Task - what to do","Frequency - when","Safety needed","Est. time (hours)","No. of units","Units per day","Start date","Assignee","Remarks"];
     const text=cells.join(",")+"\r\n";
     const blob=new Blob(["\uFEFF",text],{type:"text/csv;charset=utf-8"});
     const url=URL.createObjectURL(blob),a=document.createElement("a");a.href=url;a.download="Solar91_PM_CSV_Template.csv";

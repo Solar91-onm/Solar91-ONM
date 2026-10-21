@@ -24,6 +24,7 @@
 | Units per day | Optional integer, cannot exceed total units |
 | Start date | Optional `YYYY-MM-DD`, `DD-MM-YYYY`, or `DD/MM/YYYY` |
 | Assignee | Optional assignee name(s) |
+| Remarks | Optional; the current situation in plain words. Added to the log of every task the row creates |
 
 All fields are validated before writes. Review the dry-run confirmation. Only the O&M Head can import; an Assignee can create PM work only within their assigned scope. Administration is limited to Command Center and Reports.
 

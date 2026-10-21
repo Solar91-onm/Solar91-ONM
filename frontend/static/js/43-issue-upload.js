@@ -10,12 +10,12 @@
  KINDS.issues={
   tabLabel:"Site issues",allowed:canRaise,
   title:"Upload site issues",subtitle:"Raise many tickets from one spreadsheet instead of one by one.",
-  step1:()=>'<p>Download the template: one row per issue with <b>Site code</b>, <b>Issue category</b>, <b>Description</b> and <b>Severity</b>. Occurred on, target date, equipment and Assignee are optional; drop-down lists are included.</p>'+
+  step1:()=>'<p>Download the template: one row per issue with <b>Site code</b>, <b>Issue category</b>, <b>Description</b> and <b>Severity</b>. Occurred on, target date, equipment, Assignee and <b>Remarks</b> (what is going on right now) are optional; drop-down lists are included.</p>'+
    '<div class="row wrap"><button class="btn o sm" onclick="s91UploadDownload(\'/api/issues/import/template\',\'Site_Issues_Template.xlsx\')">Download template</button></div>',
   limitText:"An .xlsx or .csv file, up to 2 MB and 500 issue rows.",
   importUrl:"/api/issues/import",
   counts:[["new","Will raise"],["critical","Critical"],["unchanged","Already open"],["problems","Problems"]],
-  columns:[["Site code",r=>h(r.site_code)],["Issue",r=>'<b>'+h(r.category)+'</b>'+(r.severity?' <span class="wc-chip wc-'+(tone[r.severity]||"info")+'">'+h(r.severity)+'</span>':'')+'<div class="sub">'+h(r.description)+'</div>'],["Assignee",r=>h(r.assignee||"—")]],
+  columns:[["Site code",r=>h(r.site_code)],["Issue",r=>'<b>'+h(r.category)+'</b>'+(r.severity?' <span class="wc-chip wc-'+(tone[r.severity]||"info")+'">'+h(r.severity)+'</span>':'')+'<div class="sub">'+h(r.description)+'</div>'+(r.remarks?'<div class="sub"><b>Remarks:</b> '+h(r.remarks)+'</div>':'')],["Assignee",r=>h(r.assignee||"—")]],
   actionLabel:a=>a==="New"?"Will raise":a,
   canSave:p=>Number(p.new||0)>0,
   readyText:p=>p.new+" ticket"+(p.new===1?"":"s")+" will be raised"+(p.assigned?" ("+p.assigned+" assigned)":"")+(p.unchanged?"; "+p.unchanged+" already open will be skipped.":"."),

@@ -30,7 +30,7 @@ IMPORT_HEADERS = (
     "Washing assignee email",
     "Weekly target %",
     "Active",
-    "Notes",
+    "Remarks",
 )
 
 
@@ -82,6 +82,7 @@ def _workbook_bytes(db: Session, plants: list[Plant], *, include_setup: bool) ->
         "For a new setup, enter the number of tables. Assignee and other settings can be added later.",
         "Weekly target is optional and must be from 1 to 100; the default is 85.",
         "When updating a setup, blank cells mean leave the saved value as it is.",
+        "Remarks: the current situation at the plant (e.g. water tanker every 3 days, south gate locked on Sundays).",
     ):
         guide.append([text])
     guide.column_dimensions["A"].width = 95
@@ -252,7 +253,7 @@ def import_setup(db: Session, user: User, filename: str, content: bytes, *, dry_
         email = _cell(row, "Washing assignee email")
         target_text = _cell(row, "Weekly target %")
         active_text = _cell(row, "Active")
-        notes = _cell(row, "Notes")
+        notes = _cell(row, "Remarks") or _cell(row, "Notes")  # older files call the column "Notes"
         is_new = config is None or current_count == 0
         table_count = current_count
         assignee = None
@@ -294,7 +295,7 @@ def import_setup(db: Session, user: User, filename: str, content: bytes, *, dry_
             else:
                 active = active_text.casefold() == "yes"
         if len(notes) > 500:
-            errors.append("Notes must be 500 characters or fewer")
+            errors.append("Remarks must be 500 characters or fewer")
         elif notes:
             next_notes = notes
 

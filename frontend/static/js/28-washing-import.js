@@ -116,7 +116,7 @@
   title:"Upload washing",subtitle:"Record the tables cleaned for many plants and days from one spreadsheet.",
   step1:()=>{const s=state();return '<p>Download a month\'s sheet. It already lists every plant and every day up to today: type the <b>tables cleaned</b>, or pick a <b>not-done reason</b>, and leave days with nothing to report empty. Days already saved show their values.</p>'+
    '<div class="row wrap" style="gap:8px;align-items:flex-end"><label class="field" style="margin:0"><span class="lbl">Month</span><input class="inp" type="month" value="'+h(s.month||thisMonth())+'" max="'+thisMonth()+'" onchange="s91UploadMonth(this.value)"/></label><button class="btn o sm" onclick="washDailyDownload()">Download month sheet</button></div>'+
-   '<p class="sub" style="margin-top:8px">Your own file also works: one row per plant per day with the columns <b>Site code</b>, <b>Date</b> (DD-MM-YYYY), <b>Tables cleaned</b>, <b>Not done reason</b> and <b>Remarks</b>.</p>'},
+   '<p class="sub" style="margin-top:8px">Your own file also works: one row per plant per day with the columns <b>Site code</b>, <b>Date</b> (DD-MM-YYYY), <b>Tables cleaned</b>, <b>Not done reason</b> and <b>Remarks</b> (what happened that day).</p>'},
   limitText:"An .xlsx or .csv file, up to 2 MB and 3,000 day rows.",
   importUrl:"/api/scheduled/washing/daily-import",
   counts:[["new","Will save"],["unchanged","Already saved"],["blank","Left empty"],["problems","Problems"]],

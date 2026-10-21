@@ -16,7 +16,7 @@ HEADERS = [
     "Washing assignee email",
     "Weekly target %",
     "Active",
-    "Notes",
+    "Remarks",
 ]
 
 
@@ -30,6 +30,7 @@ def build_template(output: Path = OUTPUT) -> None:
         "For a new setup, enter the number of tables. Assignee and other settings can be added later.",
         "Weekly target is optional and must be from 1 to 100; the default is 85.",
         "For updates, blank cells mean leave the saved value as it is.",
+        "Remarks: the current situation at the plant (e.g. water tanker every 3 days, south gate locked on Sundays).",
     ):
         how_to.append([line])
     how_to.column_dimensions["A"].width = 95

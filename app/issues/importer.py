@@ -23,7 +23,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.core.models import AuditLog, Equipment, Issue, Plant, User, UserEquipmentTypeAssignment
+from app.core.models import AuditLog, Equipment, Issue, IssueHistory, Plant, User, UserEquipmentTypeAssignment
 from app.core.security import EQUIPMENT_TYPES, has_portfolio_scope, user_scoped_equipment_types, user_scoped_plant_ids
 from app.core.spreadsheet import cell_text, map_columns, neutralise_formulas, parse_sheet_date, read_upload_rows
 from app.issues.schemas import ISSUE_SEVERITIES, normalize_issue_severity
@@ -36,7 +36,7 @@ MAX_ISSUE_BYTES = 2 * 1024 * 1024
 MAX_ISSUE_ROWS = 500
 SHEET = "Site issues"
 HEADERS = ("Site code", "Plant name", "Issue category", "Problem", "Description", "Severity", "Equipment / unit",
-           "Occurred on", "Target date", "Assignee email", "Maker", "Impact")
+           "Occurred on", "Target date", "Assignee email", "Maker", "Impact", "Remarks")
 # Same default deadlines as the Raise Issue form (ETC_HRS in frontend/static/js/00-auth-data-and-imports.js).
 ETC_HOURS = {"Critical": 48, "Medium": 96, "Low": 240}
 ALIASES = {
@@ -51,6 +51,7 @@ ALIASES = {
     "assignee": {"Assignee email", "Assignee", "Assigned to"},
     "maker": {"Maker", "Make", "Manufacturer"},
     "impact": {"Impact"},
+    "remarks": {"Remarks", "Remark", "Current status", "Current situation", "Status remarks", "Notes", "Comments"},
 }
 _CATEGORIES = {value.casefold(): value for value in EQUIPMENT_TYPES}
 _SEVERITY_ORDER = ("Critical", "Medium", "Low")
@@ -85,6 +86,7 @@ def template_bytes(db: Session, user: User) -> bytes:
         "Target date: when it should be fixed. Blank uses the usual deadline (Critical 2 days, Medium 4 days, Low 10 days).",
         "Assignee email: optional. It must be an active Assignee; the ticket then starts as Assigned instead of Open.",
         "Equipment / unit: optional code or name of the unit, e.g. INV-03. A registered unit of the plant is linked automatically.",
+        "Remarks: optional. What is going on right now (e.g. 'Vendor called, spare expected Friday'). It becomes the ticket's first message.",
         "Nothing is saved until every row is correct. A row that matches a ticket that is still open is skipped.",
         "Photos, progress, resolution and closing are added in the portal on each ticket.",
     ):
@@ -96,7 +98,7 @@ def template_bytes(db: Session, user: User) -> bytes:
     for cell in sheet[1]:
         cell.font = Font(bold=True)
     sheet.freeze_panes = "A2"
-    for index, width in enumerate((14, 30, 22, 24, 50, 12, 18, 14, 14, 30, 16, 30), start=1):
+    for index, width in enumerate((14, 30, 22, 24, 50, 12, 18, 14, 14, 30, 16, 30, 45), start=1):
         sheet.column_dimensions[sheet.cell(1, index).column_letter].width = width
     for column in ("H", "I"):
         for row in range(2, MAX_ISSUE_ROWS + 2):
@@ -203,9 +205,9 @@ def import_issues(db: Session, user: User, filename: str, content: bytes, *, dry
         if severity not in ISSUE_SEVERITIES:
             errors.append("Severity must be Critical, Medium or Low")
         problem, equipment_ref = cell_text(get("problem")), cell_text(get("equipment"))
-        maker, impact = cell_text(get("maker")), cell_text(get("impact"))
+        maker, impact, remarks = cell_text(get("maker")), cell_text(get("impact")), cell_text(get("remarks"))
         for label, value, limit in (("Problem", problem, 160), ("Equipment / unit", equipment_ref, 255),
-                                    ("Maker", maker, 160), ("Impact", impact, 4000)):
+                                    ("Maker", maker, 160), ("Impact", impact, 4000), ("Remarks", remarks, 4000)):
             if len(value) > limit:
                 errors.append(f"{label} must be {limit} characters or fewer")
         occurred = target = None
@@ -241,7 +243,7 @@ def import_issues(db: Session, user: User, filename: str, content: bytes, *, dry
         records.append({
             "row": number, "plant": plant, "site_text": site_text, "category": category, "description": description,
             "severity": severity, "problem": problem or None, "equipment_ref": equipment_ref or None, "maker": maker or None,
-            "impact": impact or None, "occurred": occurred, "target": target, "assignee": assignee,
+            "impact": impact or None, "remarks": remarks or None, "occurred": occurred, "target": target, "assignee": assignee,
             "errors": errors, "notes": notes, "action": "New",
         })
 
@@ -300,7 +302,7 @@ def import_issues(db: Session, user: User, filename: str, content: bytes, *, dry
         "rows": [{
             "row": r["row"], "site_code": r["plant"].site_code if r["plant"] else r["site_text"],
             "plant": r["plant"].plant_name if r["plant"] else "", "category": r["category"] or "",
-            "description": r["description"][:120], "severity": r["severity"] or "",
+            "description": r["description"][:120], "remarks": (r["remarks"] or "")[:120], "severity": r["severity"] or "",
             "assignee": r["assignee"].display_name if r["assignee"] else "", "action": r["action"],
             "detail": "; ".join(r["notes"]), "errors": r["errors"],
         } for r in records],
@@ -340,6 +342,11 @@ def import_issues(db: Session, user: User, filename: str, content: bytes, *, dry
         db.flush()
         for record, issue in created:
             service._history(issue, "issue.created", user, status_to=issue.status, metadata={"source": "excel-upload", "row": record["row"]})
+            if record["remarks"]:
+                # The current situation from the sheet opens the ticket's conversation, like a first update message.
+                db.add(IssueHistory(issue_id=issue.id, action="issue.message", note=record["remarks"], actor_id=user.id,
+                                    actor_name=user.display_name,
+                                    metadata_json={"evidence_ids": [], "intent": "update", "role": user.role, "source": "excel-upload"}))
         db.add(AuditLog(user_id=user.id, actor_name=user.display_name, action="Uploaded site issues", module="Issues",
                         metadata_json={"created": len(created), "skipped_open": result["unchanged"],
                                        "first_ticket": created[0][1].ticket_no, "last_ticket": created[-1][1].ticket_no}))
