@@ -1239,6 +1239,107 @@ def _pattern_out(config: WashingConfig) -> dict | None:
         {"cycle_no": n, "start_day": days.get(f"s{n}"), "due_day": days.get(str(n))} for n in range(1, MONTHLY_CYCLE_TARGET + 1)]}
 
 
+# Day summary grouping, in display order: cleaned and confirmed first, plants with nothing recorded last.
+DAY_STATUS_ORDER = ("confirmed", "awaiting", "not_done", "rejected", "not_reported", "upcoming", "paused")
+
+
+def day_activity(db: Session, user: User, day: date, plant_id: UUID | None = None) -> dict:
+    """What happened in washing on one day, for one plant or every plant the user can see.
+
+    Cycles completed count by washing date (the same date the "Cycle updates" feed shows); confirmations count by
+    when the report was confirmed, in the business time zone (O&M entries are confirmed the moment they are saved)."""
+    manager = _is_washing_manager(db, user)
+    if not manager and user.role != "Site Engineer":
+        raise HTTPException(403, "Washing activity is available to the O&M team and Site Engineers")
+    stmt = select(Plant, WashingConfig).join(WashingConfig, WashingConfig.plant_id == Plant.id).order_by(Plant.plant_name)
+    if not manager:
+        stmt = stmt.where(Plant.id.in_(user_scoped_plant_ids(db, user) or set()))
+    if plant_id is not None:
+        stmt = stmt.where(Plant.id == plant_id)
+    plants = {p.id: (p, c) for p, c in db.execute(stmt).all()}
+    if plant_id is not None and plant_id not in plants:
+        raise HTTPException(404, "Washing plant not found")
+    # tables per cycle, as the overview counts them: the configured number, else the registered tables (one query)
+    counted = [pid for pid, (_p, c) in plants.items() if not c.tables_per_cycle]
+    registered = dict(db.execute(select(WashingTable.plant_id, func.count(WashingTable.id))
+                                 .where(WashingTable.plant_id.in_(counted)).group_by(WashingTable.plant_id)).all()) if counted else {}
+    start = datetime.combine(day, datetime.min.time(), tzinfo=BUSINESS_TZ).astimezone(timezone.utc)
+    end = start + timedelta(days=1)
+    rows: dict[UUID, dict] = {}
+    day_reports: dict[UUID, list[WashingDailyReport]] = {}
+    for pid, (p, c) in plants.items():
+        table_count = int(c.tables_per_cycle or registered.get(pid, 0))
+        rows[pid] = {"plant_id": str(pid), "plant": p.plant_name, "site_code": p.site_code, "active": c.active,
+                     "target": _daily_table_target(table_count, day, c.cycle_overrides) if manager and table_count else None,
+                     "cycles_completed": [], "confirmations": 0, "tables_confirmed": 0, "reported": 0, "pending": 0,
+                     "confirmed_by": []}
+    if plants:
+        for r in db.scalars(select(WashingDailyReport).where(
+                WashingDailyReport.plant_id.in_(list(plants)),
+                or_(WashingDailyReport.report_date == day,
+                    (WashingDailyReport.reviewed_at >= start) & (WashingDailyReport.reviewed_at < end)))):
+            row = rows[r.plant_id]
+            if r.report_date == day:
+                day_reports.setdefault(r.plant_id, []).append(r)
+                row["reported"] += 1
+                row["pending"] += r.review_status == "Pending"
+                if r.cycle_completed and r.review_status == "Confirmed" and r.cycle_no not in row["cycles_completed"]:
+                    row["cycles_completed"].append(r.cycle_no)
+            at = r.reviewed_at
+            if at is not None and at.tzinfo is None:      # SQLite returns naive UTC
+                at = at.replace(tzinfo=timezone.utc)
+            if r.review_status == "Confirmed" and at is not None and start <= at < end:
+                row["confirmations"] += 1
+                row["tables_confirmed"] += r.tables_cleaned or 0
+                if r.reviewed_by and r.reviewed_by not in row["confirmed_by"]:
+                    row["confirmed_by"].append(r.reviewed_by)
+    today = business_today()
+    counts = dict.fromkeys(DAY_STATUS_ORDER, 0)
+    for pid, row in rows.items():
+        row["cycles_completed"].sort()
+        # what was cleaned ON this day, with the same status rules as the overview's "Day by day" table
+        reps = day_reports.get(pid, [])
+        row["cleaned_confirmed"] = sum(r.tables_cleaned for r in reps if r.review_status == "Confirmed")
+        row["cleaned_pending"] = sum(r.tables_cleaned for r in reps if r.review_status == "Pending")
+        row["not_done_reason"] = next((r.exception_reason for r in reps if r.exception_reason and r.review_status != "Rejected"), None)
+        row["reported_by"] = sorted({r.reported_by for r in reps if r.reported_by})
+        if any(r.review_status == "Pending" for r in reps):
+            status = "awaiting"
+        elif row["cleaned_confirmed"]:
+            status = "confirmed"
+        elif row["not_done_reason"]:
+            status = "not_done"
+        elif reps:
+            status = "rejected"
+        elif not row["active"]:
+            status = "paused"
+        else:
+            status = "not_reported" if day <= today else "upcoming"
+        row["status"] = status
+        counts[status] += 1
+        excused = status == "not_done" and row["cleaned_confirmed"] == 0
+        row["difference"] = (row["cleaned_confirmed"] + row["cleaned_pending"] - row["target"]
+                             if row["target"] is not None and not excused else None)
+    active = [row for row in rows.values() if row["cycles_completed"] or row["confirmations"] or row["reported"]]
+    shown = sorted(rows.values(), key=lambda r: (DAY_STATUS_ORDER.index(r["status"]), r["plant"]))
+    return {
+        "date": day.isoformat(),
+        "plant_id": str(plant_id) if plant_id else None,
+        "totals": {
+            "plants": len(rows), "plants_active": len(active), "status": counts,
+            "cycles_completed": sum(len(r["cycles_completed"]) for r in rows.values()),
+            "confirmations": sum(r["confirmations"] for r in rows.values()),
+            "tables_confirmed": sum(r["tables_confirmed"] for r in rows.values()),
+            "cleaned_confirmed": sum(r["cleaned_confirmed"] for r in rows.values()),
+            "cleaned_pending": sum(r["cleaned_pending"] for r in rows.values()),
+            "target": sum(r["target"] or 0 for r in rows.values()) if manager else None,
+            "reported": sum(r["reported"] for r in rows.values()),
+            "pending": sum(r["pending"] for r in rows.values()),
+        },
+        "plants": shown,
+    }
+
+
 def month_cycles(db: Session, user: User, plant_id: UUID, month: str) -> dict:
     """One plant's three cycles for any month (past months included): planned dates, defaults, and what was done."""
     # plant and its washing setup in one round trip (this endpoint backs the cycle sheet and is called often)

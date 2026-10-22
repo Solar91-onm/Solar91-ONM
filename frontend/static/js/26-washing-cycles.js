@@ -256,6 +256,77 @@
   return '<div class="wc-feed">'+(rev+ev||'<div class="wc-empty">No cycle completed yet this month.</div>')+'</div>';
  }
 
+ /* ---- Day summary: cycles completed and confirmations done on one day, for one plant or all plants ---- */
+ window.openWashDaySummary=function(st){
+  const f=S.washF||{};
+  S.washDay={date:todayIso(),plant:f.plant&&f.plant!=="all"&&rowOf(f.plant)?f.plant:"all",st:st||"all",data:null,error:null,loading:false};
+  S.modal="washingDaySummary";S.modalCtx={};render();loadDaySummary();
+ };
+ function loadDaySummary(){
+  const d=S.washDay;if(!d||!d.date)return;const key=d.date+"|"+d.plant;d.loading=key;d.error=null;
+  apiFetch("/api/scheduled/washing/day-activity?day="+encodeURIComponent(d.date)+(d.plant!=="all"?"&plant_id="+encodeURIComponent(d.plant):""))
+   .then(r=>{if(S.washDay===d&&d.loading===key){d.data=r;d.loading=false}})
+   .catch(e=>{if(S.washDay===d&&d.loading===key){d.error=detailOf(e,"Could not load washing activity for this day.");d.loading=false}})
+   .finally(()=>{if(S.modal==="washingDaySummary"&&S.washDay===d)render()});
+ }
+ window.washDaySet=function(k,v){
+  const d=S.washDay;if(!d)return;
+  if(k==="st"){d.st=v;render();return}          // grouping filter only: no reload
+  if(k==="shift")d.date=addDays(d.date,v);else d[k]=v;
+  if(!d.date)return;d.data=null;d.error=null;render();loadDaySummary();
+ };
+ function daySummaryModal(){
+  const d=S.washDay||{date:todayIso(),plant:"all",st:"all"},r=d.data,t=r&&r.totals,today=todayIso();
+  const plants=(data().plants||[]).slice().sort((a,b)=>String(a.site_code).localeCompare(String(b.site_code)));
+  const controls='<div class="wx-dsum-bar"><button type="button" class="btn o sm" onclick="washDaySet(\'shift\',-1)" aria-label="Previous day">‹</button>'+
+   '<input type="date" class="wx-in" value="'+h(d.date)+'" max="'+h(today)+'" onchange="washDaySet(\'date\',this.value)" aria-label="Day"/>'+
+   '<button type="button" class="btn o sm" onclick="washDaySet(\'shift\',1)" aria-label="Next day"'+(d.date>=today?' disabled':'')+'>›</button>'+
+   (d.date!==today?'<button type="button" class="btn g sm" onclick="washDaySet(\'date\',\''+h(today)+'\')">Today</button>':'')+
+   '<select class="wx-in" aria-label="Plant" onchange="washDaySet(\'plant\',this.value)"><option value="all">All plants ('+plants.length+')</option>'+plants.map(p=>'<option value="'+h(p.plant_id)+'"'+(d.plant===p.plant_id?' selected':'')+'>'+h(p.site_code+" · "+p.plant)+'</option>').join("")+'</select></div>';
+  let body;
+  if(d.error)body='<div class="bn-warn banner">'+h(d.error)+'</div>';
+  else if(!r)body='<div class="wc-empty">Loading '+h(fmt(d.date))+'…</div>';
+  else{
+   const sc=t.status||{},notClean=(sc.not_done||0)+(sc.rejected||0)+(sc.not_reported||0),hasTarget=t.target!==null&&t.target!==undefined;
+   const tile=(n,l,s,st)=>'<button type="button" class="wx-dsum-k'+(st&&d.st===st?' on':'')+'"'+(st?' onclick="washDaySet(\'st\',\''+(d.st===st?'all':st)+'\')"':' disabled')+'><b>'+n+'</b><span>'+l+'</span>'+(s?'<small>'+s+'</small>':'')+'</button>';
+   const tiles='<div class="wx-dsum-ks">'+
+    tile(sc.confirmed||0,"Cleaned & confirmed",plural(t.cleaned_confirmed,"table")+(hasTarget?" of "+t.target+" due":""),"confirmed")+
+    tile(sc.awaiting||0,"Cleaned, awaiting confirmation",t.cleaned_pending?plural(t.cleaned_pending,"table"):"","awaiting")+
+    tile(notClean,"Not cleaned / not reported",[sc.not_done?sc.not_done+" not done":"",sc.not_reported?sc.not_reported+" not reported":"",sc.rejected?sc.rejected+" rejected":""].filter(Boolean).join(" · "),"notclean")+
+    tile(t.cycles_completed,"Cycles completed","")+
+    tile(t.confirmations,"Confirmations done",plural(t.tables_confirmed,"table")+" confirmed")+'</div>';
+   const pick=p=>d.st==="all"||(d.st==="notclean"?["not_done","rejected","not_reported"].includes(p.status):p.status===d.st);
+   const list=r.plants.filter(pick);
+   const diff=p=>p.difference===null||p.difference===undefined?'—':'<b class="'+(p.difference<0?'wx-neg':'wx-pos')+'">'+(p.difference>0?'+':'')+p.difference+'</b>';
+   const cleaned=p=>p.cleaned_confirmed||p.cleaned_pending?(p.cleaned_confirmed?'<b>'+p.cleaned_confirmed+'</b>':'0')+(p.cleaned_pending?' <small>+'+p.cleaned_pending+' awaiting</small>':''):'—';
+   const rows=list.map(p=>'<tr><td><b>'+h(p.plant)+'</b><small class="wx-by">'+h(p.site_code)+'</small></td><td>'+dayChip(p)+'</td><td>'+cleaned(p)+'</td>'+
+    (hasTarget?'<td>'+(p.target===null?'—':p.target)+'</td><td>'+diff(p)+'</td>':'')+
+    '<td>'+(p.cycles_completed.length?p.cycles_completed.map(n=>chip("Cycle "+n,"ok")).join(" "):'—')+'</td><td>'+(p.confirmations?p.confirmations+' <small>('+plural(p.tables_confirmed,"table")+')</small>':'—')+'</td><td><small>'+h(p.reported_by.join(", ")||"—")+'</small></td><td><small>'+h(p.confirmed_by.join(", ")||"—")+'</small></td><td><button type="button" class="btn g sm" onclick="openWashingPlantDetails(\''+h(p.plant_id)+'\')">Open</button></td></tr>').join("");
+   const head='<tr><th>Plant</th><th>Status</th><th>Tables cleaned</th>'+(hasTarget?'<th>Target</th><th>Difference</th>':'')+'<th>Cycles completed</th><th>Confirmations made</th><th>Reported by</th><th>Confirmed by</th><th></th></tr>';
+   const table=list.length?'<div class="wc-table-wrap wx-dsum-table"><table class="wc-table wc-compact" style="min-width:'+(hasTarget?980:820)+'px"><thead>'+head+'</thead><tbody>'+rows+'</tbody></table></div>'
+    :'<div class="wc-empty">No plant in this group on '+h(fmt(r.date))+'.</div>';
+   const filt=d.st!=="all"?'<p class="sub" style="margin:0 0 8px">Showing '+plural(list.length,"plant")+' · <a href="#" onclick="washDaySet(\'st\',\'all\');return false">show all '+r.plants.length+'</a></p>':'';
+   body=tiles+filt+table+'<p class="sub" style="margin-top:8px">Tables cleaned are the tables washed on this date. Confirmations made counts reports confirmed on this date, whatever day they were washed.'+(hasTarget?' Difference = tables cleaned − the day\'s target.':'')+'</p>';
+  }
+  return modal("Washing on "+h(fmt(d.date)),"Which plants cleaned tables and were confirmed on this day, which were not, and the cycles completed — for one plant or every plant.",controls+body,'<button class="btn o" onclick="closeModal()">Close</button>',true);
+ }
+ const DAY_ST={confirmed:["Cleaned & confirmed","ok"],awaiting:["Awaiting confirmation","info"],not_done:["Not done","warn"],rejected:["Report rejected","crit"],not_reported:["Not reported","crit"],upcoming:["Not reported yet","mute"],paused:["Washing paused","mute"]};
+ function dayChip(p){const s=DAY_ST[p.status]||[p.status,"mute"];return chip(s[0]+(p.status==="not_done"&&p.not_done_reason?" — "+p.not_done_reason:""),isTeam()||s[1]!=="crit"?s[1]:"mute")}
+ /* "Today" on the Cycle updates card: which plants cleaned and were confirmed today, and which were not */
+ function todayStrip(){
+  if(S._washTodayFor!==S._washCycles&&S._washCycles){
+   const forData=S._washTodayFor=S._washCycles;
+   apiFetch("/api/scheduled/washing/day-activity").then(r=>{if(S._washTodayFor===forData){S._washToday=r;if(onWashing()&&!S.modal)render()}}).catch(()=>{});
+  }
+  const r=S._washToday;if(!r||!r.plants)return '';
+  const names=(list,max)=>list.slice(0,max).map(p=>'<a href="#" onclick="openWashingPlantDetails(\''+h(p.plant_id)+'\');return false">'+h(p.plant)+'</a>'+(p.cleaned_confirmed||p.cleaned_pending?' <small>'+(p.cleaned_confirmed+p.cleaned_pending)+'</small>':'')).join(", ")+(list.length>max?' <small>and '+(list.length-max)+' more</small>':'');
+  const by=st=>r.plants.filter(p=>st.includes(p.status));
+  const done=by(["confirmed"]),wait=by(["awaiting"]),not=by(["not_done","rejected","not_reported"]);
+  const line=(ico,label,list,st)=>list.length?'<div class="wx-dtoday-l"><span class="wx-dtoday-i '+st+'">'+ico+'</span><div><button type="button" class="wx-dtoday-b" onclick="openWashDaySummary(\''+st+'\')">'+label+' <b>'+list.length+'</b></button> '+names(list,6)+'</div></div>':'';
+  const body=line("✓","Cleaned & confirmed",done,"confirmed")+line("⏳","Cleaned, awaiting confirmation",wait,"awaiting")+line("✕","Not cleaned / not reported",not,"notclean");
+  return '<div class="wx-dtoday"><div class="wx-dtoday-h"><b>Today · '+h(fmt(r.date))+'</b><small>'+plural(r.totals.cycles_completed,"cycle")+' completed · '+plural(r.totals.confirmations,"confirmation")+'</small></div>'+(body||'<div class="wc-empty">No washing plant to show.</div>')+'</div>';
+ }
+
  /* ---- plant wall: one tile per plant, colour = how the plant stands today ---- */
  function tileState(p){
   if(p.not_setup)return "unset";
@@ -393,7 +464,7 @@
   const tools='<div class="wx-rtools"><select class="wx-mini" aria-label="Sort plants" onchange="washFilter(\'sort\',this.value)">'+[["late","Most late first"],["name","Name A–Z"],["compliance","Best compliance"],["progress","Most progress"]].map(o=>'<option value="'+o[0]+'"'+(f.sort===o[0]?' selected':'')+'>'+o[1]+'</option>').join("")+'</select>'+
    '<div class="wx-view" role="group" aria-label="Layout"><button type="button" class="'+(ui.view!=="table"?'on':'')+'" onclick="washSetView(\'tiles\')" title="Plant tiles" aria-label="Plant tiles">▦</button><button type="button" class="'+(ui.view==="table"?'on':'')+'" onclick="washSetView(\'table\')" title="Table" aria-label="Table">☰</button></div></div>';
   const results='<div class="wc-card wx-results" id="wc-results"><div class="wx-results-h"><h2>'+(f.plant!=="all"?"Plant":"Plants")+' <span>'+shown+' of '+allN+'</span></h2>'+(ui.view!=="table"?legend:'<span class="wx-grow"></span>')+tools+'</div>'+washFocusBar(f)+'<div id="wc-register">'+resultsHtml()+'</div></div>';
-  const lower='<div class="wc-two">'+'<div class="wc-card"><h2>Cycle updates'+(head?' &amp; confirmations':'')+'</h2><p class="sub">Reports waiting for confirmation, cycles completed and the next cycle that started.</p>'+feedHtml()+'</div>'+
+  const lower='<div class="wc-two">'+'<div class="wc-card"><div class="row between wrap" style="gap:8px;align-items:center"><h2>Cycle updates'+(head?' &amp; confirmations':'')+'</h2><button type="button" class="btn o sm" onclick="openWashDaySummary()" title="Cycles completed and confirmations done on one day, for one plant or all plants">📊 Day summary</button></div><p class="sub">Reports waiting for confirmation, cycles completed and the next cycle that started.</p>'+todayStrip()+feedHtml()+'</div>'+
    (head?'<div class="wc-card"><h2>Assignee performance</h2><p class="sub">Ranked by weekly compliance, then average delay. O&amp;M team only.</p>'+rankingHtml()+'</div>':'')+'</div>';
   return '<div class="wc-page wx-page">'+header+stats+bar+results+lower+'</div>';
  };
@@ -621,7 +692,7 @@
    const shown=r.mine.length?r.mine:r.elsewhere.length?r.elsewhere:r.rejected,photos=shown.reduce((a,x)=>a+(x.evidence||[]).length,0);
    const flag=shown.some(x=>x.review_status==="Pending"&&x.photos_required&&(!x.has_before||!x.has_after))?' '+chip("Needs photos","warn"):(!isField()&&shown.some(x=>x.review_status!=="Rejected"&&x.backfilled&&x.job_status==="Done"&&!(x.evidence||[]).length)?' '+chip("No photos · back-filled","mute"):'');
    const note=r.mine.length?'':r.elsewhere.length?' <small>Counted in cycle '+r.elsewhere.map(x=>x.cycle_no).join(", ")+'</small>':' <small>'+h(r.rejected[0].review_note||"Rejected")+'</small>';
-   return '<tr class="'+cls+'" id="wx-row-'+id+'"><td><b>'+dayName(r.date)+'</b></td><td colspan="3">'+shown.map(val).join(" + ")+(shown.length===1&&shown[0].remarks?' <small>“'+h(shown[0].remarks)+'”</small>':'')+note+'</td><td>'+(photos||"—")+'</td><td>'+shown.map(st).join(" ")+flag+'<small class="wx-by">'+h(shown.map(x=>x.reported_by).filter((v,i,a)=>a.indexOf(v)===i).join(", "))+'</small></td><td class="wx-run" id="wx-run-'+id+'">'+(r.mine.length?r.run:"")+'</td><td><button type="button" class="btn g sm" onclick="washOpenDay(\''+id+'\')">Open</button></td></tr>';
+   return '<tr class="'+cls+'" id="wx-row-'+id+'"><td><b>'+dayName(r.date)+'</b></td><td colspan="3">'+shown.map(val).join(" + ")+(shown.length===1&&shown[0].remarks?' <small>“'+h(shown[0].remarks)+'”</small>':'')+note+'</td><td>'+(photos||"—")+'</td><td class="wx-st">'+shown.map(st).join(" ")+flag+(by=>'<small class="wx-by" title="'+h(by)+'">'+h(by)+'</small>')(shown.map(x=>x.reported_by).filter((v,i,a)=>a.indexOf(v)===i).join(", "))+'</td><td class="wx-run" id="wx-run-'+id+'">'+(r.mine.length?r.run:"")+'</td><td><button type="button" class="btn g sm" onclick="washOpenDay(\''+id+'\')">Open</button></td></tr>';
   }
   if(!r.editable)return '<tr class="'+cls+' wx-blank" id="wx-row-'+id+'"><td><b>'+dayName(r.date)+'</b></td><td colspan="5"><small>'+(r.locked?'Older than '+SE_BACK_DAYS+' days — ask the O&amp;M team to record it':'Not recorded')+'</small></td><td class="wx-run" id="wx-run-'+id+'"></td><td></td></tr>';
   const d=r.draft,f=r.files,pic=k=>'<label class="wx-pic'+(f[k].length?' on':'')+'" title="'+(k==="before"?"Before":"After")+' cleaning photos (up to 5)">'+(k==="before"?"Before":"After")+(f[k].length?' · '+f[k].length:'')+'<input type="file" accept="image/jpeg,image/png,image/webp" multiple hidden onchange="washSheetPhotos(\''+id+'\',\''+k+'\',this)"/></label>';
@@ -818,6 +889,20 @@
   if(S.modal==="washingCycleSetup")return plantSetupModal();
   if(S.modal==="washingDailyReport")return reportModal();
   if(S.modal==="washingPlantDetails")return detailsModal();
+  if(S.modal==="washingDaySummary")return daySummaryModal();
   return oldRenderModal.apply(this,arguments);
+ };
+ /* A re-render of the same plant overlay view (month loaded, day saved or confirmed) keeps the overlay and the
+    cycle sheet where the user had scrolled, instead of jumping back to the top. */
+ const viewKey=()=>S.modal==="washingPlantDetails"?[S.washDetailsPlant,S.washTab,S.washMonth,S.washSheetCycle].join("|"):null;
+ let lastViewKey=null;
+ const baseRender=render;
+ render=function(){
+  const key=viewKey(),same=key&&key===lastViewKey,b=same&&document.querySelector(".overlay .modal-b"),sh=same&&document.querySelector(".wx-sheet");
+  const keep=same?{b:b?b.scrollTop:0,s:sh?sh.scrollTop:0}:null;
+  const out=baseRender.apply(this,arguments);
+  lastViewKey=viewKey();
+  if(keep&&lastViewKey===key){const b2=document.querySelector(".overlay .modal-b"),s2=document.querySelector(".wx-sheet");if(b2)b2.scrollTop=keep.b;if(s2)s2.scrollTop=keep.s}
+  return out;
  };
 })();

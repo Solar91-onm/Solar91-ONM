@@ -22,7 +22,7 @@ from app.storage.service import SupabaseStorage
 from app.issues.service import next_issue_ticket_no
 from app.pmplan.followups import FOLLOW_UP_OUTCOMES, follow_up_out, get_follow_up_state
 from app.pmplan.alerts import alert_log_out, task_alert_scope
-from app.scheduled.washing_cycles import confirm_sheet_reports, create_daily_report, create_sheet_reports, delete_daily_report, get_overview, list_assignees, month_cycles, review_daily_report, save_cycle_schedule, set_cycle_date, setup_plant, update_daily_report
+from app.scheduled.washing_cycles import confirm_sheet_reports, create_daily_report, create_sheet_reports, day_activity, delete_daily_report, get_overview, list_assignees, month_cycles, review_daily_report, save_cycle_schedule, set_cycle_date, setup_plant, update_daily_report
 from app.scheduled.washing_import import MAX_IMPORT_BYTES, export_bytes, import_setup, template_bytes
 from app.scheduled.washing_daily_import import MAX_DAILY_BYTES, daily_template_bytes, import_daily
 
@@ -734,6 +734,12 @@ def washing_assignees(db: Annotated[Session, Depends(get_db)], user: Annotated[U
 @router.get("/washing/overview")
 def washing_overview(db: Annotated[Session, Depends(get_db)], user: Annotated[User, Depends(get_current_user)], include_tables: bool = False, report_days: int = 35):
     return get_overview(db, user, include_tables=include_tables, report_days=report_days)
+
+
+@router.get("/washing/day-activity")
+def washing_day_activity(db: Annotated[Session, Depends(get_db)], user: Annotated[User, Depends(get_current_user)], day: date | None = None, plant_id: UUID | None = None):
+    """Cycles completed and reports confirmed on one day (default today), for one plant or all visible plants."""
+    return day_activity(db, user, day or business_today(), plant_id)
 
 
 @router.post("/washing/setup", dependencies=[Depends(require_csrf)])

@@ -102,6 +102,8 @@ button.wx-tile:hover{transform:translateY(-2px);box-shadow:0 10px 24px rgba(16,3
 
 /* ---------- plant overlay ---------- */
 .wx-ov{display:flex;flex-direction:column;gap:12px}
+/* the plant overlay scrolls with the drawer itself (no second scroll box around the cycle sheet) */
+.wc-ov.wx-ov{max-height:none;overflow:visible}
 .wx-ov-top{display:flex;align-items:center;gap:12px;background:var(--wx-soft);border:1px solid var(--wx-line);border-radius:14px;padding:10px 12px}
 .wx-ov-top .wx-ring{width:64px;height:64px}
 .wx-ov-k{flex:1;min-width:0}.wx-ov-k b{font-size:14px}.wx-ov-k b em{font-style:normal;color:var(--wx-info);font-size:12.5px}
@@ -140,8 +142,13 @@ button.wx-tile:hover{transform:translateY(-2px);box-shadow:0 10px 24px rgba(16,3
 .wx-cpick button b{font-size:13px}.wx-cpick button span{font-size:11.5px;color:var(--wx-mut)}
 .wx-cpick button.on{border-color:var(--wx-pri);box-shadow:inset 0 0 0 1px var(--wx-pri);background:var(--wx-soft)}
 .wx-review{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px}
-.wx-sheet{max-height:min(56vh,620px)}
+/* tall enough for at least 10 compact day rows (~42px each) before the sheet scrolls */
+.wx-sheet{max-height:max(500px,66vh)}
 .wx-sheet .wc-compact{min-width:680px}
+.wx-sheet td.wx-st{white-space:nowrap}
+.wx-sheet td.wx-st .wx-by{display:inline-block;max-width:170px;margin:0 0 0 6px;overflow:hidden;text-overflow:ellipsis;vertical-align:middle}
+.wx-sheet .wc-chip{padding:1px 7px;font-size:11.5px}
+.wx-sheet td small{font-size:11.5px}
 .wx-sheet select.wx-in{max-width:132px}
 .wx-sheet td{vertical-align:middle}
 .wx-sheet td:first-child{white-space:nowrap}
@@ -205,3 +212,31 @@ select.pp-open{outline:2px solid var(--wx-pri);outline-offset:1px}
 .wx-roll{color:var(--wx-ok,#15803D)}
 .wx-run.next{color:#2563EB;font-weight:700}
 .wx-run{white-space:nowrap}
+
+/* day summary (Cycle updates & confirmations): one day, one plant or all plants */
+.wx-dsum-bar{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:0 0 12px}
+.wx-dsum-bar input.wx-in{width:auto;max-width:170px}
+.wx-dsum-bar select.wx-in{width:auto;flex:1;min-width:180px;max-width:340px}
+.wx-dsum-ks{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin:0 0 12px}
+.wx-dsum-k{border:1px solid var(--wx-line);border-radius:12px;padding:10px 12px;background:var(--wx-bg);text-align:left;font:inherit;color:inherit;cursor:pointer}
+.wx-dsum-k:disabled{cursor:default}
+.wx-dsum-k:not(:disabled):hover{border-color:var(--wx-pri)}
+.wx-dsum-k.on{border-color:var(--wx-pri);box-shadow:inset 0 0 0 1px var(--wx-pri);background:var(--wx-soft)}
+.wx-dsum-table{max-height:max(420px,52vh)}
+.wx-dsum-table td:first-child,.wx-dsum-table td:nth-child(2){white-space:nowrap}
+.wx-pos{color:var(--wx-ok)}.wx-neg{color:var(--wx-crit)}
+.wx-dsum-k b{display:block;font-size:22px;line-height:1.1;color:var(--wx-ink)}
+.wx-dsum-k span{display:block;font-size:12px;font-weight:700;color:var(--wx-ink);margin-top:2px}
+.wx-dsum-k small{display:block;font-size:11.5px;color:var(--wx-mut)}
+
+/* "Today" on the Cycle updates card: plants cleaned and confirmed today vs not */
+.wx-dtoday{border:1px solid var(--wx-line);border-radius:12px;padding:10px 12px;margin:0 0 10px;background:var(--wx-soft)}
+.wx-dtoday-h{display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap;margin-bottom:6px}
+.wx-dtoday-h small{font-size:12px;color:var(--wx-mut)}
+.wx-dtoday-l{display:flex;gap:8px;align-items:flex-start;padding:4px 0;font-size:12.5px;line-height:1.5}
+.wx-dtoday-l a{color:var(--wx-ink);text-decoration:none;font-weight:600}.wx-dtoday-l a:hover{text-decoration:underline}
+.wx-dtoday-l small{color:var(--wx-mut)}
+.wx-dtoday-i{flex:0 0 20px;height:20px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;color:#fff}
+.wx-dtoday-i.confirmed{background:var(--wx-ok)}.wx-dtoday-i.awaiting{background:var(--wx-info)}.wx-dtoday-i.notclean{background:var(--wx-warn)}
+.wx-dtoday-b{border:0;background:none;padding:0;font:inherit;font-weight:800;color:var(--wx-ink);cursor:pointer}
+.wx-dtoday-b:hover{text-decoration:underline}
