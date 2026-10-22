@@ -38,6 +38,7 @@
   window.pmDaysHint=function(p){
     const el=document.getElementById(p+"-hint");if(!el)return;
     const T=parseInt(v(p==="pq"?"pq-total":"pa-units"),10),N=parseInt(v(p+"-days"),10),all=p==="pa"||v("pq-plant")==="__all";el.style.color="";
+    if(!N&&checked(p+"-cycle")){el.textContent="Leave blank to spread each plant's units over this equipment's days in the PM cycle.";return}
     if(!N){el.textContent=all?"Leave blank to use each plant's saved pace. With All plants, plants that have none of this equipment are skipped.":"Leave blank to do every unit on the first due date (or the plant's saved pace).";return}
     if(!T){el.textContent="Every plant spreads its own units over "+N+" day"+(N===1?"":"s")+" — e.g. 8 inverters in "+N+" day"+(N===1?"":"s")+" = "+Math.ceil(8/N)+" a day, while a single transformer is simply done on day 1.";return}
     const per=Math.ceil(T/N),days=Math.ceil(T/per),parts=[];
@@ -62,6 +63,25 @@
   }
   async function loadTemplates(){try{S._pmTpl=await apiFetch("/api/pm-plan/templates")}catch(e){S._pmTpl=S._pmTpl||[]}return S._pmTpl}
   async function refreshTasks(){try{S.tasks=await apiFetch("/api/scheduled/tasks")}catch(e){}}
+  /* 30-day PM cycle: Plant side (Inverter days 1–7, ACCB + MCCB, VCB, …) then GSS side. Source: GET /api/pm-plan/cycle. */
+  async function loadCycle(){if(!S._pmCycle)try{S._pmCycle=await apiFetch("/api/pm-plan/cycle")}catch(e){}return S._pmCycle}
+  function cycleWin(type,start){
+    const ph=(S._pmCycle&&S._pmCycle.phases)||[];if(!ph.length||!start)return null;
+    const p=ph.find(x=>x.equipment_types.indexOf(type)>=0)||ph.find(x=>x.phase==="Miscellaneous");if(!p)return null;
+    return Object.assign({},p,{start:addDays(start,p.start_day-1),end:addDays(start,p.end_day-1)});
+  }
+  const cycleText=w=>w.area+" · "+w.phase+" — cycle day"+(w.days>1?"s "+w.start_day+"–"+w.end_day:" "+w.start_day)+": "+fmtD(w.start)+(w.days>1?" → "+fmtD(w.end):"");
+  window.pmCycleHint=function(p){
+    const el=document.getElementById(p+"-cyc"),on=checked(p+"-cycle");if(!el)return;
+    const lbl=document.getElementById(p+"-due-lbl");if(lbl)lbl.textContent=on?"Cycle start date (day 1)":"First due date";
+    const type=p==="pq"?v("pq-type"):((S._pmTpl||[]).find(x=>x.id===S.pmAssignId)||{}).equipment_type;
+    const w=on?cycleWin(type,v(p+"-due")):null;
+    el.textContent=on?(w?cycleText(w)+". Repeats on the same cycle days next month.":"Loading the PM cycle…"):"";
+    const d=document.getElementById(p+"-days");if(d&&on&&w)d.placeholder="Cycle: "+w.days+" day"+(w.days===1?"":"s");
+    else if(d&&!on&&/^Cycle:/.test(d.placeholder))d.placeholder=p==="pq"?"e.g. 3":"each plant's saved pace";
+  };
+  const cycleBox=p=>'<label style="display:flex;gap:8px;align-items:center;font-size:12.5px;margin:0 0 4px"><input id="'+p+'-cycle" type="checkbox" checked onchange="pmCycleHint(\''+p+'\');pmUnitHint(\''+p+'\')"/> Follow the 30-day PM cycle (Plant side, then GSS side) — dates come from this equipment\'s turn</label>'+
+    '<div id="'+p+'-cyc" class="muted" style="font-size:12px;margin:0 0 10px"></div>';
 
   /* Dry-run first so the person sees the count, then create. */
   async function run(url,body){
@@ -69,8 +89,9 @@
       const pre=await apiFetch(url,{method:"POST",body:Object.assign({},body,{dry_run:true})});
       if(!pre.count){toast(pre.skipped?("Nothing new to create — "+pre.skipped+" already scheduled."):"Nothing to create.");return false}
       const note=pre.open_without_units?"\n\nNote: "+pre.open_without_units+" open task(s) for this job already exist without unit numbers. They are left as they are.":"";
+      const cyc=pre.cycle?"\n\nPM cycle: "+cycleText(pre.cycle)+".":"";
       const noKit=(pre.skipped_plants||[]).length?"\n\nSkipped "+pre.skipped_plants.length+" plant(s) with no "+(body.equipment_type||"such equipment")+" registered: "+pre.skipped_plants.slice(0,8).join(", ")+(pre.skipped_plants.length>8?"…":""):"";
-      if((pre.count>1||note||noKit)&&!confirm("Create "+pre.count+" task(s) across "+pre.plants+" plant(s)"+(pre.days>1?", spread over up to "+pre.days+" day(s)":"")+(pre.skipped?" ("+pre.skipped+" already scheduled will be skipped)":"")+"?"+note+noKit))return false;
+      if((pre.count>1||note||noKit||cyc)&&!confirm("Create "+pre.count+" task(s) across "+pre.plants+" plant(s)"+(pre.days>1?", spread over up to "+pre.days+" day(s)":"")+(pre.skipped?" ("+pre.skipped+" already scheduled will be skipped)":"")+"?"+cyc+note+noKit))return false;
       const res=await apiFetch(url,{method:"POST",body:Object.assign({},body,{dry_run:false})});
       await refreshTasks();
       S.modal=null;S.modalCtx=null;S.tablePages=S.tablePages||{};S.tablePages.scheduled=1;render();
@@ -98,6 +119,7 @@
     else{const r=cfgFor(v("pq-plant"),v("pq-type"));t.placeholder=(r&&r.reg)?"Register: "+r.reg:"e.g. 10";
       t.value=r&&r.cfg?r.cfg.total_units:(r&&r.reg)||"";
       d.placeholder=r&&r.cfg&&r.cfg.total_units&&r.cfg.units_per_day?"Saved pace: "+Math.ceil(r.cfg.total_units/r.cfg.units_per_day)+" day(s)":"e.g. 3"}
+    window.pmCycleHint("pq");
     window.pmUnitHint("pq");
   };
   window.pmQuickFill=function(){ /* typed task matches a saved template → copy its settings */
@@ -111,8 +133,9 @@
     if(!canCreate()){toast("Site Engineer can execute assigned Preventive Maintenance work, but cannot create it.");return}
     S.modal="pmQuickTask";S.modalCtx={};render();
     setTimeout(()=>{try{window.pmQuickCfg()}catch(e){}},0);
-    Promise.all([loadTemplates(),loadUnitCfg()]).then(()=>{
+    Promise.all([loadTemplates(),loadUnitCfg(),loadCycle()]).then(()=>{
      if(S.modal!=="pmQuickTask")return;
+     window.pmCycleHint("pq");
      const dl=document.getElementById("pq-sugg");if(dl)dl.innerHTML=suggestions(v("pq-type")).map(x=>'<option value="'+esc(x)+'"></option>').join("");
      const total=document.getElementById("pq-total");if(total&&!total.value)try{window.pmQuickCfg()}catch(e){}
     });
@@ -127,7 +150,7 @@
        '<div class="field"><span class="lbl">Equipment type</span><select id="pq-type" class="inp" onchange="pmQuickType()">'+typeOpts(type)+'</select></div>'+
        '<div class="field"><span class="lbl">Plant</span><select id="pq-plant" class="inp" onchange="pmQuickCfg()"><option value="__all"'+(first==="__all"?" selected":"")+'>All plants</option>'+(S.plants||[]).map(p=>'<option value="'+esc(p.name)+'"'+(p.name===first?" selected":"")+'>'+esc(typeof pmPlantLabelText==="function"?pmPlantLabelText(p.name):p.name)+'</option>').join("")+'</select></div>'+
       '</div>'+
-      '<div class="field"><span class="lbl">Task — what to do</span><input id="pq-task" class="inp" list="pq-sugg" oninput="pmQuickFill()" placeholder="Pick a suggestion or type your own"/><datalist id="pq-sugg">'+suggestions(type).map(x=>'<option value="'+esc(x)+'"></option>').join("")+'</datalist></div>'+
+      '<div class="field"><span class="lbl">Task — what to do</span><input id="pq-task" class="inp" list="pq-sugg" oninput="pmQuickFill()" placeholder="Pick a suggestion or type your own"/><datalist id="pq-sugg">'+suggestions(type).map(x=>'<option value="'+esc(x)+'"></option>').join("")+'</datalist></div>'+cycleBox("pq")+
       '<div class="kgrid" style="grid-template-columns:1fr 1fr 1fr;gap:12px">'+
        '<div class="field"><span class="lbl">Number of units</span><input id="pq-total" class="inp" type="number" min="1" max="500" oninput="pmUnitHint(\'pq\')"/></div>'+
        '<div class="field"><span class="lbl">Finish within (days)</span><input id="pq-days" class="inp" type="number" min="1" max="366" placeholder="e.g. 3" oninput="pmUnitHint(\'pq\')"/></div>'+
@@ -137,7 +160,7 @@
       '<div class="kgrid" style="grid-template-columns:1fr 1fr;gap:12px">'+
        '<div class="field"><span class="lbl">Assignee</span><select id="pq-assignee" class="inp"><option value="">Assign later</option>'+opts(TEAM_POOL,S.currentUser)+'</select></div>'+
        '<div class="field"><span class="lbl">How often</span><select id="pq-freq" class="inp">'+opts(FREQS,"Monthly")+'</select></div>'+
-       '<div class="field"><span class="lbl">First due date</span><input id="pq-due" class="inp" type="date" value="'+addDays(TODAY,3)+'"/></div>'+
+       '<div class="field"><span class="lbl" id="pq-due-lbl">Cycle start date (day 1)</span><input id="pq-due" class="inp" type="date" value="'+addDays(TODAY,3)+'" oninput="pmCycleHint(\'pq\')"/></div>'+
        '<div class="field"><span class="lbl">Safety needed</span><select id="pq-safety" class="inp">'+opts(SAFE,"—")+'</select></div>'+
        '<div class="field"><span class="lbl">Est. time (hours)</span><input id="pq-hours" class="inp" type="number" min="0" step="0.5" value="2"/></div>'+
       '</div>'+
@@ -157,7 +180,7 @@
       est_hours:parseFloat(v("pq-hours"))||null,plants:plant?[plantKey(plant)]:["All plants"],
       start_date:v("pq-due"),assignees:v("pq-assignee")?[v("pq-assignee")]:[],
       per_unit:true,save_template:checked("pq-save"),
-      total_units:total,spread_days:days,
+      total_units:total,spread_days:days,follow_cycle:checked("pq-cycle"),
       save_unit_config:!!(plant&&total&&days&&checked("pq-savecfg"))});
   };
 
@@ -208,7 +231,7 @@
   };
 
   /* ───────── Assign a template to plants ───────── */
-  window.pmAssignOpen=async function(id){await loadUnitCfg();S.pmAssignId=id;S.modal="pmAssign";S.modalCtx={};render()};
+  window.pmAssignOpen=async function(id){await Promise.all([loadUnitCfg(),loadCycle()]);S.pmAssignId=id;S.modal="pmAssign";S.modalCtx={};render();setTimeout(()=>{try{window.pmCycleHint("pa");window.pmUnitHint("pa")}catch(e){}},0)};
   window.pmAssignAll=function(on){document.querySelectorAll(".pa-pl").forEach(e=>{e.checked=on})};
   function assignModal(){
     const t=(S._pmTpl||[]).find(x=>x.id===S.pmAssignId);
@@ -218,7 +241,7 @@
       '<div class="field"><span class="lbl">Plants <a href="#" onclick="pmAssignAll(true);return false" style="margin-left:8px;font-size:12.5px">select all</a> <a href="#" onclick="pmAssignAll(false);return false" style="margin-left:6px;font-size:12.5px">clear</a></span><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:6px;max-height:200px;overflow:auto;border:1px solid var(--border);border-radius:10px;padding:10px">'+plants+'</div></div>'+
       '<div class="kgrid" style="grid-template-columns:1fr 1fr;gap:12px">'+
        '<div class="field"><span class="lbl">Assignee(s) — hold Ctrl/Cmd for several; each plant gets one assignee, plants are shared between them</span><select id="pa-assignees" class="inp" multiple size="4">'+TEAM_POOL.map(n=>'<option>'+esc(n)+'</option>').join("")+'</select></div>'+
-       '<div><div class="field"><span class="lbl">First due date</span><input id="pa-due" class="inp" type="date" value="'+addDays(TODAY,3)+'"/></div>'+
+       '<div><div class="field"><span class="lbl" id="pa-due-lbl">Cycle start date (day 1)</span><input id="pa-due" class="inp" type="date" value="'+addDays(TODAY,3)+'" oninput="pmCycleHint(\'pa\')"/></div>'+cycleBox("pa")+
        '<div class="field"><span class="lbl">Number of units (optional — else each plant\'s configuration)</span><input id="pa-units" class="inp" type="number" min="1" max="500" oninput="pmUnitHint(\'pa\')" placeholder="e.g. 10"/></div>'+
        '<div class="field"><span class="lbl">Finish within (days, optional)</span><input id="pa-days" class="inp" type="number" min="1" max="366" oninput="pmUnitHint(\'pa\')" placeholder="each plant\'s saved pace"/></div>'+
        '<div id="pa-hint" class="muted" style="font-size:12px"></div></div></div>';
@@ -233,7 +256,8 @@
     const who=sel?[].slice.call(sel.selectedOptions).map(o=>o.value):[];
     await run("/api/pm-plan/templates/"+encodeURIComponent(S.pmAssignId)+"/apply",{
       plants:all?["All plants"]:names.map(n=>{const p=plantObj(n);return p?plantKey(p):n}),
-      start_date:v("pa-due"),assignees:who,per_unit:true,total_units:parseInt(v("pa-units"),10)||null,spread_days:parseInt(v("pa-days"),10)||null});
+      start_date:v("pa-due"),assignees:who,per_unit:true,total_units:parseInt(v("pa-units"),10)||null,spread_days:parseInt(v("pa-days"),10)||null,
+      follow_cycle:checked("pa-cycle")});
   };
 
   /* ───────── Maintenance scope editor (O&M Head) ───────── */
@@ -306,17 +330,43 @@
   }
 
   /* ───────── Excel plan upload ───────── */
-  window.pmImportPick=function(){
-    const i=document.createElement("input");i.type="file";i.accept=".xlsx,.xlsm,.csv,text/csv";
-    i.onchange=function(){if(i.files[0])pmImportFile(i.files[0])};i.click();
+  /* Step 1: choose whether the file's dates follow the 30-day PM cycle, and the cycle start. Step 2: pick the file. */
+  window.pmImportPick=async function(){S.modal="pmImport";S.modalCtx={};render();await loadCycle();if(S.modal==="pmImport"){render();window.pmImportDates()}};
+  function importModal(){
+    const body='<label style="display:flex;gap:8px;align-items:center;font-size:12.5px;margin:0 0 8px"><input id="im-cycle" type="checkbox" checked onchange="pmImportDates()"/> Set the dates from the 30-day PM cycle (Plant side, then GSS side)</label>'+
+      '<div class="field" style="max-width:240px"><span class="lbl">Cycle start date (day 1)</span><input id="im-start" class="inp" type="date" value="'+addDays(TODAY,3)+'" oninput="pmImportDates()"/></div>'+
+      '<p id="im-note" class="muted" style="font-size:12px;margin:0 0 8px"></p>'+
+      '<div id="im-table" style="overflow:auto;max-height:46vh"></div>';
+    return modal("Upload PM plan (Excel / CSV)","Each row's equipment is scheduled on its own days of the cycle. Next month repeats on the same cycle days.",body,
+      '<button class="btn o" onclick="closeModal()">Cancel</button><button class="btn p" onclick="pmImportChoose()">Choose file…</button>',true);
+  }
+  window.pmImportDates=function(){
+    const tb=document.getElementById("im-table"),note=document.getElementById("im-note");if(!tb)return;
+    const on=checked("im-cycle"),start=v("im-start"),ph=(S._pmCycle&&S._pmCycle.phases)||[];
+    note.textContent=on?"A row's own Start date is used as that row's cycle start; rows without one use the date above. Inverter units are spread over their days; a single unit (one VCB, one IDT…) is due on the last day of its turn."
+      :"Dates are taken exactly as written in each row's Start date (blank = 3 days from today).";
+    if(!on){tb.innerHTML="";return}
+    if(!ph.length){tb.innerHTML='<div class="muted" style="padding:8px 0">Could not load the PM cycle.</div>';return}
+    tb.innerHTML='<table><thead><tr><th>Area</th><th>Equipment</th><th>Cycle days</th><th>Dates</th></tr></thead><tbody>'+ph.map(p=>'<tr><td>'+esc(p.area)+'</td><td><b>'+esc(p.phase)+'</b><div class="muted" style="font-size:12px">'+esc(p.equipment_types.length?p.equipment_types.join(", "):"Every other equipment type")+'</div></td><td>'+(p.days>1?p.start_day+"–"+p.end_day:p.start_day)+'</td><td>'+(start?fmtD(addDays(start,p.start_day-1))+(p.days>1?" → "+fmtD(addDays(start,p.end_day-1)):""):"—")+'</td></tr>').join("")+'</tbody></table>';
   };
-  async function pmImportFile(file){
-    const post=async dry=>{const fd=new FormData();fd.append("file",file);return apiFetch("/api/pm-plan/import?dry_run="+dry,{method:"POST",body:fd})};
+  window.pmImportChoose=function(){
+    const o={cycle:checked("im-cycle"),start:v("im-start")};
+    if(o.cycle&&!o.start){toast("Choose the cycle start date.");return}
+    const i=document.createElement("input");i.type="file";i.accept=".xlsx,.xlsm,.csv,text/csv";
+    i.onchange=function(){if(i.files[0])pmImportFile(i.files[0],o)};i.click();
+  };
+  async function pmImportFile(file,o){
+    o=o||{};
+    const q=o.cycle?"&follow_cycle=true"+(o.start?"&cycle_start="+encodeURIComponent(o.start):""):"";
+    const post=async dry=>{const fd=new FormData();fd.append("file",file);return apiFetch("/api/pm-plan/import?dry_run="+dry+q,{method:"POST",body:fd})};
     try{
       const pre=await post(true);
-      const msg="Save "+pre.templates+" PM job(s) and create "+pre.tasks+" task(s)"+(pre.skipped?" ("+pre.skipped+" already scheduled will be skipped)":"")+(pre.template_only_rows?"\n"+pre.template_only_rows+" row(s) have no plant — saved as templates only.":"")+"?";
+      const sch=(pre.schedule||[]).map(x=>"• "+x.equipment_type+" ("+x.area+"): "+fmtD(x.start)+(x.end!==x.start?" → "+fmtD(x.end):"")+" · "+x.tasks+" task(s)");
+      const msg="Save "+pre.templates+" PM job(s) and create "+pre.tasks+" task(s)"+(pre.skipped?" ("+pre.skipped+" already scheduled will be skipped)":"")+(pre.template_only_rows?"\n"+pre.template_only_rows+" row(s) have no plant — saved as templates only.":"")+"?"+
+        (sch.length?"\n\nDates from the 30-day PM cycle:\n"+sch.slice(0,16).join("\n")+(sch.length>16?"\n…and "+(sch.length-16)+" more":""):"");
       if(!confirm(msg))return;
       const res=await post(false);
+      if(S.modal==="pmImport"){S.modal=null;S.modalCtx=null}
       await loadTemplates();await refreshTasks();render();
       toast(res.tasks+" task(s) created from the uploaded PM plan.");
     }catch(e){
@@ -342,6 +392,7 @@
     if(S.modal==="pmAssign")return assignModal();
     if(S.modal==="pmUnitCfg")return cfgModal();
     if(S.modal==="pmScope")return scopeModal();
+    if(S.modal==="pmImport")return importModal();
     return oldRM.apply(this,arguments);
   };
   function patchCard(){

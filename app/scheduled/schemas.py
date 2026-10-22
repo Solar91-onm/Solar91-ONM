@@ -11,7 +11,7 @@ ALLOWED_ASSETS = {
     "ACCB Panel", "Switchyard - Plant side", "Switchyard - GSS side", "Transmission line",
     "RMS", "WMS", "CCTV", "Boundary wall", "String", "Earthing", "LA", "Water pipe line",
     "Vegetation", "Modules cleaning", "ABT meters", "Street Light", "MMS", "BIKE", "Piling and Foundation", "Other",
-    "MCCB", "OLTC(RTCC)", "4 Pole", "VCB - GSS side",
+    "MCCB", "OLTC(RTCC)", "4 Pole", "VCB - GSS side", "4 Pole - GSS side", "Transmission line - GSS side",
 }
 ALLOWED_FREQUENCIES = {"Daily", "Weekly", "Monthly", "Quarterly", "Half-yearly", "Annual"}
 

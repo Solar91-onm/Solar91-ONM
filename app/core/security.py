@@ -97,6 +97,7 @@ EQUIPMENT_TYPES = [
     "Boundary wall", "String", "Earthing", "LA", "Water pipe line", "Vegetation", "Modules cleaning",
     "ABT meters", "Street Light", "MMS", "Other",
     "MCCB", "OLTC(RTCC)", "4 Pole", "VCB - GSS side",   # PM scope additions (Plant Side / GSS Side)
+    "4 Pole - GSS side", "Transmission line - GSS side",   # GSS side of the 30-day PM cycle
 ]
 
 

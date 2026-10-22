@@ -1365,6 +1365,8 @@ const TASK_TYPES=[
   {name:"OLTC(RTCC)",vertical:"OLTC(RTCC)",sub:["Tap-changer position / indication check","Auto-manual mode operation","Control wiring and relay inspection","Communication / SCADA signal check","Panel cleaning"]},
   {name:"4 Pole",vertical:"4 Pole",sub:["Structure and foundation inspection","Insulator / jumper inspection","Earthing connection check","Hardware tightening","Hotspot / corona inspection"]},
   {name:"VCB - GSS side",vertical:"VCB - GSS side",sub:["Breaker mechanical operation","Contact / terminal inspection","Relay & trip-circuit test","Spring charging mechanism","Interlock / indication check"]},
+  {name:"4 Pole - GSS side",vertical:"4 Pole - GSS side",sub:["Structure and foundation inspection","Insulator / jumper inspection","Earthing connection check","Hardware tightening","Hotspot / corona inspection"]},
+  {name:"Transmission line - GSS side",vertical:"Transmission line - GSS side",sub:["Line patrol","Conductor / sag inspection","Insulator / jumper inspection","Tower / pole / foundation inspection","Vegetation & ROW clearance"]},
   {name:"BIKE",vertical:"BIKE",sub:[
    "Bike Not Starting",
    "Accident / Body Damage",
@@ -1384,11 +1386,12 @@ const TASK_TYPES=[
  {name:"Other",vertical:"Other",sub:["Define task-specific checklist","Capture measurements / readings","Attach photo / video evidence","Record remarks / anomalies","Escalate problem to Issue if required"]}
 ];
 /* Maintenance Scope Library grouping. Organisation/filtering only: Add PM task and Add PM template still list EVERY type.
-   Any type not listed here (including types added later) falls into Miscellaneous. */
+   Any type not listed here (including types added later) falls into Miscellaneous.
+   Plant Side / GSS Side follow the order of the 30-day PM cycle (app/pmplan/cycle.py). */
 const SCOPE_DEFAULTS={
- pv:["Inverter","Piling and Foundation","WMS"],
- plant:["ACCB Panel","VCB Panel","MCCB","Transformer","Aux. Transformer","OLTC(RTCC)","RMS","Earthing","ABT meters","LA","CCTV"],
- gss:["VCB - GSS side","4 Pole","Transmission line"],
+ pv:["Piling and Foundation","WMS"],
+ plant:["Inverter","ACCB Panel","MCCB","VCB Panel","Transformer","Aux. Transformer","4 Pole","Earthing","Transmission line"],
+ gss:["VCB - GSS side","4 Pole - GSS side","Transmission line - GSS side"],
  hidden:["Module","String","Modules cleaning","MMS","Switchyard - Plant side","Switchyard - GSS side","VCB-Kiosk"]};
 const SCOPE_SECTIONS=[
  {key:"pv",title:"PV Area / Photovoltaic Area",types:SCOPE_DEFAULTS.pv.slice()},
@@ -1419,7 +1422,7 @@ function buildTables(plant,ninv,tpi,team){
 }
 function seedWashing(){const rows=[];Object.keys(WASH_TEAM).forEach(p=>{rows.push(...buildTables(p,6,4,WASH_TEAM[p]))});return rows}
 const EXC_REASONS=["Rain","Water shortage","Equipment breakdown","Access restriction","Safety stand-down","Other"];
-const VERTICALS=["Inverter", "Module", "Transformer", "Aux. Transformer", "VCB Panel", "VCB-Kiosk", "ACCB Panel", "Switchyard - Plant side", "Switchyard - GSS side", "Transmission line", "RMS", "WMS", "CCTV", "Boundary wall", "String", "Earthing", "LA", "Water pipe line", "Vegetation", "Modules cleaning", "ABT meters", "Street Light", "MMS", "Other", "MCCB", "OLTC(RTCC)", "4 Pole", "VCB - GSS side"];
+const VERTICALS=["Inverter", "Module", "Transformer", "Aux. Transformer", "VCB Panel", "VCB-Kiosk", "ACCB Panel", "Switchyard - Plant side", "Switchyard - GSS side", "Transmission line", "RMS", "WMS", "CCTV", "Boundary wall", "String", "Earthing", "LA", "Water pipe line", "Vegetation", "Modules cleaning", "ABT meters", "Street Light", "MMS", "Other", "MCCB", "OLTC(RTCC)", "4 Pole", "VCB - GSS side", "4 Pole - GSS side", "Transmission line - GSS side"];
 /* old category names (saved data from earlier versions) -> new vertical list */
 const VERT_MIGRATE={"Module/String":"Module","Combiner Box":"String","SCADA/Monitoring":"RMS","Civil/Structural":"Boundary wall","Security":"CCTV","Grid/Evacuation":"Transmission line","Weather Damage":"Other"};
 const SUBCATS={"Inverter": ["Fault code", "Communication loss", "Fan failure", "IGBT failure", "FirmWare"], "Module": ["Hotspot", "Glass breakage", "Delamination / discolouration", "Connector burn"], "Transformer": ["Oil leak", "DGA abnormality", "Bushing", "Tap changer"], "Aux. Transformer": ["Oil leak", "Tripping", "Bushing"], "VCB Panel": ["Breaker trip", "Relay fault", "Spring charging failure", "Terminal heating"], "VCB-Kiosk": ["Breaker trip", "Relay fault", "Door / enclosure damage"], "ACCB Panel": ["Breaker trip", "Terminal heating", "Metering fault"], "Switchyard - Plant side": ["Isolator fault", "CT / PT issue", "Insulator damage", "Earth switch"], "Switchyard - GSS side": ["Isolator fault", "CT / PT issue", "Insulator damage", "Breaker"], "Transmission line": ["Feeder trip", "Conductor damage", "Insulator damage", "Tower / pole damage"], "RMS": ["Communication loss", "Data gap", "Sensor failure"], "WMS": ["Sensor failure", "Communication loss", "Data gap", "Calibration"], "CCTV": ["Camera outage", "DVR / NVR failure", "Recording gap"], "Boundary wall": ["Crack / settlement", "Collapse", "Fence breach"], "String": ["Fuse failure", "String underperformance", "Terminal loose", "Cable damage"], "Earthing": ["High resistance", "Pit damage", "Loose connection"], "LA": ["Lightning strike damage", "Loose connection", "Counter fault"], "Water pipe line": ["Leakage", "Blockage", "Pump failure"], "Vegetation": ["Overgrowth", "Shading on modules", "Fire risk"], "Modules cleaning": ["Missed cleaning", "Water shortage", "Equipment failure"], "ABT meters": ["Communication loss", "Meter fault", "Data mismatch"], "Street Light": ["Fixture failure", "Cable fault", "Timer / control fault"], "MMS": ["Structure corrosion", "Loose bolts", "Foundation damage", "Tracker fault"], "Other": ["Other"]};

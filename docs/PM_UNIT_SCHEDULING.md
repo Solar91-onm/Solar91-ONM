@@ -23,3 +23,27 @@
 - **Equipment coverage** shows one row per equipment type with a per-plant dropdown. `/api/pm-plan/unit-config` register rows now include `critical` (units with High criticality) and `faulty` (status `fault`).
 - **Maintenance by day** lists, for a chosen day, every plant and the equipment on that day's plan (a job is on every day from its start date to its due date).
 - **Morning plan notification** (`pm_daily_plan`, on by default, in-app; email optional under PM alerts): from 06:00 plant time the daily job sends each person one message — Assignees their own jobs, Site Engineers their plants, the O&M Head the portfolio (respecting "assignee only" team routing). Clicking it opens the day planner on that date. Deduplicated per person per day.
+
+## 30-day PM cycle (October 2026)
+Defined once in `app/pmplan/cycle.py` and served read-only at `GET /api/pm-plan/cycle` (O&M Head, Assignee). A cycle is 30 days, the same as the Monthly recurrence, so each unit repeats on the same cycle day next month.
+
+| Area | Equipment | Cycle days |
+| --- | --- | --- |
+| Plant side | Inverter (all units, spread over the week) | 1–7 |
+| Plant side | ACCB Panel (ACCB-1, ACCB-2) + MCCB, together | 8–9 |
+| Plant side | VCB Panel | 10–11 |
+| Plant side | Transformer (IDT) | 12–13 |
+| Plant side | Aux. Transformer | 14–15 |
+| Plant side | 4 Pole | 16–17 |
+| Plant side | Earthing (earth pit) | 18–19 |
+| Plant side | Miscellaneous — every type not named here (RMS, CCTV, LA, ABT meters, OLTC(RTCC), WMS…) | 20–22 |
+| Plant side | Transmission line | 23–24 |
+| GSS side | VCB - GSS side | 25–26 |
+| GSS side | 4 Pole - GSS side | 27–28 |
+| GSS side | Transmission line - GSS side | 29–30 |
+
+The two Transmission line phases share the days left after the fixed phases.
+- **Add PM task / Assign to plants**: *Follow the 30-day PM cycle* is ticked by default (`follow_cycle` on `/api/pm-plan/tasks` and template apply). The date becomes the cycle start (day 1); the job starts on its equipment's first cycle day and its units spread over that phase (*Finish within* still overrides). A single unit is due on the last day of its phase. Unticked = previous behaviour.
+- **Upload (Excel/CSV)**: the upload dialog asks for the cycle start (`follow_cycle=true&cycle_start=YYYY-MM-DD` on `/api/pm-plan/import`). A row's own Start date is that row's cycle start; blank rows use the dialog date. The dry run returns `schedule` (equipment, area, dates, task count), shown in the confirmation.
+- `4 Pole - GSS side` and `Transmission line - GSS side` are new equipment types (like `VCB - GSS side`) so 4 Pole and Transmission line can be planned on both sides. Assignees need these types in their equipment assignment to work on them.
+- Scope library defaults follow the cycle: Plant Side = Inverter, ACCB Panel, MCCB, VCB Panel, Transformer, Aux. Transformer, 4 Pole, Earthing, Transmission line; GSS Side = the three GSS-side types; PV Area = Piling and Foundation, WMS; everything else is Miscellaneous. A scope the O&M Head already saved is kept; use *Restore standard lists* to adopt the new defaults.
