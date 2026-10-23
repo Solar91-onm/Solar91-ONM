@@ -198,13 +198,18 @@ def test_command_center_hub_shows_the_operations_donut_cards():
     hub = (ROOT / "frontend/static/js/20-modern-ui-2026.js").read_text(encoding="utf-8")
     dash = (ROOT / "frontend/static/js/08-actions-exports-and-submission.js").read_text(encoding="utf-8")
     assert "function ccOpsOverviewPanel(" in dash
-    assert "h+=ccOpsOverviewPanel(plants,open,health,f)" in dash
-    assert "ccOpsOverviewPanel(plants,open,hc,blankIssF())" in hub
-    # every slice of the three donut cards opens a filtered register, plant health included
-    assert 'act:canOpenPlants?"ccHealthQueue":""' in dash
-    assert 'if(act==="ccHealthQueue"){e.preventDefault();openDashboardHealthQueue(id);return}' in dash
+    assert "h+=ccOpsOverviewPanel(plants,open,f)" in dash
+    assert "ccOpsOverviewPanel(plants,open,blankIssF())" in hub
+    # the third card is panel washing (plant health was dropped); every slice opens a filtered register
+    assert '"Panel washing"' in dash and '"Plant health"' not in dash
+    assert 'act:canOpenWash?"ccWashQueue":""' in dash
+    assert 'if(act==="ccWashQueue"){e.preventDefault();openDashboardWashQueue(id);return}' in dash
     data = (ROOT / "frontend/static/js/00-auth-data-and-imports.js").read_text(encoding="utf-8")
-    assert "function openDashboardHealthQueue(health)" in data and 'goView("plants")' in data
+    assert "function openDashboardWashQueue(show)" in data
+    washing = (ROOT / "frontend/static/js/26-washing-cycles.js").read_text(encoding="utf-8")
+    assert 'f.show==="ontrack"' in washing and 'f.show==="slipping"' in washing
+    # the old work lanes and the separate "Plant washing" panel are no longer on the Command Center
+    assert "cx-lanes" not in hub and "function ccPanel()" not in washing
 
 
 def test_washing_forms_and_views_ask_only_for_remarks_not_a_reason():

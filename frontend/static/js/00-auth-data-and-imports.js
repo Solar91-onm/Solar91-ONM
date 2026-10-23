@@ -1595,14 +1595,13 @@ function openDashboardPmQueue(queue){
  goTab("scheduled");
  scrollToDashboardRegister(".pml-register");
 }
-/* Plant health slice → the Plants register filtered to that health (Healthy / Warning / Critical). */
-function openDashboardHealthQueue(health){
- if(!["Healthy","Warning","Critical"].includes(health))return;
- S.plF=Object.assign(S.plF||{},{health:health});
- S.tablePages.plants=1;
- persist();
- goView("plants");
- scrollToDashboardRegister("#plant-register-anchor");
+/* Panel washing slice → the washing register showing just those plants (on track / below compliance / behind deadline). */
+function openDashboardWashQueue(show){
+ if(!["ontrack","slipping","late"].includes(show))return;
+ const ui=S._washUi=S._washUi||{q:"",bucket:"all",show:"all",assignee:"all",region:"all",sort:"late",page:1,pageSize:12,selected:[]};
+ Object.assign(ui,{q:"",plant:"all",state:"all",cyc:"all",assignee:"all",region:"all",show:show,page:1});
+ if(typeof washOpenRegister==="function")washOpenRegister();else goScheduledOM("washing");
+ scrollToDashboardRegister("#wc-results, #wc-register");
 }
 function setDashboardPlantFilter(value){
  const plant=value==="all"?"all":ccPlantSearchScope().find(p=>p.name===value)?.name;

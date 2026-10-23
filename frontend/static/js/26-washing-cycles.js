@@ -21,7 +21,6 @@
  const lastAct=p=>[p.last_report_date].concat((p.cycles||[]).map(c=>c.completed_on)).filter(Boolean).sort().pop()||"";
  const ago=(iso,ref)=>{if(!iso)return "No report yet";const n=Math.round((new Date((ref||iso)+"T00:00:00")-new Date(iso+"T00:00:00"))/864e5);return n<=0?"Today":n===1?"Yesterday":n+" days ago"};
  const chip=(t,tone)=>'<span class="wc-chip wc-'+tone+'">'+h(t)+'</span>';
- const BUCKETS=[["on_track","On track","No cycle past its deadline","ok"],["1d","1+ day late","1–2 days past deadline","warn"],["3d","3+ days late","3–6 days past deadline","hot"],["7d","7+ days late","7 or more days","crit"]];
  const TONE={on_track:"ok","1d":"warn","3d":"hot","7d":"crit"};
  const DAYTONE={"Confirmed":"ok","Awaiting review":"info","Exception":"warn","Rejected":"crit","No report":"crit","Not reported yet":"mute"};
  const onWashing=()=>S.view==="dashboard"||(S.view==="om-module"&&S.omTab==="washing");
@@ -140,7 +139,7 @@
   const stOk=p=>!f.state||f.state==="all"||(f.state==="late"?tileState(p).indexOf("late-")===0:tileState(p)===f.state);
   const cycOk=p=>{if(!f.cyc||f.cyc==="all")return true;const parts=String(f.cyc).split(":");return (p.cycles||[]).some(c=>String(c.cycle_no)===parts[0]&&(parts[1]==="Not started"?c.state!=="Completed"&&c.state!=="In progress":c.state===parts[1]))};
   const configured=(data().plants||[]).filter(p=>hit(p)&&stOk(p)&&cycOk(p)&&(f.bucket==="all"||p.overdue_bucket===f.bucket)&&
-   (f.show==="all"||(f.show==="review"&&p.pending_tables_cleaned>0)||(f.show==="mine"&&p.assignee_user_id===S._currentUserId)||(f.show==="done"&&p.cycles_this_month>=p.monthly_target)||(f.show==="attention"&&head&&p.active&&(p.overdue_bucket!=="on_track"||p.weekly_compliance_percent<p.compliance_threshold_percent))||(f.show==="late"&&p.overdue_bucket!=="on_track")||(f.show==="below"&&p.active&&p.weekly_compliance_percent<p.compliance_threshold_percent)||(f.show==="notreported"&&p.today_report==null)||(f.show==="mine"&&p.assignee_user_id===S._currentUserId))&&
+   (f.show==="all"||(f.show==="review"&&p.pending_tables_cleaned>0)||(f.show==="mine"&&p.assignee_user_id===S._currentUserId)||(f.show==="done"&&p.cycles_this_month>=p.monthly_target)||(f.show==="attention"&&head&&p.active&&(p.overdue_bucket!=="on_track"||p.weekly_compliance_percent<p.compliance_threshold_percent))||(f.show==="late"&&p.overdue_bucket!=="on_track")||(f.show==="below"&&p.active&&p.weekly_compliance_percent<p.compliance_threshold_percent)||(f.show==="ontrack"&&p.active&&p.overdue_bucket==="on_track"&&p.weekly_compliance_percent>=p.compliance_threshold_percent)||(f.show==="slipping"&&p.active&&p.overdue_bucket==="on_track"&&p.weekly_compliance_percent<p.compliance_threshold_percent)||(f.show==="notreported"&&p.today_report==null)||(f.show==="mine"&&p.assignee_user_id===S._currentUserId))&&
    (f.assignee==="all"||(f.assignee==="unassigned"?!p.assignee_user_id:f.assignee===p.assignee_user_id))&&
    (f.region==="all"||f.region===(p.district||p.location||"")));
   const un=(data().unconfigured||[]).filter(hit).map(p=>Object.assign({not_setup:true},p)).filter(p=>(!f.state||f.state==="all"||f.state==="unset")&&(!f.cyc||f.cyc==="all")&&(f.show==="all"||f.show==="notsetup")&&f.bucket==="all"&&(f.assignee==="all"||f.assignee==="unassigned")&&f.region==="all");
@@ -244,10 +243,6 @@
   return '<div class="wc-table-wrap"><table class="wc-table wc-compact" style="min-width:640px"><thead><tr><th>Rank</th><th>Assignee</th><th>Plants</th><th>Cycles this month</th><th>Weekly compliance</th><th>Avg delay</th><th>Tables cleaned (7 d)</th><th>Exceptions</th></tr></thead><tbody>'+list.map((r,i)=>'<tr><td><b>#'+(i+1)+'</b></td><td><b>'+h(r.name)+'</b></td><td>'+r.plants+'</td><td>'+r.done+' / '+r.target+'</td><td>'+chip(r.wk+"%",r.wk>=r.thr?"ok":r.wk>=r.thr-15?"warn":"crit")+'</td><td>'+r.delay+' d</td><td>'+r.t7+'</td><td>'+r.ex+'</td></tr>').join("")+'</tbody></table></div>';
  }
 
- function matrixHtml(active,clickable){
-  const m=data().overdue_matrix||{};
-  return '<div class="wc-matrix">'+BUCKETS.map(b=>'<button class="wc-cell t-'+b[3]+(active===b[0]?" on":"")+'" '+(clickable?'onclick="washFilter(\'bucket\',\''+(active===b[0]?"all":b[0])+'\')"':'onclick="washOpenRegister(\''+b[0]+'\')"')+'><b>'+(m[b[0]]||0)+'</b><span>'+b[1]+'</span><small>'+b[2]+'</small></button>').join("")+'</div>';
- }
  window.washOpenRegister=function(bucket){const ui=S._washUi=S._washUi||{q:"",bucket:"all",show:"all",assignee:"all",region:"all",sort:"late",page:1,pageSize:12,selected:[]};ui.bucket=bucket||"all";ui.page=1;S.washF=Object.assign({},ui);S.view="om-module";S.omTab="washing";render()};
 
  function feedHtml(){
@@ -382,7 +377,7 @@
  function washFocusBar(f){
   const G=window.s91Glance;if(!G)return "";
   const STATE={ok:"On track",review:"Awaiting confirmation","late-1d":"1–2 days late","late-3d":"3–6 days late","late-7d":"7+ days late",late:"Behind deadline",done:"Month done",unset:"Not set up"};
-  const SHOW={attention:"Needs attention",review:"Awaiting review",notreported:"Not reported today",notsetup:"Not set up",mine:"Mine",late:"Late",below:"Below compliance target",done:"Month done"};
+  const SHOW={attention:"Needs attention",review:"Awaiting review",notreported:"Not reported today",notsetup:"Not set up",mine:"Mine",late:"Late",below:"Below compliance target",done:"Month done",ontrack:"On track (deadline and compliance)",slipping:"On time, below compliance"};
   const BUCKET={"1d":"1–2 days late","3d":"3–6 days late","7d":"7+ days late",on_track:"On track"};
   const chips=[];
   if(f.state&&f.state!=="all")chips.push({label:"Status: "+(STATE[f.state]||f.state),color:WX_STATE_COLOR[f.state]||"#0F5C2E",attr:'onclick="washFilter(\'state\',\'all\')"'});
@@ -872,17 +867,6 @@
   if(decision==="Confirm"&&rep&&rep.photos_required&&(!rep.has_before||!rep.has_after)){toast("Upload at least one before and one after photo before confirming this report.");return}
   try{await apiFetch("/api/scheduled/washing/daily-reports/"+encodeURIComponent(id)+"/review",{method:"POST",body:{decision,remarks:note}});refreshPlantMonths(S.washDetailsPlant);await loadOverview();render();toast(decision==="Confirm"?"Cleaning confirmed.":"Report rejected.")}catch(e){toast(detailOf(e))}
  };
-
- /* ---------- Command Center panel ---------- */
- function ccPanel(){
-  if(!isTeam())return "";
-  if(!S._washCycles){washCyclesEnsureLoaded();return ""}
-  const d=data();if(!(d.plants||[]).length&&!(d.unconfigured||[]).length)return "";
-  const pf=d.portfolio||{},late=(d.plants||[]).filter(p=>p.overdue_bucket!=="on_track").sort((a,b)=>b.overdue_days-a.overdue_days).slice(0,5);
-  return '<div class="wc-card wc-cc"><div class="row between wrap"><div><h2>Plant washing</h2><p class="sub">'+(pf.cycles_completed_month||0)+' of '+(pf.cycles_target_month||0)+' monthly cycles complete · weekly compliance '+(pf.weekly_compliance_percent==null?"—":pf.weekly_compliance_percent+"%")+' · '+plural(pf.pending_reviews||0,"report")+' awaiting confirmation</p></div><button class="btn o sm" onclick="washOpenRegister()">Open washing register</button></div>'+matrixHtml(null,false)+
-   (late.length?'<div class="wc-cc-list">'+late.map(p=>'<div class="wc-cc-row" onclick="S.view=\'om-module\';S.omTab=\'washing\';openWashingPlantDetails(\''+h(p.plant_id)+'\')"><span><b>'+h(p.plant)+'</b> · Cycle '+p.overdue_cycle+' due '+fmt(p.next_due)+'</span>'+chip(p.overdue_days+"d late",TONE[p.overdue_bucket])+'</div>').join("")+'</div>':'<div class="wc-empty" style="padding:8px">No plant is behind its cycle deadline.</div>')+'</div>';
- }
- if(typeof renderDashboard==="function"){const base=renderDashboard;renderDashboard=function(){return base.apply(this,arguments)+ccPanel()}}
 
  window.saveWashSetup=function(){toast("Use “Set up a plant” on the Washing page.")};
  const oldRenderModal=renderModal;

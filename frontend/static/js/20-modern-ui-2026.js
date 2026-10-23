@@ -191,7 +191,7 @@ function m26Hub(){
  const ws=m26WashSummary();
  const washRedN=ws.cycle?ws.late.length:(typeof washLinked==="function"?washLinked():wash).filter(t=>wColor(t)==="red"&&!washedToday(t)&&!excToday(t)).length;
  const critUn=crit.filter(t=>!t.assignee).length;
- const sevN=k=>open.filter(t=>normalizeIssueSeverity(t.severity)===k).length,med=sevN("Medium"),solved=issues.filter(issueSolved).length;
+ const sevN=k=>open.filter(t=>normalizeIssueSeverity(t.severity)===k).length,med=sevN("Medium");
  const mwTxt=v=>v>0?(v>=10?Math.round(v):v.toFixed(2))+" MW":"—";
  const nav=on=>on?' onclick="'+on+'" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();'+on.replace(/"/g,"&quot;")+'}" role="button" tabindex="0"':'';
  /* segmented bar: parts [{v,c,l}] */
@@ -229,8 +229,8 @@ function m26Hub(){
   +kpi("k-wash","Washing on track",'<b>'+(ws.cycle?(ws.pct==null?'—':ws.pct+'%'):(wPct==null?'—':wPct+'%'))+'</b>',ws.cycle?(ws.late.length?ws.late.length+' behind deadline':'all plants on track')+' · '+ws.done+' month done':wRed+' tables overdue','<div class="cx-bar"><i style="width:'+((ws.cycle?ws.pct:wPct)||0)+'%;background:#38BDF8"></i></div>',"m26Nav('wash')")
   +'</div></section>';
 
- /* ---- operations overview donut cards: issue, maintenance and plant-health breakdowns with drill-downs ---- */
- if(typeof ccOpsOverviewPanel==="function")h+=ccOpsOverviewPanel(plants,open,hc,blankIssF());
+ /* ---- operations overview donut cards: issue, maintenance and panel-washing breakdowns with drill-downs ---- */
+ if(typeof ccOpsOverviewPanel==="function")h+=ccOpsOverviewPanel(plants,open,blankIssF());
 
  /* ---- needs you now + plants needing attention ---- */
  const items=[],f=S.m26Need||"all";
@@ -262,15 +262,6 @@ function m26Hub(){
   h+='<section class="cx-card cx-plants"><header><div><h2>Plants needing attention</h2><p>Worst first · click a plant</p></div><button type="button" class="cx-link" onclick="m26Nav(\'plants\')">All plants →</button></header>'
    +(rows.length?'<div class="cx-plist">'+rows.map(r=>{const tone=r.c||r.b?"bad":"warn";return '<div class="cx-prow '+tone+'"'+nav("m26Nav('plant',"+m26Js(r.p.id).replace(/&quot;/g,"'")+")")+'><div class="nm"><b>'+esc(r.p.name)+'</b><small>'+esc(r.p.id)+' · '+r.n+' open</small></div><div class="tags">'+tag(r.c,"critical","bad")+tag(r.b,"overdue","bad")+tag(r.u,"no owner","warn")+tag(r.pm,"PM late","warn")+(r.wp!=null?'<em class="'+(r.wp>=WASH_TH?"ok":"bad")+'">wash '+r.wp+'%</em>':'')+'</div><div class="sc"><i style="width:'+Math.round(r.score/top*100)+'%"></i></div></div>'}).join("")+'</div>'
     :'<div class="cx-clear">✓ All plants are running clean.</div>')+'</section></div>';}
-
- /* ---- work lanes: issues · maintenance · washing ---- */
- const lane=(cls,ico,title,big,bigSub,parts,on,cta)=>'<section class="cx-card cx-lane '+cls+'"><header><span class="cx-lane-ic">'+ico+'</span><h2>'+title+'</h2><button type="button" class="cx-link" onclick="'+on+'">'+cta+' →</button></header><div class="cx-lane-big"><b>'+big+'</b><span>'+bigSub+'</span></div>'+seg(parts)+'<ul class="cx-legend">'+parts.map(p=>'<li><i style="background:'+p.c+'"></i>'+esc(p.l)+'<b>'+p.v+'</b></li>').join("")+'</ul></section>';
- h+='<div class="cx-lanes">'
-  +lane("l-issues","⚠","Site issues",open.length,"open",[{l:"Critical",v:crit.length,c:"#DC4C3E"},{l:"Medium",v:med,c:"#3B82F6"},{l:"Solved",v:solved,c:"#16A34A"}],"m26Nav('issues')","Open register")
-  +lane("l-pm","🛠","Maintenance",pmPct==null?"—":pmPct+"%","on time",[{l:"Done",v:tDone,c:"#16A34A"},{l:"Overdue",v:tOd.length,c:"#DC4C3E"},{l:"Upcoming",v:Math.max(0,tasks.length-tDone-tOd.length),c:"#CBD5D0"}],"m26Nav('pm')","Open planner")
-  +(ws.cycle?lane("l-wash","💧","Panel washing",ws.pct==null?"—":ws.pct+"%","plants on track",[{l:"On track",v:Math.max(0,ws.ok-ws.done),c:"#16A34A"},{l:"Month done",v:ws.done,c:"#0E9F6E"},{l:"Behind deadline",v:ws.late.length,c:"#DC4C3E"}],"m26Nav('wash')","Open washing")
-   :lane("l-wash","💧","Panel washing",wPct==null?"—":wPct+"%","tables compliant",[{l:"Compliant",v:wOk,c:"#16A34A"},{l:"Overdue",v:wRed,c:"#DC4C3E"},{l:"Due soon",v:Math.max(0,wash.length-wOk-wRed),c:"#F5C76B"}],"m26Nav('wash')","Open washing"))
-  +'</div>';
 
  /* ---- team workload + generation ---- */
  const load={};open.forEach(t=>{const k=t.assignee||"Unassigned";load[k]=(load[k]||0)+1});

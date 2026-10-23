@@ -933,7 +933,7 @@ function renderDashboard(){
   healthSlices.map(s=>'<button class="pill sev-pill'+(f.health===s.id?" active":"")+'" data-act="donutHealth" data-id="'+s.id+'">'+s.label+' '+s.n+'</button>').join("")+
   '</div>'+
   (active?'<button class="btn o sm" onclick="S.issF=blankIssF();S.plF=Object.assign(S.plF||{},{health:\'all\'});S.dashPlant=\'all\';persist();render()">Clear filters</button>':'')+'</div></div>';
- h+=ccOpsOverviewPanel(plants,open,health,f);
+ h+=ccOpsOverviewPanel(plants,open,f);
  h+='<div class="panel no-stick" style="padding:0"><div style="padding:14px 16px 0"><div class="row between wrap"><div><h2 style="font-size:15px;font-weight:700">Needs attention</h2><p style="font-size:12px;color:var(--muted-foreground);margin:3px 0 10px">Critical and overdue issues first</p></div>'+(canOpenIssues?'<button class="btn g sm" data-act="go" data-id="issues">All issues</button>':"")+'</div></div>';
  if(!attnRows.length)h+=emptyState("No critical issues","Nothing overdue or unassigned in the current filter.");
  else{h+='<div style="overflow-x:auto"><table class="dense"><thead><tr><th>Plant</th><th>Issue</th><th>Equipment / maker</th><th>Priority</th><th>Age</th><th>Assignee</th><th>Status</th></tr></thead><tbody>'+
@@ -944,7 +944,7 @@ function renderDashboard(){
 
 /* Operations overview donut cards (site issues · preventive maintenance · portfolio health). Shared by the
    classic dashboard and the 2026 Command Center hub, so both show the same figures and drill-downs. */
-function ccOpsOverviewPanel(plants,open,health,f){
+function ccOpsOverviewPanel(plants,open,f){
  f=f||blankIssF();
  const role=S._roleLabel||S.currentRole||"";
  const canOpenIssues=["O&M Head","Assignee","Site Engineer"].includes(role);
@@ -966,31 +966,39 @@ function ccOpsOverviewPanel(plants,open,health,f){
  const issueOverdueOther=overviewOverdue.filter(t=>t.severity!=="Critical").length;
  const issueOther=Math.max(0,overviewIssues.length-issueCritical-issueOverdueOther);
  const pmLater=Math.max(0,pmTasks.length-pmOverdue.length-pmDueSoon.length);
- const canOpenPlants=["O&M Head","Assignee"].includes(role);
+ /* panel washing: active plants by cycle deadline and weekly compliance score (the API sends these O&M figures to managers only) */
+ if(typeof washCyclesEnsureLoaded==="function")washCyclesEnsureLoaded();
+ const wd=S._washCycles,canOpenWash=["O&M Head","Assignee"].includes(role),thrOf=p=>p.compliance_threshold_percent||WASH_TH;
+ const washRows=((wd&&wd.plants)||[]).filter(p=>p.active!==false&&p.overdue_bucket&&typeof p.weekly_compliance_percent==="number"&&(!f.plant||f.plant==="all"||p.plant===f.plant));
+ const washLate=washRows.filter(p=>p.overdue_bucket!=="on_track").length;
+ const washOk=washRows.filter(p=>p.overdue_bucket==="on_track"&&p.weekly_compliance_percent>=thrOf(p)).length;
+ const washScore=!washRows.length?null:f.plant&&f.plant!=="all"?Math.round(washRows.reduce((a,p)=>a+p.weekly_compliance_percent,0)/washRows.length):(wd.portfolio||{}).weekly_compliance_percent;
+ const washTarget=washRows.length?Math.round(washRows.reduce((a,p)=>a+thrOf(p),0)/washRows.length):WASH_TH;
+ const washSegments=[{label:"On track",id:"ontrack",act:canOpenWash?"ccWashQueue":"",value:washOk,color:"#22A06B"},{label:"Below compliance",id:"slipping",act:canOpenWash?"ccWashQueue":"",value:washRows.length-washOk-washLate,color:"#F59E0B"},{label:"Behind deadline",id:"late",act:canOpenWash?"ccWashQueue":"",value:washLate,color:"#E5484D"}];
  const issueSegments=[{label:"Critical",id:"critical",act:canOpenIssues?"ccIssueQueue":"",value:issueCritical,color:"#E5484D"},{label:"Overdue",id:"overdue",act:canOpenIssues?"ccIssueQueue":"",value:issueOverdueOther,color:"#F59E0B"},{label:"Other open",id:"other",act:canOpenIssues?"ccIssueQueue":"",value:issueOther,color:"#3B82F6"}];
  const pmSegments=[{label:"Overdue",id:"overdue",act:canOpenPm?"ccPmQueue":"",value:pmOverdue.length,color:"#E5484D"},{label:"Due in 7 days",id:"due7",act:canOpenPm?"ccPmQueue":"",value:pmDueSoon.length,color:"#F59E0B"},{label:"Upcoming",id:"upcoming",act:canOpenPm?"ccPmQueue":"",value:pmLater,color:"#3B82F6"}];
- const healthSegments=[{label:"Healthy",id:"Healthy",act:canOpenPlants?"ccHealthQueue":"",value:health.Healthy,color:"#22A06B"},{label:"Warning",id:"Warning",act:canOpenPlants?"ccHealthQueue":"",value:health.Warning,color:"#F59E0B"},{label:"Critical",id:"Critical",act:canOpenPlants?"ccHealthQueue":"",value:health.Critical,color:"#E5484D"}];
- const healthTotal=healthSegments.reduce((sum,segment)=>sum+segment.value,0);
- /* one card: ring (each slice and each legend row opens its filtered register), legend with share bars, footer stat */
- const card=(cls,ico,eyebrow,title,total,unit,segments,cta,foot)=>{
+ /* one card: ring (each slice and each legend row opens its filtered register), legend with share bars, footer stat;
+    `center` replaces the total in the middle of the ring (the washing card shows its compliance score there) */
+ const card=(cls,ico,eyebrow,title,total,unit,segments,cta,foot,center)=>{
   const legend=segments.map(s=>{
    const pct=total?Math.round(100*s.value/total):0,inner='<i></i><span>'+esc(s.label)+'</span><b>'+s.value+'</b><em>'+pct+'%</em><u><s style="width:'+pct+'%"></s></u>';
    return s.act?'<button type="button" class="ccx-row'+(s.value?'':' zero')+'" style="--c:'+s.color+'" data-act="'+s.act+'" data-id="'+esc(s.id)+'" title="Open '+esc(s.label.toLowerCase())+' in the register">'+inner+'</button>':'<div class="ccx-row'+(s.value?'':' zero')+'" style="--c:'+s.color+'">'+inner+'</div>';
   }).join("");
   return '<section class="ccx-card '+cls+'"><header><span class="ccx-ic" aria-hidden="true">'+ico+'</span><div><small>'+eyebrow+'</small><h3>'+title+'</h3></div>'+(cta?'<button type="button" class="ccx-open" onclick="'+cta+'">Open <span aria-hidden="true">→</span></button>':'')+'</header>'+
-   '<div class="ccx-body">'+ccxRing(total,segments,unit)+'<div class="ccx-legend">'+legend+'</div></div>'+
+   '<div class="ccx-body">'+ccxRing(total,segments,unit,center)+'<div class="ccx-legend">'+legend+'</div></div>'+
    '<footer><span>'+foot[0]+'</span><b class="'+(foot[1]?foot[2]:'ok')+'">'+foot[1]+'</b></footer></section>';
  };
  const scopeLabel=f.plant&&f.plant!=="all"?esc(f.plant):plants.length+" plant"+(plants.length===1?"":"s");
  h+='<section class="ccx" aria-label="Operations overview"><div class="ccx-head"><div><h2>Operations overview</h2><p>Live queues across '+scopeLabel+' · click a slice or a row to open that list</p></div></div><div class="ccx-grid">'+
   card("k-issues","⚠","Unplanned","Site issues",overviewIssues.length,"open",issueSegments,canOpenIssues?"goTab('issues')":"",["Overdue issues",overviewOverdue.length,"bad"])+
   card("k-pm","🛠","Planned","Preventive maintenance",pmTasks.length,"active",pmSegments,"goScheduledOM('maintenance')",["Washing due",pmWashDue.length,"warn"])+
-  card("k-health","☀","Portfolio","Plant health",healthTotal,"plants",healthSegments,canOpenPlants?"goView('plants')":"",["Plants needing attention",health.Warning+health.Critical,"bad"])+
+  card("k-wash","💧","Planned","Panel washing",washRows.length,"compliance",washSegments,canOpenWash?"washOpenRegister()":"",
+   ["Weekly compliance target",washTarget+"%",""],!wd?"…":washScore==null?"—":washScore+"%")+
   '</div></section>';
  return h;
 }
 /* Ring for an overview card: rounded segments with small gaps on a soft track; an empty queue shows the track only. */
-function ccxRing(total,segments,unit){
+function ccxRing(total,segments,unit,center){
  const r=44,C=2*Math.PI*r,visible=total?segments.filter(s=>s.value>0):[],gap=visible.length>1?13:0;
  let start=0;
  const arcs=visible.map(s=>{
@@ -998,7 +1006,7 @@ function ccxRing(total,segments,unit){
   const act=s.act?' class="ccx-arc" role="button" tabindex="0" data-act="'+s.act+'" data-id="'+esc(s.id)+'" aria-label="'+esc(s.label+": "+s.value+" — open the list")+'"':' class="ccx-arc"';
   return '<circle cx="56" cy="56" r="'+r+'" stroke="'+s.color+'" stroke-dasharray="'+len.toFixed(2)+' '+(C-len).toFixed(2)+'" stroke-dashoffset="'+(-off).toFixed(2)+'"'+(visible.length===1?' stroke-linecap="butt"':'')+act+'><title>'+esc(s.label+": "+s.value)+'</title></circle>';
  }).join("");
- return '<div class="ccx-ring"><svg viewBox="0 0 112 112" role="img" aria-label="'+esc(total+" "+unit)+'"><circle class="ccx-track" cx="56" cy="56" r="'+r+'"/><g transform="rotate(-90 56 56)">'+arcs+'</g></svg><div class="ccx-mid"><b>'+total+'</b><span>'+esc(unit)+'</span></div></div>';
+ return '<div class="ccx-ring"><svg viewBox="0 0 112 112" role="img" aria-label="'+esc((center!=null?center:total)+" "+unit)+'"><circle class="ccx-track" cx="56" cy="56" r="'+r+'"/><g transform="rotate(-90 56 56)">'+arcs+'</g></svg><div class="ccx-mid"><b>'+(center!=null?esc(center):total)+'</b><span'+(unit.length>7?' class="long"':'')+'>'+esc(unit)+'</span></div></div>';
 }
 
 
@@ -1615,7 +1623,7 @@ function bindUi(){
   if(act==="chart"){e.preventDefault();S.chartPick=id;goView("plants");toast("Opened plants from chart · "+id);return}
   if(act==="ccIssueQueue"){e.preventDefault();openDashboardIssueQueue(id);return}
   if(act==="ccPmQueue"){e.preventDefault();openDashboardPmQueue(id);return}
-  if(act==="ccHealthQueue"){e.preventDefault();openDashboardHealthQueue(id);return}
+  if(act==="ccWashQueue"){e.preventDefault();openDashboardWashQueue(id);return}
   if(act==="trendDay"){e.preventDefault();const stay=S.view==="dashboard"||(S.view==="om-module"&&S.omTab==="issues");const same=(S.issF||{}).from===id&&(S.issF||{}).to===id;if(stay){stayFilter(same?{from:"",to:""}:{from:id,to:id});toast(same?"Cleared date focus":"Focused "+id);return}drillIssues({from:id,to:id,chip:"all"});toast("Filtered issues for "+id);return}
   if(act==="kpi"){e.preventDefault();const stay=S.view==="dashboard";
    if(id==="plants"){goView("plants");return}
