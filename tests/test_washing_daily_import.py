@@ -8,7 +8,7 @@ from openpyxl import load_workbook
 from app.core.models import AuditLog, Notification, Plant, WashingDailyReport
 from app.core.timeutil import business_today
 from app.scheduled.schemas import WashingSheetEntry
-from app.scheduled.washing_daily_import import NOT_DONE_REASONS
+from app.scheduled.washing_daily_import import HEADERS, NOT_DONE_REASON
 from tests import conftest
 from tests.conftest import login_user
 from tests.test_washing_cycles import BASE, _plant, _setup_cycle_users
@@ -29,10 +29,9 @@ def _d(day):
     return day.strftime("%d-%m-%Y")
 
 
-def test_reasons_match_the_sheet_schema():
-    assert "Rain" in NOT_DONE_REASONS
-    for reason in NOT_DONE_REASONS:
-        WashingSheetEntry(report_date=business_today(), job_status="Not done", exception_reason=reason)
+def test_sheet_has_no_reason_column_and_its_zero_reason_is_valid():
+    assert "Not done reason" not in HEADERS and "Remarks" in HEADERS
+    WashingSheetEntry(report_date=business_today(), job_status="Not done", exception_reason=NOT_DONE_REASON)
 
 
 def test_head_upload_previews_then_saves_confirmed_days_and_completes_cycles(client, db):
@@ -40,11 +39,11 @@ def test_head_upload_previews_then_saves_confirmed_days_and_completes_cycles(cli
     head, _assignee = _setup_cycle_users(client, db, plant)
     conftest._CURRENT_USER = head
     d1, d2, d3, d4 = _days(4)
-    text = ("Site code,Date,Tables cleaned,Not done reason,Remarks\n"
-            f"cycle01,{_d(d1)},3,,\n"
-            f"CYCLE01,{d2.isoformat()},,rain,Heavy rain\n"
-            f"CYCLE01,{_d(d3)},1,,\n"
-            f"CYCLE01,{_d(d4)},,,\n")  # a template day left empty
+    text = ("Site code,Date,Tables cleaned,Remarks\n"
+            f"cycle01,{_d(d1)},3,\n"
+            f"CYCLE01,{d2.isoformat()},0,Heavy rain\n"   # 0 = no washing; the remark says why
+            f"CYCLE01,{_d(d3)},1,\n"
+            f"CYCLE01,{_d(d4)},,\n")  # a template day left empty
 
     preview = _upload(client, _csv(text), True)
     assert preview.status_code == 200, preview.text
@@ -61,7 +60,7 @@ def test_head_upload_previews_then_saves_confirmed_days_and_completes_cycles(cli
     reports = db.query(WashingDailyReport).order_by(WashingDailyReport.report_date).all()
     assert [r.review_status for r in reports] == ["Confirmed"] * 3
     assert [r.cycle_no for r in reports] == [1, 1, 1]
-    assert reports[1].job_status == "Not done" and reports[1].exception_reason == "Rain" and reports[1].remarks == "Heavy rain"
+    assert reports[1].job_status == "Not done" and reports[1].tables_cleaned == 0 and reports[1].remarks == "Heavy rain"
     assert [r.cycle_completed for r in reports] == [False, False, True]
     assert db.query(AuditLog).filter_by(action="Uploaded daily washing").count() == 1
 
@@ -87,14 +86,14 @@ def test_any_problem_blocks_the_whole_file(client, db):
     db.commit()
     d1, d2 = _days(2)
     future = business_today() + timedelta(days=1)
-    text = ("Site code,Date,Tables cleaned,Not done reason\n"
+    text = ("Site code,Date,Tables cleaned,Remarks\n"
             f"CYCLE01,{_d(d1)},2,\n"
             f"CYCLE01,{_d(d1)},1,\n"            # duplicate day
             f"MISSING,{_d(d2)},1,\n"            # unknown plant
             f"NOSETUP,{_d(d2)},1,\n"            # washing not set up
             f"CYCLE01,{_d(future)},1,\n"        # future
             f"CYCLE01,31-02-2026,1,\n"          # not a date
-            f"CYCLE01,{_d(d2)},2,Rain\n"        # both
+            f"CYCLE01,{_d(d2)},,Rain all day\n" # a remark but no tables
             f"CYCLE01,{_d(d2)},abc,\n")         # not a number
     response = _upload(client, _csv(text), False)
     assert response.status_code == 200, response.text
@@ -102,7 +101,7 @@ def test_any_problem_blocks_the_whole_file(client, db):
     assert body["saved"] == 0
     assert [p["row"] for p in body["problems"]] == [3, 4, 5, 6, 7, 8, 9]
     joined = " ".join(e for p in body["problems"] for e in p["errors"])
-    for expected in ("more than once", "was not found", "has not been set up", "future", "not a date", "not both", "whole number"):
+    for expected in ("more than once", "was not found", "has not been set up", "future", "not a date", "0 if no washing", "whole number"):
         assert expected in joined
     assert db.query(WashingDailyReport).count() == 0
 
@@ -166,7 +165,8 @@ def test_month_template_is_prefilled_and_round_trips(client, db):
     expected_days = (min(business_today(), (d1.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(days=1))).day
     assert [row[2].day for row in rows[1:]] == list(range(1, expected_days + 1))
     saved_row = next(row for row in rows[1:] if row[2].date() == d1)
-    assert saved_row[3] == 2 and saved_row[6] == "Confirmed"
+    assert rows[0] == HEADERS
+    assert saved_row[3] == 2 and saved_row[5] == "Confirmed"
 
     # filling one empty day in the downloaded sheet and uploading it saves only that day
     sheet = book["Daily washing"]
@@ -232,9 +232,9 @@ def test_monthly_summary_counts_how_many_times_tables_were_washed(client, db):
     head, _assignee = _setup_cycle_users(client, db, plant)
     conftest._CURRENT_USER = head
     d1, d2, d3, d4, d5 = _days(5)
-    text = ("Site code,Date,Tables cleaned,Not done reason\n"
+    text = ("Site code,Date,Tables cleaned,Remarks\n"
             f"CYCLE01,{_d(d1)},4,\nCYCLE01,{_d(d2)},4,\nCYCLE01,{_d(d3)},4,\n"
-            f"CYCLE01,{_d(d4)},6,\nCYCLE01,{_d(d5)},,Rain\n")
+            f"CYCLE01,{_d(d4)},6,\nCYCLE01,{_d(d5)},0,Rain\n")
     assert _upload(client, _csv(text), False).json()["saved"] == 5
     month = d1.strftime("%Y-%m")
 

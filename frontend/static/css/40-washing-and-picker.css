@@ -152,8 +152,8 @@ button.wx-tile:hover{transform:translateY(-2px);box-shadow:0 10px 24px rgba(16,3
 .wx-sheet select.wx-in{max-width:132px}
 .wx-sheet td{vertical-align:middle}
 .wx-sheet td:first-child{white-space:nowrap}
-.wx-sheet td:nth-child(4){min-width:110px}
-.wx-sheet td:nth-child(5){white-space:nowrap}
+.wx-sheet td:nth-child(3){min-width:160px}
+.wx-sheet td:nth-child(4){white-space:nowrap}
 .wx-sheet .wc-compact td,.wx-sheet .wc-compact th{padding:6px 8px}
 .wx-srow.edit td{background:var(--wx-bg)}
 .wx-srow.wx-blank td{color:var(--wx-mut)}

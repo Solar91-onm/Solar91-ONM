@@ -125,7 +125,7 @@
  function strip(p){
   const ds=(p.daily_status||[]).slice(-7);
   return '<div class="wc-strip">'+ds.map(d=>{const n=(d.confirmed||0)+(d.pending||0),cls=d.confirmed?"ok":d.pending?"pend":d.exception?"exc":(d.status==="No report"&&isTeam())?"miss":"none";
-   return '<span class="wc-sd wc-sd-'+cls+'" title="'+fmt(d.date)+' · '+(n?n+' tables cleaned'+(d.pending&&!d.confirmed?' (awaiting confirmation)':''):(d.exception||d.status))+'">'+(n||(d.exception?"E":"·"))+'</span>'}).join("")+'</div>';
+   return '<span class="wc-sd wc-sd-'+cls+'" title="'+fmt(d.date)+' · '+(n?n+' tables cleaned'+(d.pending&&!d.confirmed?' (awaiting confirmation)':''):d.exception?'No washing':d.status)+'">'+(n||(d.exception?"E":"·"))+'</span>'}).join("")+'</div>';
  }
  function expandHtml(p){
   const cy=(p.cycles||[]).map(c=>'<div class="wc-ex-cy"><b>Cycle '+c.cycle_no+'</b> '+chip(c.state,c.state==="Completed"?"ok":c.state==="In progress"?"info":"mute")+'<small>'+(c.state==="Completed"?'Started '+fmt(c.started_on)+' · completed '+fmt(c.completed_on)+(isTeam()?(c.late_days?' · '+c.late_days+' day(s) after deadline':' · on time'):''):c.state==="In progress"?'Started '+fmt(c.started_on)+' · '+(c.confirmed||0)+' confirmed'+(c.pending?' + '+c.pending+' awaiting':'')+' of '+p.table_count+' tables':'Starts automatically when cycle '+(c.cycle_no-1)+' is complete')+(isTeam()?' · deadline '+fmt(c.due_date):'')+'</small></div>').join("");
@@ -203,12 +203,12 @@
   const body=rows.map(r=>{
    const n=r.confirmed+r.pending,pct=r.target?Math.min(100,Math.round(100*r.confirmed/r.target)):null,bar='<div class="wc-bar wc-bar-sm"><i class="wc-bar-ok" style="width:'+Math.round(100*r.confirmed/max)+'%"></i><i class="wc-bar-pend" style="width:'+Math.round(100*r.pending/max)+'%"></i></div>';
    const one=r.plants[0];
-   const tail=single?'<td>'+chip(one.status,dtone(one.status))+(one.exception?' <small>'+h(one.exception)+'</small>':'')+'</td><td>'+h(one.by||"—")+'</td><td>'+(photos(r.date)||"—")+'</td>':'<td><b>'+r.reported+'</b> of '+r.n+(r.exc?' <small>· '+r.exc+' exception'+(r.exc===1?"":"s")+'</small>':'')+'</td>';
+   const tail=single?'<td>'+chip(one.status,dtone(one.status))+'</td><td>'+h(one.by||"—")+'</td><td>'+(photos(r.date)||"—")+'</td>':'<td><b>'+r.reported+'</b> of '+r.n+(r.exc?' <small>· '+r.exc+' exception'+(r.exc===1?"":"s")+'</small>':'')+'</td>';
    const main='<tr class="wc-dayrow'+(!single?" wc-click":"")+'" '+(!single?'onclick="washDayToggle(\''+r.date+'\')"':'')+'><td><b>'+(!single?'<span class="wc-caret">'+(open[r.date]?"▾":"▸")+'</span> ':'')+fmt(r.date)+'</b></td><td><b>'+r.confirmed+'</b>'+bar+'</td><td>'+(r.pending||"—")+'</td>'+(team?'<td>'+r.target+'</td><td>'+(pct==null?"—":chip(pct+"%",pct>=100?"ok":pct>=70?"warn":"crit"))+'</td>':'')+tail+'</tr>';
    let sub="";
    if(!single&&open[r.date]){
     const act=r.plants.filter(x=>x.confirmed||x.pending||x.exception).sort((a,b)=>(b.confirmed+b.pending)-(a.confirmed+a.pending));
-    const list=act.map(x=>'<span><b>'+h(x.plant)+'</b> '+(x.confirmed+x.pending?(x.confirmed+x.pending)+' tables'+(x.pending&&!x.confirmed?' (awaiting)':''):h(x.exception))+'</span>').join("");
+    const list=act.map(x=>'<span><b>'+h(x.plant)+'</b> '+(x.confirmed+x.pending?(x.confirmed+x.pending)+' tables'+(x.pending&&!x.confirmed?' (awaiting)':''):'0 tables')+'</span>').join("");
     sub='<tr class="wc-exrow"><td colspan="'+(team?6:4)+'"><div class="wc-daysub">'+(list||'<span class="wc-cycle-label">No plant reported this day.</span>')+'</div></td></tr>';
    }
    return main+sub;
@@ -311,7 +311,7 @@
   return modal("Washing on "+h(fmt(d.date)),"Which plants cleaned tables and were confirmed on this day, which were not, and the cycles completed — for one plant or every plant.",controls+body,'<button class="btn o" onclick="closeModal()">Close</button>',true);
  }
  const DAY_ST={confirmed:["Cleaned & confirmed","ok"],awaiting:["Awaiting confirmation","info"],not_done:["Not done","warn"],rejected:["Report rejected","crit"],not_reported:["Not reported","crit"],upcoming:["Not reported yet","mute"],paused:["Washing paused","mute"]};
- function dayChip(p){const s=DAY_ST[p.status]||[p.status,"mute"];return chip(s[0]+(p.status==="not_done"&&p.not_done_reason?" — "+p.not_done_reason:""),isTeam()||s[1]!=="crit"?s[1]:"mute")}
+ function dayChip(p){const s=DAY_ST[p.status]||[p.status,"mute"];return chip(s[0],isTeam()||s[1]!=="crit"?s[1]:"mute")}
  /* "Today" on the Cycle updates card: which plants cleaned and were confirmed today, and which were not */
  function todayStrip(){
   if(S._washTodayFor!==S._washCycles&&S._washCycles){
@@ -500,7 +500,7 @@
  };
 
  /* ---------- plant overlay ---------- */
- window.openWashingPlantDetails=function(id){S.washTab=null;S.washMonth=(data().today||"").slice(0,7);S.washDetailsPlant=id;S.washReportPlant=id;S.washDayFocus=null;S.washEditReport=null;S.washShowAllReports=false;S.washSheetCycle=null;S.washSheetFocus=null;S.washReportDraft={status:"Done",tables:"",exception:"",remarks:"",date:""};S.modal="washingPlantDetails";S.modalCtx={};render()};
+ window.openWashingPlantDetails=function(id){S.washTab=null;S.washMonth=(data().today||"").slice(0,7);S.washDetailsPlant=id;S.washReportPlant=id;S.washDayFocus=null;S.washEditReport=null;S.washShowAllReports=false;S.washSheetCycle=null;S.washSheetFocus=null;S.washReportDraft={status:"Done",tables:"",remarks:"",date:""};S.modal="washingPlantDetails";S.modalCtx={};render()};
  window.washShowAllReports=async function(){S.washShowAllReports=true;S._washReportDays=90;render();try{await loadOverview()}catch(e){toast(detailOf(e,"Could not load older reports."))}};
  window.washFocusDay=function(d){S.washDayFocus=S.washDayFocus===d?null:d;render()};
  /* Site Engineer: pick any day in the last 45 days, enter the cleaned count and add before/after photos. The O&M Head / the plant's Assignee confirm it. */
@@ -516,7 +516,7 @@
   const review=r.can_review?'<div class="wc-confirm"><input id="wc-review-'+h(r.id)+'" class="inp" placeholder="O&M note (required to reject)"/><button class="btn o sm" onclick="reviewWashingReport(\''+h(r.id)+'\',\'Reject\')">Reject</button><button class="btn p sm" onclick="reviewWashingReport(\''+h(r.id)+'\',\'Confirm\')">Confirm cleaning</button></div>':'';
   const manage=(r.can_edit||r.can_delete)?'<div class="wc-confirm">'+(r.can_edit?'<button class="btn o sm" onclick="washEditReportOpen(\''+h(r.id)+'\')">Edit this report</button>':'')+(r.can_delete?'<button class="btn g sm" onclick="washDeleteReport(\''+h(r.id)+'\')">Delete</button>':'')+'</div>':'';
   const editor=S.washEditReport===r.id?reportEditor(r):'';
-  return '<div class="wc-rep"><div class="wc-rep-h"><div><b>'+fmt(r.report_date)+' · Cycle '+r.cycle_no+' · '+(r.job_status==="Done"?plural(r.tables_cleaned,"table")+" cleaned":"Not done — "+h(r.exception_reason))+'</b><small>Reported by '+h(r.reported_by||"—")+(r.remarks?' · “'+h(r.remarks)+'”':'')+'</small></div><div>'+chip(r.review_status==="Pending"?"Awaiting O&M confirmation":r.review_status,tone)+(r.cycle_completed?' '+chip("Cycle completed","ok"):'')+'</div></div>'+
+  return '<div class="wc-rep"><div class="wc-rep-h"><div><b>'+fmt(r.report_date)+' · Cycle '+r.cycle_no+' · '+(r.job_status==="Done"?plural(r.tables_cleaned,"table")+" cleaned":"Not done · 0 tables")+'</b><small>Reported by '+h(r.reported_by||"—")+(r.remarks?' · “'+h(r.remarks)+'”':'')+'</small></div><div>'+chip(r.review_status==="Pending"?"Awaiting O&M confirmation":r.review_status,tone)+(r.cycle_completed?' '+chip("Cycle completed","ok"):'')+'</div></div>'+
    (r.job_status==="Done"?'<div class="wc-ba">'+col("Before",by("before"))+col("After",by("after"))+'</div>'+(other.length?'<div style="margin-top:8px"><h5 style="margin:0 0 6px;font-size:12.5px;text-transform:uppercase;color:var(--muted-foreground)">Other photos</h5><div class="wc-thumbs">'+other.map(e=>thumb(r,e)).join("")+'</div></div>':''):'')+
    (r.reviewed_by?'<div class="wc-cycle-label" style="margin-top:8px">'+h(r.review_status)+' by <b>'+h(r.reviewed_by)+'</b>'+(r.reviewed_at?' on '+fmt(r.reviewed_at.slice(0,10)):'')+(r.review_note?' — '+h(r.review_note):'')+'</div>':'')+upload+review+manage+editor+'</div>';
  }
@@ -525,7 +525,7 @@
   return '<div class="wc-edit"><h5>Edit report</h5><div class="row2"><div class="field"><span class="lbl">Date</span><input id="wc-ed-date" class="inp" type="date" value="'+h(r.report_date)+'"'+min+' max="'+h(data().today||"")+'"/></div>'+
    '<div class="field"><span class="lbl">Job status</span><select id="wc-ed-status" class="inp" onchange="washEditToggle()"><option'+(nd?"":" selected")+'>Done</option><option'+(nd?" selected":"")+'>Not done</option></select></div></div>'+
    '<div class="row2"><div class="field" id="wc-ed-count-f" style="display:'+(nd?"none":"block")+'"><span class="lbl">Tables cleaned</span><input id="wc-ed-tables" class="inp" type="number" min="1" value="'+h(r.tables_cleaned)+'"/></div>'+
-   '<div class="field" id="wc-ed-reason-f" style="display:'+(nd?"block":"none")+'"><span class="lbl">Reason not done</span><select id="wc-ed-reason" class="inp"><option value="">Choose reason</option>'+REASONS.map(x=>'<option'+(r.exception_reason===x?" selected":"")+'>'+x+'</option>').join("")+'</select></div></div>'+
+   '<input id="wc-ed-reason" type="hidden" value="'+h(r.exception_reason||"Other")+'"/></div>'+
    '<div class="field"><span class="lbl">Remarks</span><textarea id="wc-ed-remarks" class="inp" rows="2" maxlength="4000">'+h(r.remarks||"")+'</textarea></div>'+
    '<div class="wc-confirm"><button class="btn o sm" onclick="washEditReportClose()">Cancel</button><button class="btn p sm" onclick="washEditReportSave(\''+h(r.id)+'\')">Save changes</button></div></div>';
  }
@@ -598,7 +598,7 @@
   const pending=reports.filter(r=>r.can_review),recent=focus?reports.filter(r=>r.report_date===focus):reports;
   const shown=focus?recent.slice(0,200):S.washShowAllReports?reports.slice(0,200):pending.concat(reports.filter(r=>!r.can_review).slice(0,Math.max(0,12-pending.length)));
   const photoCount=day=>reports.filter(r=>r.report_date===day).reduce((n,r)=>n+(r.evidence||[]).length,0),canDayReport=isField()||isTeam();
-  const days=(p.daily_status||[]).slice().reverse().map(d=>'<tr class="wc-day'+(focus===d.date?" focus":"")+'" onclick="washFocusDay(\''+d.date+'\');washTab(\'reports\')"><td><b>'+fmt(d.date)+'</b></td>'+(head?'<td>'+d.target+'</td>':'')+'<td>'+d.confirmed+'</td><td>'+(d.pending||"—")+'</td><td>'+chip(d.status,dtone(d.status))+(d.exception?' <small>'+h(d.exception)+'</small>':'')+'</td><td>'+h(d.reported_by||"—")+'</td><td>'+(photoCount(d.date)||"—")+'</td>'+(canDayReport?'<td>'+(d.date<=todayIso()&&(head||d.date>=isoDaysAgo(45))?'<button class="btn o sm" onclick="event.stopPropagation();washReportForDay(\''+d.date+'\');washTab(\'record\')">Report / photos</button>':'')+'</td>':'')+'</tr>').join("");
+  const days=(p.daily_status||[]).slice().reverse().map(d=>'<tr class="wc-day'+(focus===d.date?" focus":"")+'" onclick="washFocusDay(\''+d.date+'\');washTab(\'reports\')"><td><b>'+fmt(d.date)+'</b></td>'+(head?'<td>'+d.target+'</td>':'')+'<td>'+d.confirmed+'</td><td>'+(d.pending||"—")+'</td><td>'+chip(d.status,dtone(d.status))+'</td><td>'+h(d.reported_by||"—")+'</td><td>'+(photoCount(d.date)||"—")+'</td>'+(canDayReport?'<td>'+(d.date<=todayIso()&&(head||d.date>=isoDaysAgo(45))?'<button class="btn o sm" onclick="event.stopPropagation();washReportForDay(\''+d.date+'\');washTab(\'record\')">Report / photos</button>':'')+'</td>':'')+'</tr>').join("");
   const wk=p.weekly_compliance_percent,thr=p.compliance_threshold_percent;
   const canReport=isField()||isTeam();
   const allReports=reports.length>shown.length&&!focus;
@@ -619,7 +619,6 @@
  }
 
 
- const REASONS=["Rain","Water shortage","Equipment breakdown","Access restriction","Safety stand-down","Other"];
  const isoDaysAgo=n=>{const d=new Date();d.setDate(d.getDate()-n);return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0")};
  const todayIso=()=>data().today||isoDaysAgo(0);
  /* ---------- cycle sheet: every day of one cycle on one table; type how many tables were cleaned each day ---------- */
@@ -659,12 +658,13 @@
    const mine=active.filter(r=>r.cycle_no===pick),elsewhere=active.filter(r=>r.cycle_no!==pick);
    const editable=!active.length&&!rejected.some(r=>r.can_edit)&&cur.kind==="open"&&date<=today&&date>=minDate;
    const draft=editable?(st.rows[date]||{}):{},files=editable?(st.files[date]||{before:[],after:[]}):{before:[],after:[]};
-   const n=editable&&!draft.reason?Math.max(0,parseInt(draft.tables,10)||0):0;
+   const n=editable?Math.max(0,parseInt(draft.tables,10)||0):0;
    run+=mine.filter(r=>r.job_status==="Done").reduce((a,r)=>a+r.tables_cleaned,0)+n;
    return{date,reps,mine,elsewhere,rejected,editable,draft,files,n,run,needsPhotos:isField()&&date>=photoFrom,locked:!editable&&!reps.length&&cur.kind==="open"&&date<minDate};
   });
   const total=mc.table_count||p.table_count||0,recorded=rows.reduce((a,r)=>a+r.mine.filter(x=>x.job_status==="Done").reduce((b,x)=>b+x.tables_cleaned,0),0);
-  const fresh=rows.filter(r=>r.editable&&(r.n>0||r.draft.reason)),newTables=fresh.reduce((a,r)=>a+r.n,0);
+  /* a typed 0 is a real entry too (no washing that day), so any filled-in day counts */
+  const fresh=rows.filter(r=>r.editable&&String(r.draft.tables==null?"":r.draft.tables).trim()!==""),newTables=fresh.reduce((a,r)=>a+r.n,0);
   /* Which cycle each typed day counts towards, exactly as the server decides it (days in date order, on top of
      what is already recorded): once the cycle's count is reached, later days start the next cycle by themselves. */
   const rolls=!cur.extra&&total>0;let base=recorded,nextTables=0,completesOn=null;
@@ -681,24 +681,24 @@
  function sheetFoot(m){
   const team=!isField(),over=!m.cur.extra&&m.newTables>=m.left&&m.left>=0&&!!m.completesOn,days=m.fresh.length?plural(m.fresh.length,"day"):"days";
   const roll=over?' · <b class="wx-roll">cycle '+m.pick+' completes'+(m.pick<3?(m.nextTables?'</b> · '+plural(m.nextTables,"table")+' on later days start cycle '+(m.pick+1):'</b> · cycle '+(m.pick+1)+' starts next'):'</b>'+(m.nextTables?' · '+plural(m.nextTables,"table")+' recorded as extra washing':''))+(isField()?' (once confirmed)':''):'';
-  const sum=m.fresh.length?'<b>'+plural(m.fresh.length,"day")+'</b> to save · '+plural(m.newTables,"table")+(m.cur.extra?' · extra washing (all 3 cycles complete)':over?roll:' · '+(m.left-m.newTables)+' left after this'):'Type the tables cleaned on each day, or choose a reason if no work was done.';
+  const sum=m.fresh.length?'<b>'+plural(m.fresh.length,"day")+'</b> to save · '+plural(m.newTables,"table")+(m.cur.extra?' · extra washing (all 3 cycles complete)':over?roll:' · '+(m.left-m.newTables)+' left after this'):'Type the tables cleaned on each day. Enter 0 if no washing was done and say why in Remarks.';
   return '<span>'+sum+'</span><button type="button" class="btn p" id="wx-sheet-save" onclick="washSheetSubmit()"'+(m.fresh.length&&!S._washSheetSaving?'':' disabled')+'>'+(S._washSheetSaving?'Saving…':team?'Save '+days+' as confirmed':'Submit '+days+' for confirmation')+'</button>';
  }
  function sheetRow(r){
   const id=h(r.date),st=x=>x.review_status==="Confirmed"?chip("Confirmed","ok"):x.review_status==="Rejected"?chip("Rejected","crit"):chip("Awaiting","info");
-  const val=x=>x.job_status==="Done"?'<b>'+x.tables_cleaned+'</b>':'<span class="wx-nd">Not done — '+h(x.exception_reason)+'</span>';
+  /* a not-done day reads as 0 tables; what happened is in Remarks */
+  const val=x=>x.job_status==="Done"?'<b>'+x.tables_cleaned+'</b>':'<span class="wx-nd">0</span>';
   const cls='wx-srow'+(S.washSheetFocus===r.date?' focus':'')+(r.editable?' edit':'');
   if(r.reps.length&&!r.editable){
    const shown=r.mine.length?r.mine:r.elsewhere.length?r.elsewhere:r.rejected,photos=shown.reduce((a,x)=>a+(x.evidence||[]).length,0);
    const flag=shown.some(x=>x.review_status==="Pending"&&x.photos_required&&(!x.has_before||!x.has_after))?' '+chip("Needs photos","warn"):(!isField()&&shown.some(x=>x.review_status!=="Rejected"&&x.backfilled&&x.job_status==="Done"&&!(x.evidence||[]).length)?' '+chip("No photos · back-filled","mute"):'');
    const note=r.mine.length?'':r.elsewhere.length?' <small>Counted in cycle '+r.elsewhere.map(x=>x.cycle_no).join(", ")+'</small>':' <small>'+h(r.rejected[0].review_note||"Rejected")+'</small>';
-   return '<tr class="'+cls+'" id="wx-row-'+id+'"><td><b>'+dayName(r.date)+'</b></td><td colspan="3">'+shown.map(val).join(" + ")+(shown.length===1&&shown[0].remarks?' <small>“'+h(shown[0].remarks)+'”</small>':'')+note+'</td><td>'+(photos||"—")+'</td><td class="wx-st">'+shown.map(st).join(" ")+flag+(by=>'<small class="wx-by" title="'+h(by)+'">'+h(by)+'</small>')(shown.map(x=>x.reported_by).filter((v,i,a)=>a.indexOf(v)===i).join(", "))+'</td><td class="wx-run" id="wx-run-'+id+'">'+(r.mine.length?r.run:"")+'</td><td><button type="button" class="btn g sm" onclick="washOpenDay(\''+id+'\')">Open</button></td></tr>';
+   return '<tr class="'+cls+'" id="wx-row-'+id+'"><td><b>'+dayName(r.date)+'</b></td><td>'+shown.map(val).join(" + ")+note+'</td><td>'+shown.filter(x=>x.remarks).map(x=>'<small>“'+h(x.remarks)+'”</small>').join(" ")+'</td><td>'+(photos||"—")+'</td><td class="wx-st">'+shown.map(st).join(" ")+flag+(by=>'<small class="wx-by" title="'+h(by)+'">'+h(by)+'</small>')(shown.map(x=>x.reported_by).filter((v,i,a)=>a.indexOf(v)===i).join(", "))+'</td><td class="wx-run" id="wx-run-'+id+'">'+(r.mine.length?r.run:"")+'</td><td><button type="button" class="btn g sm" onclick="washOpenDay(\''+id+'\')">Open</button></td></tr>';
   }
-  if(!r.editable)return '<tr class="'+cls+' wx-blank" id="wx-row-'+id+'"><td><b>'+dayName(r.date)+'</b></td><td colspan="5"><small>'+(r.locked?'Older than '+SE_BACK_DAYS+' days — ask the O&amp;M team to record it':'Not recorded')+'</small></td><td class="wx-run" id="wx-run-'+id+'"></td><td></td></tr>';
+  if(!r.editable)return '<tr class="'+cls+' wx-blank" id="wx-row-'+id+'"><td><b>'+dayName(r.date)+'</b></td><td colspan="4"><small>'+(r.locked?'Older than '+SE_BACK_DAYS+' days — ask the O&amp;M team to record it':'Not recorded')+'</small></td><td class="wx-run" id="wx-run-'+id+'"></td><td></td></tr>';
   const d=r.draft,f=r.files,pic=k=>'<label class="wx-pic'+(f[k].length?' on':'')+'" title="'+(k==="before"?"Before":"After")+' cleaning photos (up to 5)">'+(k==="before"?"Before":"After")+(f[k].length?' · '+f[k].length:'')+'<input type="file" accept="image/jpeg,image/png,image/webp" multiple hidden onchange="washSheetPhotos(\''+id+'\',\''+k+'\',this)"/></label>';
   return '<tr class="'+cls+'" id="wx-row-'+id+'"><td><b>'+dayName(r.date)+'</b></td>'+
-   '<td><input class="wx-in wx-num" type="number" min="1" max="5000" inputmode="numeric" placeholder="0" value="'+h(d.tables||"")+'" aria-label="Tables cleaned on '+dayName(r.date)+'" oninput="washSheetInput(\''+id+'\',\'tables\',this)"/></td>'+
-   '<td><select class="wx-in" aria-label="Reason not done on '+dayName(r.date)+'" onchange="washSheetInput(\''+id+'\',\'reason\',this)"><option value="">—</option>'+REASONS.map(x=>'<option'+(d.reason===x?" selected":"")+'>'+x+'</option>').join("")+'</select></td>'+
+   '<td><input class="wx-in wx-num" type="number" min="0" max="5000" step="1" inputmode="numeric" placeholder="—" value="'+h(d.tables==null?"":d.tables)+'" aria-label="Tables cleaned on '+dayName(r.date)+' (0 if no washing)" oninput="washSheetInput(\''+id+'\',\'tables\',this)"/></td>'+
    '<td><input class="wx-in" maxlength="4000" placeholder="Remarks" value="'+h(d.remarks||"")+'" aria-label="Remarks for '+dayName(r.date)+'" oninput="washSheetInput(\''+id+'\',\'remarks\',this)"/></td>'+
    '<td class="wx-pics">'+pic("before")+pic("after")+(r.needsPhotos?'<small>needed</small>':'')+'</td><td></td><td class="wx-run'+(r.toNext?' next':'')+'" id="wx-run-'+id+'">'+(r.n?h(r.runText):"")+'</td><td></td></tr>';
  }
@@ -713,8 +713,8 @@
   if(c.kind==="later")return nav+picker+'<div class="wc-empty">Cycle '+m.pick+' opens once cycle '+(m.pick-1)+' is complete. Washing done now counts towards the open cycle.</div>';
   const head='<p class="sub"><b>Cycle '+m.pick+'</b> · planned '+fmt(c.c.start_date)+' → '+fmt(c.c.due_date)+' · '+m.recorded+' of '+m.total+' tables recorded'+(c.c.pending?' ('+c.c.pending+' awaiting confirmation)':'')+' · <b>'+m.left+' left</b>.'+(mc.summary&&mc.summary.confirmed_tables?' Tables washed <b>'+mc.summary.times_washed+' time'+(mc.summary.times_washed===1?'':'s')+'</b> this month'+(mc.summary.extra_times?' ('+mc.summary.extra_times+' extra after the 3 cycles)':'')+'.':'')+(c.extra?' <b>All 3 cycles are complete.</b> Days you add now are saved as extra washing.':'')+(c.kind==="open"?(team?' Your entries are saved as confirmed.':' The O&amp;M Head or the plant\'s Assignee confirms your entries. Days in the last '+PHOTO_DAYS+' days need before and after photos.'):'')+'</p>';
   const review=m.pending.length?'<div class="wc-flow-note wx-review"><div><b>'+plural(m.pending.length,"day")+' awaiting your confirmation</b><p>'+m.pending.reduce((a,x)=>a+x.tables_cleaned,0)+' tables'+(m.pending.length>m.ready.length?' · '+(m.pending.length-m.ready.length)+' still need before/after photos':'')+'. Use <b>Open</b> on a day to see its photos or to reject it with a note.</p></div>'+(m.ready.length?'<button type="button" class="btn p sm" onclick="washSheetConfirm()"'+(S._washSheetConfirming?' disabled':'')+'>'+(S._washSheetConfirming?'Confirming…':'Confirm '+plural(m.ready.length,"day"))+'</button>':'')+'</div>':'';
-  const th='<tr><th>Date</th><th>Tables cleaned</th><th>Not done reason</th><th>Remarks</th><th>Photos</th><th>Status</th><th>Total</th><th></th></tr>';
-  const body=m.rows.length?m.rows.map(sheetRow).join(""):'<tr><td colspan="8" class="wc-empty">'+(month>thisMonth?'No days to fill yet.':'No days in this cycle yet.')+'</td></tr>';
+  const th='<tr><th>Date</th><th>Tables cleaned</th><th>Remarks</th><th>Photos</th><th>Status</th><th>Total</th><th></th></tr>';
+  const body=m.rows.length?m.rows.map(sheetRow).join(""):'<tr><td colspan="7" class="wc-empty">'+(month>thisMonth?'No days to fill yet.':'No days in this cycle yet.')+'</td></tr>';
   if(S.washSheetFocus){const f=S.washSheetFocus;setTimeout(()=>{const el=document.getElementById("wx-row-"+f);if(el&&el.scrollIntoView)el.scrollIntoView({block:"center",behavior:"smooth"});S.washSheetFocus=null},80)}
   return nav+picker+head+review+'<div class="wc-table-wrap wx-sheet"><table class="wc-table wc-compact"><thead>'+th+'</thead><tbody>'+body+'</tbody></table></div>'+
    (c.kind==="open"?'<div class="wx-sheet-foot" id="wx-sheet-foot">'+sheetFoot(m)+'</div>':'');
@@ -722,7 +722,7 @@
  const sheetCtx=()=>{const p=rowOf(S.washDetailsPlant),month=S.washMonth||(data().today||"").slice(0,7),mc=p&&monthCache()[p.plant_id+"|"+month];return p&&mc&&mc.cycles?{p,mc,m:sheetModel(p,mc)}:null};
  /* typing never re-renders the table (focus stays put); only the running totals and the footer are updated in place */
  window.washSheetInput=function(date,field,el){
-  const x=sheetCtx();if(!x)return;const st=sheetState(x.p.plant_id,x.mc.month),r=st.rows[date]=st.rows[date]||{tables:"",reason:"",remarks:""};r[field]=el.value;
+  const x=sheetCtx();if(!x)return;const st=sheetState(x.p.plant_id,x.mc.month),r=st.rows[date]=st.rows[date]||{tables:"",remarks:""};r[field]=el.value;
   const m=sheetModel(x.p,x.mc);
   m.rows.forEach(row=>{const c=document.getElementById("wx-run-"+row.date);if(c){c.textContent=row.runText||"";c.classList.toggle("next",!!row.toNext)}});
   const foot=document.getElementById("wx-sheet-foot");if(foot)foot.innerHTML=sheetFoot(m);
@@ -739,11 +739,14 @@
   const x=sheetCtx();if(!x)return;const {p,mc,m}=x,entries=[],problems=[],uploads=[];
   for(const r of m.rows){
    if(!r.editable)continue;
-   const d=r.draft,t=String(d.tables||"").trim(),reason=d.reason||"",remarks=String(d.remarks||"").trim(),f=r.files,day=dayName(r.date);
-   if(!t&&!reason){if(remarks||f.before.length||f.after.length)problems.push(day+": enter the tables cleaned or a reason");continue}
-   if(t&&reason){problems.push(day+": enter either tables cleaned or a reason, not both");continue}
-   if(reason){entries.push({report_date:r.date,job_status:"Not done",tables_cleaned:0,exception_reason:reason,remarks:remarks||null});continue}
-   const n=Number(t);if(!Number.isInteger(n)||n<1){problems.push(day+": tables cleaned must be a whole number");continue}
+   const d=r.draft,t=String(d.tables==null?"":d.tables).trim(),remarks=String(d.remarks||"").trim(),f=r.files,day=dayName(r.date);
+   if(!t){if(remarks||f.before.length||f.after.length)problems.push(day+": enter the tables cleaned (0 if no washing was done)");continue}
+   const n=Number(t);if(!Number.isInteger(n)||n<0||n>5000){problems.push(day+": tables cleaned must be a number from 0 to 5000");continue}
+   /* 0 tables is saved as a not-done day, the same way the DWR import records a 0 */
+   if(n===0){
+    if(f.before.length||f.after.length){problems.push(day+": photos can only be added to a day with tables cleaned");continue}
+    entries.push({report_date:r.date,job_status:"Not done",tables_cleaned:0,exception_reason:"Other",remarks:remarks||null});continue;
+   }
    if(r.needsPhotos&&(!f.before.length||!f.after.length)){problems.push(day+": add at least one before and one after photo");continue}
    entries.push({report_date:r.date,job_status:"Done",tables_cleaned:n,remarks:remarks||null});uploads.push(r.date);
   }
@@ -792,11 +795,11 @@
  /* ---------- edit / delete a report (O&M: any report; Site Engineer: own, until confirmed) ---------- */
  window.washEditReportOpen=function(id){S.washEditReport=id;render()};
  window.washEditReportClose=function(){S.washEditReport=null;render()};
- window.washEditToggle=function(){const st=(document.getElementById("wc-ed-status")||{}).value==="Not done",a=document.getElementById("wc-ed-count-f"),b=document.getElementById("wc-ed-reason-f");if(a)a.style.display=st?"none":"block";if(b)b.style.display=st?"block":"none"};
+ window.washEditToggle=function(){const st=(document.getElementById("wc-ed-status")||{}).value==="Not done",a=document.getElementById("wc-ed-count-f");if(a)a.style.display=st?"none":"block"};
  window.washEditReportSave=async function(id){
   const v=k=>{const e=document.getElementById("wc-ed-"+k);return e?e.value:""},status=v("status"),body={report_date:v("date")||undefined,job_status:status,remarks:v("remarks")};
   if(status==="Done"){const n=Number(v("tables"));if(!Number.isInteger(n)||n<1){toast("Enter how many tables were cleaned.");return}body.tables_cleaned=n}
-  else{if(!v("reason")){toast("Choose the reason the work was not done.");return}body.exception_reason=v("reason")}
+  else body.exception_reason=v("reason")||"Other";   // no reason is asked for; what happened goes in Remarks
   try{await apiFetch("/api/scheduled/washing/daily-reports/"+encodeURIComponent(id),{method:"PATCH",body});S.washEditReport=null;refreshPlantMonths(S.washDetailsPlant);await loadOverview();render();toast("Report updated.")}catch(e){toast(detailOf(e,"Could not update the report."))}
  };
  window.washDeleteReport=async function(id){
@@ -804,23 +807,22 @@
   try{await apiFetch("/api/scheduled/washing/daily-reports/"+encodeURIComponent(id),{method:"DELETE"});S.washEditReport=null;refreshPlantMonths(S.washDetailsPlant);await loadOverview();render();toast("Report deleted.")}catch(e){toast(detailOf(e,"Could not delete the report."))}
  };
  /* ---------- daily report (count + before/after photos) ---------- */
- window.openWashingDailyReport=function(id){S.washReportPlant=id;S.washReportDraft={status:"Done",tables:"",exception:"",remarks:"",date:""};S.modal="washingDailyReport";S.modalCtx={};render()};
+ window.openWashingDailyReport=function(id){S.washReportPlant=id;S.washReportDraft={status:"Done",tables:"",remarks:"",date:""};S.modal="washingDailyReport";S.modalCtx={};render()};
  window.washReportDraftChanged=function(){
   const v=id=>{const e=document.getElementById(id);return e?e.value:undefined},d=S.washReportDraft||{};
-  const n={status:v("wc-status"),tables:v("wc-tables"),exception:v("wc-exception"),remarks:v("wc-remarks"),date:v("wc-date")};
+  const n={status:v("wc-status"),tables:v("wc-tables"),remarks:v("wc-remarks"),date:v("wc-date")};
   Object.keys(n).forEach(k=>{if(n[k]!==undefined)d[k]=n[k]});S.washReportDraft=d;
-  const nd=d.status==="Not done",a=document.getElementById("wc-exception-field"),b=document.getElementById("wc-count-field"),c=document.getElementById("wc-photo-fields");
-  if(a)a.style.display=nd?"block":"none";if(b)b.style.display=nd?"none":"block";if(c)c.style.display=nd?"none":"grid";
+  const nd=d.status==="Not done",b=document.getElementById("wc-count-field"),c=document.getElementById("wc-photo-fields");
+  if(b)b.style.display=nd?"none":"block";if(c)c.style.display=nd?"none":"grid";
  };
  function reportModal(){
   const p=rowOf(S.washReportPlant);if(!p)return "";
-  const d=S.washReportDraft||{status:"Done",tables:"",exception:"",remarks:""},left=Math.max(0,p.table_count-p.confirmed_tables_cleaned-p.pending_tables_cleaned),nd=d.status==="Not done";
+  const d=S.washReportDraft||{status:"Done",tables:"",remarks:""},left=Math.max(0,p.table_count-p.confirmed_tables_cleaned-p.pending_tables_cleaned),nd=d.status==="Not done";
   const fieldHint=isField()?"Report the actual number cleaned on this date; daily amounts may vary. The O&M team reviews the report and photos.":'<b>Cycle '+p.current_cycle+'</b> · '+p.confirmed_tables_cleaned+' of '+p.table_count+' tables confirmed'+(p.pending_tables_cleaned?' (+'+p.pending_tables_cleaned+' awaiting confirmation)':'')+' · <b>'+left+' left to report</b>. When all tables are confirmed, the next cycle starts automatically.';
   return modal("Report today's washing",h(p.site_code)+" · "+h(p.plant),
    '<div class="wc-form"><div class="wc-hint">'+fieldHint+'</div>'+
    '<div class="field"><span class="lbl">Date cleaned</span><input id="wc-date" class="inp" type="date" value="'+h(d.date||todayIso())+'" min="'+h(isField()?isoDaysAgo(45):isoDaysAgo(730))+'" max="'+h(todayIso())+'" onchange="washReportDraftChanged()"/></div><div class="row2"><div class="field"><span class="lbl">Job status</span><select id="wc-status" class="inp" onchange="washReportDraftChanged()"><option'+(nd?"":" selected")+'>Done</option><option'+(nd?" selected":"")+'>Not done</option></select></div>'+
    '<div class="field" id="wc-count-field" style="display:'+(nd?"none":"block")+'"><span class="lbl">Tables cleaned today</span><input id="wc-tables" class="inp" type="number" min="1" max="'+p.table_count+'" value="'+h(d.tables)+'" placeholder="Enter actual count" oninput="washReportDraftChanged()"/>'+(isField()?'<small>Only report what was actually cleaned today; no fixed daily target applies.</small>':'')+'</div></div>'+
-   '<div class="field" id="wc-exception-field" style="display:'+(nd?"block":"none")+'"><span class="lbl">Reason work was not done</span><select id="wc-exception" class="inp" onchange="washReportDraftChanged()"><option value="">Choose reason</option>'+["Rain","Water shortage","Equipment breakdown","Access restriction","Safety stand-down","Other"].map(x=>'<option'+(d.exception===x?" selected":"")+'>'+x+'</option>').join("")+'</select></div>'+
    '<div id="wc-photo-fields" class="row2" style="display:'+(nd?"none":"grid")+'"><div class="field"><span class="lbl">Before cleaning photos (up to 5)</span><input id="wc-before" class="inp" type="file" accept="image/jpeg,image/png,image/webp" multiple onchange="washPhotoSelection(\'before\',this)"/><small id="wc-before-selected" class="wc-photo-selection">Select before-cleaning photos</small></div><div class="field"><span class="lbl">After cleaning photos (up to 5)</span><input id="wc-after" class="inp" type="file" accept="image/jpeg,image/png,image/webp" multiple onchange="washPhotoSelection(\'after\',this)"/><small id="wc-after-selected" class="wc-photo-selection">Select after-cleaning photos</small></div></div>'+
    '<div class="field"><span class="lbl">Remarks</span><textarea id="wc-remarks" class="inp" rows="3" maxlength="4000" placeholder="What happened today?" oninput="washReportDraftChanged()">'+h(d.remarks)+'</textarea></div></div>',
    '<button class="btn o" onclick="closeModal()">Cancel</button><button class="btn p" onclick="submitWashingDailyReport()">'+(isField()?'Submit for O&amp;M confirmation':'Save confirmed record')+'</button>',true);
@@ -841,21 +843,20 @@
   if(when>todayIso()){toast("The date cannot be in the future.");return}
   const fb=Array.from((document.getElementById("wc-before")||{}).files||[]),fa=Array.from((document.getElementById("wc-after")||{}).files||[]);
   if(!nd&&(!Number.isInteger(count)||count<1)){toast("Enter how many tables you cleaned today.");return}
-  if(nd&&!d.exception){toast("Choose the reason the work was not done.");return}
   if(fb.length>5||fa.length>5){toast("Choose no more than 5 before and 5 after photos.");return}
   if(!nd&&isField()&&(!fb.length||!fa.length)){toast("Add at least one before photo and one after photo so the O&M team can verify the report.");return}
   let saved=null;
   S._washReportSubmitting=true;
   try{
-   saved=await apiFetch("/api/scheduled/washing/daily-reports",{method:"POST",body:{plant_id:p.plant_id,job_status:nd?"Not done":"Done",tables_cleaned:nd?0:count,cleaned_table_codes:[],exception_reason:nd?d.exception:null,remarks:(d.remarks||"").trim()||null,report_date:when}});
+   saved=await apiFetch("/api/scheduled/washing/daily-reports",{method:"POST",body:{plant_id:p.plant_id,job_status:nd?"Not done":"Done",tables_cleaned:nd?0:count,cleaned_table_codes:[],exception_reason:nd?"Other":null,remarks:(d.remarks||"").trim()||null,report_date:when}});
    await upload(saved.id,fb,"before");await upload(saved.id,fa,"after");
    const inOverlay=S.modal==="washingPlantDetails";
    if(!inOverlay)S.modal=null;
-   S.washReportDraft={status:"Done",tables:"",exception:"",remarks:"",date:""};refreshPlantMonths(p.plant_id);await loadOverview();render();const closes=!nd&&sameMonth&&left>0&&count>=left&&(p.cycles_this_month||0)<3;
+   S.washReportDraft={status:"Done",tables:"",remarks:"",date:""};refreshPlantMonths(p.plant_id);await loadOverview();render();const closes=!nd&&sameMonth&&left>0&&count>=left&&(p.cycles_this_month||0)<3;
    if(closes)toast("Cycle "+p.current_cycle+(isField()?" reaches all "+p.table_count+" tables (completes once confirmed)":" complete")+" — the next days count towards cycle "+Math.min((p.current_cycle||1)+1,3)+".");
    toast(isField()?"Washing report submitted for O&M confirmation.":"Washing record saved and confirmed"+(!nd&&(!fb.length||!fa.length)?". Add before/after photos from the report card when you have them.":"."));
   }catch(e){
-   if(saved){S.washDetailsPlant=p.plant_id;S.washReportPlant=p.plant_id;S.modal="washingPlantDetails";S.modalCtx={};S.washReportDraft={status:"Done",tables:"",exception:"",remarks:"",date:""};await loadOverview().catch(()=>{});render();toast("Report saved, but photo upload failed. Retry the missing photo from this report card. "+detailOf(e));return}
+   if(saved){S.washDetailsPlant=p.plant_id;S.washReportPlant=p.plant_id;S.modal="washingPlantDetails";S.modalCtx={};S.washReportDraft={status:"Done",tables:"",remarks:"",date:""};await loadOverview().catch(()=>{});render();toast("Report saved, but photo upload failed. Retry the missing photo from this report card. "+detailOf(e));return}
    toast(detailOf(e));
   }finally{
    S._washReportSubmitting=false;

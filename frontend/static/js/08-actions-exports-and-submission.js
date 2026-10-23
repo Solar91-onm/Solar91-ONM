@@ -919,7 +919,6 @@ function renderDashboard(){
  const active=ccFilterActive()||f.equip!=="all";
  const role=S._roleLabel||S.currentRole||"";
  const canOpenIssues=["O&M Head","Assignee","Site Engineer"].includes(role);
- const canOpenPm=["O&M Head","Assignee","Administration","Client / Asset Owner","Site Engineer"].includes(role);
  let h=ccHero(plants,open,overdue,health,mW);
  h+=ccFilterBar();
  h+='<div class="panel filter-panel cc-dashboard-filters"><div class="cc-filter-heading"><i>⌕</i><span>Filter live operations</span></div><div class="cc-filter-controls">'+
@@ -934,6 +933,23 @@ function renderDashboard(){
   healthSlices.map(s=>'<button class="pill sev-pill'+(f.health===s.id?" active":"")+'" data-act="donutHealth" data-id="'+s.id+'">'+s.label+' '+s.n+'</button>').join("")+
   '</div>'+
   (active?'<button class="btn o sm" onclick="S.issF=blankIssF();S.plF=Object.assign(S.plF||{},{health:\'all\'});S.dashPlant=\'all\';persist();render()">Clear filters</button>':'')+'</div></div>';
+ h+=ccOpsOverviewPanel(plants,open,health,f);
+ h+='<div class="panel no-stick" style="padding:0"><div style="padding:14px 16px 0"><div class="row between wrap"><div><h2 style="font-size:15px;font-weight:700">Needs attention</h2><p style="font-size:12px;color:var(--muted-foreground);margin:3px 0 10px">Critical and overdue issues first</p></div>'+(canOpenIssues?'<button class="btn g sm" data-act="go" data-id="issues">All issues</button>':"")+'</div></div>';
+ if(!attnRows.length)h+=emptyState("No critical issues","Nothing overdue or unassigned in the current filter.");
+ else{h+='<div style="overflow-x:auto"><table class="dense"><thead><tr><th>Plant</th><th>Issue</th><th>Equipment / maker</th><th>Priority</th><th>Age</th><th>Assignee</th><th>Status</th></tr></thead><tbody>'+
+  attnRows.slice(0,12).map(t=>{const p=plantRec(t.plant);return '<tr class="click" data-act="issue" data-id="'+esc(t.id)+'" title="Open issue"><td><div style="font-weight:600">'+(p?esc(p.name):esc(t.plant||"—"))+'</div><div style="font-size:12px;color:var(--muted-foreground)">'+(p?esc(p.id):"")+'</div></td><td><div style="font-weight:600">'+esc(t.id)+'</div><div style="font-size:12px;color:var(--muted-foreground)">'+esc(t.vertical)+'</div></td><td>'+esc(t.equip||"—")+(t.maker?'<div style="font-size:12px;color:var(--muted-foreground)">'+esc(t.maker)+'</div>':'')+'</td><td>'+badge(issueLevel(t))+'</td><td class="nowrap">'+esc(ageBucket(t))+'</td><td>'+(t.assignee?esc(t.assignee):'<span style="color:var(--danger);font-weight:600">Unassigned</span>')+'</td><td>'+badge(t.status)+(isOverdueIssue(t)?' '+badge("Overdue"):"")+'</td></tr>'}).join("")+'</tbody></table></div>';}
+ h+='</div>';
+ return h;
+}
+
+/* Operations overview donut cards (site issues · preventive maintenance · portfolio health). Shared by the
+   classic dashboard and the 2026 Command Center hub, so both show the same figures and drill-downs. */
+function ccOpsOverviewPanel(plants,open,health,f){
+ f=f||blankIssF();
+ const role=S._roleLabel||S.currentRole||"";
+ const canOpenIssues=["O&M Head","Assignee","Site Engineer"].includes(role);
+ const canOpenPm=["O&M Head","Assignee","Administration","Client / Asset Owner","Site Engineer"].includes(role);
+ let h="";
  const scopedPlantNames=new Set(plants.map(p=>p.name));
  const overviewIssues=open.filter(t=>scopedPlantNames.has(t.plant));
  const overviewOverdue=overviewIssues.filter(isOverdueIssue);
@@ -968,11 +984,6 @@ function renderDashboard(){
    '<section><div class="cc-ops-head"><div><div class="cc-ops-title">Solar portfolio health</div><div class="cc-ops-sub">Plant status across this view</div></div><span class="cc-solar-spark">☀</span></div>'+
     '<div class="cc-ops-content">'+portfolioHealthDonut+'<div class="cc-ops-legend">'+portfolioHealthSegments.map(s=>'<div><i style="--legend-color:'+s.color+'"></i><span>'+s.label+'</span><b>'+s.value+'</b></div>').join("")+'</div></div><div class="cc-ops-foot"><span>Plants in view</span><strong>'+portfolioHealthTotal+'</strong></div></section>'+
   '</div></div>';
- h+='<div class="panel no-stick" style="padding:0"><div style="padding:14px 16px 0"><div class="row between wrap"><div><h2 style="font-size:15px;font-weight:700">Needs attention</h2><p style="font-size:12px;color:var(--muted-foreground);margin:3px 0 10px">Critical and overdue issues first</p></div>'+(canOpenIssues?'<button class="btn g sm" data-act="go" data-id="issues">All issues</button>':"")+'</div></div>';
- if(!attnRows.length)h+=emptyState("No critical issues","Nothing overdue or unassigned in the current filter.");
- else{h+='<div style="overflow-x:auto"><table class="dense"><thead><tr><th>Plant</th><th>Issue</th><th>Equipment / maker</th><th>Priority</th><th>Age</th><th>Assignee</th><th>Status</th></tr></thead><tbody>'+
-  attnRows.slice(0,12).map(t=>{const p=plantRec(t.plant);return '<tr class="click" data-act="issue" data-id="'+esc(t.id)+'" title="Open issue"><td><div style="font-weight:600">'+(p?esc(p.name):esc(t.plant||"—"))+'</div><div style="font-size:12px;color:var(--muted-foreground)">'+(p?esc(p.id):"")+'</div></td><td><div style="font-weight:600">'+esc(t.id)+'</div><div style="font-size:12px;color:var(--muted-foreground)">'+esc(t.vertical)+'</div></td><td>'+esc(t.equip||"—")+(t.maker?'<div style="font-size:12px;color:var(--muted-foreground)">'+esc(t.maker)+'</div>':'')+'</td><td>'+badge(issueLevel(t))+'</td><td class="nowrap">'+esc(ageBucket(t))+'</td><td>'+(t.assignee?esc(t.assignee):'<span style="color:var(--danger);font-weight:600">Unassigned</span>')+'</td><td>'+badge(t.status)+(isOverdueIssue(t)?' '+badge("Overdue"):"")+'</td></tr>'}).join("")+'</tbody></table></div>';}
- h+='</div>';
  return h;
 }
 

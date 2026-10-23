@@ -5,6 +5,10 @@
 :root[data-theme="dark"]{--cx-bg:#17201B;--cx-soft:#1D2822;--cx-line:#2C3A32;--cx-ink:#E6EEE9;--cx-mut:#98A89F;--cx-bad:#F87171;--cx-bad-bg:#3A1A1A;--cx-warn:#FBBF24;--cx-warn-bg:#382A12;--cx-ok:#4ADE80;--cx-ok-bg:#173324;--cx-info:#93C5FD;--cx-info-bg:#18263D;--cx-shadow:0 1px 2px rgba(0,0,0,.3)}
 
 .cx{display:flex;flex-direction:column;gap:14px}
+/* operations overview donut cards, sitting under the hero as a light card */
+.cx .cc-ops-overview{margin:0;color:var(--cx-ink);background:var(--cx-bg);border:1px solid var(--cx-line);border-radius:18px;padding:16px;box-shadow:var(--cx-shadow)}
+.cx .cc-ops-overview>div:first-child p{color:var(--cx-mut)}
+.cx .cc-work-overview>section{border-color:var(--cx-line);box-shadow:none}
 
 /* ---------- hero ---------- */
 .cx-hero{position:relative;overflow:hidden;display:grid;grid-template-columns:minmax(0,1.05fr) minmax(0,1.25fr);gap:18px;padding:22px;border-radius:22px;color:#fff;

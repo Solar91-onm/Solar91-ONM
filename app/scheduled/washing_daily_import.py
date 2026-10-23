@@ -1,10 +1,11 @@
 """Daily washing upload: record the tables cleaned per plant per day from one spreadsheet.
 
-One row is one plant on one day: Site code, Date, then either Tables cleaned or a Not done reason, and optional
-Remarks. Rows follow the same rules as the plant cycle sheet (``create_sheet_reports``): entries by the O&M Head
-or a washing Assignee are saved as confirmed; a Site Engineer's entries (own plant, last 45 days) wait for review
-with one notification per plant; a day that already has a pending or confirmed report is never added again; and
-every row is checked before anything is saved (all or nothing).
+One row is one plant on one day: Site code, Date, Tables cleaned (0 when no washing was done) and optional
+Remarks. A 0 is saved as a not-done day with the reason "Other"; what happened goes in Remarks. Rows follow the
+same rules as the plant cycle sheet (``create_sheet_reports``): entries by the O&M Head or a washing Assignee
+are saved as confirmed; a Site Engineer's entries (own plant, last 45 days) wait for review with one notification
+per plant; a day that already has a pending or confirmed report is never added again; and every row is checked
+before anything is saved (all or nothing).
 
 The downloadable sheet for a month is pre-filled with one row per plant and day, so people only type numbers.
 Days already saved show their values; uploading them again unchanged is harmless ("Already saved").
@@ -15,7 +16,7 @@ import io
 from calendar import monthrange
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
-from typing import Any, get_args
+from typing import Any
 from uuid import UUID
 
 from fastapi import HTTPException
@@ -30,7 +31,6 @@ from app.core.security import user_scoped_plant_ids
 from app.core.spreadsheet import cell_text, map_columns, neutralise_formulas, parse_sheet_date, read_upload_rows
 from app.core.timeutil import business_today
 from app.plants.codes import normalize_site_code, plant_code_index
-from app.scheduled.schemas import WashingSheetEntry
 from app.scheduled.washing_cycles import (
     MAX_BACKDATE_DAYS,
     MONTHLY_CYCLE_TARGET,
@@ -50,16 +50,15 @@ MAX_DAILY_ROWS = 3000
 MAX_HISTORY_DAYS = 730  # the cycle sheet shows months up to two years back; older days could not be reviewed there
 MAX_TABLES = 5000
 SHEET = "Daily washing"
-HEADERS = ("Site code", "Plant name", "Date", "Tables cleaned", "Not done reason", "Remarks", "Saved in portal")
+HEADERS = ("Site code", "Plant name", "Date", "Tables cleaned", "Remarks", "Saved in portal")
 SUMMARY_HEADERS = ("Site code", "Plant name", "Tables per cycle", "Cycles completed (of 3)", "Cycle 1 done on",
                    "Cycle 2 done on", "Cycle 3 done on", "Tables cleaned (confirmed)", "Tables awaiting review",
                    "Times washed", "Extra washes after 3 cycles", "Extra tables after 3 cycles", "Days worked", "Days not done")
-NOT_DONE_REASONS: tuple[str, ...] = get_args(get_args(WashingSheetEntry.model_fields["exception_reason"].annotation)[0])
+NOT_DONE_REASON = "Other"  # the sheet asks for no reason: a 0 day is saved with this one
 ALIASES = {
     "site_code": {"Site code", "Plant code", "Site", "Code", "Site id"},
     "date": {"Date", "Report date", "Washing date", "Cleaning date", "Work date", "Day"},
     "tables": {"Tables cleaned", "Tables washed", "Tables", "Cleaned tables", "No of tables cleaned", "Number of tables cleaned"},
-    "reason": {"Not done reason", "Reason", "Reason not done", "Not done", "Exception reason", "Exception"},
     "remarks": {"Remarks", "Remark", "Notes", "Note", "Comments", "Comment"},
 }
 
@@ -76,8 +75,8 @@ def _allowed_plants(db: Session, user: User, manager: bool) -> set[UUID] | None:
     return None if manager else (user_scoped_plant_ids(db, user) or set())
 
 
-def _describe(job_status: str, tables: int, reason: str | None) -> str:
-    return f"{tables} table{'s' if tables != 1 else ''}" if job_status == "Done" else f"Not done — {reason}"
+def _describe(job_status: str, tables: int) -> str:
+    return f"{tables} table{'s' if tables != 1 else ''}" if job_status == "Done" else "0 tables (not done)"
 
 
 # ───────────────────────── template ─────────────────────────
@@ -145,7 +144,7 @@ def daily_template_bytes(db: Session, user: User, month: str | None = None, plan
     for text in (
         "One row is one plant on one day. Site code and Date are already filled in for you.",
         "Type the number of tables cleaned that day in 'Tables cleaned'.",
-        "If no washing was done, leave 'Tables cleaned' empty and pick the 'Not done reason' instead.",
+        "If no washing was done, type 0 in 'Tables cleaned' and write what happened in 'Remarks'.",
         "Leave a row completely empty if you have nothing to report for that day; empty rows are skipped.",
         "Rows marked in 'Saved in portal' are already recorded. Change those days in the portal, not in this file.",
         f"Dates may be typed as DD-MM-YYYY. Site Engineers can enter the last {MAX_BACKDATE_DAYS} days for their own plant.",
@@ -169,23 +168,20 @@ def daily_template_bytes(db: Session, user: User, month: str | None = None, plan
             if report is not None and report.review_status != "Rejected":
                 done = report.job_status == "Done"
                 status = "Confirmed" if report.review_status == "Confirmed" else "Pending review"
-                sheet.append([plant.site_code, plant.plant_name, day, report.tables_cleaned if done else None,
-                              None if done else report.exception_reason, report.remarks, status])
+                sheet.append([plant.site_code, plant.plant_name, day, report.tables_cleaned if done else 0,
+                              report.remarks, status])
             else:
-                sheet.append([plant.site_code, plant.plant_name, day, None, None, None,
+                sheet.append([plant.site_code, plant.plant_name, day, None, None,
                               "Rejected — enter again" if report is not None else None])
             sheet.cell(sheet.max_row, 3).number_format = "DD-MM-YYYY"
-    sheet.auto_filter.ref = f"A1:G{max(1, sheet.max_row)}"
-    for index, width in enumerate((14, 32, 14, 16, 22, 40, 20), start=1):
+    sheet.auto_filter.ref = f"A1:F{max(1, sheet.max_row)}"
+    for index, width in enumerate((14, 32, 14, 16, 48, 20), start=1):
         sheet.column_dimensions[sheet.cell(1, index).column_letter].width = width
     last_row = max(sheet.max_row, 2) + 200
     tables = DataValidation(type="whole", operator="between", formula1="0", formula2=str(MAX_TABLES), allow_blank=True,
                             showErrorMessage=True, error="Type a whole number of tables")
-    reasons = DataValidation(type="list", formula1='"' + ",".join(NOT_DONE_REASONS) + '"', allow_blank=True)
-    for validation in (tables, reasons):
-        sheet.add_data_validation(validation)
+    sheet.add_data_validation(tables)
     tables.add(f"D2:D{last_row}")
-    reasons.add(f"E2:E{last_row}")
 
     summary = workbook.create_sheet("Monthly summary")
     summary.append(SUMMARY_HEADERS)
@@ -238,12 +234,11 @@ def import_daily(db: Session, user: User, filename: str, content: bytes, *, dry_
     columns = map_columns(headers, ALIASES)
     if "site_code" not in columns or "date" not in columns:
         raise HTTPException(422, 'The file needs a "Site code" column and a "Date" column')
-    if "tables" not in columns and "reason" not in columns:
-        raise HTTPException(422, 'The file needs a "Tables cleaned" column (and optionally "Not done reason")')
+    if "tables" not in columns:
+        raise HTTPException(422, 'The file needs a "Tables cleaned" column')
 
     allowed = _allowed_plants(db, user, manager)
     plants = plant_code_index(db.scalars(select(Plant)))
-    reasons = {reason.casefold(): reason for reason in NOT_DONE_REASONS}
     today = business_today()
     records: list[dict[str, Any]] = []
     seen: dict[tuple[UUID, date], int] = {}
@@ -254,8 +249,8 @@ def import_daily(db: Session, user: User, filename: str, content: bytes, *, dry_
             return values[index] if index is not None and index < len(values) else None
 
         site_text, tables_text = cell_text(get("site_code")), cell_text(get("tables"))
-        reason_text, remarks = cell_text(get("reason")), cell_text(get("remarks"))
-        if not tables_text and not reason_text and not remarks:
+        remarks = cell_text(get("remarks"))
+        if not tables_text and not remarks:
             blank += 1  # a pre-filled day left empty
             continue
         errors: list[str] = []
@@ -288,15 +283,8 @@ def import_daily(db: Session, user: User, filename: str, content: bytes, *, dry_
                 tables = _whole_number(tables_text)
             except ValueError:
                 errors.append(f"Tables cleaned must be a whole number from 0 to {MAX_TABLES}")
-        reason = None
-        if reason_text:
-            reason = reasons.get(reason_text.casefold())
-            if reason is None:
-                errors.append("Not done reason must be one of: " + ", ".join(NOT_DONE_REASONS))
-        if tables and reason_text:
-            errors.append("Enter either the tables cleaned or a not-done reason, not both")
-        elif not tables and not reason_text and not errors:
-            errors.append("Enter the tables cleaned, or the reason washing was not done")
+        elif not errors:
+            errors.append("Enter the tables cleaned (0 if no washing was done)")
         if len(remarks) > 4000:
             errors.append("Remarks must be 4000 characters or fewer")
         if plant is not None and day is not None and not errors:
@@ -307,7 +295,7 @@ def import_daily(db: Session, user: User, filename: str, content: bytes, *, dry_
                 seen[key] = number
         records.append({
             "row": number, "plant": plant, "site_code": plant.site_code if plant else site_text, "date": day,
-            "job_status": "Done" if tables else "Not done", "tables": tables, "reason": None if tables else reason,
+            "job_status": "Done" if tables else "Not done", "tables": tables, "reason": None if tables else NOT_DONE_REASON,
             "remarks": remarks or None, "errors": errors, "action": "Problem" if errors else "New", "detail": "",
         })
 
@@ -339,15 +327,15 @@ def import_daily(db: Session, user: User, filename: str, content: bytes, *, dry_
         saved = taken.get((plant.id, day))
         if saved is None:
             continue
-        same = (saved.job_status == record["job_status"] and saved.tables_cleaned == record["tables"]
-                and (saved.exception_reason or None) == record["reason"])
+        # a saved not-done day matches a 0 whatever reason it was stored with
+        same = saved.job_status == record["job_status"] and saved.tables_cleaned == record["tables"]
         status = "confirmed" if saved.review_status == "Confirmed" else "pending review"
         if same:
             record["action"] = "Unchanged"
             record["detail"] = f"Already saved ({status})" + ("; the remark change is ignored" if (saved.remarks or None) != record["remarks"] else "")
         else:
             record["errors"].append(
-                f"Already saved for {_day_label(day)} as {_describe(saved.job_status, saved.tables_cleaned, saved.exception_reason)} "
+                f"Already saved for {_day_label(day)} as {_describe(saved.job_status, saved.tables_cleaned)} "
                 f"({status}). Change that day in the plant's washing sheet in the portal")
 
     # Work out each new day's cycle exactly as saving them one by one in date order would (see _add_report).
@@ -387,7 +375,7 @@ def import_daily(db: Session, user: User, filename: str, content: bytes, *, dry_
     for record in new_records:
         if record["errors"]:
             continue
-        record["detail"] = f"{_describe(record['job_status'], record['tables'], record['reason'])} · Cycle {record['cycle_no']}"
+        record["detail"] = f"{_describe(record['job_status'], record['tables'])} · Cycle {record['cycle_no']}"
         if record.get("extra"):
             record["detail"] += " · extra washing (all 3 cycles already complete)"
         elif record.get("planned") is not None and record["planned"].cycle_completed:

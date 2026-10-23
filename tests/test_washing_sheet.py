@@ -168,3 +168,44 @@ def test_record_tab_uses_the_cycle_sheet():
     assert "/api/scheduled/washing/daily-reports/sheet" in washing
     assert "/api/scheduled/washing/daily-reports/confirm" in washing
     assert "tab===\"record\"?sheetHtml(p)" in washing
+
+
+def test_sheet_saves_a_zero_day_as_not_done_with_remarks(client, db):
+    """The sheet has no reason column: typing 0 tables saves a not-done day (reason "Other") with the remarks."""
+    plant = _plant(db)
+    _setup_cycle_users(client, db, plant)
+    _engineer(client, db, plant)
+    (d1,) = _days(1)
+    response = _sheet(client, plant, [
+        {"report_date": d1.isoformat(), "job_status": "Not done", "tables_cleaned": 0, "exception_reason": "Other", "remarks": "Pump down"},
+    ])
+    assert response.status_code == 200, response.text
+    saved = db.query(WashingDailyReport).filter_by(plant_id=plant.id, report_date=d1).one()
+    assert saved.job_status == "Not done" and saved.tables_cleaned == 0
+    assert saved.exception_reason == "Other" and saved.remarks == "Pump down"
+
+
+def test_record_sheet_has_no_reason_column_and_accepts_zero():
+    washing = (ROOT / "frontend/static/js/26-washing-cycles.js").read_text(encoding="utf-8")
+    assert "<th>Not done reason</th>" not in washing
+    assert "<th>Tables cleaned</th><th>Remarks</th>" in washing
+    assert 'type="number" min="0"' in washing
+    assert 'job_status:"Not done",tables_cleaned:0,exception_reason:"Other"' in washing
+    assert "tables cleaned must be a whole number" not in washing
+
+
+def test_command_center_hub_shows_the_operations_donut_cards():
+    hub = (ROOT / "frontend/static/js/20-modern-ui-2026.js").read_text(encoding="utf-8")
+    dash = (ROOT / "frontend/static/js/08-actions-exports-and-submission.js").read_text(encoding="utf-8")
+    assert "function ccOpsOverviewPanel(" in dash
+    assert "h+=ccOpsOverviewPanel(plants,open,health,f)" in dash
+    assert "ccOpsOverviewPanel(plants,open,hc,blankIssF())" in hub
+
+
+def test_washing_forms_and_views_ask_only_for_remarks_not_a_reason():
+    washing = (ROOT / "frontend/static/js/26-washing-cycles.js").read_text(encoding="utf-8")
+    assert "Reason not done" not in washing and "Reason work was not done" not in washing
+    assert "Choose the reason the work was not done" not in washing
+    assert '"Not done — "+h(r.exception_reason)' not in washing
+    assert 'exception_reason:nd?"Other":null' in washing
+    assert 'body.exception_reason=v("reason")||"Other"' in washing

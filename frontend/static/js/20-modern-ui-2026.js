@@ -229,6 +229,9 @@ function m26Hub(){
   +kpi("k-wash","Washing on track",'<b>'+(ws.cycle?(ws.pct==null?'—':ws.pct+'%'):(wPct==null?'—':wPct+'%'))+'</b>',ws.cycle?(ws.late.length?ws.late.length+' behind deadline':'all plants on track')+' · '+ws.done+' month done':wRed+' tables overdue','<div class="cx-bar"><i style="width:'+((ws.cycle?ws.pct:wPct)||0)+'%;background:#38BDF8"></i></div>',"m26Nav('wash')")
   +'</div></section>';
 
+ /* ---- operations overview donut cards: issue, maintenance and plant-health breakdowns with drill-downs ---- */
+ if(typeof ccOpsOverviewPanel==="function")h+=ccOpsOverviewPanel(plants,open,hc,blankIssF());
+
  /* ---- needs you now + plants needing attention ---- */
  const items=[],f=S.m26Need||"all";
  open.slice().sort((a,b)=>(SEV_RANK[a.severity]??9)-(SEV_RANK[b.severity]??9)||issueAgeDays(b)-issueAgeDays(a))
