@@ -966,15 +966,16 @@ function ccOpsOverviewPanel(plants,open,f){
  const issueOverdueOther=overviewOverdue.filter(t=>t.severity!=="Critical").length;
  const issueOther=Math.max(0,overviewIssues.length-issueCritical-issueOverdueOther);
  const pmLater=Math.max(0,pmTasks.length-pmOverdue.length-pmDueSoon.length);
- /* panel washing: active plants by cycle deadline and weekly compliance score (the API sends these O&M figures to managers only) */
+ /* panel washing: active plants by cycle schedule (the cycles due by today's date in the month). A late plant whose
+    excused days (rain, water shortage, work not started, or a reason the O&M Head added) cover the days it is late is
+    "Delayed by reason"; the API works this out and sends it to the O&M team only. */
  if(typeof washCyclesEnsureLoaded==="function")washCyclesEnsureLoaded();
- const wd=S._washCycles,canOpenWash=["O&M Head","Assignee"].includes(role),thrOf=p=>p.compliance_threshold_percent||WASH_TH;
- const washRows=((wd&&wd.plants)||[]).filter(p=>p.active!==false&&p.overdue_bucket&&typeof p.weekly_compliance_percent==="number"&&(!f.plant||f.plant==="all"||p.plant===f.plant));
- const washLate=washRows.filter(p=>p.overdue_bucket!=="on_track").length;
- const washOk=washRows.filter(p=>p.overdue_bucket==="on_track"&&p.weekly_compliance_percent>=thrOf(p)).length;
- const washScore=!washRows.length?null:f.plant&&f.plant!=="all"?Math.round(washRows.reduce((a,p)=>a+p.weekly_compliance_percent,0)/washRows.length):(wd.portfolio||{}).weekly_compliance_percent;
- const washTarget=washRows.length?Math.round(washRows.reduce((a,p)=>a+thrOf(p),0)/washRows.length):WASH_TH;
- const washSegments=[{label:"On track",id:"ontrack",act:canOpenWash?"ccWashQueue":"",value:washOk,color:"#22A06B"},{label:"Below compliance",id:"slipping",act:canOpenWash?"ccWashQueue":"",value:washRows.length-washOk-washLate,color:"#F59E0B"},{label:"Behind deadline",id:"late",act:canOpenWash?"ccWashQueue":"",value:washLate,color:"#E5484D"}];
+ const wd=S._washCycles,canOpenWash=["O&M Head","Assignee"].includes(role);
+ const washRows=((wd&&wd.plants)||[]).filter(p=>p.active!==false&&p.overdue_bucket&&(!f.plant||f.plant==="all"||p.plant===f.plant));
+ const washOk=washRows.filter(p=>p.overdue_bucket==="on_track").length;
+ const washExcused=washRows.filter(p=>p.overdue_bucket!=="on_track"&&p.delay_excused).length;
+ const washCycles=washRows.reduce((a,p)=>a+(p.cycles_this_month||0),0),washCycleTarget=washRows.reduce((a,p)=>a+(p.monthly_target||3),0);
+ const washSegments=[{label:"On track",id:"ontrack",act:canOpenWash?"ccWashQueue":"",value:washOk,color:"#22A06B"},{label:"Delayed by reason",id:"excused",act:canOpenWash?"ccWashQueue":"",value:washExcused,color:"#F59E0B"},{label:"Not on track",id:"notontrack",act:canOpenWash?"ccWashQueue":"",value:washRows.length-washOk-washExcused,color:"#E5484D"}];
  const issueSegments=[{label:"Critical",id:"critical",act:canOpenIssues?"ccIssueQueue":"",value:issueCritical,color:"#E5484D"},{label:"Overdue",id:"overdue",act:canOpenIssues?"ccIssueQueue":"",value:issueOverdueOther,color:"#F59E0B"},{label:"Other open",id:"other",act:canOpenIssues?"ccIssueQueue":"",value:issueOther,color:"#3B82F6"}];
  const pmSegments=[{label:"Overdue",id:"overdue",act:canOpenPm?"ccPmQueue":"",value:pmOverdue.length,color:"#E5484D"},{label:"Due in 7 days",id:"due7",act:canOpenPm?"ccPmQueue":"",value:pmDueSoon.length,color:"#F59E0B"},{label:"Upcoming",id:"upcoming",act:canOpenPm?"ccPmQueue":"",value:pmLater,color:"#3B82F6"}];
  /* one card: ring (each slice and each legend row opens its filtered register), legend with share bars, footer stat;
@@ -992,8 +993,8 @@ function ccOpsOverviewPanel(plants,open,f){
  h+='<section class="ccx" aria-label="Operations overview"><div class="ccx-head"><div><h2>Operations overview</h2><p>Live queues across '+scopeLabel+' · click a slice or a row to open that list</p></div></div><div class="ccx-grid">'+
   card("k-issues","⚠","Unplanned","Site issues",overviewIssues.length,"open",issueSegments,canOpenIssues?"goTab('issues')":"",["Overdue issues",overviewOverdue.length,"bad"])+
   card("k-pm","🛠","Planned","Preventive maintenance",pmTasks.length,"active",pmSegments,"goScheduledOM('maintenance')",["Washing due",pmWashDue.length,"warn"])+
-  card("k-wash","💧","Planned","Panel washing",washRows.length,"compliance",washSegments,canOpenWash?"washOpenRegister()":"",
-   ["Weekly compliance target",washTarget+"%",""],!wd?"…":washScore==null?"—":washScore+"%")+
+  card("k-wash","💧","Planned","Panel washing",washRows.length,"plants",washSegments,canOpenWash?"washOpenRegister()":"",
+   ["Cycles done this month",washCycles+" of "+washCycleTarget,""],!wd?"…":null)+
   '</div></section>';
  return h;
 }

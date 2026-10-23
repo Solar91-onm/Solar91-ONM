@@ -207,7 +207,9 @@ def test_command_center_hub_shows_the_operations_donut_cards():
     data = (ROOT / "frontend/static/js/00-auth-data-and-imports.js").read_text(encoding="utf-8")
     assert "function openDashboardWashQueue(show)" in data
     washing = (ROOT / "frontend/static/js/26-washing-cycles.js").read_text(encoding="utf-8")
-    assert 'f.show==="ontrack"' in washing and 'f.show==="slipping"' in washing
+    assert 'f.show==="ontrack"' in washing and 'f.show==="excused"' in washing and 'f.show==="notontrack"' in washing
+    # the washing card counts plants by cycle schedule, not by compliance score
+    assert '"Delayed by reason"' in dash and '"Not on track"' in dash and '"compliance",washSegments' not in dash
     # the old work lanes and the separate "Plant washing" panel are no longer on the Command Center
     assert "cx-lanes" not in hub and "function ccPanel()" not in washing
 

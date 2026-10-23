@@ -1,9 +1,11 @@
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import date, timedelta
+from uuid import UUID
 
-from app.core.models import AppSetting, AuditLog, Notification, UserEquipmentTypeAssignment, WashingDailyReport
+from app.core.models import AppSetting, AuditLog, Notification, UserEquipmentTypeAssignment, UserPlantAssignment, WashingDailyReport
 from app.core.timeutil import business_today
+from app.scheduled import washing_cycles
 from app.scheduled.washing_cycles import (
     DEFAULT_EXCUSED_REASONS,
     EXCUSED_REASONS_SETTING,
@@ -131,3 +133,36 @@ def test_only_the_om_head_changes_the_list_and_every_change_is_audited(client, d
     assert db.get(AppSetting, EXCUSED_REASONS_SETTING).setting_value == ["Rain"]
     audits = db.query(AuditLog).filter_by(entity_id=EXCUSED_REASONS_SETTING).all()
     assert len(audits) == 2 and audits[-1].metadata_json == {"from": ["Rain", "Grid outage"], "to": ["Rain"]}
+
+
+def _late_plant(client, db, monkeypatch, excused_days):
+    """13 Nov: cycle 1 was due 10 Nov and is not complete, so the plant is 3 days late."""
+    today = date(2026, 11, 13)
+    monkeypatch.setattr(washing_cycles, "business_today", lambda: today)
+    plant, head, assignee = _setup(client, db)
+    _day(db, plant, date(2026, 11, 2), 20)
+    for n in range(excused_days):
+        _day(db, plant, date(2026, 11, 5 + n), 0, "Rain all day" if n % 2 else "Water shortage")
+    _day(db, plant, date(2026, 11, 12), 0, "Labour absent")        # not a listed reason: does not count
+    washing_cycles.invalidate_overview_cache()
+    row = next(p for p in client.get(f"{BASE}/overview").json()["plants"] if p["plant_id"] == str(plant.id))
+    return row, assignee
+
+
+def test_late_plant_is_delayed_by_reason_when_excused_days_cover_the_delay(client, db, monkeypatch):
+    row, _assignee = _late_plant(client, db, monkeypatch, excused_days=3)
+    assert row["overdue_bucket"] == "3d" and row["overdue_days"] == 3
+    assert row["excused_days_late_cycle"] == 3 and row["delay_excused"] is True
+
+
+def test_late_plant_is_not_on_track_when_excused_days_fall_short(client, db, monkeypatch):
+    row, assignee = _late_plant(client, db, monkeypatch, excused_days=2)
+    assert row["overdue_days"] == 3 and row["excused_days_late_cycle"] == 2 and row["delay_excused"] is False
+    # an on-track plant is never "delayed by reason", and field users never receive these figures
+    engineer = login_user(client, db, role="Site Engineer", name="Late Engineer", email="late-engineer@example.com")
+    db.add(UserPlantAssignment(user_id=engineer.id, plant_id=UUID(row["plant_id"]), assignment_role="Site Engineer"))
+    db.commit()
+    conftest._CURRENT_USER = engineer
+    washing_cycles.invalidate_overview_cache()
+    field_row = client.get(f"{BASE}/overview").json()["plants"][0]
+    assert "delay_excused" not in field_row and "excused_days_late_cycle" not in field_row

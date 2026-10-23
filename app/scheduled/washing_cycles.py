@@ -717,6 +717,17 @@ def _build_overview(db: Session, user: User, include_tables: bool = False, repor
         overdue = _overdue_info(cycles_this_month, today, due_dates)
         if not config.active:
             overdue.update({"overdue_days": 0, "overdue_bucket": "on_track", "overdue_cycle": None})
+        # A late cycle's delay is "excused" when its excused days (rain, water shortage, ...: see excused_reasons)
+        # are at least as many as the days it is late. The window runs from the cycle's start (or the day after the
+        # previous cycle was completed, if later) to today.
+        late_cycle = overdue.get("overdue_cycle")
+        excused_in_late_cycle = 0
+        if late_cycle:
+            window_start = start_dates[late_cycle - 1]
+            previous_done = completed_dates.get(late_cycle - 1)
+            if previous_done and previous_done >= window_start:
+                window_start = previous_done + timedelta(days=1)
+            excused_in_late_cycle = sum(1 for day in excused_dates if window_start <= day <= today)
         day_reports: dict[date, list[WashingDailyReport]] = {}
         for report in reports:
             if report.report_date.year == today.year and report.report_date.month == today.month:
@@ -817,6 +828,8 @@ def _build_overview(db: Session, user: User, include_tables: bool = False, repor
             "productivity": [{"person": person, "tables": count} for person, count in sorted(productivity.items())],
             "daily_productivity": sorted(daily_productivity, key=lambda row: (row["date"], row["person"])),
             "compliance_threshold_percent": config.compliance_threshold_percent,
+            "excused_days_late_cycle": excused_in_late_cycle,
+            "delay_excused": bool(late_cycle) and excused_in_late_cycle >= overdue["overdue_days"],
         })
         if include_tables:
             plant_rows[-1]["table_codes"] = table_codes
@@ -894,7 +907,8 @@ def _build_overview(db: Session, user: User, include_tables: bool = False, repor
         # Compliance / delay / ranking figures are O&M performance metrics; field users never receive them.
         hidden = ("weekly_compliance_percent", "monthly_compliance_percent", "daily_compliance_percent", "average_delay_days",
                   "compliance_threshold_percent", "overdue_days", "overdue_bucket", "overdue_cycle", "productivity",
-                  "daily_productivity", "exceptions_this_month", "tables_due_today", "tables_pending_today")
+                  "daily_productivity", "exceptions_this_month", "tables_due_today", "tables_pending_today",
+                  "excused_days_late_cycle", "delay_excused")
         for row in result["plants"]:
             for key in hidden:
                 row.pop(key, None)
