@@ -5,10 +5,51 @@
 :root[data-theme="dark"]{--cx-bg:#17201B;--cx-soft:#1D2822;--cx-line:#2C3A32;--cx-ink:#E6EEE9;--cx-mut:#98A89F;--cx-bad:#F87171;--cx-bad-bg:#3A1A1A;--cx-warn:#FBBF24;--cx-warn-bg:#382A12;--cx-ok:#4ADE80;--cx-ok-bg:#173324;--cx-info:#93C5FD;--cx-info-bg:#18263D;--cx-shadow:0 1px 2px rgba(0,0,0,.3)}
 
 .cx{display:flex;flex-direction:column;gap:14px}
-/* operations overview donut cards, sitting under the hero as a light card */
-.cx .cc-ops-overview{margin:0;color:var(--cx-ink);background:var(--cx-bg);border:1px solid var(--cx-line);border-radius:18px;padding:16px;box-shadow:var(--cx-shadow)}
-.cx .cc-ops-overview>div:first-child p{color:var(--cx-mut)}
-.cx .cc-work-overview>section{border-color:var(--cx-line);box-shadow:none}
+
+/* ---------- operations overview: donut cards (issues · maintenance · plant health) ---------- */
+.ccx{background:var(--cx-bg);border:1px solid var(--cx-line);border-radius:20px;padding:18px;box-shadow:var(--cx-shadow);color:var(--cx-ink)}
+.ccx-head h2{margin:0;font-size:17px;font-weight:800;letter-spacing:-.01em;color:var(--cx-ink)}
+.ccx-head p{margin:3px 0 0;font-size:12.5px;color:var(--cx-mut)}
+.ccx-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin-top:14px}
+.ccx-card{--a:#3B82F6;display:flex;flex-direction:column;gap:14px;min-width:0;padding:16px;border-radius:16px;border:1px solid var(--cx-line);
+ background:linear-gradient(180deg,color-mix(in srgb,var(--a) 7%,var(--cx-bg)) 0%,var(--cx-bg) 48%);transition:border-color .18s,box-shadow .18s,transform .18s}
+.ccx-card:hover{border-color:color-mix(in srgb,var(--a) 35%,var(--cx-line));box-shadow:0 16px 32px -24px color-mix(in srgb,var(--a) 75%,transparent);transform:translateY(-1px)}
+.ccx-card.k-issues{--a:#E5484D}.ccx-card.k-pm{--a:#16A34A}.ccx-card.k-health{--a:#F5B821}
+.ccx-card header{display:flex;align-items:center;gap:10px;min-width:0}
+.ccx-card header>div{flex:1;min-width:0}
+.ccx-ic{flex:none;display:grid;place-items:center;width:36px;height:36px;border-radius:11px;font-size:17px;background:color-mix(in srgb,var(--a) 14%,var(--cx-bg))}
+.ccx-card header small{display:block;font-size:10.5px;font-weight:800;letter-spacing:.09em;text-transform:uppercase;color:var(--cx-mut)}
+.ccx-card h3{margin:1px 0 0;font-size:15px;font-weight:800;color:var(--cx-ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ccx-open{flex:none;display:inline-flex;align-items:center;gap:5px;padding:6px 12px;border:1px solid var(--cx-line);border-radius:999px;background:var(--cx-bg);color:var(--cx-ink);font:inherit;font-size:12.5px;font-weight:700;cursor:pointer;transition:border-color .15s,color .15s}
+.ccx-open:hover,.ccx-open:focus-visible{border-color:var(--a);color:var(--cx-pri);outline:none}
+.ccx-body{display:grid;grid-template-columns:128px minmax(0,1fr);gap:16px;align-items:center}
+.ccx-ring{position:relative;width:128px;height:128px}
+.ccx-ring svg{display:block;width:100%;height:100%;overflow:visible}
+.ccx-track{fill:none;stroke:var(--cx-line);stroke-width:12}
+.ccx-arc{fill:none;stroke-width:12;stroke-linecap:round;transition:stroke-width .15s,filter .15s}
+.ccx-arc[role=button]{cursor:pointer}
+.ccx-arc[role=button]:hover,.ccx-arc[role=button]:focus-visible{stroke-width:15;filter:brightness(1.08);outline:none}
+.ccx-mid{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;pointer-events:none}
+.ccx-mid b{font-size:28px;font-weight:800;line-height:1;letter-spacing:-.03em;color:var(--cx-ink);font-variant-numeric:tabular-nums}
+.ccx-mid span{margin-top:4px;font-size:10.5px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:var(--cx-mut)}
+.ccx-legend{display:flex;flex-direction:column;gap:2px;min-width:0}
+.ccx-row{display:grid;grid-template-columns:10px minmax(0,1fr) auto 38px;grid-template-rows:auto 4px;column-gap:8px;row-gap:5px;align-items:center;width:100%;padding:7px 8px;border:0;border-radius:10px;background:transparent;text-align:left;font:inherit;color:var(--cx-ink)}
+button.ccx-row{cursor:pointer;transition:background .15s}
+button.ccx-row:hover,button.ccx-row:focus-visible{background:color-mix(in srgb,var(--c) 11%,transparent);outline:none}
+.ccx-row i{width:9px;height:9px;border-radius:50%;background:var(--c);box-shadow:0 0 0 3px color-mix(in srgb,var(--c) 20%,transparent)}
+.ccx-row span{font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ccx-row b{font-size:15px;font-weight:800;font-variant-numeric:tabular-nums}
+.ccx .ccx-row em{font-style:normal;font-size:11.5px;font-weight:700;color:var(--cx-mut);text-align:right;font-variant-numeric:tabular-nums;padding:0;background:none;border-radius:0}
+.ccx-row u{grid-column:2/5;height:4px;border-radius:99px;background:var(--cx-soft);overflow:hidden;text-decoration:none}
+.ccx-row s{display:block;height:100%;border-radius:inherit;background:var(--c);text-decoration:none}
+.ccx-row.zero{opacity:.55}
+.ccx-card footer{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:auto;padding:9px 12px;border-radius:11px;background:var(--cx-soft);font-size:12.5px;color:var(--cx-mut)}
+.ccx-card footer b{font-size:14px;font-weight:800;font-variant-numeric:tabular-nums}
+.ccx-card footer b.bad{color:var(--cx-bad)}.ccx-card footer b.warn{color:var(--cx-warn)}.ccx-card footer b.ok{color:var(--cx-ok)}
+@media(max-width:1180px){.ccx-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.ccx-card.k-health{grid-column:1/-1}.ccx-card.k-health .ccx-body{grid-template-columns:128px minmax(0,460px)}}
+@media(max-width:720px){.ccx{padding:14px}.ccx-grid{grid-template-columns:1fr}.ccx-card.k-health{grid-column:auto}}
+@media(max-width:420px){.ccx-body{grid-template-columns:104px minmax(0,1fr);gap:12px}.ccx-ring{width:104px;height:104px}.ccx-mid b{font-size:24px}}
+@media(prefers-reduced-motion:reduce){.ccx-card,.ccx-arc,button.ccx-row{transition:none}.ccx-card:hover{transform:none}}
 
 /* ---------- hero ---------- */
 .cx-hero{position:relative;overflow:hidden;display:grid;grid-template-columns:minmax(0,1.05fr) minmax(0,1.25fr);gap:18px;padding:22px;border-radius:22px;color:#fff;

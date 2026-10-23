@@ -966,25 +966,39 @@ function ccOpsOverviewPanel(plants,open,health,f){
  const issueOverdueOther=overviewOverdue.filter(t=>t.severity!=="Critical").length;
  const issueOther=Math.max(0,overviewIssues.length-issueCritical-issueOverdueOther);
  const pmLater=Math.max(0,pmTasks.length-pmOverdue.length-pmDueSoon.length);
- const issueSegments=[{label:"Critical",id:"critical",act:canOpenIssues?"ccIssueQueue":"",value:issueCritical,color:"#E85D43"},{label:"Overdue",id:"overdue",act:canOpenIssues?"ccIssueQueue":"",value:issueOverdueOther,color:"#F1A33C"},{label:"Other open",id:"other",act:canOpenIssues?"ccIssueQueue":"",value:issueOther,color:"#32A66A"}];
- const pmSegments=[{label:"Overdue",id:"overdue",act:canOpenPm?"ccPmQueue":"",value:pmOverdue.length,color:"#E85D43"},{label:"Due in 7 days",id:"due7",act:canOpenPm?"ccPmQueue":"",value:pmDueSoon.length,color:"#F1A33C"},{label:"Upcoming",id:"upcoming",act:canOpenPm?"ccPmQueue":"",value:pmLater,color:"#3987D6"}];
- const portfolioHealthSegments=[{label:"Healthy",value:health.Healthy,color:"#32A66A"},{label:"Warning",value:health.Warning,color:"#F1A33C"},{label:"Critical",value:health.Critical,color:"#E85D43"}];
- const portfolioHealthTotal=portfolioHealthSegments.reduce((sum,segment)=>sum+segment.value,0);
- const issueDonut=ccOpsDonut(overviewIssues.length,issueSegments,"OPEN");
- const pmDonut=ccOpsDonut(pmTasks.length,pmSegments,"ACTIVE");
- const portfolioHealthDonut=ccOpsDonut(portfolioHealthTotal,portfolioHealthSegments,"PLANTS");
- const operationLink=canOpenIssues?'<button class="btn o sm" onclick="goTab(\'issues\')">Open Site Issues</button>':"";
- const filteredScopeLabel=f.plant&&f.plant!=="all"?f.plant:"current plant scope";
- h+='<div class="panel cc-ops-overview"><div class="row between wrap" style="gap:10px;margin-bottom:14px"><div><h2>Operations overview</h2><p>Live issue and maintenance queues · '+esc(filteredScopeLabel)+'</p></div></div>'+
-  '<div class="cc-work-overview">'+
-   '<section><div class="cc-ops-head"><div><div class="cc-ops-title">Unplanned · Site Issues</div><div class="cc-ops-sub">Faults and urgent work</div></div>'+operationLink+'</div>'+
-    '<div class="cc-ops-content">'+issueDonut+'<div class="cc-ops-legend">'+issueSegments.map(s=>'<'+(s.act?'button type="button" data-act="'+s.act+'" data-id="'+s.id+'"':'div')+'><i style="--legend-color:'+s.color+'"></i><span>'+s.label+'</span><b>'+s.value+'</b></'+(s.act?'button':'div')+'>').join("")+'</div></div><div class="cc-ops-foot"><span>Overdue issues</span><strong>'+overviewOverdue.length+'</strong></div></section>'+
-   '<section><div class="cc-ops-head"><div><div class="cc-ops-title">Planned · Preventive Maintenance</div><div class="cc-ops-sub">Work orders and washing cycles</div></div><button class="btn o sm" onclick="goScheduledOM(\'maintenance\')">Open Preventive Maintenance</button></div>'+
-    '<div class="cc-ops-content">'+pmDonut+'<div class="cc-ops-legend">'+pmSegments.map(s=>'<'+(s.act?'button type="button" data-act="'+s.act+'" data-id="'+s.id+'"':'div')+'><i style="--legend-color:'+s.color+'"></i><span>'+s.label+'</span><b>'+s.value+'</b></'+(s.act?'button':'div')+'>').join("")+'</div></div><div class="cc-ops-foot"><span>Washing due</span><strong>'+pmWashDue.length+'</strong></div></section>'+
-   '<section><div class="cc-ops-head"><div><div class="cc-ops-title">Solar portfolio health</div><div class="cc-ops-sub">Plant status across this view</div></div><span class="cc-solar-spark">☀</span></div>'+
-    '<div class="cc-ops-content">'+portfolioHealthDonut+'<div class="cc-ops-legend">'+portfolioHealthSegments.map(s=>'<div><i style="--legend-color:'+s.color+'"></i><span>'+s.label+'</span><b>'+s.value+'</b></div>').join("")+'</div></div><div class="cc-ops-foot"><span>Plants in view</span><strong>'+portfolioHealthTotal+'</strong></div></section>'+
-  '</div></div>';
+ const canOpenPlants=["O&M Head","Assignee"].includes(role);
+ const issueSegments=[{label:"Critical",id:"critical",act:canOpenIssues?"ccIssueQueue":"",value:issueCritical,color:"#E5484D"},{label:"Overdue",id:"overdue",act:canOpenIssues?"ccIssueQueue":"",value:issueOverdueOther,color:"#F59E0B"},{label:"Other open",id:"other",act:canOpenIssues?"ccIssueQueue":"",value:issueOther,color:"#3B82F6"}];
+ const pmSegments=[{label:"Overdue",id:"overdue",act:canOpenPm?"ccPmQueue":"",value:pmOverdue.length,color:"#E5484D"},{label:"Due in 7 days",id:"due7",act:canOpenPm?"ccPmQueue":"",value:pmDueSoon.length,color:"#F59E0B"},{label:"Upcoming",id:"upcoming",act:canOpenPm?"ccPmQueue":"",value:pmLater,color:"#3B82F6"}];
+ const healthSegments=[{label:"Healthy",id:"Healthy",act:canOpenPlants?"ccHealthQueue":"",value:health.Healthy,color:"#22A06B"},{label:"Warning",id:"Warning",act:canOpenPlants?"ccHealthQueue":"",value:health.Warning,color:"#F59E0B"},{label:"Critical",id:"Critical",act:canOpenPlants?"ccHealthQueue":"",value:health.Critical,color:"#E5484D"}];
+ const healthTotal=healthSegments.reduce((sum,segment)=>sum+segment.value,0);
+ /* one card: ring (each slice and each legend row opens its filtered register), legend with share bars, footer stat */
+ const card=(cls,ico,eyebrow,title,total,unit,segments,cta,foot)=>{
+  const legend=segments.map(s=>{
+   const pct=total?Math.round(100*s.value/total):0,inner='<i></i><span>'+esc(s.label)+'</span><b>'+s.value+'</b><em>'+pct+'%</em><u><s style="width:'+pct+'%"></s></u>';
+   return s.act?'<button type="button" class="ccx-row'+(s.value?'':' zero')+'" style="--c:'+s.color+'" data-act="'+s.act+'" data-id="'+esc(s.id)+'" title="Open '+esc(s.label.toLowerCase())+' in the register">'+inner+'</button>':'<div class="ccx-row'+(s.value?'':' zero')+'" style="--c:'+s.color+'">'+inner+'</div>';
+  }).join("");
+  return '<section class="ccx-card '+cls+'"><header><span class="ccx-ic" aria-hidden="true">'+ico+'</span><div><small>'+eyebrow+'</small><h3>'+title+'</h3></div>'+(cta?'<button type="button" class="ccx-open" onclick="'+cta+'">Open <span aria-hidden="true">→</span></button>':'')+'</header>'+
+   '<div class="ccx-body">'+ccxRing(total,segments,unit)+'<div class="ccx-legend">'+legend+'</div></div>'+
+   '<footer><span>'+foot[0]+'</span><b class="'+(foot[1]?foot[2]:'ok')+'">'+foot[1]+'</b></footer></section>';
+ };
+ const scopeLabel=f.plant&&f.plant!=="all"?esc(f.plant):plants.length+" plant"+(plants.length===1?"":"s");
+ h+='<section class="ccx" aria-label="Operations overview"><div class="ccx-head"><div><h2>Operations overview</h2><p>Live queues across '+scopeLabel+' · click a slice or a row to open that list</p></div></div><div class="ccx-grid">'+
+  card("k-issues","⚠","Unplanned","Site issues",overviewIssues.length,"open",issueSegments,canOpenIssues?"goTab('issues')":"",["Overdue issues",overviewOverdue.length,"bad"])+
+  card("k-pm","🛠","Planned","Preventive maintenance",pmTasks.length,"active",pmSegments,"goScheduledOM('maintenance')",["Washing due",pmWashDue.length,"warn"])+
+  card("k-health","☀","Portfolio","Plant health",healthTotal,"plants",healthSegments,canOpenPlants?"goView('plants')":"",["Plants needing attention",health.Warning+health.Critical,"bad"])+
+  '</div></section>';
  return h;
+}
+/* Ring for an overview card: rounded segments with small gaps on a soft track; an empty queue shows the track only. */
+function ccxRing(total,segments,unit){
+ const r=44,C=2*Math.PI*r,visible=total?segments.filter(s=>s.value>0):[],gap=visible.length>1?13:0;
+ let start=0;
+ const arcs=visible.map(s=>{
+  const span=s.value/total*C,len=Math.max(0.5,span-gap),off=start+(span-len)/2;start+=span;
+  const act=s.act?' class="ccx-arc" role="button" tabindex="0" data-act="'+s.act+'" data-id="'+esc(s.id)+'" aria-label="'+esc(s.label+": "+s.value+" — open the list")+'"':' class="ccx-arc"';
+  return '<circle cx="56" cy="56" r="'+r+'" stroke="'+s.color+'" stroke-dasharray="'+len.toFixed(2)+' '+(C-len).toFixed(2)+'" stroke-dashoffset="'+(-off).toFixed(2)+'"'+(visible.length===1?' stroke-linecap="butt"':'')+act+'><title>'+esc(s.label+": "+s.value)+'</title></circle>';
+ }).join("");
+ return '<div class="ccx-ring"><svg viewBox="0 0 112 112" role="img" aria-label="'+esc(total+" "+unit)+'"><circle class="ccx-track" cx="56" cy="56" r="'+r+'"/><g transform="rotate(-90 56 56)">'+arcs+'</g></svg><div class="ccx-mid"><b>'+total+'</b><span>'+esc(unit)+'</span></div></div>';
 }
 
 
@@ -1601,6 +1615,7 @@ function bindUi(){
   if(act==="chart"){e.preventDefault();S.chartPick=id;goView("plants");toast("Opened plants from chart · "+id);return}
   if(act==="ccIssueQueue"){e.preventDefault();openDashboardIssueQueue(id);return}
   if(act==="ccPmQueue"){e.preventDefault();openDashboardPmQueue(id);return}
+  if(act==="ccHealthQueue"){e.preventDefault();openDashboardHealthQueue(id);return}
   if(act==="trendDay"){e.preventDefault();const stay=S.view==="dashboard"||(S.view==="om-module"&&S.omTab==="issues");const same=(S.issF||{}).from===id&&(S.issF||{}).to===id;if(stay){stayFilter(same?{from:"",to:""}:{from:id,to:id});toast(same?"Cleared date focus":"Focused "+id);return}drillIssues({from:id,to:id,chip:"all"});toast("Filtered issues for "+id);return}
   if(act==="kpi"){e.preventDefault();const stay=S.view==="dashboard";
    if(id==="plants"){goView("plants");return}

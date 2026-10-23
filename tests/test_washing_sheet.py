@@ -200,6 +200,11 @@ def test_command_center_hub_shows_the_operations_donut_cards():
     assert "function ccOpsOverviewPanel(" in dash
     assert "h+=ccOpsOverviewPanel(plants,open,health,f)" in dash
     assert "ccOpsOverviewPanel(plants,open,hc,blankIssF())" in hub
+    # every slice of the three donut cards opens a filtered register, plant health included
+    assert 'act:canOpenPlants?"ccHealthQueue":""' in dash
+    assert 'if(act==="ccHealthQueue"){e.preventDefault();openDashboardHealthQueue(id);return}' in dash
+    data = (ROOT / "frontend/static/js/00-auth-data-and-imports.js").read_text(encoding="utf-8")
+    assert "function openDashboardHealthQueue(health)" in data and 'goView("plants")' in data
 
 
 def test_washing_forms_and_views_ask_only_for_remarks_not_a_reason():

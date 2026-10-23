@@ -1595,6 +1595,15 @@ function openDashboardPmQueue(queue){
  goTab("scheduled");
  scrollToDashboardRegister(".pml-register");
 }
+/* Plant health slice → the Plants register filtered to that health (Healthy / Warning / Critical). */
+function openDashboardHealthQueue(health){
+ if(!["Healthy","Warning","Critical"].includes(health))return;
+ S.plF=Object.assign(S.plF||{},{health:health});
+ S.tablePages.plants=1;
+ persist();
+ goView("plants");
+ scrollToDashboardRegister("#plant-register-anchor");
+}
 function setDashboardPlantFilter(value){
  const plant=value==="all"?"all":ccPlantSearchScope().find(p=>p.name===value)?.name;
  if(!plant)return;
