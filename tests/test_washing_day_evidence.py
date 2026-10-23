@@ -148,7 +148,8 @@ def test_overview_sends_recent_reports_by_default_and_full_window_on_request(cli
     assert default_response.status_code == 200, default_response.text
     default = default_response.json()
     query_count = int(default_response.headers["server-timing"].split('desc="')[1].split()[0])
-    assert query_count <= 3, f"Washing overview used {query_count} database queries for one configured plant"
+    # the overview's 3 queries plus one read of the compliance excused-reasons setting (once per request, not per plant)
+    assert query_count <= 4, f"Washing overview used {query_count} database queries for one configured plant"
     assert sorted(r["report_date"] for r in default["reports"]) == sorted(
         (business_today() - timedelta(days=a)).isoformat() for a in (1, 10))
     full = client.get(f"{BASE}/overview?report_days=90").json()

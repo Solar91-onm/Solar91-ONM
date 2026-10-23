@@ -17,12 +17,12 @@ from app.core.models import AuditLog, Equipment, Issue, OMTask, PMAlertLog, PMDu
 from app.core.security import WASHING_TYPE, equipment_scope_matches, get_current_user, require_csrf, require_permission, user_scoped_equipment_types, user_scoped_plant_ids, resolve_equipment_id
 from app.plants.codes import find_plant_by_code, normalize_site_code
 from app.pmplan.units import distribute, next_cycle_id
-from app.scheduled.schemas import PMFollowUpCreate, ProblemTaskCreate, TaskCompletion, TaskIssueLink, TaskReassign, TaskScheduleEdit, TaskUnitPlanEdit, WashingCycleDateRequest, WashingCycleScheduleRequest, WashingDailyReportRequest, WashingReportReviewRequest, WashingReportUpdateRequest, WashingSetupRequest, WashingSheetRequest, WashingBulkConfirmRequest
+from app.scheduled.schemas import PMFollowUpCreate, ProblemTaskCreate, TaskCompletion, TaskIssueLink, TaskReassign, TaskScheduleEdit, TaskUnitPlanEdit, WashingCycleDateRequest, WashingCycleScheduleRequest, WashingDailyReportRequest, WashingExcusedReasonRequest, WashingExcusedReasonsRequest, WashingReportReviewRequest, WashingReportUpdateRequest, WashingSetupRequest, WashingSheetRequest, WashingBulkConfirmRequest
 from app.storage.service import SupabaseStorage
 from app.issues.service import next_issue_ticket_no
 from app.pmplan.followups import FOLLOW_UP_OUTCOMES, follow_up_out, get_follow_up_state
 from app.pmplan.alerts import alert_log_out, task_alert_scope
-from app.scheduled.washing_cycles import confirm_sheet_reports, create_daily_report, create_sheet_reports, day_activity, delete_daily_report, get_overview, list_assignees, month_cycles, review_daily_report, save_cycle_schedule, set_cycle_date, setup_plant, update_daily_report
+from app.scheduled.washing_cycles import add_excused_reason, confirm_sheet_reports, create_daily_report, create_sheet_reports, day_activity, delete_daily_report, get_overview, list_assignees, list_excused_reasons, month_cycles, remove_excused_reason, review_daily_report, save_cycle_schedule, save_excused_reasons, set_cycle_date, setup_plant, update_daily_report
 from app.scheduled.washing_import import MAX_IMPORT_BYTES, export_bytes, import_setup, template_bytes
 from app.scheduled.washing_daily_import import MAX_DAILY_BYTES, daily_template_bytes, import_daily
 
@@ -740,6 +740,28 @@ def washing_overview(db: Annotated[Session, Depends(get_db)], user: Annotated[Us
 def washing_day_activity(db: Annotated[Session, Depends(get_db)], user: Annotated[User, Depends(get_current_user)], day: date | None = None, plant_id: UUID | None = None):
     """Cycles completed and reports confirmed on one day (default today), for one plant or all visible plants."""
     return day_activity(db, user, day or business_today(), plant_id)
+
+
+# Reasons that excuse a 0-table day from the compliance score (remark match). Backend only: the O&M team can read
+# the list, the O&M Head changes it. Defaults: Work not started, Rain, Water shortage.
+@router.get("/washing/compliance-reasons")
+def washing_compliance_reasons(db: Annotated[Session, Depends(get_db)], user: Annotated[User, Depends(get_current_user)]):
+    return list_excused_reasons(db, user)
+
+
+@router.put("/washing/compliance-reasons", dependencies=[Depends(require_csrf)])
+def replace_washing_compliance_reasons(payload: WashingExcusedReasonsRequest, db: Annotated[Session, Depends(get_db)], user: Annotated[User, Depends(get_current_user)]):
+    return save_excused_reasons(db, user, payload.reasons)
+
+
+@router.post("/washing/compliance-reasons", dependencies=[Depends(require_csrf)])
+def add_washing_compliance_reason(payload: WashingExcusedReasonRequest, db: Annotated[Session, Depends(get_db)], user: Annotated[User, Depends(get_current_user)]):
+    return add_excused_reason(db, user, payload.reason)
+
+
+@router.delete("/washing/compliance-reasons", dependencies=[Depends(require_csrf)])
+def remove_washing_compliance_reason(reason: str, db: Annotated[Session, Depends(get_db)], user: Annotated[User, Depends(get_current_user)]):
+    return remove_excused_reason(db, user, reason)
 
 
 @router.post("/washing/setup", dependencies=[Depends(require_csrf)])

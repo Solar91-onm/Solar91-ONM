@@ -176,6 +176,15 @@ class WashingSheetRequest(BaseModel):
     entries: list[WashingSheetEntry] = Field(min_length=1, max_length=62)
 
 
+class WashingExcusedReasonsRequest(BaseModel):
+    """The full list of reasons that excuse a 0-table day from the compliance score (replaces the current list)."""
+    reasons: list[str] = Field(max_length=50)
+
+
+class WashingExcusedReasonRequest(BaseModel):
+    reason: str = Field(min_length=1, max_length=80)
+
+
 class WashingReportReviewRequest(BaseModel):
     decision: Literal["Confirm", "Reject"]
     remarks: str | None = Field(default=None, max_length=4000)

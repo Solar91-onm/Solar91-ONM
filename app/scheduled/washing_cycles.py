@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from calendar import monthrange
 from datetime import date, datetime, timedelta, timezone
+import re
 import uuid
 from uuid import UUID
 
@@ -11,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.core.timeutil import BUSINESS_TZ, business_today
 from app.core.config import get_settings
-from app.core.models import AuditLog, Notification, Plant, User, UserEquipmentTypeAssignment, WashingConfig, WashingDailyReport, WashingHistory, WashingTable
+from app.core.models import AppSetting, AuditLog, Notification, Plant, User, UserEquipmentTypeAssignment, WashingConfig, WashingDailyReport, WashingHistory, WashingTable
 from app.core.security import WASHING_TYPE, assignee_has_type, user_scoped_plant_ids
 from app.notifications.service import notify_users, users_with_role
 from app.scheduled.schemas import (
@@ -43,6 +44,112 @@ def invalidate_overview_cache() -> None:
 
 def _month_key(value: date) -> str:
     return value.strftime("%Y-%m")
+
+
+# ───────────── days excused from the compliance score ─────────────
+# A day with 0 tables cleaned is left out of the compliance target only when its remark names one of these reasons
+# (whole words, any case: "Heavy rain since morning" matches "Rain"). Any other 0 day counts as 0 tables cleaned.
+# The O&M Head manages the list through the API; it is stored in app_settings and these defaults apply until then.
+EXCUSED_REASONS_SETTING = "washing_excused_reasons"
+DEFAULT_EXCUSED_REASONS = ("Work not started", "Rain", "Water shortage")
+MAX_EXCUSED_REASONS = 50
+MAX_EXCUSED_REASON_LENGTH = 80
+
+
+def _normalise_reason(text: object) -> str:
+    return " ".join(str(text or "").split()).casefold()
+
+
+def excused_reasons(db: Session) -> list[str]:
+    row = db.get(AppSetting, EXCUSED_REASONS_SETTING)
+    value = row.setting_value if row is not None else None
+    if not isinstance(value, list):
+        return list(DEFAULT_EXCUSED_REASONS)
+    return [str(reason) for reason in value if _normalise_reason(reason)]
+
+
+def _reason_patterns(reasons: list[str]) -> list[re.Pattern]:
+    return [
+        re.compile(r"(?<!\w)" + r"\s+".join(re.escape(word) for word in _normalise_reason(reason).split()) + r"(?!\w)")
+        for reason in reasons if _normalise_reason(reason)
+    ]
+
+
+def _is_excused(report: WashingDailyReport, patterns: list[re.Pattern]) -> bool:
+    """A 0-table day, awaiting confirmation or confirmed, whose remark (or an older entry's specific not-done
+    reason, e.g. "Rain") names an excused reason. A rejected report never excuses its day."""
+    if report.review_status == "Rejected" or report.job_status != "Not done" or report.tables_cleaned:
+        return False
+    text = _normalise_reason(report.remarks)
+    if report.exception_reason and report.exception_reason != "Other":
+        text += " " + _normalise_reason(report.exception_reason)
+    return any(pattern.search(text) for pattern in patterns)
+
+
+def _excused_dates(reports, patterns: list[re.Pattern]) -> set[date]:
+    """Days left out of the compliance target: an excused 0 day, unless tables were also reported cleaned that day."""
+    worked = {report.report_date for report in reports if report.review_status != "Rejected" and report.tables_cleaned}
+    return {report.report_date for report in reports if _is_excused(report, patterns)} - worked
+
+
+def _clean_reason(text: object) -> str:
+    reason = " ".join(str(text or "").split())
+    if not reason:
+        raise HTTPException(422, "A reason cannot be empty")
+    if len(reason) > MAX_EXCUSED_REASON_LENGTH:
+        raise HTTPException(422, f"A reason must be {MAX_EXCUSED_REASON_LENGTH} characters or fewer")
+    return reason
+
+
+def save_excused_reasons(db: Session, user: User, reasons: list[str], action: str = "Changed") -> dict:
+    """O&M Head only: replace the list of reasons that excuse a 0-table day from the compliance score."""
+    if user.role != "O&M Head":
+        raise HTTPException(403, "Only the O&M Head can change the reasons that excuse a washing day from compliance")
+    cleaned: list[str] = []
+    for reason in reasons:
+        reason = _clean_reason(reason)
+        if _normalise_reason(reason) not in {_normalise_reason(r) for r in cleaned}:
+            cleaned.append(reason)
+    if len(cleaned) > MAX_EXCUSED_REASONS:
+        raise HTTPException(422, f"Keep the list to {MAX_EXCUSED_REASONS} reasons or fewer")
+    row = db.get(AppSetting, EXCUSED_REASONS_SETTING, with_for_update=True)
+    before = excused_reasons(db)
+    if row is None:
+        db.add(AppSetting(setting_key=EXCUSED_REASONS_SETTING, setting_value=cleaned, updated_by=user.id))
+    else:
+        row.setting_value = cleaned
+        row.updated_by = user.id
+    db.add(AuditLog(
+        user_id=user.id, actor_name=user.display_name,
+        action=f"{action} washing compliance excused reasons", module="Washing",
+        entity_type="setting", entity_id=EXCUSED_REASONS_SETTING,
+        metadata_json={"from": before, "to": cleaned},
+    ))
+    db.commit()
+    return {"reasons": cleaned, "defaults": list(DEFAULT_EXCUSED_REASONS)}
+
+
+def add_excused_reason(db: Session, user: User, reason: str) -> dict:
+    if user.role != "O&M Head":
+        raise HTTPException(403, "Only the O&M Head can change the reasons that excuse a washing day from compliance")
+    return save_excused_reasons(db, user, excused_reasons(db) + [_clean_reason(reason)], action="Added to")
+
+
+def remove_excused_reason(db: Session, user: User, reason: str) -> dict:
+    if user.role != "O&M Head":
+        raise HTTPException(403, "Only the O&M Head can change the reasons that excuse a washing day from compliance")
+    current = excused_reasons(db)
+    kept = [r for r in current if _normalise_reason(r) != _normalise_reason(reason)]
+    if len(kept) == len(current):
+        raise HTTPException(404, "That reason is not in the list")
+    return save_excused_reasons(db, user, kept, action="Removed from")
+
+
+def list_excused_reasons(db: Session, user: User) -> dict:
+    """The O&M team (O&M Head and washing Assignees) can read the list; only the O&M Head changes it."""
+    if not _is_washing_manager(db, user):
+        raise HTTPException(403, "Only the O&M team can see the washing compliance reasons")
+    return {"reasons": excused_reasons(db), "defaults": list(DEFAULT_EXCUSED_REASONS), "can_edit": user.role == "O&M Head"}
 
 
 PATTERN_KEY = "pattern"   # cycle_overrides["pattern"] = {"from": "YYYY-MM", "days": {"s1": 1, "1": 10, ...}}
@@ -529,6 +636,7 @@ def _build_overview(db: Session, user: User, include_tables: bool = False, repor
     reports_out = []
     monthly_out = []
     cycle_events_all: list[dict] = []
+    patterns = _reason_patterns(excused_reasons(db))
     for plant, config, table_count, reports in visible:
         completed_by_month: dict[str, set[int]] = {}
         for report in reports:
@@ -571,10 +679,7 @@ def _build_overview(db: Session, user: User, include_tables: bool = False, repor
             report.tables_cleaned for report in reports
             if report.report_date == today and report.review_status == "Confirmed"
         )
-        excused_dates = {
-            report.report_date for report in reports
-            if report.exception_reason and report.review_status == "Confirmed"
-        }
+        excused_dates = _excused_dates(reports, patterns)
         productivity: dict[str, int] = {}
         daily_productivity: list[dict] = []
         week_start = today - timedelta(days=6)
@@ -1294,6 +1399,7 @@ def day_activity(db: Session, user: User, day: date, plant_id: UUID | None = Non
                 if r.reviewed_by and r.reviewed_by not in row["confirmed_by"]:
                     row["confirmed_by"].append(r.reviewed_by)
     today = business_today()
+    patterns = _reason_patterns(excused_reasons(db))
     counts = dict.fromkeys(DAY_STATUS_ORDER, 0)
     for pid, row in rows.items():
         row["cycles_completed"].sort()
@@ -1317,7 +1423,7 @@ def day_activity(db: Session, user: User, day: date, plant_id: UUID | None = Non
             status = "not_reported" if day <= today else "upcoming"
         row["status"] = status
         counts[status] += 1
-        excused = status == "not_done" and row["cleaned_confirmed"] == 0
+        excused = not row["cleaned_confirmed"] and not row["cleaned_pending"] and any(_is_excused(r, patterns) for r in reps)
         row["difference"] = (row["cleaned_confirmed"] + row["cleaned_pending"] - row["target"]
                              if row["target"] is not None and not excused else None)
     active = [row for row in rows.values() if row["cycles_completed"] or row["confirmations"] or row["reported"]]
@@ -1656,6 +1762,7 @@ def check_weekly_compliance_alerts(db: Session, today: date | None = None) -> in
     week_start = current - timedelta(days=6)
     week_key = f"{current.isocalendar().year}-W{current.isocalendar().week:02d}"
     notified = 0
+    patterns = _reason_patterns(excused_reasons(db))
     for config in db.scalars(select(WashingConfig).with_for_update()):
         if not config.active:
             continue
@@ -1663,13 +1770,12 @@ def check_weekly_compliance_alerts(db: Session, today: date | None = None) -> in
         total_tables = _plant_table_count(db, config.plant_id, config)
         if not plant or not total_tables:
             continue
-        excused_dates = set(db.scalars(select(WashingDailyReport.report_date).where(
+        excused_dates = _excused_dates(db.scalars(select(WashingDailyReport).where(
             WashingDailyReport.plant_id == plant.id,
             WashingDailyReport.report_date >= week_start,
             WashingDailyReport.report_date <= current,
-            WashingDailyReport.review_status == "Confirmed",
-            WashingDailyReport.exception_reason.is_not(None),
-        )))
+            WashingDailyReport.review_status != "Rejected",
+        )).all(), patterns)
         expected = sum(
             _daily_table_target(total_tables, week_start + timedelta(days=offset), config.cycle_overrides)
             for offset in range(7)
