@@ -81,7 +81,10 @@ function s91CanonEmail(v){
 function s91CodeError(err){
   const clerkError=err&&Array.isArray(err.errors)&&err.errors[0];
   const m=String(clerkError&&(clerkError.longMessage||clerkError.message)||err&&err.message||"");
-  if(err&&err.status===429||/rate limit|only request this after|seconds/i.test(m))return "Please wait a minute before asking for another code.";
+  if(err&&err.status===429||/rate limit|only request this after|too many/i.test(m)){
+    const secs=(m.match(/(\d+)\s*sec/i)||[])[1];
+    return "Clerk is limiting sign-in requests for this email. "+(secs?"Try again in "+secs+" seconds.":"Wait a minute and try again.");
+  }
   if(/signups not allowed|sign.?up.*disabled/i.test(m))return "This email has no Clerk account yet. Ask your O&M Head to add you.";
   if(/expired|invalid/i.test(m))return "That code is wrong or has expired. Check the newest email, or ask for a new code.";
   return m||"Something went wrong. Please try again.";
@@ -237,10 +240,10 @@ function s91Alive(canvas){
 
 
 
-async function clerkToken(){
+async function clerkToken(fresh){
   if (AUTH_PROVIDER !== "clerk") return null;
   try {
-    if (window.Clerk?.session) return await window.Clerk.session.getToken();
+    if (window.Clerk?.session) return await window.Clerk.session.getToken(fresh?{skipCache:true}:undefined);
   } catch (err) {
     console.warn("Clerk session could not be read.");
   }
@@ -256,9 +259,15 @@ async function clerkSignOut(){
 async function authenticatedFetch(url, options){
   const request=options||{};
   request.headers=Object.assign({},request.headers||{});
-  const token=await clerkToken();
-  if(token)request.headers.Authorization="Bearer "+token;
-  const response=await fetch(url,request);
+  const send=async fresh=>{
+    const token=await clerkToken(fresh);
+    if(token)request.headers.Authorization="Bearer "+token;else delete request.headers.Authorization;
+    return fetch(url,request);
+  };
+  let response=await send(false);
+  // Clerk tokens live about a minute; one that expired on the way (slow upload, server waking up) gets one retry with a fresh token.
+  // A 401 is only raised by the sign-in check, before any data is written, so the retry cannot save twice.
+  if(response.status===401)response=await send(true);
   if(response.status===401){
     await clerkSignOut();
     throw new Error("Authentication required");
@@ -355,6 +364,14 @@ async function apiFetch(url,opts,latency){
   if(isRead&&[502,503,504].includes(res.status)){
     await new Promise(resolve=>setTimeout(resolve,600));
     try{res=await attempt();}catch(error){if(externalSignal&&externalSignal.aborted)throw error;throw new Error("The server did not respond. Please retry.");}
+  }
+  // Expired-on-arrival token: retry once with a fresh one before signing out (401 happens before any write runs).
+  if(res.status===401){
+    const fresh=await clerkToken(true);
+    if(fresh){
+      opts.headers["Authorization"]="Bearer "+fresh;
+      try{res=await attempt();}catch(error){if(externalSignal&&externalSignal.aborted)throw error;throw new Error(isRead?"The server did not respond. Please retry.":"No connection. Check connectivity and verify whether the change was saved.");}
+    }
   }
   if(res.status===401){
     try{await window.Clerk?.signOut();}catch(e){}

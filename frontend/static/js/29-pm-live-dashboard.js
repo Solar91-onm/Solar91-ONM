@@ -8,7 +8,7 @@
   ["pm_promise_missed","Site promise missed"],["pm_no_followup","No follow-up on late job"],
   ["pm_weekly_summary","Weekly late-job summary"],["pm_daily_plan","Morning plan: today's plants & equipment"]
  ];
- const state=()=>{const f=S.pmLive||(S.pmLive={}),defaults={plant:"all",plantQuery:"",plantOpen:false,plantTab:"late",equipment:"all",week:"all",age:"all",status:"all",query:"",page:1,covShow:"all",covOpen:[],day:TODAY,dayFrom:addDays(TODAY,-2),dayEquip:"all"};Object.keys(defaults).forEach(key=>{if(f[key]===undefined)f[key]=defaults[key]});return f};
+ const state=()=>{const f=S.pmLive||(S.pmLive={}),defaults={plant:"all",plantQuery:"",plantOpen:false,plantTab:"late",equipment:"all",week:"all",age:"all",status:"all",query:"",page:1,covShow:"all",covOpen:[],covCollapsed:true,day:TODAY,dayFrom:addDays(TODAY,-2),dayEquip:"all",dayQuery:"",dayStatus:"all",dayAll:false,focus:"all",person:"all",sort:"due",leadAll:false};Object.keys(defaults).forEach(key=>{if(f[key]===undefined)f[key]=defaults[key]});return f};
  const repaint=()=>window.render();
  const escape=typeof esc==="function"?esc:value=>String(value==null?"":value);
  const scopeTasks=()=>{
@@ -44,9 +44,17 @@
   if(f.status!=="all")rows=rows.filter(task=>taskStatus(task)===f.status);
   if(f.week!=="all")rows=rows.filter(task=>task.due&&Math.floor((dueOffset(task)||0)/7)===f.week);
   if(f.age!=="all")rows=rows.filter(task=>taskStatus(task)==="Overdue"&&daysLate(task)>=f.age[0]&&daysLate(task)<=f.age[1]);
-  if(f.query){const q=f.query.toLowerCase();rows=rows.filter(task=>[task.id,task.name,task.type,task.equip,task.assignee,task.plant].join(" ").toLowerCase().includes(q))}
+  if(f.focus==="today")rows=rows.filter(task=>isOpen(task)&&onDay(task,TODAY));
+  else if(f.focus==="unassigned")rows=rows.filter(task=>isOpen(task)&&unassigned(task));
+  if(f.person!=="all")rows=rows.filter(task=>f.person==="__none"?unassigned(task):task.assignee===f.person);
+  if(f.query){const q=f.query.toLowerCase();rows=rows.filter(task=>[task.id,task.name,task.type,task.equip,task.assignee,task.plant,(plantFor(task.plant)||{}).id].join(" ").toLowerCase().includes(q))}
   return rows.sort((a,b)=>String(a.due||"").localeCompare(String(b.due||"")));
  };
+ const isOpen=task=>task.status!=="Completed"&&task.status!=="Cancelled";
+ const unassigned=task=>{const who=String(task.assignee||"").trim();return!who||who==="Unassigned"||who==="—"};
+ /* reassignment (PATCH /api/scheduled/tasks/{id}/assignee) needs tasks.manage, which only the O&M Head holds */
+ const canAssign=()=>(S._roleLabel||S.currentRole||"")==="O&M Head";
+ const PAGE=15;
  // Read-only plant equipment totals. The equipment register and PM unit configuration
  // define unit quantities; work orders alone must never be treated as the inventory.
  let unitRequest=null,unitLoaded=false,unitError=null;
@@ -103,61 +111,69 @@
    const overdue=perUnit?effective.filter(t=>taskStatus(t)==="Overdue").length:effective.filter(t=>taskStatus(t)==="Overdue").reduce((n,t)=>n+quantity(t),0);
    const planned=perUnit?effective.length:effective.reduce((n,t)=>n+quantity(t),0);
    const label=!all.length?"Not planned":overdue?"Overdue":maintained&&(!row.units||maintained>=row.units)?"Maintained":"Scheduled";
-   return Object.assign(row,{maintained:Math.min(maintained,row.units||maintained),overdue,planned:row.units?Math.min(planned,row.units):planned,workOrders:all.length,label});
+   /* units named on the PM jobs themselves ("No. of units" on upload); shown only as a labelled fallback, never as inventory */
+   const jobUnits=perUnit?Math.max(latestByUnit.size,...effective.map(t=>Number(t.totalUnits)||0)):planned;
+   return Object.assign(row,{maintained:Math.min(maintained,row.units||maintained),overdue,planned:row.units?Math.min(planned,row.units):planned,workOrders:all.length,label,jobUnits});
   }).sort((a,b)=>a.plant.localeCompare(b.plant)||a.type.localeCompare(b.type));
  }
  /* Equipment coverage: ONE row per equipment type across the selected plants. The per-plant breakdown opens
     as a dropdown under the row, so an "All plants" inverter job no longer fills the table with a row per plant. */
  const COV_RANK={late:0,missing:1,stray:2,scheduled:3,unknown:4,done:5};
  function coverageGroups(){
-  const map=new Map();
-  coverageData().forEach(r=>{if(!map.has(r.type))map.set(r.type,{type:r.type,rows:[]});map.get(r.type).rows.push(r)});
+  const map=new Map(),data=coverageData(),hasInventory=data.some(r=>r.units!==null);
+  data.forEach(r=>{if(!map.has(r.type))map.set(r.type,{type:r.type,rows:[]});map.get(r.type).rows.push(r)});
   return[...map.values()].map(g=>{
    const rs=g.rows,sum=k=>rs.reduce((n,r)=>n+(Number(r[k])||0),0);
-   g.units=rs.some(r=>r.units!==null)?sum("units"):null;
+   g.units=rs.some(r=>r.units!==null)?sum("units"):null;g.jobUnits=sum("jobUnits");g.hasInventory=hasInventory;
    g.critical=sum("critical");g.faulty=sum("faulty");g.planned=sum("planned");g.maintained=sum("maintained");g.overdue=sum("overdue");
    g.equipped=rs.filter(r=>r.units!==null&&r.units>0);
    g.late=rs.filter(r=>r.label==="Overdue");
    g.missing=rs.filter(r=>r.units&&!r.workOrders);
-   g.stray=rs.filter(r=>r.units===null&&r.workOrders);
+   /* with no register / unit counts anywhere, "not in register" is true of every plant and says nothing: one notice covers it */
+   g.stray=hasInventory?rs.filter(r=>r.units===null&&r.workOrders):[];
    g.status=g.late.length?"late":g.missing.length?"missing":g.stray.length?"stray":(g.units&&g.maintained>=g.units)?"done":g.planned?"scheduled":"unknown";
-   g.rows=rs.slice().sort((a,b)=>(COV_RANK[rowState(a)]-COV_RANK[rowState(b)])||a.plant.localeCompare(b.plant));
+   g.rows=rs.slice().sort((a,b)=>(COV_RANK[rowState(a,hasInventory)]-COV_RANK[rowState(b,hasInventory)])||a.plant.localeCompare(b.plant));
    return g;
   }).sort((a,b)=>(COV_RANK[a.status]-COV_RANK[b.status])||(b.critical-a.critical)||a.type.localeCompare(b.type));
  }
- function rowState(r){return r.units===null?(r.workOrders?"stray":"unknown"):r.label==="Not planned"?"missing":r.label==="Overdue"?"late":r.label==="Maintained"?"done":"scheduled"}
+ function rowState(r,hasInventory){if(r.units===null&&r.workOrders&&hasInventory===false)return r.overdue?"late":r.planned&&r.maintained>=r.planned?"done":"scheduled";return r.units===null?(r.workOrders?"stray":"unknown"):r.label==="Not planned"?"missing":r.label==="Overdue"?"late":r.label==="Maintained"?"done":"scheduled"}
  const STATE_LABEL={late:"Overdue",missing:"No PM job",stray:"Not in register",scheduled:"Scheduled",unknown:"Set unit count",done:"Maintained"};
  function miniBar(done,late,total){const t=Math.max(1,total);return'<div class="pml-unit-bar" role="img" aria-label="'+done+' of '+total+' units done, '+late+' overdue"><i class="done" style="width:'+Math.min(100,100*done/t)+'%"></i><i class="overdue" style="width:'+Math.min(100,100*late/t)+'%"></i></div>'}
  function coverageHtml(){
-  const f=state(),all=f.plant==="all",open=new Set(f.covOpen||[]);
+  const f=state(),all=f.plant==="all",open=new Set(f.covOpen||[]),collapsed=f.covCollapsed!==false;
   let groups=coverageGroups().filter(g=>f.equipment==="all"||g.type===f.equipment);
+  const toggle='<button type="button" class="btn o sm pmc-toggle" data-pmc-cov aria-expanded="'+(!collapsed)+'">'+(collapsed?'Show equipment table ▾':'Hide table ▴')+'</button>';
   const head='<div class="pml-coverage-head"><div><h3>Equipment coverage</h3><p>One row per equipment type'+(all?' across all plants':'')+'. Open a row (▸) to see each plant. Counts are <b>units</b>.</p></div>'+
-   '<div class="pmx-tools"><label class="pml-inline-select">Show<select data-pmx-show aria-label="Which equipment to show"><option value="all"'+(f.covShow==="all"?" selected":"")+'>All equipment</option><option value="attention"'+(f.covShow==="attention"?" selected":"")+'>Needs attention</option><option value="critical"'+(f.covShow==="critical"?" selected":"")+'>Has critical / faulty units</option><option value="missing"'+(f.covShow==="missing"?" selected":"")+'>Without a PM job somewhere</option></select></label><button type="button" class="btn o sm" data-pml-action="refresh-units">Refresh</button></div></div>';
+   '<div class="pmx-tools">'+(collapsed?'':'<label class="pml-inline-select">Show<select data-pmx-show aria-label="Which equipment to show"><option value="all"'+(f.covShow==="all"?" selected":"")+'>All equipment</option><option value="attention"'+(f.covShow==="attention"?" selected":"")+'>Needs attention</option><option value="critical"'+(f.covShow==="critical"?" selected":"")+'>Has critical / faulty units</option><option value="missing"'+(f.covShow==="missing"?" selected":"")+'>Without a PM job somewhere</option></select></label><button type="button" class="btn o sm" data-pml-action="refresh-units">Refresh</button>')+toggle+'</div></div>';
   if(!unitLoaded)return'<article class="pml-card pml-coverage pml-eqx">'+head+'<div class="pml-empty">Loading registered equipment and unit counts…</div></article>';
   if(unitError)return'<article class="pml-card pml-coverage pml-eqx">'+head+'<div class="pml-empty">'+escape(unitError)+'</div></article>';
-  const totalUnits=groups.reduce((n,g)=>n+(g.units||0),0),critical=groups.reduce((n,g)=>n+g.critical,0),faulty=groups.reduce((n,g)=>n+g.faulty,0);
+  const hasInventory=groups.some(g=>g.hasInventory);
+  const totalUnits=groups.reduce((n,g)=>n+(hasInventory?(g.units||0):g.jobUnits),0),critical=groups.reduce((n,g)=>n+g.critical,0),faulty=groups.reduce((n,g)=>n+g.faulty,0);
   const lateTypes=groups.filter(g=>g.late.length).length,missingPlants=groups.reduce((n,g)=>n+g.missing.length,0);
-  const summary='<div class="pml-coverage-metrics"><span><b>'+totalUnits.toLocaleString("en-IN")+'</b>Registered units · '+groups.length+' equipment types</span><span class="'+(critical||faulty?"crit":"")+'"><b>'+critical+'</b>Critical units'+(faulty?' · '+faulty+' in fault':'')+'</span><span class="'+(lateTypes?"late":"")+'"><b>'+lateTypes+'</b>Equipment types with overdue work</span><span class="'+(missingPlants?"warn":"")+'"><b>'+missingPlants+'</b>Plant · equipment pairs without a PM job</span></div>';
+  const summary='<div class="pml-coverage-metrics"><span><b>'+totalUnits.toLocaleString("en-IN")+'</b>'+(hasInventory?'Registered units':'Units in PM jobs')+' · '+groups.length+' equipment types</span><span class="'+(critical||faulty?"crit":"")+'"><b>'+critical+'</b>Critical units'+(faulty?' · '+faulty+' in fault':'')+'</span><span class="'+(lateTypes?"late":"")+'"><b>'+lateTypes+'</b>Equipment types with overdue work</span><span class="'+(missingPlants?"warn":"")+'"><b>'+missingPlants+'</b>Plant · equipment pairs without a PM job</span></div>';
+  const notice=!hasInventory&&groups.length?'<div class="pmc-notice"><span><b>No equipment register or saved unit counts yet.</b> Unit totals here come from the PM jobs themselves. Save each plant’s counts once so coverage can also show equipment that has no PM job.</span>'+(typeof pmOpenUnitCfg==="function"&&["O&M Head","Assignee","Administration"].includes(S._roleLabel||S.currentRole||"")?'<button type="button" class="btn o sm" onclick="pmOpenUnitCfg()">Unit counts</button>':'')+'</div>':'';
+  if(collapsed)return'<article class="pml-card pml-coverage pml-eqx is-collapsed">'+head+summary+notice+'</article>';
   if(f.covShow==="attention")groups=groups.filter(g=>g.late.length||g.missing.length||g.stray.length);
   else if(f.covShow==="critical")groups=groups.filter(g=>g.critical||g.faulty);
   else if(f.covShow==="missing")groups=groups.filter(g=>g.missing.length);
   const chips=g=>[g.late.length?'<span class="pmx-chip late">'+g.late.length+' plant'+(g.late.length>1?'s':'')+' overdue</span>':'',g.missing.length?'<span class="pmx-chip warn">'+g.missing.length+' plant'+(g.missing.length>1?'s':'')+' without a PM job</span>':'',g.stray.length?'<span class="pmx-chip gray" title="A PM job exists but the equipment register has none of this type there">'+g.stray.length+' plant'+(g.stray.length>1?'s':'')+' not in register</span>':''].join("")||'<span class="pmx-chip ok">On track</span>';
   const critCell=(c,fl)=>(c?'<span class="pmx-crit">'+c+' high</span>':'<span class="pmx-muted">—</span>')+(fl?'<span class="pmx-fault">'+fl+' fault</span>':'');
+  const unitsCell=(units,jobUnits)=>units!==null&&units!==undefined?'<b>'+Number(units).toLocaleString("en-IN")+'</b>':jobUnits?'<b>'+Number(jobUnits).toLocaleString("en-IN")+'</b><small>in PM jobs</small>':'<span class="pmx-muted">—</span>';
   const body=groups.map(g=>{
-   const isOpen=open.has(g.type)||groups.length===1;
-   let h='<tr class="pmx-row'+(isOpen?" open":"")+' st-'+g.status+'" data-pmx-type="'+escape(g.type)+'" title="'+(isOpen?"Hide":"Show")+' plants"><td><span class="pmx-chev">›</span><b>'+escape(g.type)+'</b><small>'+(g.equipped.length?'registered at '+g.equipped.length+' plant'+(g.equipped.length>1?'s':''):'not in the register yet')+'</small></td>'+
-    '<td><b>'+(g.units===null?'—':g.units.toLocaleString("en-IN"))+'</b></td><td>'+critCell(g.critical,g.faulty)+'</td>'+
+   const isOpenRow=open.has(g.type)||groups.length===1;
+   let h='<tr class="pmx-row'+(isOpenRow?" open":"")+' st-'+g.status+'" data-pmx-type="'+escape(g.type)+'" title="'+(isOpenRow?"Hide":"Show")+' plants"><td><span class="pmx-chev">›</span><b>'+escape(g.type)+'</b><small>'+(g.equipped.length?'registered at '+g.equipped.length+' plant'+(g.equipped.length>1?'s':''):hasInventory?'not in the register yet':g.rows.length+' plant'+(g.rows.length===1?'':'s')+' with PM jobs')+'</small></td>'+
+    '<td>'+unitsCell(g.units,g.jobUnits)+'</td><td>'+critCell(g.critical,g.faulty)+'</td>'+
     '<td>'+miniBar(g.maintained,g.overdue,Math.max(g.planned,g.units||0))+'<small>'+g.maintained+' done · '+g.overdue+' overdue · '+g.planned+' planned</small></td>'+
     '<td class="pmx-chips">'+chips(g)+'</td><td><button type="button" class="btn o sm" data-pml-coverage="'+escape(g.type)+'">View jobs</button></td></tr>';
-   if(isOpen)h+=g.rows.map(r=>{const st=rowState(r);
-    return'<tr class="pmx-sub st-'+st+'"><td><button type="button" class="pml-link" data-pml-plant="'+escape(r.plant)+'">'+escape(r.plant)+'</button><small>'+escape(r.plantId||"")+'</small></td><td>'+(r.units===null?'<span class="pmx-muted">—</span>':r.units)+'</td><td>'+critCell(r.critical,r.faulty)+'</td>'+
+   if(isOpenRow)h+=g.rows.map(r=>{const st=rowState(r,hasInventory);
+    return'<tr class="pmx-sub st-'+st+'"><td><button type="button" class="pml-link" data-pml-plant="'+escape(r.plant)+'">'+escape(r.plant)+'</button><small>'+escape(r.plantId||"")+'</small></td><td>'+unitsCell(r.units,r.jobUnits)+'</td><td>'+critCell(r.critical,r.faulty)+'</td>'+
      '<td>'+miniBar(r.maintained,r.overdue,Math.max(r.planned,r.units||0))+'<small>'+r.maintained+' done · '+r.overdue+' overdue · '+r.planned+' planned</small></td>'+
      '<td><span class="pml-cov-status '+({late:"late",missing:"missing",stray:"unknown",unknown:"unknown",done:"done",scheduled:"scheduled"}[st])+'">'+STATE_LABEL[st]+'</span></td><td>'+(r.workOrders?'<button type="button" class="btn g sm" data-pmx-jobs="'+escape(r.plant)+'|'+escape(r.type)+'">Jobs</button>':'')+'</td></tr>'}).join("");
    return h;
   }).join("");
   const table='<div class="pml-coverage-scroll"><table class="pml-coverage-table pmx-table"><thead><tr><th>Equipment</th><th>Units</th><th>Critical</th><th>PM progress</th><th>Needs attention</th><th></th></tr></thead><tbody>'+(body||'<tr><td colspan="6"><div class="pml-empty">No equipment types match “'+escape({attention:"Needs attention",critical:"Has critical / faulty units",missing:"Without a PM job"}[f.covShow]||"this filter")+'”.</div></td></tr>')+'</tbody></table></div>';
-  const foot='<div class="pml-coverage-foot">Critical = equipment marked High criticality in the equipment register. “Not in register” means a PM job exists at a plant whose register has none of that equipment.</div>';
-  return'<article class="pml-card pml-coverage pml-eqx">'+head+summary+(groups.length||f.covShow!=="all"?table:'<div class="pml-empty">No registered equipment or PM work orders for this plant / equipment filter.</div>')+foot+'</article>';
+  const foot='<div class="pml-coverage-foot">Critical = equipment marked High criticality in the equipment register.'+(hasInventory?' “Not in register” means a PM job exists at a plant whose register has none of that equipment.':'')+'</div>';
+  return'<article class="pml-card pml-coverage pml-eqx">'+head+summary+notice+(groups.length||f.covShow!=="all"?table:'<div class="pml-empty">No registered equipment or PM work orders for this plant / equipment filter.</div>')+foot+'</article>';
  }
 
  /* Day planner: pick a day, see every plant and the equipment being maintained that day. */
@@ -165,34 +181,49 @@
  const WD=["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
  function dayPlannerHtml(){
   const f=state(),tasks=currentScopeTasks().filter(t=>f.equipment==="all"||t.type===f.equipment),day=f.day||TODAY,from=f.dayFrom||addDays(TODAY,-2);
-  const days=Array.from({length:14},(_,i)=>addDays(from,i));
-  const strip=days.map(d=>{
-   const list=tasks.filter(t=>onDay(t,d)),units=list.reduce((n,t)=>n+quantity(t),0),plants=new Set(list.map(t=>t.plant)).size;
+  const days=Array.from({length:14},(_,i)=>addDays(from,i)).map(d=>{const list=tasks.filter(t=>onDay(t,d));return{d,list,units:list.reduce((n,t)=>n+quantity(t),0),plants:new Set(list.map(t=>t.plant)).size}});
+  const maxUnits=Math.max(1,...days.map(x=>x.units));
+  const strip=days.map(({d,list,units,plants})=>{
    const openList=list.filter(t=>taskStatus(t)!=="Done"),late=d<TODAY&&openList.length,done=list.length&&!openList.length,dt=new Date(d+"T00:00:00");
-   return'<button type="button" class="pmd-chip'+(d===day?" on":"")+(list.length?" has":"")+(late?" late":"")+(done?" done":"")+(d===TODAY?" today":"")+'" data-pmd-day="'+d+'" aria-pressed="'+(d===day)+'" title="'+escape(displayDate(d))+': '+units+' unit(s) at '+plants+' plant(s)"><small>'+WD[dt.getDay()]+'</small><b>'+dt.getDate()+'</b><span>'+(units?units+' unit'+(units===1?'':'s'):'—')+'</span><i>'+(plants?plants+' plant'+(plants===1?'':'s'):'')+'</i></button>';
+   return'<button type="button" class="pmd-chip'+(d===day?" on":"")+(list.length?" has":"")+(late?" late":"")+(done?" done":"")+(d===TODAY?" today":"")+'" data-pmd-day="'+d+'" aria-pressed="'+(d===day)+'" title="'+escape(displayDate(d))+': '+units+' unit(s) at '+plants+' plant(s)"><small>'+WD[dt.getDay()]+'</small><b>'+dt.getDate()+'</b><span>'+(units?units+' unit'+(units===1?'':'s'):'—')+'</span><i>'+(plants?plants+' plant'+(plants===1?'':'s'):'')+'</i><em class="pmd-load" aria-hidden="true"><i style="width:'+(units?Math.max(6,Math.round(100*units/maxUnits)):0)+'%"></i></em></button>';
   }).join("");
   const dayTasks=tasks.filter(t=>onDay(t,day));
   const types=[...new Set(dayTasks.map(t=>t.type||"Equipment"))].sort();
   const eq=f.dayEquip!=="all"&&types.includes(f.dayEquip)?f.dayEquip:"all";
   const shown=dayTasks.filter(t=>eq==="all"||(t.type||"Equipment")===eq);
-  const plants=[...new Set(shown.map(t=>t.plant))].sort((a,b)=>{const la=shown.filter(t=>t.plant===a&&taskStatus(t)==="Overdue").length,lb=shown.filter(t=>t.plant===b&&taskStatus(t)==="Overdue").length;return lb-la||String(a).localeCompare(String(b))});
-  const units=shown.reduce((n,t)=>n+quantity(t),0),people=new Set(shown.map(t=>t.assignee||"Unassigned"));
+  const units=shown.reduce((n,t)=>n+quantity(t),0),people=new Set(shown.map(t=>t.assignee||"Unassigned")),plantN=new Set(shown.map(t=>t.plant)).size;
   const carried=day===TODAY?tasks.filter(t=>taskStatus(t)==="Overdue"&&!onDay(t,day)):[];
   const dt=new Date(day+"T00:00:00");
-  const cards=plants.map(pn=>{
-   const pt=shown.filter(t=>t.plant===pn),pr=plantFor(pn),pu=pt.reduce((n,t)=>n+quantity(t),0);
-   const lines=workGroups(pt).map(g=>{const c=countsOf(g.tasks),todo=g.tasks.length-(c.Done||0);
-    return'<div class="pmd-line"><span class="pmd-type">'+escape(g.type||"Equipment")+' <b>×'+g.total+'</b></span><span class="pmd-what">'+escape(g.name)+'<small>'+escape(g.freq||"")+' · '+escape(g.assignees.join(", "))+'</small></span>'+
-     '<span class="pmd-state">'+(c.Done?'<em class="ok">'+c.Done+' done</em>':'')+(c.Overdue?'<em class="late">'+c.Overdue+' overdue</em>':'')+(todo-(c.Overdue||0)>0?'<em>'+(todo-(c.Overdue||0))+' to do</em>':'')+'</span><button type="button" class="btn o sm" data-pml-group="'+groupToken(g)+'">Open</button></div>'}).join("");
-   return'<div class="pmd-plant"><div class="pmd-plant-h"><button type="button" class="pml-link" data-pml-plant="'+escape(pn)+'"><b>'+escape(pr&&pr.id?pr.id+" · ":"")+escape(pn)+'</b></button><span>'+pu+' unit'+(pu===1?'':'s')+' · '+pt.length+' work order'+(pt.length===1?'':'s')+'</span></div>'+lines+'</div>';
-  }).join("");
+  /* one compact row per plant + equipment + activity for this day; the long task text sits on one truncated line */
+  const stateOf=g=>g.overdue?"late":g.completed>=g.total?"done":g.lastDue===day?"due":g.completed?"progress":"planned";
+  const LABEL={late:"Overdue",done:"Done",due:day===TODAY?"Due today":"Due this day",progress:"In progress",planned:"Planned"},RANK={late:0,due:1,progress:2,planned:3,done:4};
+  const groups=workGroups(shown).map(g=>Object.assign(g,{dayState:stateOf(g)}));
+  const tally={all:groups.length,todo:groups.filter(g=>g.dayState!=="done").length,late:groups.filter(g=>g.dayState==="late").length,done:groups.filter(g=>g.dayState==="done").length};
+  const q=String(f.dayQuery||"").trim().toLowerCase(),want=["all","todo","late","done"].includes(f.dayStatus)?f.dayStatus:"all";
+  const rows=groups.filter(g=>(want==="all"||(want==="todo"?g.dayState!=="done":g.dayState===want))&&(!q||[g.plant,(plantFor(g.plant)||{}).id,g.type,g.name,g.assignees.join(" ")].join(" ").toLowerCase().includes(q)))
+   .sort((a,b)=>RANK[a.dayState]-RANK[b.dayState]||String(a.plant).localeCompare(String(b.plant))||String(a.type).localeCompare(String(b.type)));
+  const LIMIT=12,visible=f.dayAll?rows:rows.slice(0,LIMIT);
+  const nextDay=groups.length?"":tasks.map(t=>{if(!t.due||t.due<=day)return"";const first=t.start&&t.start<=t.due?t.start:t.due;return first>day?first:addDays(day,1)}).filter(Boolean).sort()[0]||"";
+  const who=g=>{const named=g.assignees.filter(a=>a!=="Unassigned");return(named.length?escape(named.length>2?named.length+" people":named.join(", ")):"")+(g.tasks.some(t=>isOpen(t)&&unassigned(t))?'<span class="pmc-unassigned">'+(named.length?'some unassigned':'Unassigned')+'</span>':"")};
+  const body=visible.map(g=>{const pr=plantFor(g.plant)||{},token=groupToken(g),needsWho=canAssign()&&g.tasks.some(t=>isOpen(t)&&unassigned(t));
+   return'<tr class="pmd-row st-'+g.dayState+'" data-pml-group="'+token+'"><td class="pmd-c-plant"><button type="button" class="pml-link" data-pml-plant="'+escape(g.plant)+'"><b>'+escape(pr.id||g.plant)+'</b></button><small>'+escape(g.plant)+'</small></td>'+
+    '<td class="pmd-c-eq"><span class="pmd-type">'+escape(g.type||"Equipment")+' <b>×'+g.total+'</b></span><small class="pmd-task" title="'+escape(g.name)+'">'+escape(g.name)+'</small></td>'+
+    '<td class="pmd-c-prog">'+progressBar(g)+'<small>'+g.completed+'/'+g.total+' done'+(g.overdue?' · <b class="late">'+g.overdue+' overdue</b>':'')+'</small></td>'+
+    '<td class="pmd-c-who">'+who(g)+'</td><td><span class="pmd-pill st-'+g.dayState+'">'+LABEL[g.dayState]+'</span></td>'+
+    '<td class="pmd-c-act">'+(needsWho?'<button type="button" class="btn o sm" data-pmc-assign="'+token+'">Assign</button>':'')+'<button type="button" class="btn o sm" data-pml-group="'+token+'">Open</button></td></tr>'}).join("");
+  const seg=[["all","All"],["todo","To do"],["late","Overdue"],["done","Done"]].map(([k,l])=>'<button type="button" class="'+(want===k?"on":"")+(k==="late"&&tally.late?" hot":"")+'" data-pmd-status="'+k+'" aria-pressed="'+(want===k)+'">'+l+' <b>'+tally[k]+'</b></button>').join("");
+  const list=groups.length?'<div class="pmd-tools"><input type="search" class="pmd-search" placeholder="Find plant, code, equipment or person…" value="'+escape(f.dayQuery||"")+'" data-pml-input="day-query" aria-label="Search this day\'s plan"><div class="pmd-seg" role="group" aria-label="Filter by progress">'+seg+'</div></div>'+
+   (rows.length?'<div class="pmd-table-wrap"><table class="pmd-table"><thead><tr><th>Plant</th><th>Equipment &amp; work</th><th>Progress</th><th>Assignee</th><th>Status</th><th></th></tr></thead><tbody>'+body+'</tbody></table></div>'+
+    (rows.length>LIMIT?'<div class="pmd-more"><span>Showing '+visible.length+' of '+rows.length+'</span><button type="button" class="btn o sm" data-pmd-all>'+(f.dayAll?'Show fewer':'Show all '+rows.length)+'</button></div>':'')
+    :'<div class="pml-empty">Nothing on this day matches '+(q?'“'+escape(f.dayQuery)+'”':'this filter')+'.</div>')
+   :'<div class="pml-empty">No preventive maintenance is scheduled on this day'+(f.equipment!=="all"?' for '+escape(f.equipment):'')+'.'+(nextDay?' <button type="button" class="btn o sm" data-pmd-jump="'+nextDay+'">Next planned day: '+escape(WD[new Date(nextDay+"T00:00:00").getDay()]+", "+displayDate(nextDay))+' →</button>':'')+'</div>';
   return'<article id="pm-day-planner" class="pml-card pml-day"><div class="pmd-head"><div><h3>Maintenance by day</h3><p>Pick a day to see which plants and equipment are being maintained. Each morning the team gets this list as a notification.</p></div>'+
    '<div class="pmd-nav"><button type="button" class="btn o sm" data-pmd-shift="-7" aria-label="Previous week">‹</button><button type="button" class="btn o sm" data-pmd-today>Today</button><button type="button" class="btn o sm" data-pmd-shift="7" aria-label="Next week">›</button><button type="button" class="btn g sm" data-pml-action="alerts" title="Morning plan notification settings">🔔 Alerts</button></div></div>'+
    '<div class="pmd-strip" role="group" aria-label="Choose a day">'+strip+'</div>'+
-   '<div class="pmd-sel"><div class="pmd-sel-h"><div><b>'+escape(WD[dt.getDay()]+", "+displayDate(day))+(day===TODAY?' · Today':'')+'</b><small>'+(shown.length?plants.length+' plant'+(plants.length===1?'':'s')+' · '+units+' unit'+(units===1?'':'s')+' · '+people.size+' '+(people.size===1?'person':'people'):'Nothing scheduled')+'</small></div>'+
+   '<div class="pmd-sel"><div class="pmd-sel-h"><div><b>'+escape(WD[dt.getDay()]+", "+displayDate(day))+(day===TODAY?' · Today':'')+'</b><small>'+(shown.length?plantN+' plant'+(plantN===1?'':'s')+' · '+units+' unit'+(units===1?'':'s')+' · '+people.size+' '+(people.size===1?'person':'people'):'Nothing scheduled')+'</small></div>'+
    (types.length>1?'<div class="pmd-eq">'+['all'].concat(types).map(k=>{const n=k==="all"?dayTasks.reduce((a,t)=>a+quantity(t),0):dayTasks.filter(t=>(t.type||"Equipment")===k).reduce((a,t)=>a+quantity(t),0);return'<button type="button" class="'+(eq===k?"on":"")+'" data-pmd-equip="'+escape(k)+'">'+escape(k==="all"?"All equipment":k)+' <b>'+n+'</b></button>'}).join("")+'</div>':'')+'</div>'+
    (carried.length?'<button type="button" class="pmd-carried" data-pmd-overdue>⚠ '+carried.length+' overdue work order'+(carried.length===1?'':'s')+' from earlier days still open — show them</button>':'')+
-   (cards?'<div class="pmd-grid">'+cards+'</div>':'<div class="pml-empty">No preventive maintenance is scheduled on this day'+(f.equipment!=="all"?' for '+escape(f.equipment):'')+'.</div>')+'</div></article>';
+   list+'</div></article>';
  }
 
  // Aggregate unit-level work orders only for presentation. Individual server-backed
@@ -238,8 +269,52 @@
   drawer.innerHTML='<div class="pml-drawer"><header><div><b>'+escape(group.type||"Equipment")+' · '+escape(group.name)+'</b><small>'+escape(group.plant)+' · '+escape(group.freq||"Recurring")+' · '+group.total+' units in selected cycle</small></div><button aria-label="Close" data-pml-close type="button">×</button></header><div class="pml-drawer-body">'+
    '<div class="pml-card"><div class="pml-unit-metrics"><span><b>'+escape(configured===null||configured===undefined?"—":configured)+'</b><small>Registered units</small></span><span><b>'+group.total+'</b><small>Scheduled units</small></span><span><b>'+group.completed+'</b><small>Completed</small></span><span><b>'+group.overdue+'</b><small>Overdue</small></span></div>'+progressBar(group)+'<p class="pml-unit-caption">'+group.completed+' completed · '+group.overdue+' overdue · '+(group.total-group.completed-group.overdue)+' remaining in this cycle</p></div>'+
    '<div class="pml-card"><h3>Workload by day</h3><p>Combined quantities, without separate inverter/panel rows.</p>'+daily.map(row=>'<div class="pml-daily-line"><strong>'+escape(row.date?displayDate(row.date):"No date")+'</strong><span>'+row.units+' unit'+(row.units===1?'':'s')+'</span><span class="pml-badge '+row.status.toLowerCase().replace(/ /g,'-')+'">'+escape(row.status)+'</span></div>').join('')+'</div>'+
-   '<div class="pml-card"><h3>Task records <small>· '+group.tasks.length+'</small></h3><p>Open a work record to complete checks, upload evidence or review history. Unit identifiers are not displayed in the main register.</p>'+group.tasks.slice().sort((a,b)=>String(a.due||"").localeCompare(String(b.due||""))).map(t=>'<div class="pml-task-row"><div><b>Start '+escape(displayDate(t.start))+' · Due '+escape(displayDate(t.due))+'</b><small>'+escape(t.assignee||"Unassigned")+' · '+escape(taskStatus(t))+'</small></div>'+(["O&M Head","Assignee"].includes(S._roleLabel||S.currentRole)&&!["Completed","Cancelled"].includes(t.status)?'<button type="button" class="btn o sm" data-pml-edit="'+escape(t.id)+'">Edit dates</button>':"")+'<button type="button" class="btn o sm" data-pml-open="'+escape(t.id)+'">Open task</button></div>').join('')+'</div></div><div class="pml-drawer-footer"><button type="button" class="btn o" data-pml-close>Close</button></div></div>';
+   '<div class="pml-card"><h3>Task records <small>· '+group.tasks.length+'</small></h3><p>Open a work record to complete checks, upload evidence or review history. Unit identifiers are not displayed in the main register.</p>'+group.tasks.slice().sort((a,b)=>String(a.due||"").localeCompare(String(b.due||""))).map(t=>'<div class="pml-task-row"><div><b>Start '+escape(displayDate(t.start))+' · Due '+escape(displayDate(t.due))+'</b><small>'+escape(t.assignee||"Unassigned")+' · '+escape(taskStatus(t))+'</small></div>'+(["O&M Head","Assignee"].includes(S._roleLabel||S.currentRole)&&!["Completed","Cancelled"].includes(t.status)?'<button type="button" class="btn o sm" data-pml-edit="'+escape(t.id)+'">Edit dates</button>':"")+'<button type="button" class="btn o sm" data-pml-open="'+escape(t.id)+'">Open task</button></div>').join('')+'</div></div><div class="pml-drawer-footer">'+(canAssign()&&group.tasks.some(t=>isOpen(t)&&unassigned(t))?'<button type="button" class="btn p" data-pmc-assign="'+token+'">Assign</button>':'')+'<button type="button" class="btn o" data-pml-close>Close</button></div></div>';
   drawer.onclick=event=>{if(event.target===drawer||event.target.closest('[data-pml-close]'))closeDrawer(drawer)};
+  document.body.append(drawer);
+ }
+ /* Assign one plant's equipment group (e.g. Inverter × 15 at one plant) to a person. Each work order is saved through the
+    existing per-task reassignment API, so the server keeps checking role and equipment scope and logs every change. */
+ function openAssign(token){
+  const group=groupByToken(token);if(!group)return;
+  if(!canAssign()){toast("Only the O&M Head can assign PM work.");return}
+  const open=group.tasks.filter(isOpen);
+  if(!open.length){toast("Every work order in this group is already completed.");return}
+  const people=(typeof TEAM_POOL!=="undefined"&&Array.isArray(TEAM_POOL)?TEAM_POOL:[]).filter(Boolean);
+  const current=[...new Set(open.map(t=>unassigned(t)?"Unassigned":t.assignee))];
+  const pr=plantFor(group.plant)||{};
+  const drawer=document.createElement("div");drawer.className="pml-overlay pmc-assign";
+  drawer.innerHTML='<div class="pml-drawer"><header><div><b>Assign '+escape(group.type||"equipment")+' × '+group.total+'</b><small>'+escape((pr.id?pr.id+" · ":"")+group.plant)+' · '+escape(group.name)+'</small></div><button type="button" aria-label="Close" data-pml-close>×</button></header>'+
+   '<form class="pml-drawer-body" data-pmc-assign-form><div class="pml-card"><p><b>'+open.length+'</b> open work order'+(open.length===1?'':'s')+' · now: '+escape(current.join(", "))+'</p>'+
+   (people.length?'<label>Assignee<select name="who" required>'+people.map(name=>'<option'+(current.length===1&&current[0]===name?' selected':'')+'>'+escape(name)+'</option>').join("")+'</select></label>':'<p class="pml-empty">No team member has the Assignee role yet. Add one under Team, then assign this work.</p>')+
+   '<p class="pmc-note">Every work order is updated and logged separately. The server only accepts an Assignee whose equipment types include '+escape(group.type||"this equipment")+'.</p><p class="pmc-progress" role="status" aria-live="polite"></p></div>'+
+   '<div class="pml-drawer-footer"><button type="button" class="btn o" data-pml-close>Cancel</button><button type="submit" class="btn p"'+(people.length?'':' disabled')+'>Assign '+open.length+' work order'+(open.length===1?'':'s')+'</button></div></form></div>';
+  drawer.onclick=event=>{if(event.target===drawer||event.target.closest("[data-pml-close]"))closeDrawer(drawer)};
+  drawer.querySelector("form").onsubmit=async event=>{
+   event.preventDefault();
+   const form=event.currentTarget,who=String(new FormData(form).get("who")||"").trim(),button=form.querySelector('button[type="submit"]'),status=form.querySelector(".pmc-progress");
+   if(!who||button.disabled)return;
+   button.disabled=true;form.querySelectorAll("select,[data-pml-close]").forEach(el=>{el.disabled=true});
+   let saved=0,failure=null;
+   for(const task of open){
+    if(task.assignee===who){saved++;continue}
+    status.textContent="Saving "+(saved+1)+" of "+open.length+"…";
+    try{
+     const row=await apiFetch("/api/scheduled/tasks/"+encodeURIComponent(task.id)+"/assignee",{method:"PATCH",body:{assignee:who}});
+     const index=(S.tasks||[]).findIndex(x=>x.id===task.id);if(index>=0)S.tasks[index]=Object.assign({},S.tasks[index],row);
+     saved++;
+    }catch(error){failure=error;break}
+   }
+   if(failure){
+    status.textContent="Saved "+saved+" of "+open.length+". Stopped: "+(failure.message||"the server rejected the change")+". The rest keep their current assignee.";
+    form.querySelectorAll("[data-pml-close]").forEach(el=>{el.disabled=false});
+    toast(saved?"Assigned "+saved+" of "+open.length+" — see the message in the dialog.":(failure.message||"Could not assign this work."));
+    repaint();
+    return;
+   }
+   closeDrawer(drawer);repaint();
+   toast(open.length+" work order"+(open.length===1?"":"s")+" assigned to "+who+" and logged.");
+  };
   document.body.append(drawer);
  }
  function plantDetailsHtml(){
@@ -269,16 +344,25 @@
   const onTimePercent=done.length?percent(onTime.length,done.length):0;
   const configuredTypes=unitLoaded&&!unitError?coverageData().map(row=>row.type):[];
   const equipmentTypes=[...new Set(tasks.map(task=>task.type).concat(configuredTypes).filter(Boolean))].sort();
+  const todayOpen=tasks.filter(task=>isOpen(task)&&onDay(task,TODAY)),noOwner=tasks.filter(task=>isOpen(task)&&unassigned(task));
+  const plantsOf=list=>new Set(list.map(task=>task.plant).filter(Boolean)).size;
   const plantRows=(S.plants||[]).map(plant=>{
    const jobs=tasks.filter(task=>task.plant===plant.name),late=jobs.filter(task=>taskStatus(task)==="Overdue");
-   return{plant,jobs,overdue:late.length,oldest:Math.max(0,...late.map(daysLate))};
-  }).filter(row=>row.jobs.length).sort((a,b)=>b.overdue-a.overdue||b.oldest-a.oldest);
+   const next=jobs.filter(task=>isOpen(task)&&task.due&&task.due>=TODAY).map(task=>task.due).sort()[0]||"";
+   return{plant,jobs,overdue:late.length,oldest:Math.max(0,...late.map(daysLate)),soon:jobs.filter(task=>taskStatus(task)==="Due soon").length,noOwner:jobs.filter(task=>isOpen(task)&&unassigned(task)).length,next};
+  }).filter(row=>row.jobs.length).sort((a,b)=>b.overdue-a.overdue||b.oldest-a.oldest||b.soon-a.soon||String(a.next||"9").localeCompare(String(b.next||"9"))||a.plant.name.localeCompare(b.plant.name));
   const ageBands=[[1,2,"1–2 days"],[3,6,"3–6 days"],[7,13,"1–2 weeks"],[14,99999,"2+ weeks"]];
   const ageCounts=ageBands.map(band=>overdue.filter(task=>daysLate(task)>=band[0]&&daysLate(task)<=band[1]).length);
   const weekRows=Array.from({length:9},(_,i)=>i-3).map(week=>{
    const jobs=tasks.filter(task=>task.due&&Math.floor((dueOffset(task)||0)/7)===week);
    return{week,jobs,counts:countsOf(jobs)};
   }),weekMax=Math.max(1,...weekRows.map(row=>row.jobs.length));
+  const lateOf=group=>Math.max(0,...group.tasks.filter(isOpen).map(daysLate));
+  if(f.sort==="late")visibleGroups.sort((a,b)=>b.overdue-a.overdue||lateOf(b)-lateOf(a)||a.firstDue.localeCompare(b.firstDue));
+  else if(f.sort==="plant")visibleGroups.sort((a,b)=>String(a.plant).localeCompare(String(b.plant))||a.firstDue.localeCompare(b.firstDue));
+  else if(f.sort==="equipment")visibleGroups.sort((a,b)=>String(a.type).localeCompare(String(b.type))||String(a.plant).localeCompare(String(b.plant)));
+  const pages=Math.max(1,Math.ceil(visibleGroups.length/PAGE));if(f.page>pages)f.page=pages;
+  const peopleList=[...new Set(tasks.map(task=>task.assignee).filter(name=>name&&!unassigned({assignee:name})))].sort();
   const statuses=["Done","Upcoming","Due soon","Overdue"],total=tasks.length||1,circumference=2*Math.PI*47;
   let offset=0;
   const donut='<svg viewBox="0 0 120 120" role="img" aria-label="Preventive maintenance task status"><circle cx="60" cy="60" r="47" fill="none" stroke="var(--pml-sub)" stroke-width="15"/>'+statuses.map(key=>{
@@ -290,10 +374,19 @@
   const role=S._roleLabel||S.currentRole||"",canCreate=["O&M Head","Assignee","Administration"].includes(role);
   const plantPicker=f.plantOpen?'<div class="pml-picker-menu"><input id="pml-plant-search" placeholder="Search plants…" value="'+escape(f.plantQuery)+'" data-pml-input="plant-search"><div><button type="button" data-pml-plant="all">All plants <small>'+tasks.length+' active jobs</small></button>'+
    scopedPlants().filter(plant=>(plant.name+" "+plant.id).toLowerCase().includes(f.plantQuery.toLowerCase())).map(plant=>'<button type="button" data-pml-plant="'+escape(plant.name)+'">'+escape(plant.id||"")+' '+escape(plant.name)+'<small>'+tasks.filter(task=>task.plant===plant.name&&taskStatus(task)==="Overdue").length+' overdue</small></button>').join("")+'</div></div>':"";
-  const alertsButton='<button type="button" class="btn o sm" data-pml-action="alerts">Alerts</button>';
+  const item=(attrs,title,note)=>'<button type="button" role="menuitem" '+attrs+'><b>'+title+'</b>'+(note?'<small>'+note+'</small>':'')+'</button>';
+  const link=(href,title,note)=>'<a role="menuitem" href="'+href+'" download><b>'+title+'</b><small>'+note+'</small></a>';
   /* the PM plan import is O&M Head only on the server (PLANNER_ROLES); Administration is read-only */
-  const uploadButton=role==="O&M Head"&&typeof pmImportPick==="function"?'<button type="button" class="btn o sm" onclick="pmImportPick()">Import CSV / Excel</button><a class="btn o sm" href="/static/templates/PM_Task_Plan_Template.xlsx" download>Excel template</a><a class="btn o sm" href="/static/templates/PM_Plant_Side_Template.xlsx" download title="Inverter, ACCB + MCCB, VCB, IDT, Aux. Transformer, 4 Pole, Earthing, Transmission line">Plant side Excel</a><a class="btn o sm" href="/static/templates/PM_GSS_Side_Template.xlsx" download title="VCB, 4 Pole and Transmission line on the GSS side">GSS side Excel</a><button type="button" class="btn o sm" onclick="pmDownloadCsvTemplate()">CSV template</button>':"";
-  const unitsButton=canCreate&&typeof pmOpenUnitCfg==="function"?'<button type="button" class="btn o sm" onclick="pmOpenUnitCfg()">Unit counts</button>':"";
+  const uploadButton=role==="O&M Head"&&typeof pmImportPick==="function"?'<details class="pmc-menu"><summary class="btn o sm">Upload plan <span aria-hidden="true">▾</span></summary><div class="pmc-menu-list" role="menu">'+
+   item('onclick="pmImportPick()"',"Upload Excel / CSV plan","Checked first (dry run), then you confirm")+'<span class="pmc-menu-label">Templates</span>'+
+   link("/static/templates/PM_Plant_Side_Template.xlsx","Plant side Excel","Inverter, ACCB + MCCB, VCB, IDT, Aux. Transformer, 4 Pole, Earthing, Transmission line")+
+   link("/static/templates/PM_GSS_Side_Template.xlsx","GSS side Excel","VCB, 4 Pole and Transmission line on the GSS side")+
+   link("/static/templates/PM_Task_Plan_Template.xlsx","General plan Excel","Any equipment, each row with its own start date")+
+   item('onclick="pmDownloadCsvTemplate()"',"CSV template","Header row for a CSV upload")+'</div></details>':"";
+  const moreMenu='<details class="pmc-menu pmc-menu-end"><summary class="btn o sm">More <span aria-hidden="true">▾</span></summary><div class="pmc-menu-list" role="menu">'+
+   (canCreate&&typeof pmOpenUnitCfg==="function"?item('onclick="pmOpenUnitCfg()"',"Unit counts","How many of each equipment every plant has"):'')+
+   item('data-pml-action="alerts"',"Alerts","Which PM events notify you, in-app or by email")+
+   item('onclick="exportScheduledOMCompliance()"',"Export compliance","Excel report of PM work")+item('onclick="window.print()"',"Print / PDF","")+'</div></details>';
   const addButton=canCreate?'<button type="button" class="btn p sm" onclick="openProblemScheduledTask()">+ Add job</button>':"";
   /* ---- "At a glance" overview: every card, slice, column and bar filters the register and scrolls to it ---- */
   const G=window.s91Glance;
@@ -308,41 +401,58 @@
   const eqRows=equipmentTypes.map(type=>{const rows=tasks.filter(task=>task.type===type),late=rows.filter(task=>taskStatus(task)==="Overdue").length,doneN=rows.filter(task=>taskStatus(task)==="Done").length;return{type,rows,late,doneN}}).sort((x,y)=>y.late-x.late||y.rows.length-x.rows.length||x.type.localeCompare(y.type));
   const miniRing=(value,color)=>{const R=15,C=2*Math.PI*R,v=Math.max(0,Math.min(100,value));return'<svg class="gx-mini-ring" viewBox="0 0 40 40" aria-hidden="true"><circle cx="20" cy="20" r="'+R+'" class="t"/><circle cx="20" cy="20" r="'+R+'" class="v" stroke="'+color+'" stroke-dasharray="'+(v/100*C).toFixed(1)+' '+C.toFixed(1)+'" transform="rotate(-90 20 20)"/><text x="20" y="23.5" text-anchor="middle">'+Math.round(v)+'%</text></svg>'};
   const heroHtml='<div class="gx-hero gx-hero-pm"><div class="gx-hero-copy"><span class="gx-eyebrow">PREVENTIVE MAINTENANCE · AT A GLANCE</span><span class="gx-info" tabindex="0" title="Planned vs. unplanned: use this module for recurring work and washing. If execution reveals a fault, convert the completed task into a linked O&amp;M Issue.">ⓘ Planned vs. unplanned</span><h2>'+escape(f.plant==="all"?"Portfolio overview":f.plant)+'</h2><p>'+(overdue.length?'<b class="gx-hot">'+overdue.length+' work order'+(overdue.length===1?'':'s')+' overdue</b>':'<b>Nothing overdue</b>')+' · '+dueSoon.length+' due this week · '+tasks.length+' active records'+(f.plant==="all"?' across '+scopePlantN+' plant'+(scopePlantN===1?'':'s'):'')+'</p>'+
-   (overdue.length?'<button type="button" class="gx-hero-cta" data-pml-status="Overdue">Show overdue work →</button>':'')+'</div>'+
+   '<div class="pmc-hero-actions">'+
+    (overdue.length?'<button type="button" class="pmc-pill hot" data-pml-status="Overdue"><b>'+overdue.length+'</b> overdue at '+plantsOf(overdue)+' plant'+(plantsOf(overdue)===1?'':'s')+' · oldest '+Math.max(0,...overdue.map(daysLate))+' d <span>Show →</span></button>':'')+
+    (todayOpen.length?'<button type="button" class="pmc-pill" data-pml-focus="today"><b>'+todayOpen.reduce((n,task)=>n+quantity(task),0)+'</b> units on today’s plan · '+plantsOf(todayOpen)+' plant'+(plantsOf(todayOpen)===1?'':'s')+' <span>Show →</span></button>':'')+
+    (noOwner.length?'<button type="button" class="pmc-pill warn" data-pml-focus="unassigned"><b>'+noOwner.length+'</b> open work order'+(noOwner.length===1?'':'s')+' with no assignee <span>'+(canAssign()?'Assign →':'Show →')+'</span></button>':'')+
+    (!overdue.length&&!noOwner.length?'<span class="pmc-pill ok">✓ Nothing late and every open job has an owner</span>':'')+'</div></div>'+
    '<div class="gx-hero-score">'+(G?G.scoreRing(onSchedule,scoreColor):'')+'<div><b>'+onSchedule+'%</b><small>on schedule</small><span>'+done.length+' completed · '+onTimePercent+'% on time</span></div></div></div>';
-  const kpiHtml='<div class="gx-kpis">'+
+  const kf=(key,label,n,note,color)=>kpiTile(label,n,note,color,'data-pml-focus="'+key+'"',{on:f.focus===key,pct:percent(n,tasks.length)});
+  const kpiHtml='<div class="gx-kpis pmc-kpis">'+
    kp("Overdue","Overdue",overdue.length,overdue.length?"past due date · act now":"nothing past due","var(--danger)")+
+   kf("today","Due today",todayOpen.length,todayOpen.length?"open on today’s plan · "+plantsOf(todayOpen)+" plant"+(plantsOf(todayOpen)===1?"":"s"):"nothing planned today","var(--primary)")+
    kp("Due soon","Due this week",dueSoon.length,"due in the next 7 days","var(--warning)")+
-   kp("Upcoming","Upcoming",upcomingN,"scheduled later","var(--info)")+
-   kp("Done","Completed",done.length,onTimePercent+"% finished on time","var(--success)")+'</div>';
+   kf("unassigned","Unassigned",noOwner.length,noOwner.length?"open work with no owner":"every open job has an owner","var(--status-violet)")+
+   kp("Done","Completed",done.length,onTimePercent+"% finished on time · "+upcomingN+" upcoming","var(--success)")+'</div>';
   const donutHtml=G?G.donut({title:"Where the jobs stand",sub:"Click a slice to list those work orders",noun:"work orders",attr:"data-pml-status",active:f.status,slices:[{key:"Overdue",label:"Overdue",n:overdue.length,color:COLORS.Overdue},{key:"Due soon",label:"Due this week",n:dueSoon.length,color:COLORS["Due soon"]},{key:"Upcoming",label:"Upcoming",n:upcomingN,color:COLORS.Upcoming},{key:"Done",label:"Completed",n:done.length,color:COLORS.Done}]}):'';
   const weeksHtml='<article class="gx-card"><header><h3>Jobs by due week</h3><p>Three weeks back to five ahead · click a week</p></header><div class="gx-cols">'+weekRows.map(row=>'<button type="button" class="gx-col'+(f.week===row.week?' on':'')+(row.week===0?' now':'')+(row.week<0?' past':'')+'" data-pml-week="'+row.week+'" title="'+escape(weekName(row.week))+': '+row.jobs.length+' job'+(row.jobs.length===1?'':'s')+(row.counts.Overdue?' · '+row.counts.Overdue+' overdue':'')+'"><b>'+row.jobs.length+'</b><span class="gx-col-bar">'+["Done","Upcoming","Due soon","Overdue"].map(key=>row.counts[key]?'<i style="height:'+Math.max(4,Math.round(row.counts[key]/weekMax*108))+'px;background:'+COLORS[key]+'"></i>':'').join('')+'</span><small>'+shortWeek(row.week)+'</small></button>').join('')+'</div><div class="gx-mini-legend">'+["Overdue","Due soon","Upcoming","Done"].map(key=>'<span><i style="background:'+COLORS[key]+'"></i>'+(key==="Due soon"?"Due this week":key==="Done"?"Completed":key)+'</span>').join('')+'</div></article>';
   const ageHtml='<article class="gx-card"><header><h3>How late is overdue work?</h3><p>Days past due · work turns critical after 7 days</p></header>'+(overdue.length?'<div class="gx-hbars">'+ageBands.map((band,i)=>'<button type="button" class="gx-hbar'+(ageIdx===i?' on':'')+(ageIdx>=0&&ageIdx!==i?' dim':'')+'" style="--c:'+AGE_TONE[i]+'" data-pml-age="'+i+'"><span>'+band[2]+'</span><i><b style="width:'+Math.max(ageCounts[i]?6:0,percent(ageCounts[i],ageMax))+'%"></b></i><strong>'+ageCounts[i]+'</strong></button>').join('')+'</div>':'<div class="gx-allclear"><span>✓</span><b>No overdue work</b><small>Every open job in this scope is within its due date.</small></div>')+'</article>';
   const eqHtml='<article class="gx-card gx-eq-card"><header><h3>By equipment</h3><p>Completion ring and overdue count · click to filter</p></header>'+(eqRows.length?'<div class="gx-eq-grid">'+eqRows.map(r=>'<button type="button" class="gx-eq'+(f.equipment===r.type?' on':'')+(r.late?' late':'')+'" data-pml-equipment="'+escape(r.type)+'">'+miniRing(percent(r.doneN,r.rows.length),r.late?COLORS.Overdue:COLORS.Done)+'<span class="gx-eq-copy"><b>'+escape(r.type)+'</b><small>'+(r.rows.length?r.rows.length+' job'+(r.rows.length===1?'':'s'):'No PM job scheduled')+'</small></span>'+(r.late?'<em>'+r.late+' late</em>':'<em class="ok">on track</em>')+'</button>').join('')+'</div>':'<div class="pml-empty">No equipment work orders in this scope.</div>')+'</article>';
-  const leaderHtml=f.plant==="all"?'<article class="gx-card gx-leader"><header><h3>Plants needing attention</h3><p>Ranked by overdue preventive work · click a plant to focus it</p></header>'+(plantRows.length?plantRows.slice(0,6).map((row,i)=>'<button type="button" class="gx-lead-row'+(row.overdue?' late':'')+'" data-pml-plant="'+escape(row.plant.name)+'"><i>'+(i+1)+'</i><span class="gx-lead-name"><b>'+escape(row.plant.name)+'</b><small>'+escape(row.plant.id||"")+' · '+row.jobs.length+' job'+(row.jobs.length===1?'':'s')+'</small></span>'+stacked(row.jobs)+'<strong>'+(row.overdue?row.overdue+' overdue<small>'+row.oldest+' d oldest</small>':'On track<small>no late work</small>')+'</strong></button>').join(''):'<div class="pml-empty">No plants have scheduled PM tasks yet.</div>')+'</article>':'';
+  const leadShown=f.leadAll?plantRows:plantRows.slice(0,6);
+  const leadRight=row=>row.overdue?row.overdue+' overdue<small>'+row.oldest+' d oldest</small>':row.soon?'<span class="soon">'+row.soon+' due this week</span><small>'+(row.next?'next '+escape(displayDate(row.next)):'')+'</small>':'On track<small>'+(row.next?'next due '+escape(displayDate(row.next)):'no open work')+'</small>';
+  const leaderHtml=f.plant==="all"?'<article class="gx-card gx-leader'+(f.leadAll?' pmc-lead-all':'')+'"><header><h3>Plants needing attention</h3><p>Overdue first, then work due this week · click a plant to focus it</p></header><div class="pmc-lead-list">'+(plantRows.length?leadShown.map((row,i)=>'<button type="button" class="gx-lead-row'+(row.overdue?' late':'')+'" data-pml-plant="'+escape(row.plant.name)+'"><i>'+(i+1)+'</i><span class="gx-lead-name"><b>'+escape(row.plant.name)+'</b><small>'+escape(row.plant.id||"")+' · '+row.jobs.length+' job'+(row.jobs.length===1?'':'s')+(row.noOwner?' · <em class="pmc-noowner">'+row.noOwner+' unassigned</em>':'')+'</small></span>'+stacked(row.jobs)+'<strong>'+leadRight(row)+'</strong></button>').join(''):'<div class="pml-empty">No plants have scheduled PM tasks yet.</div>')+'</div>'+
+   (plantRows.length>6?'<button type="button" class="pmc-lead-more" data-pmc-leadall>'+(f.leadAll?'Show top 6':'Show all '+plantRows.length+' plants')+'</button>':'')+'</article>':'';
   const glanceHtml='<div class="gx-glance">'+heroHtml+kpiHtml+'<div class="gx-grid gx-grid-3">'+donutHtml+weeksHtml+ageHtml+'</div><div class="gx-grid '+(leaderHtml?'gx-grid-2':'gx-grid-1')+'">'+eqHtml+leaderHtml+'</div></div>';
   const focusChips=[];
   if(f.status!=="all")focusChips.push({label:"Status: "+(f.status==="Due soon"?"Due this week":f.status==="Done"?"Completed":f.status),color:COLORS[f.status]||"#64748B",attr:'data-pml-status="'+escape(f.status)+'"'});
   if(f.week!=="all")focusChips.push({label:"Due: "+weekName(f.week),color:"#0F5C2E",attr:'data-pml-week="'+f.week+'"'});
   if(ageIdx>=0)focusChips.push({label:"Late: "+ageBands[ageIdx][2],color:AGE_TONE[ageIdx],attr:'data-pml-age="'+ageIdx+'"'});
   if(f.equipment!=="all")focusChips.push({label:"Equipment: "+f.equipment,color:"#3B82F6",attr:'data-pml-equipment="'+escape(f.equipment)+'"'});
+  if(f.focus!=="all")focusChips.push({label:f.focus==="today"?"On today’s plan":"No assignee",color:f.focus==="today"?"#0F5C2E":"#8B5CF6",attr:'data-pml-focus="'+escape(f.focus)+'"'});
+  if(f.person!=="all")focusChips.push({label:"Assignee: "+(f.person==="__none"?"Unassigned":f.person),color:"#475569",attr:'data-pml-select-clear="person"'});
   const focusBarHtml=G?G.focusBar(focusChips,'data-pml-action="clear"'):'';
   const overview='<section class="pml">'+
    '<div class="pml-toolbar"><div class="pml-brand"><span class="pml-mark">PM</span><div><b>Preventive Maintenance</b><small>Equipment units and PM work orders · '+escape(role)+'</small></div></div>'+
    '<div class="pml-picker"><button type="button" class="pml-picker-btn" data-pml-action="toggle-plants">'+escape(plantLabel)+' <span>▾</span></button>'+plantPicker+'</div><span class="pml-grow"></span>'+
-   '<div class="pml-actions"><button class="btn o sm" type="button" onclick="exportScheduledOMCompliance()">Export compliance</button><button class="btn o sm" type="button" onclick="window.print()">Print / PDF</button>'+alertsButton+unitsButton+uploadButton+addButton+'</div></div>'+
+   '<div class="pml-actions">'+uploadButton+moreMenu+addButton+'</div></div>'+
    glanceHtml+plantDetailsHtml()+coverageHtml()+dayPlannerHtml()+
    '<article class="pml-card pml-register" id="pm-unit-register"><div class="pml-register-head"><div><h3>Plant equipment maintenance register</h3><p>One row per equipment category, maintenance activity and cycle. Unit quantities are combined; open a row for work details.</p></div><span>'+visibleGroups.length+' equipment/activity rows · '+selected.length+' underlying tasks</span></div>'+
    focusBarHtml+'<div class="pml-filters"><label class="pml-inline-select">Plant<select aria-label="Choose plant for preventive maintenance" data-pml-select="plant"><option value="all">All plants ('+scopedPlants().length+')</option>'+scopedPlants().map(p=>'<option value="'+escape(p.name)+'"'+(f.plant===p.name?' selected':'')+'>'+escape(p.id||'')+' · '+escape(p.name)+'</option>').join('')+'</select></label><input type="search" placeholder="Search equipment, plant, task, person…" value="'+escape(f.query)+'" data-pml-input="query"><select aria-label="Filter by status" data-pml-select="status"><option value="all">All statuses</option>'+["Overdue","Due soon","Upcoming","Done","Cancelled"].map(key=>'<option value="'+key+'"'+(f.status===key?" selected":"")+'>'+key+'</option>').join("")+'</select><select aria-label="Filter by equipment" data-pml-select="equipment"><option value="all">All equipment</option>'+equipmentTypes.map(key=>'<option value="'+escape(key)+'"'+(f.equipment===key?" selected":"")+'>'+escape(key)+'</option>').join("")+'</select>'+
-   (f.status!=="all"||f.week!=="all"||f.age!=="all"||f.equipment!=="all"||f.plant!=="all"?'<button class="btn o sm" type="button" data-pml-action="clear">Clear filters</button>':"")+'</div>'+
-   '<div class="pml-table-wrap"><table class="pml-table pml-consolidated-table"><thead><tr><th>Equipment / maintenance work</th><th>Plant</th><th>Units</th><th>Unit progress</th><th>Assignee</th><th>Start date</th><th>Due window</th><th>Status</th><th>Action</th></tr></thead><tbody>'+
-   (visibleGroups.length?visibleGroups.slice((f.page-1)*10,f.page*10).map(group=>{
+   '<select aria-label="Filter by assignee" data-pml-select="person"><option value="all">All people</option><option value="__none"'+(f.person==="__none"?" selected":"")+'>Unassigned</option>'+peopleList.map(name=>'<option value="'+escape(name)+'"'+(f.person===name?" selected":"")+'>'+escape(name)+'</option>').join("")+'</select>'+
+   '<select aria-label="Sort rows" data-pml-select="sort">'+[["due","Sort: due date"],["late","Sort: most overdue"],["plant","Sort: plant"],["equipment","Sort: equipment"]].map(([k,l])=>'<option value="'+k+'"'+(f.sort===k?" selected":"")+'>'+l+'</option>').join("")+'</select>'+
+   (f.status!=="all"||f.week!=="all"||f.age!=="all"||f.equipment!=="all"||f.plant!=="all"||f.focus!=="all"||f.person!=="all"||f.query?'<button class="btn o sm" type="button" data-pml-action="clear">Clear filters</button>':"")+'</div>'+
+   '<div class="pml-table-wrap"><table class="pml-table pml-consolidated-table"><thead><tr><th>Equipment / maintenance work</th><th>Plant</th><th>Unit progress</th><th>Assignee</th><th>Due window</th><th>Status</th><th>Action</th></tr></thead><tbody>'+
+   (visibleGroups.length?visibleGroups.slice((f.page-1)*PAGE,f.page*PAGE).map(group=>{
     const unitInventory=coverageUnit(group.plant,group.type),inventoryTotal=unitInventory&&unitInventory.units,fullGroup=allGroups.find(g=>g.key===group.key)||group,displayUnits=inventoryTotal==null?fullGroup.total:inventoryTotal;
     const term=groupToken(group),dates=displayDate(group.firstDue)+(group.lastDue&&group.lastDue!==group.firstDue?' – '+displayDate(group.lastDue):''),starts=displayDate(group.firstStart)+(group.lastStart&&group.lastStart!==group.firstStart?' – '+displayDate(group.lastStart):'');
-    const note=group.assignees.length===1?group.assignees[0]:group.assignees.length+' team members';
-    return'<tr data-pml-group="'+term+'"><td><b>'+escape(group.type||'Equipment')+' × '+fullGroup.total+'</b><small>'+escape(group.name)+' · '+escape(group.freq||'—')+'</small></td><td>'+escape((plantFor(group.plant)||{}).id||'')+'<small>'+escape(group.plant||'Unassigned')+'</small></td><td><b>'+fullGroup.total+'</b><small>'+(inventoryTotal==null?'in this job':inventoryTotal===fullGroup.total?'all registered units':'of '+inventoryTotal+' registered')+'</small></td><td>'+progressBar(fullGroup)+'<small>'+fullGroup.completed+' done · '+fullGroup.overdue+' overdue</small></td><td>'+escape(note)+'</td><td>'+starts+'</td><td>'+dates+'</td><td><span class="pml-badge '+group.status.toLowerCase().replace(/ /g,'-')+'">'+escape(group.status)+'</span></td><td><button class="btn o sm" type="button" data-pml-group="'+term+'">View units</button></td></tr>';
-   }).join(''):'<tr><td colspan="9"><div class="pml-empty">No equipment work matches this selection. Choose another plant, clear a filter, or add a PM job.</div></td></tr>')+
-   '</tbody></table></div><div class="pml-pager"><span>'+visibleGroups.length+' equipment/activity rows · '+selected.length+' task records (unit-level history preserved)</span><div><button class="btn o sm" type="button" data-pml-page="-1" '+(f.page<=1?"disabled":"")+'>Previous</button> Page '+f.page+' of '+Math.max(1,Math.ceil(visibleGroups.length/10))+' <button class="btn o sm" type="button" data-pml-page="1" '+(f.page>=Math.ceil(visibleGroups.length/10)?"disabled":"")+'>Next</button></div></div></article></section>';
+    const named=group.assignees.filter(name=>name!=="Unassigned"),openNoOwner=group.tasks.some(task=>isOpen(task)&&unassigned(task));
+    const note=(named.length?'<span class="pmc-who">'+escape(named.length===1?named[0]:named.length+' team members')+'</span>':'')+(openNoOwner?'<span class="pmc-unassigned">'+(named.length?'some unassigned':'Unassigned')+'</span>':'');
+    const late=lateOf(group),until=group.lastDue?dueOffset({due:group.lastDue}):null;
+    const when=group.status==="Done"?'':late?'<em class="pmc-when late">'+late+' d late</em>':until===0?'<em class="pmc-when soon">due today</em>':until!==null&&until>0&&until<=7?'<em class="pmc-when soon">in '+until+' d</em>':'';
+    const rowTone=group.status==="Overdue"?' pmc-late':group.status==="Due soon"?' pmc-soon':group.status==="Done"?' pmc-done':'';
+    return'<tr class="pmc-row'+rowTone+'" data-pml-group="'+term+'"><td><b>'+escape(group.type||'Equipment')+' × '+fullGroup.total+'</b><small class="pmc-task" title="'+escape(group.name)+'">'+escape(group.name)+' · '+escape(group.freq||'—')+'</small></td><td><b>'+escape((plantFor(group.plant)||{}).id||'')+'</b><small>'+escape(group.plant||'Unassigned')+'</small></td><td>'+progressBar(fullGroup)+'<small>'+fullGroup.completed+'/'+fullGroup.total+' done · '+fullGroup.overdue+' overdue'+(inventoryTotal==null||inventoryTotal===fullGroup.total?'':' · of '+inventoryTotal+' registered')+'</small></td><td>'+(note||'<span class="pmx-muted">—</span>')+'</td><td class="pmc-dates"><b>'+dates+'</b><small>start '+starts+'</small>'+when+'</td><td><span class="pml-badge '+group.status.toLowerCase().replace(/ /g,'-')+'">'+escape(group.status)+'</span></td><td class="pmc-act">'+(canAssign()&&openNoOwner?'<button class="btn o sm" type="button" data-pmc-assign="'+term+'">Assign</button>':'')+'<button class="btn o sm" type="button" data-pml-group="'+term+'">View units</button></td></tr>';
+   }).join(''):'<tr><td colspan="7"><div class="pml-empty">No equipment work matches this selection. Choose another plant, clear a filter, or add a PM job.</div></td></tr>')+
+   '</tbody></table></div><div class="pml-pager"><span>'+visibleGroups.length+' equipment/activity rows · '+selected.length+' task records (unit-level history preserved)</span><div><button class="btn o sm" type="button" data-pml-page="-1" '+(f.page<=1?"disabled":"")+'>Previous</button> Page '+f.page+' of '+pages+' <button class="btn o sm" type="button" data-pml-page="1" '+(f.page>=pages?"disabled":"")+'>Next</button></div></div></article></section>';
   return overview;
  }
 
@@ -393,14 +503,14 @@
  if(!window._pmLiveEvents){
   window._pmLiveEvents=true;
   document.addEventListener("click",event=>{
-   const target=event.target.closest("[data-pml-action],[data-pml-status],[data-pml-week],[data-pml-age],[data-pml-equipment],[data-pml-plant],[data-pml-open],[data-pml-edit],[data-pml-page],[data-pml-coverage],[data-pml-group],[data-pml-planttab]");
+   const target=event.target.closest("[data-pml-action],[data-pml-status],[data-pml-week],[data-pml-age],[data-pml-equipment],[data-pml-plant],[data-pml-open],[data-pml-edit],[data-pml-page],[data-pml-coverage],[data-pmc-assign],[data-pml-group],[data-pml-planttab],[data-pml-focus],[data-pml-select-clear],[data-pmc-cov],[data-pmc-leadall]");
    if(!target)return;
    const f=state();
    /* chart, KPI and chip filters land on the matching register rows (chips inside the register do not jump) */
    const glanceTo=(on,id)=>{if(on&&!target.closest("#pm-unit-register"))S._glanceScroll=id||"pm-unit-register"};
    if(target.dataset.pmlAction==="refresh-units"){loadUnitCoverage(true)}
    else if(target.dataset.pmlAction==="toggle-plants"){f.plantOpen=!f.plantOpen;repaint()}
-   else if(target.dataset.pmlAction==="clear"){Object.assign(f,{equipment:"all",week:"all",age:"all",status:"all",query:"",page:1});repaint()}
+   else if(target.dataset.pmlAction==="clear"){Object.assign(f,{equipment:"all",week:"all",age:"all",status:"all",query:"",focus:"all",person:"all",page:1});repaint()}
    else if(target.dataset.pmlAction==="alerts")openAlerts();
    else if(target.dataset.pmlStatus!==undefined){f.status=f.status===target.dataset.pmlStatus?"all":target.dataset.pmlStatus;f.page=1;glanceTo(f.status!=="all");repaint()}
    else if(target.dataset.pmlWeek!==undefined){const week=Number(target.dataset.pmlWeek);f.week=f.week===week?"all":week;f.page=1;glanceTo(f.week!=="all");repaint()}
@@ -409,14 +519,25 @@
    else if(target.dataset.pmlPlant!==undefined){f.plant=target.dataset.pmlPlant;f.plantOpen=false;f.plantQuery="";f.page=1;if(target.closest(".gx-leader"))glanceTo(true,"pm-plant-focus");repaint()}
    else if(target.dataset.pmlCoverage!==undefined){f.equipment=f.equipment===target.dataset.pmlCoverage?"all":target.dataset.pmlCoverage;f.page=1;repaint();const list=document.querySelector(".pml-register");if(list)list.scrollIntoView({behavior:"smooth",block:"start"})}
    else if(target.dataset.pmlPlanttab!==undefined){f.plantTab=target.dataset.pmlPlanttab;repaint()}
+   else if(target.dataset.pmlFocus!==undefined){f.focus=f.focus===target.dataset.pmlFocus?"all":target.dataset.pmlFocus;f.page=1;glanceTo(f.focus!=="all");repaint()}
+   else if(target.dataset.pmlSelectClear!==undefined){f[target.dataset.pmlSelectClear]="all";f.page=1;repaint()}
+   else if(target.dataset.pmcCov!==undefined){f.covCollapsed=f.covCollapsed===false;repaint()}
+   else if(target.dataset.pmcLeadall!==undefined){f.leadAll=!f.leadAll;repaint()}
+   else if(target.dataset.pmcAssign!==undefined){event.stopPropagation();const overlay=target.closest(".pml-unit-drawer");if(overlay)overlay.remove();openAssign(target.dataset.pmcAssign)}
    else if(target.dataset.pmlGroup!==undefined){event.stopPropagation();openGroup(target.dataset.pmlGroup)}
    else if(target.dataset.pmlEdit!==undefined){event.stopPropagation();const overlay=target.closest(".pml-unit-drawer");if(overlay)overlay.remove();if(typeof pmEditOpen==="function")pmEditOpen(target.dataset.pmlEdit)}
    else if(target.dataset.pmlOpen!==undefined){event.stopPropagation();const overlay=target.closest(".pml-unit-drawer");if(overlay)overlay.remove();openModal("taskDetail",{id:target.dataset.pmlOpen})}
-   else if(target.dataset.pmlPage!==undefined){const pages=Math.max(1,Math.ceil(workGroups(filteredTasks()).length/10));f.page=Math.max(1,Math.min(pages,f.page+Number(target.dataset.pmlPage)));repaint()}
+   else if(target.dataset.pmlPage!==undefined){const pages=Math.max(1,Math.ceil(workGroups(filteredTasks()).length/PAGE));f.page=Math.max(1,Math.min(pages,f.page+Number(target.dataset.pmlPage)));repaint()}
   });
+  document.addEventListener("click",event=>{
+   const inMenu=event.target.closest(".pmc-menu");
+   document.querySelectorAll(".pmc-menu[open]").forEach(menu=>{if(menu!==inMenu||event.target.closest(".pmc-menu-list [role=menuitem]"))menu.removeAttribute("open")});
+  });
+  document.addEventListener("keydown",event=>{if(event.key==="Escape")document.querySelectorAll(".pmc-menu[open]").forEach(menu=>menu.removeAttribute("open"))});
   document.addEventListener("input",event=>{
    const field=event.target.dataset&&event.target.dataset.pmlInput;if(!field)return;
    const f=state();if(field==="query"){f.query=event.target.value;f.page=1;repaint();const input=document.querySelector('[data-pml-input="query"]');if(input){input.focus();input.setSelectionRange(input.value.length,input.value.length)}}
+   else if(field==="day-query"){f.dayQuery=event.target.value;f.dayAll=false;const start=event.target.selectionStart;repaint();const input=document.querySelector('[data-pml-input="day-query"]');if(input){input.focus();input.setSelectionRange(start,start)}}
    else if(field==="plant-search"){f.plantQuery=event.target.value;const start=event.target.selectionStart;repaint();const input=document.getElementById("pml-plant-search");if(input){input.focus();input.setSelectionRange(start,start)}}
   });
   document.addEventListener("change",event=>{
@@ -428,10 +549,13 @@
  if(!window._pmDayEvents){
   window._pmDayEvents=true;
   document.addEventListener("click",event=>{
-   const t=event.target.closest("[data-pmd-day],[data-pmd-shift],[data-pmd-today],[data-pmd-equip],[data-pmx-type],[data-pmd-overdue],[data-pmx-jobs]");
+   const t=event.target.closest("[data-pmd-day],[data-pmd-shift],[data-pmd-today],[data-pmd-equip],[data-pmx-type],[data-pmd-overdue],[data-pmx-jobs],[data-pmd-status],[data-pmd-all],[data-pmd-jump]");
    if(!t||event.target.closest("[data-pml-coverage],[data-pml-plant]"))return;
    const f=state();
-   if(t.dataset.pmdDay!==undefined){f.day=t.dataset.pmdDay;f.dayEquip="all"}
+   if(t.dataset.pmdDay!==undefined){f.day=t.dataset.pmdDay;f.dayEquip="all";f.dayAll=false}
+   else if(t.dataset.pmdStatus!==undefined){f.dayStatus=t.dataset.pmdStatus;f.dayAll=false}
+   else if(t.dataset.pmdAll!==undefined){f.dayAll=!f.dayAll}
+   else if(t.dataset.pmdJump!==undefined){f.day=t.dataset.pmdJump;f.dayEquip="all";f.dayAll=false;if(f.day<f.dayFrom||f.day>addDays(f.dayFrom,13))f.dayFrom=addDays(f.day,-2)}
    else if(t.dataset.pmdShift!==undefined){f.dayFrom=addDays(f.dayFrom||addDays(TODAY,-2),Number(t.dataset.pmdShift));const last=addDays(f.dayFrom,13);if(f.day<f.dayFrom||f.day>last)f.day=f.dayFrom<=TODAY&&TODAY<=last?TODAY:f.dayFrom}
    else if(t.dataset.pmdToday!==undefined){f.day=TODAY;f.dayFrom=addDays(TODAY,-2)}
    else if(t.dataset.pmdEquip!==undefined){f.dayEquip=t.dataset.pmdEquip}

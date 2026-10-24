@@ -14,10 +14,12 @@ with sync_playwright() as p:
  page.add_style_tag(path=str(CSS))
  page.evaluate('''() => {
  window.TODAY='2026-10-10';
- window.S={view:'om-module',omTab:'scheduled',_roleLabel:'O&M Head',plants:[{id:'SP-01',dbId:'uuid-1',name:'Bhadla'},{id:'SP-02',dbId:'uuid-2',name:'Jodhpur'}],tasks:[],pmLive:{plant:'all',plantQuery:'',plantOpen:false,plantTab:'late',equipment:'all',week:'all',age:'all',status:'all',query:'',page:1}};
+ window.S={view:'om-module',omTab:'scheduled',_roleLabel:'O&M Head',plants:[{id:'SP-01',dbId:'uuid-1',name:'Bhadla'},{id:'SP-02',dbId:'uuid-2',name:'Jodhpur'}],tasks:[],pmLive:{plant:'all',plantQuery:'',plantOpen:false,plantTab:'late',equipment:'all',week:'all',age:'all',status:'all',query:'',page:1,covCollapsed:false}};
  window.esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
  window.pmDisplayTaskName=t=>String(t.name||'').replace(/\\s+—\\s+unit\\s+\\d+$/i,'');
  window.fmtD=s=>s;window.fmtDT=s=>s;
+ window.addDays=(iso,d)=>{const x=new Date(iso+'T00:00:00Z');x.setUTCDate(x.getUTCDate()+d);return x.toISOString().slice(0,10)};
+ window.kpiTile=(label,value)=>'<div class="cc-kpi2">'+label+' '+value+'</div>';
  window.renderScheduled=()=>'<p>Legacy</p>';
  window.renderModal=()=>'';window.openModal=(kind,ctx)=>{window._opened={kind,ctx}};
  window.toast=()=>{};
@@ -32,8 +34,8 @@ with sync_playwright() as p:
  assert page.locator('.pml-consolidated-table tbody tr').count()==2,page.locator('.pml-consolidated-table').inner_text()
  assert 'Inverter × 12' in page.locator('.pml-consolidated-table').inner_text()
  assert page.locator('.pml-picker-btn').count()==1
- assert page.locator('.pml-inline-select select option').count()==3
- page.locator('.pml-inline-select select').select_option(label='SP-01 · Bhadla')
+ assert page.locator('[data-pml-select="plant"] option').count()==3
+ page.locator('[data-pml-select="plant"]').select_option(label='SP-01 · Bhadla')
  assert page.locator('.pml-consolidated-table tbody tr').count()==1
  assert page.locator('.pml-plant-focus').count()==1
  assert '12' in page.locator('.pml-focus-row').first.inner_text()
@@ -48,7 +50,7 @@ with sync_playwright() as p:
  page.set_viewport_size({'width':390,'height':844})
  page.evaluate('render()')
  assert page.locator('.pml-plant-focus').count()==1
- assert page.locator('.pml-inline-select').is_visible()
+ assert page.locator('[data-pml-select="plant"]').is_visible()
  page.evaluate('''() => {S.pmLive={plant:'Bhadla',status:'Overdue'};render()}''')
  assert page.locator('.pml-consolidated-table tbody tr').count()==1
  assert 'Inverter × 12' in page.locator('.pml-consolidated-table').inner_text()

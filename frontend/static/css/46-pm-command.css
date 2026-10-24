@@ -1,0 +1,148 @@
+/* Preventive Maintenance — at-a-glance command layer (loaded last).
+   1 toolbar menus · 2 hero action pills · 3 five KPI tiles · 4 plants list · 5 coverage notice / collapsed card
+   6 day planner list · 7 register highlighting · 8 assign drawer · 9 small screens
+   Colours reuse the --pml-* / --pmx-* tokens from pm-live-dashboard.css and 39-pm-planner.css, which already switch for dark mode. */
+
+/* ---------- 1 · toolbar menus (native <details>, no extra state) ---------- */
+#app .pml-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.pmc-menu{position:relative}
+.pmc-menu>summary{list-style:none;display:inline-flex;align-items:center;gap:6px;cursor:pointer;user-select:none}
+.pmc-menu>summary::-webkit-details-marker{display:none}
+.pmc-menu>summary span{font-size:10px;opacity:.7;transition:transform .15s}
+.pmc-menu[open]>summary{border-color:var(--pmx-sel,#0F5C2E);box-shadow:0 0 0 3px rgba(15,92,46,.12)}
+.pmc-menu[open]>summary span{transform:rotate(180deg)}
+.pmc-menu-list{position:absolute;z-index:60;top:calc(100% + 6px);left:0;min-width:290px;max-width:min(340px,92vw);display:grid;gap:2px;padding:6px;
+ background:var(--pml-card,#fff);border:1px solid var(--pml-line,#E4E9E6);border-radius:14px;box-shadow:0 18px 40px rgba(16,40,26,.16)}
+.pmc-menu-end .pmc-menu-list{left:auto;right:0}
+.pmc-menu-list>button,.pmc-menu-list>a{display:block;width:100%;text-align:left;border:0;background:none;border-radius:10px;padding:8px 10px;font:inherit;color:var(--pml-ink,#111814);text-decoration:none;cursor:pointer}
+.pmc-menu-list>button:hover,.pmc-menu-list>a:hover,.pmc-menu-list>button:focus-visible,.pmc-menu-list>a:focus-visible{background:var(--pml-sub,#F2F5F3)}
+.pmc-menu-list b{display:block;font-size:13px}
+.pmc-menu-list small{display:block;font-size:11.5px;color:var(--pml-muted,#4F5B55);margin-top:1px;line-height:1.35}
+.pmc-menu-label{display:block;padding:8px 10px 3px;font-size:10.5px;font-weight:800;letter-spacing:.07em;text-transform:uppercase;color:var(--pml-muted,#4F5B55);border-top:1px solid var(--pml-line,#E4E9E6);margin-top:4px}
+
+/* ---------- 2 · hero action pills ---------- */
+.pmc-hero-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+.pmc-pill{display:inline-flex;align-items:center;gap:6px;border:1px solid rgba(255,255,255,.28);background:rgba(255,255,255,.12);color:#fff;border-radius:999px;padding:6px 12px;font:inherit;font-size:12.5px;font-weight:600;cursor:pointer;backdrop-filter:blur(4px);transition:background .15s,transform .15s}
+button.pmc-pill:hover{background:rgba(255,255,255,.22);transform:translateY(-1px)}
+.pmc-pill b{font-size:14px;font-weight:800}
+.pmc-pill span{font-weight:800;opacity:.9}
+.pmc-pill.hot{background:#fff;color:#9F1D1D;border-color:#fff;box-shadow:0 8px 18px rgba(0,0,0,.18)}
+.pmc-pill.warn{background:rgba(251,191,36,.2);border-color:rgba(251,191,36,.55)}
+.pmc-pill.ok{cursor:default;background:rgba(74,222,128,.16);border-color:rgba(74,222,128,.45)}
+
+/* ---------- 3 · five KPI tiles ---------- */
+#app .gx-kpis.pmc-kpis{grid-template-columns:repeat(5,minmax(0,1fr))}
+
+/* ---------- 4 · plants list ---------- */
+.pmc-lead-list{display:grid;gap:2px}
+.pmc-lead-all .pmc-lead-list{max-height:420px;overflow:auto;padding-right:4px}
+.pmc-lead-more{margin-top:8px;align-self:center;border:1px solid var(--gx-line,#e1e9e4);background:var(--gx-card,#fff);border-radius:999px;padding:5px 14px;font:inherit;font-size:12px;font-weight:700;color:var(--gx-brand,#0c5e2a);cursor:pointer}
+.pmc-lead-more:hover{background:var(--gx-sub,#f3f7f4)}
+.gx-lead-row>strong .soon{color:var(--warning-strong,#92600E)}
+.pmc-noowner{font-style:normal;font-weight:700;color:#7C3AED}
+
+/* ---------- 5 · coverage ---------- */
+.pml-coverage.is-collapsed .pml-coverage-metrics{margin-bottom:0}
+.pmc-toggle{white-space:nowrap}
+.pmc-notice{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:10px 0 2px;padding:10px 12px;border-radius:11px;font-size:12.5px;line-height:1.45;
+ background:var(--pmx-blue-bg,#EAF2FE);color:var(--pml-ink,#111814);border:1px solid color-mix(in srgb,var(--pmx-blue,#27639E) 25%,transparent)}
+.pmc-notice span{flex:1 1 360px}
+.pmc-notice b{color:var(--pmx-blue,#27639E)}
+
+/* ---------- 6 · day planner ---------- */
+.pmd-chip .pmd-load{display:block;width:72%;height:4px;margin-top:4px;border-radius:99px;background:color-mix(in srgb,var(--pml-muted,#4F5B55) 14%,transparent);overflow:hidden;font-style:normal}
+.pmd-chip .pmd-load i{display:block;height:100%;min-height:0;border-radius:inherit;background:var(--pmx-blue,#27639E)}
+.pmd-chip.late .pmd-load i{background:var(--pmx-late,#C93B2E)}
+.pmd-chip.done .pmd-load i{background:var(--pmx-ok,#147B38)}
+.pmd-tools{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:2px 0 10px}
+.pmd-search{flex:1 1 260px;min-width:0;height:36px;border:1px solid var(--pml-line,#E4E9E6);border-radius:10px;padding:0 12px;font:inherit;font-size:13px;background:var(--pml-card,#fff);color:var(--pml-ink,#111814)}
+.pmd-search:focus{outline:none;border-color:var(--pmx-sel,#0F5C2E);box-shadow:0 0 0 3px rgba(15,92,46,.14)}
+.pmd-seg{display:inline-flex;padding:3px;gap:2px;border-radius:11px;background:var(--pml-card,#fff);border:1px solid var(--pml-line,#E4E9E6)}
+.pmd-seg button{border:0;background:none;border-radius:8px;padding:5px 11px;font:inherit;font-size:12.5px;font-weight:700;color:var(--pml-muted,#4F5B55);cursor:pointer;white-space:nowrap}
+.pmd-seg button b{margin-left:3px;color:var(--pml-ink,#111814)}
+.pmd-seg button.hot b{color:var(--pmx-late,#C93B2E)}
+.pmd-seg button.on{background:var(--pml-ink,#111814);color:var(--pml-card,#fff)}
+.pmd-seg button.on b{color:inherit}
+.pmd-table-wrap{border:1px solid var(--pml-line,#E4E9E6);border-radius:12px;overflow:auto;background:var(--pml-card,#fff)}
+.pmd-table{width:100%;border-collapse:collapse;font-size:12.5px}
+#app .pmd-table th{position:sticky;top:0;z-index:1;text-align:left;font-size:11px;text-transform:uppercase;padding:8px 12px;background:var(--pml-sub,#F2F5F3);color:var(--pml-muted,#4F5B55)}
+#app .pmd-table td{padding:7px 12px;border-top:1px solid var(--pml-line,#E4E9E6);vertical-align:middle}
+.pmd-row{cursor:pointer}
+.pmd-row:hover td{background:var(--pml-sub,#F2F5F3)}
+.pmd-row td:first-child{box-shadow:inset 3px 0 0 var(--pmd-tone,transparent)}
+.pmd-row.st-late{--pmd-tone:var(--pmx-late,#C93B2E)}.pmd-row.st-due{--pmd-tone:var(--pmx-warn,#A75B04)}
+.pmd-row.st-progress,.pmd-row.st-planned{--pmd-tone:var(--pmx-blue,#27639E)}.pmd-row.st-done{--pmd-tone:var(--pmx-ok,#147B38)}
+.pmd-row.st-late td{background:color-mix(in srgb,var(--pmx-late-bg,#FCEAE8) 55%,transparent)}
+.pmd-row.st-done td{opacity:.78}
+.pmd-row small{display:block;font-size:11.5px;color:var(--pml-muted,#4F5B55);margin-top:2px}
+.pmd-c-plant{white-space:nowrap}
+.pmd-c-plant .pml-link b{font-size:13px}
+.pmd-c-eq{max-width:340px}
+.pmd-c-eq .pmd-task{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:320px}
+.pmd-c-prog{min-width:140px}
+.pmd-c-prog .pml-unit-bar{max-width:180px}
+.pmd-c-prog b.late{color:var(--pmx-late,#C93B2E)}
+.pmd-c-who{font-size:12.5px}
+.pmd-c-act{text-align:right;white-space:nowrap}
+.pmd-c-act .btn+.btn{margin-left:6px}
+.pmd-pill{display:inline-block;border-radius:999px;padding:2px 9px;font-size:11.5px;font-weight:800;white-space:nowrap;background:var(--pmx-blue-bg,#EAF2FE);color:var(--pmx-blue,#27639E)}
+.pmd-pill.st-late{background:var(--pmx-late-bg,#FCEAE8);color:var(--pmx-late,#C93B2E)}
+.pmd-pill.st-due{background:var(--pmx-warn-bg,#FDF3E3);color:var(--pmx-warn,#A75B04)}
+.pmd-pill.st-done{background:var(--pmx-ok-bg,#E7F6EC);color:var(--pmx-ok,#147B38)}
+.pmd-more{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:8px;font-size:12.5px;color:var(--pml-muted,#4F5B55)}
+
+/* ---------- 7 · register ---------- */
+.pmc-unassigned{display:inline-block;border-radius:999px;padding:2px 8px;font-size:11.5px;font-weight:800;white-space:nowrap;background:#F1EAFE;color:#6D28D9}
+.pmc-who+.pmc-unassigned{margin-left:6px}
+.pmc-who{font-weight:600}
+.pmc-when{display:block;font-style:normal;font-size:11.5px;font-weight:800;margin-top:2px}
+.pmc-when.late{color:var(--pmx-late,#C93B2E)}.pmc-when.soon{color:var(--pmx-warn,#A75B04)}
+#app .pml-consolidated-table tr.pmc-row td:first-child{box-shadow:inset 3px 0 0 var(--pmc-tone,transparent)}
+#app .pml-consolidated-table tr.pmc-late{--pmc-tone:var(--pmx-late,#C93B2E)}
+#app .pml-consolidated-table tr.pmc-late td{background:color-mix(in srgb,var(--pmx-late-bg,#FCEAE8) 50%,transparent)}
+#app .pml-consolidated-table tr.pmc-soon{--pmc-tone:var(--pmx-warn,#A75B04)}
+#app .pml-consolidated-table tr.pmc-done{--pmc-tone:var(--pmx-ok,#147B38)}
+#app .pml-consolidated-table .pmc-task{display:block;max-width:300px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#app .pml-consolidated-table td.pmc-act{white-space:nowrap}
+#app .pml-consolidated-table td.pmc-act .btn+.btn{margin-left:6px}
+#app .pml-consolidated-table td{padding:9px 12px}
+#app .pml-consolidated-table td:nth-child(4){min-width:0}
+#app .pml-consolidated-table td.pmc-dates{white-space:nowrap}
+#app .pml-consolidated-table td.pmc-dates b{font-size:13px}
+#app .pml-consolidated-table td small{white-space:nowrap}
+#app .pml-consolidated-table td:first-child small{white-space:nowrap}
+#app .pml-filters select{max-width:170px}
+#app .pml-filters .pml-inline-select select{max-width:190px}
+#app .pml-filters input{min-width:170px}
+
+/* ---------- 8 · assign drawer ---------- */
+.pmc-assign .pml-drawer{width:min(460px,100%)}
+.pmc-assign label{display:grid;gap:5px;font-size:12px;font-weight:700;margin:12px 0}
+.pmc-assign select{height:40px;border:1px solid var(--border,#E4E9E6);border-radius:10px;padding:0 10px;font:inherit;font-size:14px;background:var(--surface,#fff);color:inherit}
+.pmc-note{font-size:12px;color:var(--muted-foreground,#4F5B55);line-height:1.45}
+.pmc-progress{min-height:18px;font-size:12.5px;font-weight:700;color:var(--primary,#0c5e2a)}
+
+/* ---------- 9 · small screens ---------- */
+@media (max-width:1180px){#app .gx-kpis.pmc-kpis{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media (max-width:760px){
+ #app .gx-kpis.pmc-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}
+ .pmc-menu-list{position:fixed;left:12px!important;right:12px!important;top:auto;bottom:12px;max-width:none;min-width:0}
+ .pmd-seg{width:100%;overflow-x:auto}
+ .pmd-table thead{display:none}
+ .pmd-table,.pmd-table tbody{display:block}
+ .pmd-table tr{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px 10px;padding:10px 12px;border-top:1px solid var(--pml-line,#E4E9E6)}
+ .pmd-table tr:first-child{border-top:0}
+ #app .pmd-table td{display:block;padding:0;border:0;background:none!important}
+ .pmd-c-eq,.pmd-c-prog{grid-column:1/-1;max-width:none}
+ .pmd-c-eq .pmd-task{max-width:none}
+ .pmd-c-who{align-self:center}
+ /* the whole row opens the group on a tap, so only Assign stays as a button */
+ .pmd-c-act{grid-column:1/-1;text-align:left}
+ .pmd-c-act .btn[data-pml-group]{display:none}
+ .pmd-c-act:not(:has([data-pmc-assign])){display:none!important}
+ .pmd-row td:first-child{box-shadow:none}
+ .pmd-row{box-shadow:inset 3px 0 0 var(--pmd-tone,transparent)}
+}
+@media print{.pmc-menu,.pmc-hero-actions,.pmd-tools,.pmd-more,.pmc-act,.pmd-c-act{display:none!important}}
+#app .pml-consolidated-table .pml-badge{white-space:nowrap}
+.pml-day .pml-empty .btn{margin-left:8px}

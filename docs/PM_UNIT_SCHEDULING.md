@@ -56,3 +56,14 @@ The two Transmission line phases share the days left after the fixed phases.
 
 ## Plant side and GSS side Excel templates
 `frontend/static/templates/PM_Plant_Side_Template.xlsx` and `PM_GSS_Side_Template.xlsx` (buttons *Plant side Excel* / *GSS side Excel* on Preventive Maintenance and in the upload dialog). They come pre-filled with one row per equipment in cycle order. Fill in *Plant(s)*; there is **no Start date column**, because the cycle start (day 1) is chosen in the portal's upload dialog. The dropdowns list only that side's equipment. The workbook Keywords (`solar91-pm-side:plant` / `:gss`) make the importer reject a GSS-side type in the Plant side file and any non-GSS type in the GSS side file. Rebuild both files with `python scripts/build_pm_side_templates.py` after changing the cycle. The general `PM_Task_Plan_Template.xlsx` and CSV upload are unchanged.
+
+## At-a-glance PM page (October 2026)
+Presentation only (`29-pm-live-dashboard.js`, `46-pm-command.css`); no API, schema or stored-record changes.
+- **Toolbar**: *+ Add job*, an *Upload plan* menu (upload, Plant side / GSS side / general Excel, CSV template; O&M Head) and a *More* menu (Unit counts, Alerts, Export compliance, Print).
+- **Hero pills and KPI tiles**: Overdue · Due today (open work on today's plan) · Due this week · Unassigned (open work with no assignee) · Completed. Each filters the register; the filter shows as a chip.
+- **Plants needing attention**: overdue first, then work due this week; *Show all plants* lists every plant with its next due date and unassigned count.
+- **Equipment coverage** is collapsed to its summary by default. With no Equipment Register rows or saved unit counts anywhere, unit totals come from the PM jobs ("in PM jobs") and one notice replaces the per-row "not in register" chips.
+- **Maintenance by day**: the day strip shows a workload bar; the chosen day is a compact list (plant · equipment × units · progress · assignee · status), searchable, filtered by All / To do / Overdue / Done, 12 rows until *Show all*. An empty day offers a jump to the next planned day.
+- **Register**: 15 rows a page, people filter, sort (due date / most overdue / plant / equipment), overdue rows tinted with "N d late", "due today / in N d" for work due this week, an *Unassigned* chip.
+- **Assign** (O&M Head; register row, day list, unit drawer): assigns a plant's open work orders in one group through the existing `PATCH /api/scheduled/tasks/{id}/assignee`, one request per work order, so role and equipment-scope checks and the task log stay on the server. If one is rejected it stops, says how many were saved and leaves the rest unchanged.
+- Browser check: `python scripts/verify_pm_command_view.py` (mock data and API, no credentials).

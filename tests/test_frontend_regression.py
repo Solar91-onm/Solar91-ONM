@@ -221,3 +221,46 @@ def test_plant_code_normalization_and_embedded_seed_codes_are_canonical():
       ''')
       run=subprocess.run(['node','-e',script],cwd=ROOT,capture_output=True,text=True,timeout=10)
       assert run.returncode==0,run.stderr
+
+def test_expired_token_401_is_retried_once_with_a_fresh_token_before_sign_out():
+    script=textwrap.dedent(r'''
+      const fs=require('fs'),vm=require('vm'),assert=require('assert');
+      const s=fs.readFileSync('frontend/static/js/00-auth-data-and-imports.js','utf8');
+      const start=s.indexOf('async function apiFetch(');assert(start>=0);
+      let i=s.indexOf('{',start),depth=0,end=-1;
+      for(let j=i;j<s.length;j++){if(s[j]==='{')depth++;else if(s[j]==='}'&&--depth===0){end=j+1;break}}
+      assert(end>0);
+      const run=async statuses=>{
+        const auth=[];let signedOut=0,signIn=0;
+        const sandbox={AbortController,FormData,clearTimeout,setTimeout,
+          clerkToken:async fresh=>fresh?'fresh':'stale',
+          window:{Clerk:{signOut:async()=>{signedOut++}}},showClerkSignIn:()=>{signIn++},
+          fetch:async(_url,o)=>{auth.push(o.headers.Authorization);const status=statuses[auth.length-1];
+            return {status,ok:status<400,headers:{get:()=>null},json:async()=>({saved:true})}}};
+        vm.createContext(sandbox);vm.runInContext(s.slice(start,end),sandbox);
+        let result,error;
+        try{result=await sandbox.apiFetch('/api/pm-plan/import',{method:'POST',body:{a:1}})}catch(e){error=e}
+        return {auth,signedOut,signIn,result,error};
+      };
+      (async()=>{
+        const ok=await run([401,200]);
+        assert.deepStrictEqual(ok.auth,['Bearer stale','Bearer fresh']);
+        assert.strictEqual(ok.signedOut,0);assert.strictEqual(ok.result.saved,true);
+        const bad=await run([401,401]);
+        assert.strictEqual(bad.auth.length,2,'only one retry');
+        assert.strictEqual(bad.signedOut,1);assert.strictEqual(bad.signIn,1);
+        assert.strictEqual(bad.error.message,'Authentication required');
+      })().catch(error=>{console.error(error);process.exitCode=1});
+    ''')
+    run=subprocess.run(['node','-e',script],cwd=ROOT,capture_output=True,text=True,timeout=10)
+    assert run.returncode==0,run.stderr
+
+def test_pm_command_stylesheet_loads_last_and_pm_page_parses():
+    index=(ROOT/'frontend/templates/index.html').read_text(encoding='utf-8')
+    assert '/static/css/46-pm-command.css' in index
+    assert index.index('/static/css/46-pm-command.css')>index.index('/static/css/45-command-center.css')
+    js=(ROOT/'frontend/static/js/29-pm-live-dashboard.js').read_text(encoding='utf-8')
+    # group assignment goes through the existing per-task API so role, equipment scope and audit stay server-side
+    assert '"/api/scheduled/tasks/"+encodeURIComponent(task.id)+"/assignee"' in js
+    run=subprocess.run(['node','--check','frontend/static/js/29-pm-live-dashboard.js'],cwd=ROOT,capture_output=True,text=True,timeout=10)
+    assert run.returncode==0,run.stderr
