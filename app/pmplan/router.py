@@ -29,7 +29,8 @@ from app.core.models import AuditLog, Equipment, OMTask, NotificationPreference,
 from app.core.security import equipment_scope_matches, get_current_user, require_csrf, user_scoped_plant_ids
 from app.plants.codes import find_plant_by_code
 from app.pmplan.alerts import PM_ALERT_EVENTS, PM_TEAM_RECIPIENT_MODES, default_pm_preferences, get_pm_preferences
-from app.pmplan.cycle import CYCLE, CYCLE_DAYS, window as cycle_window, window_out
+from app.pmplan.cycle import (CYCLE, CYCLE_DAYS, NAMED_TYPES, chained_window, phase_for, phase_index,
+                               window as cycle_window, window_out)
 from app.pmplan.units import distribute, next_cycle_id, run_daily  # noqa: F401  (next_cycle_id re-exported for the scheduled router)
 from app.scheduled.schemas import ALLOWED_ASSETS, ALLOWED_FREQUENCIES
 
@@ -304,7 +305,8 @@ def _create_tasks(db: Session, user: User, tpl: dict[str, Any], items: list[dict
     counts: dict[Any, int] = {}
     quantity_by_plant: dict[Any, int | None] = {}
     for it in items:
-        due = start + timedelta(days=(it.get("due_day") or it.get("day") or 1) - 1)
+        job_start = it.get("start") or start      # PM cycle: each plant has its own turn (_fit_to_cycle)
+        due = job_start + timedelta(days=(it.get("due_day") or it.get("day") or 1) - 1)
         wo = "WO-" + uuid.uuid4().hex[:10].upper()
         who_user: User | None = it["assignee_user"]
         if it["plant"].id not in quantity_by_plant:
@@ -316,7 +318,7 @@ def _create_tasks(db: Session, user: User, tpl: dict[str, Any], items: list[dict
         registered_quantity = quantity_by_plant[it["plant"].id]
         db.add(OMTask(
             work_order_no=wo, plant_id=it["plant"].id, task_name=it["name"], task_type=tpl["equipment_type"],
-            equipment_ref=it["ref"], frequency=tpl["frequency"], due_on=due, start_on=start, assignee_text=it["assignee"],
+            equipment_ref=it["ref"], frequency=tpl["frequency"], due_on=due, start_on=job_start, assignee_text=it["assignee"],
             quantity=it.get("total_units") if it.get("unit_no") is not None else registered_quantity,
             unit_no=it.get("unit_no"), total_units=it.get("total_units"), cycle_id=it.get("cycle_id"),
             cycle_day=it.get("day"), planned_due_on=due if it.get("unit_no") else None,
@@ -335,13 +337,14 @@ def _create_tasks(db: Session, user: User, tpl: dict[str, Any], items: list[dict
     db.add(AuditLog(user_id=user.id, actor_name=user.display_name, action="Created PM tasks from plan", module="Scheduled O&M",
                     metadata_json={"equipment_type": tpl["equipment_type"], "task": tpl["task_name"], "count": len(items)}))
     db.flush()
+    first_due = min((it.get("start") or start for it in items), default=start)
     try:
         from app.notifications.service import create_notification
         batch = uuid.uuid4().hex[:8]
         for uid, n in counts.items():
             create_notification(db, user_id=uid, event_type="task_assigned",
                                 title=f"{n} PM task(s) assigned — {tpl['task_name']}",
-                                message=f"{tpl['equipment_type']} · first due {start.isoformat()}",
+                                message=f"{tpl['equipment_type']} · first due {first_due.isoformat()}",
                                 target_type="task", target_id=first_by_user[uid], dedupe_key=f"pm-plan:{batch}:{uid}")
     except Exception:  # notifications must never block planning
         pass
@@ -397,6 +400,64 @@ def _start_and_plan(payload: ApplyIn, equipment_type: str) -> tuple[date, dict[s
     plan["phase_days"] = w["days"]
     plan["spread_days"] = plan["spread_days"] or w["days"]
     return w["start"], plan, w
+
+
+_UNCHAINED_FREQUENCIES = ("Daily", "Weekly")    # short-period checks are not part of the monthly phase order
+
+
+def _booked(db: Session, plant_ids: list[Any], cycle_start: date,
+            planned: list[tuple[Any, int, date]]) -> dict[Any, dict[int, date]]:
+    """Last due date booked per plant and cycle phase in the cycle from `cycle_start` (its 30 days).
+
+    Counts PM work already in the register (any status but Cancelled, not Daily/Weekly; e.g. inverters set
+    up earlier from Add PM task) plus `planned` (plant, phase, last due) from earlier rows of the same upload.
+    Miscellaneous holds every other equipment type, so only work planned in the same request counts for it."""
+    lo, hi = cycle_start, cycle_start + timedelta(days=CYCLE_DAYS - 1)
+    out: dict[Any, dict[int, date]] = {}
+
+    def add(pid: Any, idx: int, end: date) -> None:
+        if lo <= end <= hi:
+            row = out.setdefault(pid, {})
+            row[idx] = max(row.get(idx, end), end)
+
+    if plant_ids:
+        for pid, etype, end in db.execute(
+                select(OMTask.plant_id, OMTask.task_type, func.max(OMTask.due_on))
+                .where(OMTask.plant_id.in_(plant_ids), OMTask.task_type.in_(NAMED_TYPES),
+                       OMTask.problem_source == "PM template", OMTask.status != "Cancelled",
+                       OMTask.frequency.not_in(_UNCHAINED_FREQUENCIES), OMTask.due_on.between(lo, hi))
+                .group_by(OMTask.plant_id, OMTask.task_type)):
+            add(pid, phase_index(etype), end)
+    for pid, idx, end in planned:
+        if pid in plant_ids:
+            add(pid, idx, end)
+    return out
+
+
+def _fit_to_cycle(db: Session, items: list[dict[str, Any]], equipment_type: str, cycle_start: date,
+                  planned: list[tuple[Any, int, date]] | None = None) -> dict[Any, dict[str, Any]]:
+    """Give each plant's tasks its own turn in the cycle, after the work already booked there (chained_window).
+
+    Sets item["start"]; with `planned`, records each plant's last due date so later rows chain after it."""
+    pids = list(dict.fromkeys(it["plant"].id for it in items))
+    booked = _booked(db, pids, cycle_start, planned or [])
+    wins = {pid: chained_window(equipment_type, cycle_start, booked.get(pid)) for pid in pids}
+    idx = phase_index(equipment_type)
+    for it in items:
+        it["start"] = wins[it["plant"].id]["start"]
+        if planned is not None:
+            planned.append((it["plant"].id, idx, it["start"] + timedelta(days=(it.get("due_day") or it.get("day") or 1) - 1)))
+    return wins
+
+
+def _cycle_out(nominal: dict[str, Any] | None, wins: dict[Any, dict[str, Any]], items: list[dict[str, Any]]) -> dict[str, Any]:
+    """`cycle`: the first plant's turn (standard turn if nothing is created); `cycle_moved`: plants whose turn moved."""
+    if not nominal:
+        return {"cycle": None, "cycle_moved": []}
+    names = {it["plant"].id: it["plant"].plant_name for it in items}
+    first = next(iter(wins.values()), nominal)
+    return {"cycle": window_out(first),
+            "cycle_moved": [{"plant": names[pid], **window_out(w)} for pid, w in wins.items() if w["moved_days"]]}
 
 
 def _asks_all_plants(values: list[str]) -> bool:
@@ -495,11 +556,12 @@ def apply_template(template_id: uuid.UUID, payload: ApplyIn, db: Annotated[Sessi
         plants, without = _equipped_plants(db, plants, tpl["equipment_type"])
     start, plan, w = _start_and_plan(payload, tpl["equipment_type"])
     items, skipped = _plan_tasks(db, user, plants, tpl, payload.assignees, payload.per_unit, payload.units, set(), {}, plan)
+    wins = _fit_to_cycle(db, items, tpl["equipment_type"], payload.start_date) if w else {}
     if not payload.dry_run and items:
         _create_tasks(db, user, tpl, items, start, str(row.id))
         db.commit()
     return {**_summary(items, skipped, payload.dry_run, db, tpl), "skipped_plants": [p.plant_name for p in without],
-            "cycle": window_out(w) if w else None}
+            **_cycle_out(w, wins, items)}
 
 
 # ───────────────────────── quick add ("Add PM task") ─────────────────────────
@@ -518,6 +580,7 @@ def quick_add(payload: QuickTaskIn, db: Annotated[Session, Depends(get_db)], use
         _require(user, TEMPLATE_WRITERS, "Only the O&M Head can save plant unit configuration")
     start, plan, w = _start_and_plan(payload, tpl["equipment_type"])
     items, skipped = _plan_tasks(db, user, plants, tpl, payload.assignees, payload.per_unit, payload.units, set(), {}, plan)
+    wins = _fit_to_cycle(db, items, tpl["equipment_type"], payload.start_date) if w else {}
     if not payload.dry_run and items:
         tid = str(_upsert_template(db, user, tpl).id) if payload.save_template else None
         _create_tasks(db, user, tpl, items, start, tid)
@@ -528,7 +591,7 @@ def quick_add(payload: QuickTaskIn, db: Annotated[Session, Depends(get_db)], use
                 _save_config(db, user, plant, tpl["equipment_type"], payload.total_units, payload.units_per_day or spread_pace or tpl.get("units_per_day"))
         db.commit()
     return {**_summary(items, skipped, payload.dry_run, db, tpl), "skipped_plants": [p.plant_name for p in without],
-            "cycle": window_out(w) if w else None}
+            **_cycle_out(w, wins, items)}
 
 
 @router.get("/cycle")
@@ -833,8 +896,33 @@ def _parse_checks(text: Any) -> list[dict[str, Any]]:
     return out
 
 
+SIDE_KEYWORD = "solar91-pm-side:"      # workbook Keywords of the Plant side / GSS side templates
+SIDE_AREAS = {"plant": "Plant side", "gss": "GSS side"}
+
+
+def _plan_side(wb: Any) -> str | None:
+    """'plant' / 'gss' for the side templates (PM_Plant_Side_Template / PM_GSS_Side_Template), else None."""
+    words = str(getattr(wb.properties, "keywords", None) or "").casefold()
+    side = words.split(SIDE_KEYWORD, 1)[1].split()[0].strip(",;") if SIDE_KEYWORD in words else ""
+    return side if side in SIDE_AREAS else None
+
+
+def _side_error(side: str | None, equipment_type: str) -> str | None:
+    """A Plant side file takes no GSS-side equipment and a GSS side file only GSS-side equipment."""
+    if not side:
+        return None
+    area = phase_for(equipment_type)["area"]
+    if side == "gss" and area != "GSS side":
+        return (f"'{equipment_type}' is not GSS side equipment. This is the GSS side template: use VCB - GSS side, "
+                f"4 Pole - GSS side or Transmission line - GSS side, or move the row to the Plant side template")
+    if side == "plant" and area == "GSS side":
+        return f"'{equipment_type}' is GSS side equipment. Move this row to the GSS side template"
+    return None
+
+
 def _read_plan(content: bytes) -> list[dict[str, Any]]:
     wb = load_workbook(io.BytesIO(content), data_only=True, read_only=True)
+    side = _plan_side(wb)
     ws = wb["PM Tasks"] if "PM Tasks" in wb.sheetnames else wb[wb.sheetnames[0]]
     rows = list(ws.iter_rows(values_only=True))
     if not rows:
@@ -854,6 +942,7 @@ def _read_plan(content: bytes) -> list[dict[str, Any]]:
         if str(cell.get("task") or "").strip().upper().startswith("EXAMPLE"):
             continue
         cell["row"] = n
+        cell["side"] = side
         out.append(cell)
     return out
 
@@ -963,7 +1052,10 @@ async def import_plan(db: Annotated[Session, Depends(get_db)], user: Annotated[U
                       file: UploadFile = File(...), dry_run: bool = True, follow_cycle: bool = False,
                       cycle_start: date | None = None):
     """With follow_cycle, each row's Start date (else cycle_start) is that row's PM cycle start and the
-    row's dates come from its equipment's phase (e.g. Inverter days 1-7, VCB Panel days 10-11)."""
+    row's dates come from its equipment's phase (e.g. Inverter days 1-7, VCB Panel days 10-11). Rows run in
+    cycle order and each plant's phase starts after the earlier phases' work there (_fit_to_cycle), so a
+    10-day inverter round moves ACCB + MCCB and everything after it. The Plant side / GSS side templates
+    reject equipment of the other side."""
     _require(user, PLANNER_ROLES, "Only the O&M Head can import a PM plan")
     if not (file.filename or "").lower().endswith((".xlsx", ".xlsm", ".csv")):
         raise HTTPException(422, "Upload an .xlsx, .xlsm, or .csv file")
@@ -985,14 +1077,20 @@ async def import_plan(db: Annotated[Session, Depends(get_db)], user: Annotated[U
     users_cache: dict[str, User | None] = {}
     templates_only = skipped = 0
     default_start = (cycle_start if follow_cycle and cycle_start else None) or business_today() + timedelta(days=3)
-    schedule: dict[tuple[str, date], dict[str, Any]] = {}
-    for cell in cells:
-        tpl, errs = _clean_row(cell)
+    schedule: dict[tuple[str, date, date], dict[str, Any]] = {}
+    planned: list[tuple[Any, int, date]] = []        # (plant, phase, last due) of rows already planned in this file
+    rows = [(cell, *_clean_row(cell)) for cell in cells]
+    if follow_cycle:      # cycle order (Inverter first, GSS side last) so each equipment follows the one before it
+        rows.sort(key=lambda r: phase_index(r[1]["equipment_type"]) if r[1] else -1)
+    for cell, tpl, errs in rows:
         plant_text = str(cell.get("plants") or "").strip()
         plants: list[Plant] = []
         items: list[dict[str, Any]] = []
         start = default_start
-        if tpl and plant_text:
+        side_err = _side_error(cell.get("side"), tpl["equipment_type"]) if tpl else None
+        if side_err:
+            errs.append(side_err)
+        elif tpl and plant_text:
             try:
                 plants = _resolve_plants(db, [p for p in plant_text.split(",")])
                 units_hint = None
@@ -1004,14 +1102,21 @@ async def import_plan(db: Annotated[Session, Depends(get_db)], user: Annotated[U
                 w = None
                 if follow_cycle:
                     w = cycle_window(tpl["equipment_type"], start)
-                    start = w["start"]
+                    cycle_day1, start = start, w["start"]
                     row_plan.update(spread_days=w["days"], phase_days=w["days"])
                 items, skip = _plan_tasks(db, user, plants, tpl, assignees, True, units_hint, seen, users_cache, row_plan)
                 skipped += skip
                 if w:
-                    entry = schedule.setdefault((tpl["equipment_type"], w["start"]),
-                                                {"equipment_type": tpl["equipment_type"], **window_out(w), "tasks": 0})
-                    entry["tasks"] += len(items)
+                    names = {it["plant"].id: it["plant"].plant_name for it in items}
+                    for pid, pw in _fit_to_cycle(db, items, tpl["equipment_type"], cycle_day1, planned).items():
+                        n_tasks = sum(1 for it in items if it["plant"].id == pid)
+                        last = max(it["start"] + timedelta(days=(it.get("due_day") or it.get("day") or 1) - 1)
+                                   for it in items if it["plant"].id == pid)
+                        entry = schedule.setdefault((tpl["equipment_type"], pw["start"], last), {
+                            "equipment_type": tpl["equipment_type"], **window_out(pw), "end": last.isoformat(),
+                            "tasks": 0, "plants": []})
+                        entry["tasks"] += n_tasks
+                        entry["plants"].append(names[pid])
             except HTTPException as exc:
                 errs.append(str(exc.detail))
         elif tpl:
@@ -1020,6 +1125,7 @@ async def import_plan(db: Annotated[Session, Depends(get_db)], user: Annotated[U
             problems.append({"row": cell["row"], "errors": errs})
         elif tpl:
             plan.append((cell, tpl, plants, items, start))
+    problems.sort(key=lambda p: p["row"])
     if problems:
         raise HTTPException(422, {"message": f"{len(problems)} row(s) need fixing — nothing was imported", "problems": problems[:50]})
 
@@ -1028,7 +1134,7 @@ async def import_plan(db: Annotated[Session, Depends(get_db)], user: Annotated[U
         raise HTTPException(422, f"This file would create {total} tasks (limit {MAX_TASKS_PER_CALL}). Split it into smaller files.")
     result = {"dry_run": dry_run, "rows": len(plan), "templates": len(plan), "tasks": total, "skipped": skipped,
               "template_only_rows": templates_only, "follow_cycle": follow_cycle,
-              "schedule": sorted(schedule.values(), key=lambda e: (e["start"], e["equipment_type"]))}
+              "schedule": sorted(schedule.values(), key=lambda e: (e["start"], phase_index(e["equipment_type"])))}
     if dry_run:
         return result
     for cell, tpl, plants, items, start in plan:

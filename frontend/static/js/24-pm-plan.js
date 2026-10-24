@@ -89,7 +89,8 @@
       const pre=await apiFetch(url,{method:"POST",body:Object.assign({},body,{dry_run:true})});
       if(!pre.count){toast(pre.skipped?("Nothing new to create — "+pre.skipped+" already scheduled."):"Nothing to create.");return false}
       const note=pre.open_without_units?"\n\nNote: "+pre.open_without_units+" open task(s) for this job already exist without unit numbers. They are left as they are.":"";
-      const cyc=pre.cycle?"\n\nPM cycle: "+cycleText(pre.cycle)+".":"";
+      const moved=(pre.cycle_moved||[]).map(m=>"• "+m.plant+": "+fmtD(m.start)+(m.end!==m.start?" → "+fmtD(m.end):"")+" (moved "+m.moved_days+" day(s) to follow earlier work there)");
+      const cyc=pre.cycle?"\n\nPM cycle: "+cycleText(pre.cycle)+"."+(moved.length?"\n"+moved.slice(0,8).join("\n")+(moved.length>8?"\n…and "+(moved.length-8)+" more":""):""):"";
       const noKit=(pre.skipped_plants||[]).length?"\n\nSkipped "+pre.skipped_plants.length+" plant(s) with no "+(body.equipment_type||"such equipment")+" registered: "+pre.skipped_plants.slice(0,8).join(", ")+(pre.skipped_plants.length>8?"…":""):"";
       if((pre.count>1||note||noKit||cyc)&&!confirm("Create "+pre.count+" task(s) across "+pre.plants+" plant(s)"+(pre.days>1?", spread over up to "+pre.days+" day(s)":"")+(pre.skipped?" ("+pre.skipped+" already scheduled will be skipped)":"")+"?"+cyc+note+noKit))return false;
       const res=await apiFetch(url,{method:"POST",body:Object.assign({},body,{dry_run:false})});
@@ -336,6 +337,7 @@
     const body='<label style="display:flex;gap:8px;align-items:center;font-size:12.5px;margin:0 0 8px"><input id="im-cycle" type="checkbox" checked onchange="pmImportDates()"/> Set the dates from the 30-day PM cycle (Plant side, then GSS side)</label>'+
       '<div class="field" style="max-width:240px"><span class="lbl">Cycle start date (day 1)</span><input id="im-start" class="inp" type="date" value="'+addDays(TODAY,3)+'" oninput="pmImportDates()"/></div>'+
       '<p id="im-note" class="muted" style="font-size:12px;margin:0 0 8px"></p>'+
+      '<p style="font-size:12.5px;margin:0 0 8px">Templates: <a href="/static/templates/PM_Plant_Side_Template.xlsx" download>Plant side Excel</a> · <a href="/static/templates/PM_GSS_Side_Template.xlsx" download>GSS side Excel</a> — each file only accepts its own side\'s equipment.</p>'+
       '<div id="im-table" style="overflow:auto;max-height:46vh"></div>';
     return modal("Upload PM plan (Excel / CSV)","Each row's equipment is scheduled on its own days of the cycle. Next month repeats on the same cycle days.",body,
       '<button class="btn o" onclick="closeModal()">Cancel</button><button class="btn p" onclick="pmImportChoose()">Choose file…</button>',true);
@@ -343,7 +345,7 @@
   window.pmImportDates=function(){
     const tb=document.getElementById("im-table"),note=document.getElementById("im-note");if(!tb)return;
     const on=checked("im-cycle"),start=v("im-start"),ph=(S._pmCycle&&S._pmCycle.phases)||[];
-    note.textContent=on?"A row's own Start date is used as that row's cycle start; rows without one use the date above. Inverter units are spread over their days; a single unit (one VCB, one IDT…) is due on the last day of its turn."
+    note.textContent=on?"Equipment is done in the order below, one after the other. If earlier work at a plant runs longer than its days (e.g. a 10-day inverter round), the next equipment starts the day after it and the rest move with it — the confirmation shows the final dates. Inverter units are spread over their days; a single unit (one VCB, one IDT…) is due on the last day of its turn. A row's own Start date (general template only) is that row's cycle start."
       :"Dates are taken exactly as written in each row's Start date (blank = 3 days from today).";
     if(!on){tb.innerHTML="";return}
     if(!ph.length){tb.innerHTML='<div class="muted" style="padding:8px 0">Could not load the PM cycle.</div>';return}
@@ -361,7 +363,7 @@
     const post=async dry=>{const fd=new FormData();fd.append("file",file);return apiFetch("/api/pm-plan/import?dry_run="+dry+q,{method:"POST",body:fd})};
     try{
       const pre=await post(true);
-      const sch=(pre.schedule||[]).map(x=>"• "+x.equipment_type+" ("+x.area+"): "+fmtD(x.start)+(x.end!==x.start?" → "+fmtD(x.end):"")+" · "+x.tasks+" task(s)");
+      const sch=(pre.schedule||[]).map(x=>"• "+x.equipment_type+" ("+x.area+"): "+fmtD(x.start)+(x.end!==x.start?" → "+fmtD(x.end):"")+" · "+x.tasks+" task(s)"+((x.plants||[]).length>1?" · "+x.plants.length+" plants":"")+(x.moved_days?" · moved "+x.moved_days+" day(s) after earlier work":"")+(x.past_cycle_days?" · "+x.past_cycle_days+" day(s) past the 30-day cycle":""));
       const msg="Save "+pre.templates+" PM job(s) and create "+pre.tasks+" task(s)"+(pre.skipped?" ("+pre.skipped+" already scheduled will be skipped)":"")+(pre.template_only_rows?"\n"+pre.template_only_rows+" row(s) have no plant — saved as templates only.":"")+"?"+
         (sch.length?"\n\nDates from the 30-day PM cycle:\n"+sch.slice(0,16).join("\n")+(sch.length>16?"\n…and "+(sch.length-16)+" more":""):"");
       if(!confirm(msg))return;
