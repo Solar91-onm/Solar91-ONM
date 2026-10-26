@@ -63,7 +63,7 @@
   const f=readSetupForm();if(f.plantId===null)return;
   S.washSetupDraft=Object.assign({},S.washSetupDraft||{},f);
  };
- window.washClearFilters=function(){const ui=S._washUi;Object.assign(ui,{plant:"all",q:"",bucket:"all",show:"all",state:"all",cyc:"all",assignee:"all",region:"all",sort:"late",page:1});S.washF=Object.assign({},ui);const el=document.getElementById("wc-register");if(el)el.innerHTML=registerHtml();render()};
+ window.washClearFilters=function(){const ui=S._washUi;Object.assign(ui,{plant:"all",q:"",bucket:"all",show:"all",repDay:"",state:"all",cyc:"all",assignee:"all",region:"all",sort:"late",page:1});S.washF=Object.assign({},ui);const el=document.getElementById("wc-register");if(el)el.innerHTML=registerHtml();render()};
  window.washSetupPlantChanged=function(){
   const f=readSetupForm();if(!f.plantId)return;
   /* switching plant loads that plant's saved values; nothing typed for the previous plant is carried over */
@@ -131,15 +131,45 @@
   const canReport=isField()||isTeam(),id=h(p.plant_id);
   return '<div class="wc-ex"><div class="wc-ex-cycles">'+cy+'</div><div class="wc-actions"><button class="btn o sm" onclick="openWashingPlantDetails(\''+id+'\')">Cycle &amp; reports</button>'+(canReport?'<button class="btn p sm" onclick="openWashingDailyReport(\''+id+'\')">'+(isField()?'Report today':'Record cleaning')+'</button>':'')+(isTeam()?'<button class="btn g sm" onclick="openWashingSetup(\''+id+'\')">Edit setup</button>':'')+'</div></div>';
  }
+ /* "Not reported" view: today or any of the previous 9 days. Each day's per-plant status comes from day-activity (one
+    request per day, kept until the overview reloads — so once a plant's report is saved it drops out of the list). */
+ const REP_DAYS=10;
+ /* the day picker is an O&M team control (O&M Head / Assignee); Site Engineers always see today for their own plant */
+ const repDay=()=>{const t=todayIso(),d=(S._washUi||{}).repDay;return isTeam()&&d&&d<=t&&d>=addDays(t,-(REP_DAYS-1))?d:t};
+ const repLabel=d=>d===todayIso()?"Not reported today":"Not reported on "+dayName(d);
+ function dayEntry(day){
+  if(S._washDayFor!==S._washCycles){S._washDayFor=S._washCycles;S._washDays={}}
+  const c=S._washDays;
+  if(!c[day]&&S._washCycles){
+   c[day]={loading:true};
+   apiFetch("/api/scheduled/washing/day-activity?day="+encodeURIComponent(day))
+    .then(r=>{if(S._washDays===c)c[day]={data:r,status:Object.fromEntries((r.plants||[]).map(p=>[p.plant_id,p.status]))}})
+    .catch(e=>{if(S._washDays===c)c[day]={error:detailOf(e,"Could not load the reports for "+dayName(day)+".")}})
+    .finally(()=>{if(S._washDays===c&&onWashing()&&!S.modal)render()});
+  }
+  return c[day]||{};
+ }
+ /* no report of any kind saved for that day (a 0 / not-done day counts as reported); paused plants are left out.
+    Until a past day has loaded nothing matches; today falls back to the overview's own today_report. */
+ function notReportedOn(p,day){
+  const e=dayEntry(day);
+  if(e.status)return e.status[p.plant_id]==="not_reported";
+  return day===todayIso()&&p.active!==false&&p.today_report==null;
+ }
+ function repDaySelect(onchange){
+  const t=todayIso(),rd=repDay();
+  return '<select class="wx-mini wx-repday" aria-label="Day to check" title="Plants with no washing report saved for this day" onchange="'+onchange+'">'+Array.from({length:REP_DAYS},(_,i)=>addDays(t,-i)).map((d,i)=>'<option value="'+d+'"'+(d===rd?' selected':'')+'>'+(i===0?'Today · '+fmt(d):i===1?'Yesterday · '+fmt(d):h(dayName(d)))+'</option>').join("")+'</select>';
+ }
+ window.washRepDay=function(v){const ui=S._washUi;if(!ui)return;ui.show="notreported";S._glanceScroll="wc-results";washFilter("repDay",v)};
  function filtered(){
   const ui=S._washUi=S._washUi||{q:"",bucket:"all",show:"all",assignee:"all",region:"all",sort:"late",page:1,pageSize:12,selected:[]};
-  const f=S.washF=Object.assign({q:"",bucket:"all",show:"all"},ui),q=(f.q||"").trim().toLowerCase(),head=isTeam();
+  const f=S.washF=Object.assign({q:"",bucket:"all",show:"all"},ui),q=(f.q||"").trim().toLowerCase(),head=isTeam(),rd=repDay();
   const hit=p=>(!q||(p.plant+" "+p.site_code).toLowerCase().includes(q))&&(!f.plant||f.plant==="all"||p.plant_id===f.plant);
   /* glance filters: state = the plant's tile colour (donut slice), cyc = "<cycle no>:<state>" (cycle progress bar) */
   const stOk=p=>!f.state||f.state==="all"||(f.state==="late"?tileState(p).indexOf("late-")===0:tileState(p)===f.state);
   const cycOk=p=>{if(!f.cyc||f.cyc==="all")return true;const parts=String(f.cyc).split(":");return (p.cycles||[]).some(c=>String(c.cycle_no)===parts[0]&&(parts[1]==="Not started"?c.state!=="Completed"&&c.state!=="In progress":c.state===parts[1]))};
   const configured=(data().plants||[]).filter(p=>hit(p)&&stOk(p)&&cycOk(p)&&(f.bucket==="all"||p.overdue_bucket===f.bucket)&&
-   (f.show==="all"||(f.show==="review"&&p.pending_tables_cleaned>0)||(f.show==="mine"&&p.assignee_user_id===S._currentUserId)||(f.show==="done"&&p.cycles_this_month>=p.monthly_target)||(f.show==="attention"&&head&&p.active&&(p.overdue_bucket!=="on_track"||p.weekly_compliance_percent<p.compliance_threshold_percent))||(f.show==="late"&&p.overdue_bucket!=="on_track")||(f.show==="below"&&p.active&&p.weekly_compliance_percent<p.compliance_threshold_percent)||(f.show==="ontrack"&&p.active&&p.overdue_bucket==="on_track")||(f.show==="excused"&&p.active&&p.overdue_bucket&&p.overdue_bucket!=="on_track"&&p.delay_excused)||(f.show==="notontrack"&&p.active&&p.overdue_bucket&&p.overdue_bucket!=="on_track"&&!p.delay_excused)||(f.show==="notreported"&&p.today_report==null)||(f.show==="mine"&&p.assignee_user_id===S._currentUserId))&&
+   (f.show==="all"||(f.show==="review"&&p.pending_tables_cleaned>0)||(f.show==="mine"&&p.assignee_user_id===S._currentUserId)||(f.show==="done"&&p.cycles_this_month>=p.monthly_target)||(f.show==="attention"&&head&&p.active&&(p.overdue_bucket!=="on_track"||p.weekly_compliance_percent<p.compliance_threshold_percent))||(f.show==="late"&&p.overdue_bucket!=="on_track")||(f.show==="below"&&p.active&&p.weekly_compliance_percent<p.compliance_threshold_percent)||(f.show==="ontrack"&&p.active&&p.overdue_bucket==="on_track")||(f.show==="excused"&&p.active&&p.overdue_bucket&&p.overdue_bucket!=="on_track"&&p.delay_excused)||(f.show==="notontrack"&&p.active&&p.overdue_bucket&&p.overdue_bucket!=="on_track"&&!p.delay_excused)||(f.show==="notreported"&&notReportedOn(p,rd))||(f.show==="mine"&&p.assignee_user_id===S._currentUserId))&&
    (f.assignee==="all"||(f.assignee==="unassigned"?!p.assignee_user_id:f.assignee===p.assignee_user_id))&&
    (f.region==="all"||f.region===(p.district||p.location||"")));
   const un=(data().unconfigured||[]).filter(hit).map(p=>Object.assign({not_setup:true},p)).filter(p=>(!f.state||f.state==="all"||f.state==="unset")&&(!f.cyc||f.cyc==="all")&&(f.show==="all"||f.show==="notsetup")&&f.bucket==="all"&&(f.assignee==="all"||f.assignee==="unassigned")&&f.region==="all");
@@ -254,7 +284,7 @@
  /* ---- Day summary: cycles completed and confirmations done on one day, for one plant or all plants ---- */
  window.openWashDaySummary=function(st){
   const f=S.washF||{};
-  S.washDay={date:todayIso(),plant:f.plant&&f.plant!=="all"&&rowOf(f.plant)?f.plant:"all",st:st||"all",data:null,error:null,loading:false};
+  S.washDay={date:repDay(),plant:f.plant&&f.plant!=="all"&&rowOf(f.plant)?f.plant:"all",st:st||"all",data:null,error:null,loading:false};
   S.modal="washingDaySummary";S.modalCtx={};render();loadDaySummary();
  };
  function loadDaySummary(){
@@ -307,19 +337,19 @@
  }
  const DAY_ST={confirmed:["Cleaned & confirmed","ok"],awaiting:["Awaiting confirmation","info"],not_done:["Not done","warn"],rejected:["Report rejected","crit"],not_reported:["Not reported","crit"],upcoming:["Not reported yet","mute"],paused:["Washing paused","mute"]};
  function dayChip(p){const s=DAY_ST[p.status]||[p.status,"mute"];return chip(s[0],isTeam()||s[1]!=="crit"?s[1]:"mute")}
- /* "Today" on the Cycle updates card: which plants cleaned and were confirmed today, and which were not */
+ /* Day log on the Cycle updates card: which plants cleaned and were confirmed on the chosen day (today by default,
+    or any of the last 10 days — the same day as the "Not reported" plant filter), and which did not report */
  function todayStrip(){
-  if(S._washTodayFor!==S._washCycles&&S._washCycles){
-   const forData=S._washTodayFor=S._washCycles;
-   apiFetch("/api/scheduled/washing/day-activity").then(r=>{if(S._washTodayFor===forData){S._washToday=r;if(onWashing()&&!S.modal)render()}}).catch(()=>{});
-  }
-  const r=S._washToday;if(!r||!r.plants)return '';
+  const day=repDay(),e=dayEntry(day),r=e.data;
+  if(!r||!r.plants)return day===todayIso()?'':'<div class="wx-dtoday"><div class="wx-dtoday-h"><b>'+h(dayName(day))+'</b>'+repDaySelect("washFilter('repDay',this.value)")+'</div><div class="wc-empty">'+(e.error?h(e.error):'Loading '+h(dayName(day))+'…')+'</div></div>';
   const names=(list,max)=>list.slice(0,max).map(p=>'<a href="#" onclick="openWashingPlantDetails(\''+h(p.plant_id)+'\');return false">'+h(p.plant)+'</a>'+(p.cleaned_confirmed||p.cleaned_pending?' <small>'+(p.cleaned_confirmed+p.cleaned_pending)+'</small>':'')).join(", ")+(list.length>max?' <small>and '+(list.length-max)+' more</small>':'');
   const by=st=>r.plants.filter(p=>st.includes(p.status));
   const done=by(["confirmed"]),wait=by(["awaiting"]),not=by(["not_done","rejected","not_reported"]);
   const line=(ico,label,list,st)=>list.length?'<div class="wx-dtoday-l"><span class="wx-dtoday-i '+st+'">'+ico+'</span><div><button type="button" class="wx-dtoday-b" onclick="openWashDaySummary(\''+st+'\')">'+label+' <b>'+list.length+'</b></button> '+names(list,6)+'</div></div>':'';
   const body=line("✓","Cleaned & confirmed",done,"confirmed")+line("⏳","Cleaned, awaiting confirmation",wait,"awaiting")+line("✕","Not cleaned / not reported",not,"notclean");
-  return '<div class="wx-dtoday"><div class="wx-dtoday-h"><b>Today · '+h(fmt(r.date))+'</b><small>'+plural(r.totals.cycles_completed,"cycle")+' completed · '+plural(r.totals.confirmations,"confirmation")+'</small></div>'+(body||'<div class="wc-empty">No washing plant to show.</div>')+'</div>';
+  const unrep=r.plants.filter(p=>p.status==="not_reported").length;
+  const team=isTeam(),show=team&&unrep?'<button type="button" class="btn g sm" onclick="washRepDay(\''+h(r.date)+'\')" title="List only the plants with no report saved for this day">Show '+plural(unrep,"plant")+' not reported</button>':'';
+  return '<div class="wx-dtoday"><div class="wx-dtoday-h"><b>'+(r.date===todayIso()?'Today · '+h(fmt(r.date)):h(dayName(r.date)))+'</b>'+(team?repDaySelect("washFilter('repDay',this.value)"):'')+'<small>'+plural(r.totals.cycles_completed,"cycle")+' completed · '+plural(r.totals.confirmations,"confirmation")+'</small>'+show+'</div>'+(body||'<div class="wc-empty">No washing plant to show.</div>')+'</div>';
  }
 
  /* ---- plant wall: one tile per plant, colour = how the plant stands today ---- */
@@ -355,7 +385,14 @@
   if(!list.length)return '<div class="wc-empty">No plants match. <button class="btn g sm" onclick="washClearFilters()">Clear filters</button></div>';
   return '<div class="wx-wall">'+list.map(tileHtml).join("")+'</div>';
  }
- function resultsHtml(){return S._washUi&&S._washUi.view==="table"?registerHtml():wallHtml()}
+ function resultsHtml(){
+  if(S._washUi&&S._washUi.show==="notreported"){
+   const d=repDay(),e=dayEntry(d);
+   if(e.error)return '<div class="bn-warn banner">'+h(e.error)+'</div>';
+   if(!e.status&&d!==todayIso())return '<div class="wc-empty">Loading the reports for '+h(dayName(d))+'…</div>';
+  }
+  return S._washUi&&S._washUi.view==="table"?registerHtml():wallHtml();
+ }
  window.washSetView=function(v){S._washUi.view=v;render()};
 
  /* Glance clicks: toggle a filter, repaint, then land on the plant list. */
@@ -377,7 +414,7 @@
  function washFocusBar(f){
   const G=window.s91Glance;if(!G)return "";
   const STATE={ok:"On track",review:"Awaiting confirmation","late-1d":"1–2 days late","late-3d":"3–6 days late","late-7d":"7+ days late",late:"Behind deadline",done:"Month done",unset:"Not set up"};
-  const SHOW={attention:"Needs attention",review:"Awaiting review",notreported:"Not reported today",notsetup:"Not set up",mine:"Mine",late:"Late",below:"Below compliance target",done:"Month done",ontrack:"On track (cycles)",excused:"Delayed by reason",notontrack:"Not on track"};
+  const SHOW={attention:"Needs attention",review:"Awaiting review",notreported:repLabel(repDay()),notsetup:"Not set up",mine:"Mine",late:"Late",below:"Below compliance target",done:"Month done",ontrack:"On track (cycles)",excused:"Delayed by reason",notontrack:"Not on track"};
   const BUCKET={"1d":"1–2 days late","3d":"3–6 days late","7d":"7+ days late",on_track:"On track"};
   const chips=[];
   if(f.state&&f.state!=="all")chips.push({label:"Status: "+(STATE[f.state]||f.state),color:WX_STATE_COLOR[f.state]||"#0F5C2E",attr:'onclick="washFilter(\'state\',\'all\')"'});
@@ -393,6 +430,7 @@
   const d=data(),pf=d.portfolio||{},head=isTeam(),field=isField();
   const ui=S._washUi=S._washUi||{q:"",bucket:"all",show:"all",assignee:"all",region:"all",sort:"late",page:1,pageSize:12,selected:[]};
   if(ui.plant===undefined)ui.plant="all";if(!ui.view)ui.view="tiles";
+  if(!head)Object.assign(ui,{plant:"all",show:"all",assignee:"all",repDay:""});   // these filters live only in the O&M bar
   const f=S.washF=Object.assign({},ui);
   const plants=d.plants||[],unconfigured=d.unconfigured||[],allN=plants.length+unconfigured.length,m=d.overdue_matrix||{};
   S._currentUserId=d.viewer_user_id||S._currentUserId;
@@ -443,14 +481,19 @@
   const lowest=plants.filter(p=>p.active!==false&&typeof p.weekly_compliance_percent==="number").sort((x,y)=>x.weekly_compliance_percent-y.weekly_compliance_percent||x.plant.localeCompare(y.plant)).slice(0,6);
   const compCard=head?'<article class="gx-card"><header><h3>Lowest weekly compliance</h3><p>Plants furthest below target · click a plant to open its cycles and reports</p></header>'+(lowest.length?'<div class="gx-hbars gx-comp">'+lowest.map(p=>{const v=p.weekly_compliance_percent,t=p.compliance_threshold_percent||thr,c=v>=t?"#16A34A":v>=t-15?"#D97706":"#DC2626";return '<button type="button" class="gx-hbar" style="--c:'+c+'" onclick="openWashingPlantDetails(\''+h(p.plant_id)+'\')" title="'+h(p.plant)+': '+v+'% (target '+t+'%)"><span>'+h(p.plant)+'</span><i><b style="width:'+Math.max(v?4:0,Math.min(100,v))+'%"></b><u style="left:'+Math.min(100,t)+'%"></u></i><strong>'+v+'%</strong></button>'}).join("")+'</div>':'<div class="gx-allclear"><span>✓</span><b>No compliance data yet</b><small>Compliance appears once daily reports are confirmed.</small></div>')+'</article>':'';
   const stats='<div class="gx-glance gx-wash">'+hero+kpis+'<div class="gx-grid '+(head?'gx-grid-3':'gx-grid-2')+'">'+donutCard+cycleCard+compCard+'</div></div>';
-  const counts={all:allN,attention:plants.filter(p=>p.active&&(p.overdue_bucket!=="on_track"||p.weekly_compliance_percent<p.compliance_threshold_percent)).length,review:plants.filter(p=>p.pending_tables_cleaned>0).length,notreported:plants.filter(p=>p.today_report==null).length,notsetup:unconfigured.length,mine:plants.filter(p=>p.assignee_user_id===S._currentUserId).length};
-  const views=head?[["all","All"],["attention","Needs attention"],["review","Awaiting review"],["notreported","Not reported today"],["notsetup","Not set up"]].concat(role()==="Assignee"?[["mine","Mine"]]:[]):[["all","All"],["review","Awaiting review"],["notreported","Not reported today"]];
+  const counts={all:allN,attention:plants.filter(p=>p.active&&(p.overdue_bucket!=="on_track"||p.weekly_compliance_percent<p.compliance_threshold_percent)).length,review:plants.filter(p=>p.pending_tables_cleaned>0).length,notreported:0,notsetup:unconfigured.length,mine:plants.filter(p=>p.assignee_user_id===S._currentUserId).length};
+  const rd=repDay(),rdLoaded=!!dayEntry(rd).status||rd===todayIso(),repName=rd===todayIso()?"Not reported today":"Not reported "+fmt(rd);
+  counts.notreported=rdLoaded?plants.filter(p=>notReportedOn(p,rd)).length:"…";
+  const views=head?[["all","All"],["attention","Needs attention"],["review","Awaiting review"],["notreported",repName],["notsetup","Not set up"]].concat(role()==="Assignee"?[["mine","Mine"]]:[]):[];
   const plantOpts=plants.map(p=>[p.plant_id,p.site_code+" · "+p.plant]).concat(unconfigured.map(p=>[p.plant_id,p.site_code+" · "+p.plant+"  — not set up"])).sort((a,b)=>a[1].localeCompare(b[1]));
   const assignees=Array.from(new Map(plants.filter(p=>p.assignee_user_id).map(p=>[p.assignee_user_id,p.assignee_name])).entries()).sort((a,b)=>String(a[1]).localeCompare(String(b[1])));
   const active=f.plant!=="all"||f.show!=="all"||f.bucket!=="all"||(f.state&&f.state!=="all")||(f.cyc&&f.cyc!=="all")||f.assignee!=="all"||f.region!=="all"||f.sort!=="late"||f.q;
-  const bar=(allN>1||head)?'<div class="wx-bar">'+
+  /* plant picker, quick views, day filter and Assignee filter: O&M team only. Site Engineers just see their own plant(s),
+     which the server already limits the washing data to. */
+  const bar=head?'<div class="wx-bar">'+
    '<label class="wx-plant"><span>⌕</span><select data-pp aria-label="Choose a plant" onchange="washFilter(\'plant\',this.value)"><option value="all">All plants ('+allN+')</option>'+plantOpts.map(o=>'<option value="'+h(o[0])+'"'+(f.plant===o[0]?' selected':'')+'>'+h(o[1])+'</option>').join("")+'</select></label>'+
    '<div class="wx-seg" role="tablist" aria-label="Quick views">'+views.map(v=>'<button type="button" role="tab" aria-selected="'+(f.show===v[0])+'" class="'+(f.show===v[0]?'on':'')+'" onclick="washFilter(\'show\',\''+v[0]+'\')">'+v[1]+' <b>'+counts[v[0]]+'</b></button>').join("")+'</div>'+
+   (f.show==="notreported"?repDaySelect("washRepDay(this.value)"):'')+
    '<span class="wx-grow"></span>'+
    (head&&assignees.length?'<select class="wx-mini" aria-label="Filter by Assignee" onchange="washFilter(\'assignee\',this.value)"><option value="all">Any Assignee</option><option value="unassigned"'+(f.assignee==="unassigned"?' selected':'')+'>No Assignee</option>'+assignees.map(a=>'<option value="'+h(a[0])+'"'+(f.assignee===a[0]?' selected':'')+'>'+h(a[1])+'</option>').join("")+'</select>':'')+
    (active?'<button type="button" class="wx-clear" onclick="washClearFilters()">Clear</button>':'')+'</div>':'';

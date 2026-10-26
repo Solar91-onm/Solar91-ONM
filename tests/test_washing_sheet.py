@@ -224,3 +224,27 @@ def test_washing_forms_and_views_ask_only_for_remarks_not_a_reason():
     assert '"Not done — "+h(r.exception_reason)' not in washing
     assert 'exception_reason:nd?"Other":null' in washing
     assert 'body.exception_reason=v("reason")||"Other"' in washing
+
+
+def test_not_reported_view_can_check_any_of_the_last_ten_days():
+    washing = (ROOT / "frontend/static/js/26-washing-cycles.js").read_text(encoding="utf-8")
+    # the view filters on the chosen day's day-activity status, not only on today's report
+    assert "const REP_DAYS=10;" in washing
+    assert '(f.show==="notreported"&&notReportedOn(p,rd))' in washing
+    assert 'return e.status[p.plant_id]==="not_reported";' in washing
+    assert "p.today_report==null).length" not in washing
+    # the day list is cached per overview load, so a saved report drops the plant after the refresh
+    assert "if(S._washDayFor!==S._washCycles){S._washDayFor=S._washCycles;S._washDays={}}" in washing
+    # the Cycle updates day log follows the same day and can open the not-reported list
+    assert "const day=repDay(),e=dayEntry(day),r=e.data;" in washing
+    assert "S.washDay={date:repDay()," in washing
+
+
+def test_washing_filters_are_for_the_om_team_only():
+    washing = (ROOT / "frontend/static/js/26-washing-cycles.js").read_text(encoding="utf-8")
+    # the plant / quick-view / day / Assignee bar renders only for O&M Head and Assignee
+    assert "const bar=head?'<div class=\"wx-bar\">'+" in washing
+    assert 'if(!head)Object.assign(ui,{plant:"all",show:"all",assignee:"all",repDay:""});' in washing
+    # Site Engineers are pinned to today and get no day picker in the Cycle updates log
+    assert "return isTeam()&&d&&d<=t&&d>=addDays(t,-(REP_DAYS-1))?d:t" in washing
+    assert "(team?repDaySelect(\"washFilter('repDay',this.value)\"):'')" in washing
