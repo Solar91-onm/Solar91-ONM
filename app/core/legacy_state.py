@@ -220,7 +220,12 @@ def load_state(db:Session,user:User,include_washing:bool=True)->dict[str,Any]:
     state["handovers"]=handovers
 
     tasks=[]
-    for t in db.scalars(select(OMTask).order_by(OMTask.created_at.desc())):
+    from app.scheduled.history import history_since, recent_or_open
+    pm_since=history_since()
+    task_query=select(OMTask)
+    if pm_since is not None:
+        task_query=task_query.where(recent_or_open(pm_since))
+    for t in db.scalars(task_query.order_by(OMTask.created_at.desc())):
         r=dict(t.legacy_payload or {})
         ev=[]
         for item in t.evidence or []:
@@ -245,6 +250,8 @@ def load_state(db:Session,user:User,include_washing:bool=True)->dict[str,Any]:
                 equipment_id=next(iter(matches))
         r.update({"id":t.work_order_no,"plant":name_by_id.get(t.plant_id,r.get("plant") or "") or "","equipmentId":str(equipment_id) if equipment_id else None,"name":t.task_name or "","type":t.task_type or "","problem":t.problem,"problemSource":t.problem_source,"equip":t.equipment_ref,"freq":t.frequency,"due":t.due_on.isoformat() if t.due_on else None,"start":t.start_on.isoformat() if t.start_on else None,"assignee":t.assignee_text,"assigneeUserId":str(t.assignee_user_id) if t.assignee_user_id else None,"status":t.status,"sop":t.sop,"safety":t.safety,"tools":t.tools,"duration":t.duration,"completion":t.completion,"actualCompleted":t.actual_completed_on.isoformat() if t.actual_completed_on else None,"delayDays":t.delay_days,"problemFound":t.problem_found,"recurrenceOf":t.recurrence_parent_no,"linkedIssue":t.linked_issue,"evidence":ev,"log":t.log or []}); tasks.append(r)
     state["tasks"]=tasks
+    # The browser labels counts of finished PM work with this (None = full history loaded).
+    state["tasksHistoryFrom"]=pm_since.isoformat() if pm_since else None
 
     washing=[]
     # The full bootstrap is consumed across legacy views, dashboards, reports, and exports; only lite refreshes skip washing.

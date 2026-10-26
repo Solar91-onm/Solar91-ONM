@@ -249,12 +249,12 @@
   if(key==="issOver"){drillIssues({plant,chip:"Overdue",q:"",from:"",to:""});return}
   if(key==="issToday"){drillIssues({plant,chip:"all",q:"",from:TODAY,to:TODAY});return}
   if(key==="pmToday"){
-   S.pmLive=Object.assign(S.pmLive||{},{plant,day:TODAY,dayFrom:addDays(TODAY,-2),dayEquip:"all",plantOpen:false});
+   S.pmLive=Object.assign(S.pmLive||{},{plant,day:TODAY,dayFrom:addDays(TODAY,-2),dayEquip:"all",plantOpen:false,view:"schedule",calMonth:TODAY.slice(0,7)});
    S._glanceScroll="pm-day-planner";goScheduledOM("maintenance");return;
   }
   if(key==="pm"||key==="pmOver"||key==="pmSoon"){
    const status=key==="pmSoon"?"Due soon":key==="pmOver"?"Overdue":d.pmOverdue.length?"Overdue":"all";
-   S.pmLive=Object.assign(S.pmLive||{},{plant,status,week:"all",age:"all",equipment:"all",query:"",page:1,plantOpen:false});
+   S.pmLive=Object.assign(S.pmLive||{},{plant,status,week:"all",age:"all",equipment:"all",query:"",page:1,plantOpen:false,view:"register"});
    S._glanceScroll="pm-unit-register";goScheduledOM("maintenance");return;
   }
   if(key==="wash"||key==="washLate"){

@@ -305,6 +305,9 @@ function stampISO(){const d=new Date();return TODAY+"T"+pad2(d.getHours())+":"+p
 /* Activity-log time: ISO timestamps with an offset are shown as a readable local date/time; legacy text stays as stored. */
 function s91LogAt(v){const s=String(v==null?"":v);return /T\d{2}:\d{2}.*(Z|[+-]\d{2}:?\d{2})$/.test(s)&&typeof fmtDT==="function"?fmtDT(s):s}
 function addHoursISO(iso,h){const hrs=Number(h);const d=new Date(iso);if(!iso||isNaN(d.getTime())||!Number.isFinite(hrs))return stampISO();d.setHours(d.getHours()+Math.round(hrs));if(isNaN(d.getTime()))return stampISO();const p=n=>String(n).padStart(2,"0");return d.getFullYear()+"-"+p(d.getMonth()+1)+"-"+p(d.getDate())+"T"+p(d.getHours())+":"+p(d.getMinutes())}
+/* A local date/time typed in the browser (date or datetime-local input, plant time) as an exact UTC instant for the
+   API. Sending the bare "2026-10-27T10:00" made the server read it as 10:00 UTC — 5½ hours late in India. */
+function s91LocalToUtc(value,timeOfDay){const s=String(value||"").trim();if(!s)return null;const d=new Date(/^\d{4}-\d{2}-\d{2}$/.test(s)?s+"T"+(timeOfDay||"09:00"):s);return isNaN(d.getTime())?null:d.toISOString()}
 function hrsBetween(a,b){const x=new Date(a),y=new Date(b);if(isNaN(x.getTime())||isNaN(y.getTime()))return NaN;return (y-x)/3600000}
 function fmtDT(s){if(!s)return"—";const d=new Date(s);if(isNaN(d.getTime()))return"—";return d.toLocaleDateString("en-GB",{day:"2-digit",month:"short"})+", "+d.toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit",hour12:false})}
 function esc(q){return String(q==null?"":q).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;")}
@@ -325,6 +328,25 @@ function saveK(k,v){
   try{sessionStorage.setItem(PRE+k,JSON.stringify(v))}catch(e){}
 }
 function clearK(){try{Object.keys(sessionStorage).filter(k=>k.startsWith(PRE)).forEach(k=>sessionStorage.removeItem(k))}catch(e){}}
+/* A readable message for a failed API response. FastAPI validation errors arrive as a list ("detail":[{loc,msg}]),
+   and a proxy error page (Render 502/503 while the service wakes up) has no JSON at all; neither should reach the
+   person as a bare "HTTP 422" / "HTTP 502". */
+const S91_HTTP_MESSAGES={400:"The request could not be processed. Check the entered values.",403:"You do not have permission to do this.",404:"This record was not found. It may have been removed — refresh the page.",408:"The request timed out. Please retry.",409:"This record was changed by someone else. Refresh and try again.",413:"The file is too large to upload.",415:"This file type is not supported.",422:"Some of the entered values are not valid.",429:"Too many requests at once. Wait a moment and retry.",500:"The server hit an unexpected error. Please retry; if it keeps happening, tell the O&M Head.",502:"The server is starting up or briefly unavailable. Please retry in a minute.",503:"The service is temporarily unavailable (it may be waking up). Please retry in a minute.",504:"The server took too long to respond. Please retry."};
+function s91ApiErrorMessage(status,data){
+  const raw=data&&data.detail;
+  if(typeof raw==="string"&&raw.trim())return raw;
+  if(Array.isArray(raw)&&raw.length){
+    const parts=raw.slice(0,3).map(item=>{
+      const loc=(item&&Array.isArray(item.loc)?item.loc:[]).filter(x=>typeof x==="string"&&!["body","query","path"].includes(x));
+      const field=loc.length?loc[loc.length-1].replace(/_/g," "):"";
+      const msg=String((item&&item.msg)||"is not valid").replace(/^Value error,\s*/i,"");
+      return field?field.charAt(0).toUpperCase()+field.slice(1)+": "+msg:msg;
+    });
+    return "Please check: "+parts.join("; ")+(raw.length>3?" (and "+(raw.length-3)+" more)":"");
+  }
+  if(raw&&typeof raw==="object"&&typeof raw.message==="string"&&raw.message)return raw.message;
+  return S91_HTTP_MESSAGES[status]||"The request failed (HTTP "+status+"). Please retry.";
+}
 async function apiFetch(url,opts,latency){
   opts=Object.assign({},opts||{});opts.headers=Object.assign({"Accept":"application/json"},opts.headers||{});
   const token=await clerkToken();
@@ -380,9 +402,7 @@ async function apiFetch(url,opts,latency){
   }
   const data=res.status===204?null:await res.json().catch(()=>({}));
   if(!res.ok){
-    const raw=data?.detail;
-    const detail=typeof raw==="string"?raw:raw?.message||data?.error||"HTTP "+res.status;
-    const err=new Error(detail);err.status=res.status;err.data=data;throw err;
+    const err=new Error(s91ApiErrorMessage(res.status,data));err.status=res.status;err.data=data;throw err;
   }
   return data;
 }
@@ -1318,7 +1338,7 @@ function secRepData(tab){
   return{title:"Handover report",cols:["Handover","Project","Location","Capacity","Stage","Progress","Overdue mandatory","Status"],rows,facetName:"Stage",facetIdx:4,textIdx:[0,1,2],sum:[["Projects",rows.length],["In flight",rows.filter(r=>r[7]!=="Active O&M").length],["Overdue mandatory items",rows.reduce((s,r)=>s+r[6],0)],["Active O&M",rows.filter(r=>r[7]==="Active O&M").length]]}}
  if(tab==="scheduled"){const by={};S.tasks.forEach(t=>{(by[t.plant]=by[t.plant]||[]).push(t)});
   const rows=Object.keys(by).map(pn=>{const a=by[pn],done=a.filter(t=>t.status==="Completed"),od=a.filter(t=>taskOD(t)>0).length,ot=done.filter(t=>t.completion&&t.completion.date<=t.due).length;return[pn,a.length,a.length-done.length,od,done.length,done.length?Math.round(100*ot/done.length)+"%":"—",od?"Has overdue":"On track"]});
-  return{title:"Preventive Maintenance report — by plant",cols:["Plant","Tasks","Open","Overdue","Completed","On-time (completed)","Health"],rows,facetName:"Health",facetIdx:6,textIdx:[0],sum:[["Tasks",S.tasks.length],["Open",rows.reduce((s,r)=>s+r[2],0)],["Overdue",rows.reduce((s,r)=>s+r[3],0)],["PM on-time",pmOnTimePct()+"%"]]}}
+  return{title:"Preventive Maintenance report — by plant"+(typeof pmHistoryNote==="function"&&pmHistoryNote()?" (open work and "+pmHistoryNote()+")":""),cols:["Plant","Tasks","Open","Overdue","Completed","On-time (completed)","Health"],rows,facetName:"Health",facetIdx:6,textIdx:[0],sum:[["Tasks",S.tasks.length],["Open",rows.reduce((s,r)=>s+r[2],0)],["Overdue",rows.reduce((s,r)=>s+r[3],0)],["PM on-time",pmOnTimePct()+"%"]]}}
  if(tab==="washing"){const rows=S.plants.filter(p=>S.washing.some(t=>t.plant===p.name)).map(p=>{const w=S.washing.filter(t=>t.plant===p.name),fq=(S.washMeta[p.name]||{freq:14}).freq,ok=w.filter(t=>daysSince(t)<=fq).length,red=w.filter(t=>wColor(t)==="red").length,pc=Math.round(100*ok/w.length);return[p.name,w.length,fq+" d",pc+"%",red,pc>=WASH_TH?"Compliant":"Below threshold"]});
   return{title:"Washing report — by plant",cols:["Plant","Tables in cycle","Frequency","Compliance","Red-zone tables","Status"],rows,facetName:"Status",facetIdx:5,textIdx:[0],sum:[["Plants tracked",rows.length],["Tables",S.washing.length],["Red-zone",rows.reduce((s,r)=>s+r[4],0)],["Compliance",washCompliancePct()+"%"]]}}
  const by={};S.issues.forEach(t=>{(by[t.plant]=by[t.plant]||[]).push(t)});
@@ -1608,7 +1628,7 @@ function openDashboardPmQueue(queue){
  S.tablePages.scheduled=1;
  // The 2026 PM register owns its own filter state, so sync classic Command Centre clicks.
  const live=S.pmLive||(S.pmLive={});
- Object.assign(live,{plant:S.schedScope||"all",status:queue==="overdue"?"Overdue":queue==="due7"?"Due soon":queue==="upcoming"?"Upcoming":"all",equipment:"all",week:"all",age:"all",page:1});
+ Object.assign(live,{plant:S.schedScope||"all",status:queue==="overdue"?"Overdue":queue==="due7"?"Due soon":queue==="upcoming"?"Upcoming":"all",equipment:"all",week:"all",age:"all",page:1,view:"register"});
  goTab("scheduled");
  scrollToDashboardRegister(".pml-register");
 }

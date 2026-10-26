@@ -27,9 +27,19 @@ function pmDisplayTaskName(task){
 function pmDisplayTaskActivity(text){
  return String(text||"").replace(/\s*[—-]\s*unit\s+\d+\s+of\s+\d+,\s*day\s+\d+/ig,"");
 }
+/* Finished PM work older than S.tasksHistoryFrom is not loaded at sign-in (app/scheduled/history.py); counts of
+   finished work on screen cover that window and say so. */
+function pmHistoryNote(){return S.tasksHistoryFrom?"finished work since "+fmtDate(S.tasksHistoryFrom):""}
 async function exportScheduledOMCompliance(){
  try{await ensureXlsxLoaded()}catch(error){console.error("Could not load Excel export library",error);toast("Excel support could not load. Check your connection and retry.");return}
- const taskRows=(S.tasks||[]).map(t=>({
+ /* the compliance file always carries the full history, which the page itself does not load */
+ let tasks=S.tasks||[],partial=false;
+ if(S.tasksHistoryFrom){
+  toast("Loading the full PM history for the export…");
+  try{tasks=await apiFetch("/api/scheduled/tasks?history=all")}
+  catch(error){partial=true;toast("The full PM history could not load — this export has open work and "+pmHistoryNote()+" only. "+(error.message||""))}
+ }
+ const taskRows=(tasks||[]).map(t=>({
   "Work Order":t.id,"Plant":t.plant,"Task":pmDisplayTaskName(t),"Maintenance Type":t.type||"","Equipment":t.type||"","Frequency":t.freq||"",
   "Scheduled Date":t.due||"","Actual Completion":t.completion&&t.completion.date||"","Delay (days)":t.completion&&Number.isFinite(Number(t.completion.delay))?Number(t.completion.delay):"",
   "Assignee":t.assignee||"","Status":t.status||"","Readings / Measurements":t.completion&&t.completion.readings||"","Evidence Files":t.completion&&t.completion.photos||0,
@@ -41,7 +51,7 @@ async function exportScheduledOMCompliance(){
   "Status":washedToday(t)?"Washed today":excToday(t)?"Exception":wDue(t,meta.freq||14)?"Overdue":"Scheduled","Last Exception":ex?(ex.date+" · "+(ex.reason||"")):""
  }});
  const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(taskRows),"Preventive Maintenance");XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(washRows),"Washing");
- XLSX.writeFile(wb,"Solar91_Preventive_Maintenance_Compliance_"+(S.opsDate||TODAY)+".xlsx");
+ XLSX.writeFile(wb,"Solar91_Preventive_Maintenance_Compliance_"+(S.opsDate||TODAY)+(partial?"_recent_only":"")+".xlsx");
 }
 function renderScheduledHub(){
  const sub=S.omTab==="washing"?"washing":"maintenance";

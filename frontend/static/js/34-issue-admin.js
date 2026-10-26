@@ -1,7 +1,8 @@
 "use strict";
-/* O&M Head-only ticket correction and reversible deletion. The server enforces role and audit controls. */
+/* Ticket correction (O&M Head, or the ticket's Assignee) and O&M Head-only reversible deletion. The server enforces role and audit controls. */
 (function(){
  const head=()=>typeof AUTH_IDENTITY!=="undefined"&&AUTH_IDENTITY.role==="O&M Head";
+ const canEdit=t=>typeof s91CanEditIssue==="function"?s91CanEditIssue(t):head();
  const escHtml=v=>String(v??"").replace(/[&<>"']/g,ch=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[ch]));
  const ownIssue=id=>(S.issues||[]).find(x=>x.id===id);
  const cleanRoot=()=>document.getElementById("s91-issue-admin-root")?.remove();
@@ -11,7 +12,7 @@
  const btnClose='<button type="button" class="btn o" data-cancel>Cancel</button>';
  document.addEventListener('click',e=>{if(e.target.matches('.s91-admin-shade')||e.target.closest('#s91-issue-admin-root [data-cancel]'))cleanRoot()});
  document.addEventListener('keydown',e=>{if(e.key==='Escape'&&document.getElementById('s91-issue-admin-root'))cleanRoot()});
- document.addEventListener('click',e=>{const edit=e.target.closest('[data-s91-edit]');if(edit){e.stopPropagation();if(head()&&typeof openModal==='function')openModal('editTicket',{id:edit.dataset.s91Edit});}});
+ document.addEventListener('click',e=>{const edit=e.target.closest('[data-s91-edit]');if(edit){e.stopPropagation();if(canEdit(ownIssue(edit.dataset.s91Edit))&&typeof openModal==='function')openModal('editTicket',{id:edit.dataset.s91Edit});}});
  window.s91ConfirmDeleteIssue=function(id){
   if(!head())return;
   const ticket=ownIssue(id);if(!ticket||!ticket.dbId){toast('Ticket not found on the server; reload and try again.');return}
@@ -61,7 +62,7 @@
  // Reinforce clear edit access from the register, keeping all real save handlers in place.
  if(typeof issueQuickActs==='function'){
   const original=issueQuickActs;
-  issueQuickActs=function(t){const html=original(t);if(!head()||!t.dbId)return html;
+  issueQuickActs=function(t){const html=original(t);if(!t.dbId||!canEdit(t))return html;
    const edit='<button class="btn o sm" type="button" data-s91-edit="'+escHtml(t.id)+'">Edit</button>';
    return html.replace('</div>',edit+'</div>');
   };

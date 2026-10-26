@@ -15,8 +15,9 @@ from app.core.database import get_db
 from app.core.models import Issue, IssueHistory, User, UserEquipmentTypeAssignment
 from app.core.security import ensure_equipment_scope, ensure_plant_scope, equipment_scope_matches, get_current_user, is_head, require_csrf, require_permission, text_is_current_user, user_scoped_equipment_types, user_scoped_plant_ids
 from app.issues import importer as issue_importer
+from app.issues.deadlines import deadline_settings, save_deadline_hours
 from app.issues.repository import IssueRepository
-from app.issues.schemas import AssignmentRequest, BulkAssignRequest, CloseRequest, StepBackRequest, IssueCommentCreate, IssueCreate, IssueDatesUpdate, IssueETCUpdate, IssueOut, IssueStatusRequest, IssueStepCreate, IssueStepUpdate, IssueUpdate, IssueDeleteRequest, IssueRestoreRequest, ProgressRequest, ResolveRequest, ReopenRequest, normalize_issue_severity
+from app.issues.schemas import AssignmentRequest, BulkAssignRequest, CloseRequest, StepBackRequest, IssueCommentCreate, IssueCreate, IssueDatesUpdate, IssueDeadlinesUpdate, IssueETCUpdate, IssueOut, IssueStatusRequest, IssueStepCreate, IssueStepUpdate, IssueUpdate, IssueDeleteRequest, IssueRestoreRequest, ProgressRequest, ResolveRequest, ReopenRequest, normalize_issue_severity
 from app.issues.service import IssueService
 from app.storage.service import SupabaseStorage
 
@@ -36,6 +37,15 @@ def list_issue_assignees(db:Annotated[Session,Depends(get_db)],user:Annotated[Us
     for user_id,equipment_type in type_rows:
         by_user.setdefault(user_id,[]).append(equipment_type)
     return [{"id":str(row.id),"name":row.display_name,"equipment_types":by_user.get(row.id,[])} for row in rows]
+
+@router.get("/deadlines")
+def get_issue_deadlines(db:Annotated[Session,Depends(get_db)],user:Annotated[User,Depends(get_current_user)]):
+    """Default deadline (hours after raising) for new Critical and Medium tickets; the raise form uses it."""
+    return deadline_settings(db)
+
+@router.put("/deadlines",dependencies=[Depends(require_csrf)])
+def put_issue_deadlines(data:IssueDeadlinesUpdate,db:Annotated[Session,Depends(get_db)],user:Annotated[User,Depends(require_permission("issues.manage"))]):
+    return save_deadline_hours(db,user,data.critical_hours,data.medium_hours,apply_to_open=data.apply_to_open,dry_run=data.dry_run)
 
 @router.get("/import/template")
 def issue_upload_template(db:Annotated[Session,Depends(get_db)],user:Annotated[User,Depends(require_permission("issues.create"))]):
@@ -258,7 +268,20 @@ def create_issue(data:IssueCreate,db:Annotated[Session,Depends(get_db)],user:Ann
     return IssueService(db).create(data,user)
 
 @router.patch("/{issue_id}",response_model=IssueOut,dependencies=[Depends(require_csrf)])
-def update_issue(issue_id:UUID,data:IssueUpdate,db:Annotated[Session,Depends(get_db)],user:Annotated[User,Depends(require_permission("issues.manage"))]): return IssueService(db).update(issue_id,data,user)
+def update_issue(issue_id:UUID,data:IssueUpdate,db:Annotated[Session,Depends(get_db)],user:Annotated[User,Depends(get_current_user)]):
+    """Correct a ticket's details and dates: the O&M Head on any ticket, an Assignee on an open ticket assigned to them."""
+    if user.role!="O&M Head":
+        if user.role!="Assignee":
+            raise HTTPException(403,"Only the O&M Head or the ticket's Assignee can edit a ticket")
+        row=_require_issue_workflow_scope(db,user,issue_id)
+        if row.status=="Closed":
+            raise HTTPException(409,"A closed ticket can only be edited by the O&M Head")
+        changes=data.model_dump(exclude_unset=True)
+        if any(key in changes for key in ("equipment_id","equipment_ref","vertical")):
+            # Moving the ticket to other equipment must keep it inside the Assignee's own equipment scope.
+            ensure_equipment_scope(db,user,row.plant_id,changes.get("equipment_id",row.equipment_id),
+                                   changes.get("equipment_ref",row.equipment_ref),changes.get("vertical",row.vertical))
+    return IssueService(db).update(issue_id,data,user)
 
 @router.patch("/{issue_id}/dates",response_model=IssueOut,dependencies=[Depends(require_csrf)])
 def change_issue_dates(issue_id:UUID,data:IssueDatesUpdate,db:Annotated[Session,Depends(get_db)],user:Annotated[User,Depends(get_current_user)]):
@@ -313,6 +336,7 @@ def _require_issue_workflow_scope(db:Session,user:User,issue_id:UUID):
             if not text_is_current_user(row.assignee_text,user):
                 raise HTTPException(403,"Only the assigned Assignee can advance this ticket")
             row.assigned_to=user.id
+    return row
 
 
 @router.post("/{issue_id}/status",response_model=IssueOut,dependencies=[Depends(require_csrf)])
@@ -393,4 +417,10 @@ def resolve_issue(issue_id:UUID,data:ResolveRequest,db:Annotated[Session,Depends
     _require_issue_workflow_scope(db,user,issue_id); return IssueService(db).transition(issue_id,"Resolved",user,resolve=data)
 
 @router.post("/{issue_id}/close",response_model=IssueOut,dependencies=[Depends(require_csrf)])
-def close_issue(issue_id:UUID,data:CloseRequest,db:Annotated[Session,Depends(get_db)],user:Annotated[User,Depends(require_permission("issues.close"))]): return IssueService(db).close(issue_id,data,user)
+def close_issue(issue_id:UUID,data:CloseRequest,db:Annotated[Session,Depends(get_db)],user:Annotated[User,Depends(get_current_user)]):
+    """Close a ticket: the O&M Head on any ticket, an Assignee on a ticket assigned to them. Both are logged."""
+    if user.role!="O&M Head":
+        if user.role!="Assignee":
+            raise HTTPException(403,"Only the O&M Head or the ticket's Assignee can close a ticket")
+        _require_issue_workflow_scope(db,user,issue_id)
+    return IssueService(db).close(issue_id,data,user)

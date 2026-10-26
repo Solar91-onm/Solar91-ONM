@@ -67,3 +67,14 @@ Presentation only (`29-pm-live-dashboard.js`, `46-pm-command.css`); no API, sche
 - **Register**: 15 rows a page, people filter, sort (due date / most overdue / plant / equipment), overdue rows tinted with "N d late", "due today / in N d" for work due this week, an *Unassigned* chip.
 - **Assign** (O&M Head; register row, day list, unit drawer): assigns a plant's open work orders in one group through the existing `PATCH /api/scheduled/tasks/{id}/assignee`, one request per work order, so role and equipment-scope checks and the task log stay on the server. If one is rejected it stops, says how many were saved and leaves the rest unchanged.
 - Browser check: `python scripts/verify_pm_command_view.py` (mock data and API, no credentials).
+
+## Views instead of one long page (October 2026)
+Presentation only (`29-pm-live-dashboard.js`, `47-pm-views.css`); no API, schema or stored-record changes. The hero and the five KPI tiles stay on top; below them one tab bar:
+- **Overview** — status donut, jobs by due week, how late overdue work is, **Upcoming 7 days** (units and plants per day, top equipment, share done; a day opens the calendar), plants needing attention, equipment rings. With one plant chosen, its focus card comes first.
+- **Calendar** — month heat map (darker = more units that day, red badge = overdue work due that day, green line = share done) above the existing *Maintenance by day* list. *+ Plan job on …* opens *Add job* with that day as the start date.
+- **Plants** — every plant against every equipment type, coloured by the most urgent state (overdue / due this week / planned / all done / no PM job) with the work-order count. Filter chips (with overdue work, due this week, on track, without PM jobs), plant search, sort, 30 rows until *Show all*. A cell opens that plant + equipment in the register.
+- **Coverage** — the equipment coverage table (always expanded here).
+- **Work register** — unchanged register, filters, assign and edit. KPI tiles, hero pills, chart bars/slices and Command Centre / Work Radar / Plant Pulse links open this view (Plant Pulse "today" opens the Calendar).
+
+Scale: one render reuses its coverage, plant lookups and grouping instead of recomputing them per row, and search boxes redraw 150 ms after typing stops. Measured in local headless Chromium with mock data (100 plants, 2,208 work orders): about 250–380 ms per render before, 35–105 ms per view after. Not measured against live data or on a phone CPU. `/api/scheduled/tasks` and the bootstrap still send every PM record the user may see (see `docs/SCALABILITY_AUDIT.md`).
+Browser checks: `python scripts/verify_pm_command_view.py`, `python scripts/verify_pm_consolidation.py`.

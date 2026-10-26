@@ -62,7 +62,7 @@
   if(t.hasAttribute('data-radar-open')){
    const k=t.dataset.radarOpen,id=t.dataset.radarId;
    if(k==='issues'&&typeof window.s91JumpToTicket==='function'){window.s91JumpToTicket(id);return}
-   if(k==='pm'){if(typeof S!=='undefined'){if(S.pmLive){S.pmLive.query=id;S.pmLive.status='all';S.pmLive.page=1}if(S.schedF)S.schedF.q=id;}if(typeof goScheduledOM==='function')goScheduledOM('maintenance');return}
+   if(k==='pm'){if(typeof S!=='undefined'){if(S.pmLive){S.pmLive.query=id;S.pmLive.status='all';S.pmLive.page=1;S.pmLive.view='register'}if(S.schedF)S.schedF.q=id;}if(typeof goScheduledOM==='function')goScheduledOM('maintenance');return}
    if(k==='washing'){if(typeof S!=='undefined'){S._washUi=S._washUi||{};S._washUi.q=t.dataset.radarPlant||'';S._washUi.page=1;}if(typeof washOpenRegister==='function')washOpenRegister();else if(typeof goScheduledOM==='function')goScheduledOM('washing');return}
   }
   paint();

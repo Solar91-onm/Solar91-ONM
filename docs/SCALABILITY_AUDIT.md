@@ -142,3 +142,16 @@ No production/staging connection, load test, setting change, migration, or deplo
 - Render logs showed `slow_or_failed_request` warnings with `status=200` (slow, not failed) and about 275-315 ms per SQL statement (e.g. 4 queries, `db_ms=1104`), with `app_ms` up to about 1.6 s. Per-statement time that high for small queries indicates network distance between the service and the database, not slow SQL. The unmeasured `app_ms` also contained pool pre-ping round trips and new-connection handshakes (TCP, TLS, login), which `DB_POOL_RECYCLE_SECONDS=300` forced every five minutes.
 - Changes: an idle-aware health check replaces pinging before every request (a connection used in the last `DB_PING_IDLE_SECONDS`, default 10, is reused directly; an idle one is pinged and, if dead, replaced via SQLAlchemy's DisconnectionError handling; `DB_PING_IDLE_SECONDS=0` restores the previous behaviour); new-connection and health-check time are reported in `Server-Timing` (`conn`) and in the slow-request line (`new_connections`, `connect_ms`, `health_checks`, `health_check_ms`), and excluded from `app_ms`; the default and `render.yaml` recycle interval is 1800 s; on startup the service logs `database_latency round_trip_ms=…` (WARNING at 50 ms or more); the washing month endpoint reads the plant and its setup in one query.
 - Not changed and not verified: the live Render region/plan and the Supabase project region. If `round_trip_ms` is high, put the service and the database in the same region (the Render region is fixed at service creation). These changes were tested on SQLite only; no Render, Supabase or production connection was used.
+
+### Addendum 2026-10-25: PM history window and JSON encoding
+
+- **PM history window.** Open PM work stays bounded by the plan (about 2,100 units at 100 plants), but finished recurrences grow by about 25,000 a year. Sign-in and `GET /api/scheduled/tasks` now send open work plus finished work completed (else due) in the last `BOOTSTRAP_PM_HISTORY_DAYS` days (default 180; 0 = previous behaviour). `?history=all` returns everything; the compliance export uses it and names the file `_recent_only` if that request fails. Browser state sync already ignores `tasks`, so a windowed browser cannot remove records.
+- **JSON encoding.** `/api/bootstrap` and `/api/scheduled/tasks` return through `app/core/fastjson.py` (stdlib `json.dumps` with a date/UUID/Decimal hook, same bytes as FastAPI's `jsonable_encoder`, which it falls back to for anything else). For 14,700 work orders `jsonable_encoder` took 1.5 s against 0.13 s for the dump.
+- **Measured** (isolated temp SQLite, FastAPI TestClient, one O&M Head, 100 plants, 2,100 open + 25,200 completed work orders, single run each):
+
+| | Before | 180-day window + fast JSON |
+| --- | --- | --- |
+| `/api/bootstrap?lite=1` | 27,300 tasks, 15.4 MB (0.40 MB gzip), 3.9 s | 14,700 tasks, 8.2 MB (0.21 MB gzip), 1.2 s |
+| `/api/scheduled/tasks` | 27,300 tasks, 24.9 MB (1.64 MB gzip), 5.3 s | 14,700 tasks, 13.3 MB (0.88 MB gzip), 1.7 s |
+
+  Not measured on PostgreSQL, Render or a phone. The remaining time is mostly building each record in Python (~95 µs each); a column-row read like the washing overview's would be the next step if needed.

@@ -21,14 +21,16 @@ async function refreshIssueActivity(ticketId,showErrors){
  const t=(S.issues||[]).find(x=>x.id===ticketId);if(!t)return;
  if(!t.dbId){t.activityLoaded=true;t.activityError="Ticket updates are available after this issue is synchronized to the server.";if(S.modal==="ticket"&&(S.modalCtx||{}).id===ticketId)render();return}
  t.activityLoading=true;t.activityError=null;
+ /* other loads replace the ticket with a copy while this request runs (work steps, live refresh); a copy made
+    meanwhile still says "loading", so the result goes to the original and to whatever object is current now,
+    otherwise the ticket shows "Loading conversation…" until the page is reloaded */
+ const settle=fields=>{Object.assign(t,fields);const now=(S.issues||[]).find(x=>x.id===ticketId);if(now&&now!==t)Object.assign(now,fields)};
  try{
-  t.activity=await apiFetch("/api/issues/"+encodeURIComponent(t.dbId)+"/activity");
-  t.activityLoaded=true;
+  settle({activity:await apiFetch("/api/issues/"+encodeURIComponent(t.dbId)+"/activity"),activityLoaded:true,activityLoading:false});
  }catch(e){
-  t.activityError=e.message||"Could not load ticket updates.";
+  settle({activityError:e.message||"Could not load ticket updates.",activityLoading:false});
   if(showErrors)toast(t.activityError);
  }
- t.activityLoading=false;
  if(S.modal==="ticket"&&(S.modalCtx||{}).id===ticketId)render();
 }
 function showIssueMessagePhotoSelection(input){
@@ -1287,7 +1289,9 @@ function ccPopup(title,meta,tone,open){
   else ccPopup(s,"",tone,null);
 }
  const box=ccToastBox();
- while(box.children.length>=4)box.firstChild.remove();
+ /* a short laptop screen (720-768 px tall) fits two cards without covering the page; taller screens keep four */
+ const cap=window.innerHeight<800?2:4;
+ while(box.children.length>=cap)box.firstChild.remove();
  const el=document.createElement("div");
  el.className="cc-toast "+(tone||"i")+(open?" clk":"");
  const ic={s:I.check(16),d:I.alert(16),w:I.alert(16),i:I.bell(16)}[tone||"i"];
@@ -1314,8 +1318,10 @@ function ccPopup(title,meta,tone,open){
   const fresh=br.filter(t=>!S._ccSeen[t.id]);
   br.forEach(t=>{S._ccSeen[t.id]=1});
   if(!fresh.length)return;
-  fresh.slice(0,3).forEach(t=>ccPopup("Overdue — "+t.id,(t.plant||"")+" · "+t.vertical+" · past committed ETC · "+(t.assignee||"unassigned"),"d",()=>openIssue(t.id)));
-  if(fresh.length>3)ccPopup("+"+(fresh.length-3)+" more overdue issues","Open Needs Attention on the Command Center","d",null);
+  /* one card per ticket only when there is one; several become a single summary that opens the overdue list */
+  if(fresh.length===1){const t=fresh[0];ccPopup("Overdue — "+t.id,(t.plant||"")+" · "+t.vertical+" · past committed ETC · "+(t.assignee||"unassigned"),"d",()=>openIssue(t.id));return}
+  const ids=fresh.slice(0,3).map(t=>t.id).join(", ")+(fresh.length>3?" and "+(fresh.length-3)+" more":"");
+  ccPopup(fresh.length+" tickets are past their deadline",ids,"d",()=>{if(typeof drillIssues==="function")drillIssues({chip:"Overdue",q:"",from:"",to:""});else goTab("issues")});
  }
  setTimeout(check,1500);
  setInterval(check,45000);

@@ -117,7 +117,13 @@
    if(submitting===open.key)drafts.delete(open.key);              // submitted: never bring it back
    submitting=null;
    const s=st();
-   if(!name&&s&&s.modal&&!NAV.fromHistory){NAV.skipPop+=1;history.back()}   // drop the dialog's history step
+   if(!name&&s&&s.modal&&!NAV.fromHistory){
+    /* drop the dialog's history step — unless the same click also went to another screen (a ticket's "Open plant
+       page" closes the dialog, then navigates). history.back() runs later and would undo that move, so it is
+       checked one tick later; if a new screen was opened, the dialog's step stays and Back returns to the ticket. */
+    const at=NAV.i;
+    setTimeout(()=>{const now=st();if(NAV.i===at&&now&&now.modal){NAV.skipPop+=1;history.back()}},0);
+   }
    open=null;
   }
   if(name&&!open){                                                // a dialog opened

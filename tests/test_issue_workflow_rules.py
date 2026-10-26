@@ -91,12 +91,23 @@ def test_unassigned_ticket_cannot_be_acknowledged_by_an_assignee(client, db):
     assert client.post(f"/api/issues/{issue['id']}/acknowledge").status_code == 403
 
 
-def test_only_the_head_can_edit_or_close_and_direct_close_needs_a_reason(client, db):
+def test_only_the_head_or_the_tickets_assignee_can_edit_or_close_and_direct_close_needs_a_reason(client, db):
     assignee, _, issue = _head_with_issue(client, db)
-    client.post(f"/api/issues/{issue['id']}/assign", json={"assigned_to": str(assignee.id)})
     from tests import conftest
     head = conftest._CURRENT_USER
+    # before the ticket is assigned to them, an Assignee cannot edit or close it
+    db.add(UserEquipmentTypeAssignment(user_id=assignee.id, equipment_type="Inverter")); db.commit()
     conftest._CURRENT_USER = db.get(User, assignee.id)
+    assert client.patch(f"/api/issues/{issue['id']}", json={"description": "tampered"}).status_code == 403
+    assert client.post(f"/api/issues/{issue['id']}/close", json={"note": "x", "direct": True}).status_code == 403
+    # another Assignee (same equipment scope) cannot touch a ticket that is not theirs
+    conftest._CURRENT_USER = head
+    client.post(f"/api/issues/{issue['id']}/assign", json={"assigned_to": str(assignee.id)})
+    other = User(auth_provider="test", external_subject="wr-other", email="wr-o@example.com",
+                 display_name="Other Assignee", role="Assignee", is_active=True)
+    db.add(other); db.commit(); db.refresh(other)
+    db.add(UserEquipmentTypeAssignment(user_id=other.id, equipment_type="Inverter")); db.commit()
+    conftest._CURRENT_USER = db.get(User, other.id)
     assert client.patch(f"/api/issues/{issue['id']}", json={"description": "tampered"}).status_code == 403
     assert client.post(f"/api/issues/{issue['id']}/close", json={"note": "x", "direct": True}).status_code == 403
     conftest._CURRENT_USER = head

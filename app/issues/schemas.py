@@ -153,6 +153,14 @@ class IssueDatesUpdate(BaseModel):
     reason: str = Field(min_length=3, max_length=4000)
 
 
+class IssueDeadlinesUpdate(BaseModel):
+    """Default deadline (hours after a ticket is raised) for new Critical and Medium tickets. O&M Head only."""
+    critical_hours: int = Field(ge=1, le=24 * 90)
+    medium_hours: int = Field(ge=1, le=24 * 90)
+    apply_to_open: bool = False   # also move open tickets that still carry the old default
+    dry_run: bool = False         # report what would change; save nothing
+
+
 ISSUE_MESSAGE_INTENTS = {"update", "work_done", "question", "blocked", "confirm"}
 
 
@@ -187,7 +195,7 @@ class ReopenRequest(BaseModel):
 class CloseRequest(BaseModel):
     note: str | None = None
     closure: dict[str, Any] = Field(default_factory=dict)
-    direct: bool = False                      # O&M Head only: close without the resolution step (a reason is required)
+    direct: bool = False                      # O&M Head or the ticket's Assignee: close without the resolution step (a reason is required)
 
 
 class IssueOut(BaseModel):

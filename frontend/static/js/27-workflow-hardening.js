@@ -4,7 +4,8 @@
    Rules enforced here:
    - Every ticket change (assign, acknowledge, close, edit...) goes to the server; nothing is changed only on screen.
    - Assignees are real users with the Assignee role, taken from the database (/api/issues/assignees).
-   - Only the O&M Head can assign, edit, close or move a ticket's stage; Assignees advance only their own tickets.
+   - Only the O&M Head can assign or move a ticket's stage; Assignees advance only their own tickets.
+   - Editing, dates and closing: the O&M Head, or the ticket's own Assignee (45-issue-edit-access.js).
    - Dialogs keep what the person chose/typed when the page redraws in the background. */
 (function(){
  const role=()=>(typeof AUTH_IDENTITY!=="undefined"&&AUTH_IDENTITY.role)||"Viewer";
@@ -175,7 +176,7 @@
   if(sev&&sev!==t.severity)set("severity",sev);
   if(document.getElementById("edit-tk-desc")){if(!desc){toast("The description cannot be empty.");return}if(desc!==t.desc)set("description",desc)}
   if(document.getElementById("edit-tk-maker")&&maker!==(t.maker||""))set("maker",maker);
-  if(/^\d{4}-\d{2}-\d{2}$/.test(oc))set("occurred_at",oc+"T09:00:00");
+  if(/^\d{4}-\d{2}-\d{2}$/.test(oc))set("occurred_at",s91LocalToUtc(oc,"09:00"));
   if(eq&&eq!==(t.equip||""))set("equipment_ref",eq);
   if(vert&&vert!==t.vertical)set("vertical",vert);
   if(document.getElementById("edit-tk-sub")){const sv=(sub==="(none)"||sub==="")?null:sub;if(sv!==(t.sub||null))set("subcategory",sv)}
@@ -216,8 +217,8 @@
   const t=issue(id);if(!canChangeDates(t)){toast("You cannot change this ticket's dates.");return}
   const start=field("td-start"),etc=field("td-etc"),reason=field("td-reason").trim(),body={};
   if(reason.length<3){toast("Enter the reason for the date change.");return}
-  if(start&&start!==isoDay(t.occurred||t.created))body.occurred_at=start+"T09:00:00";
-  if(etc&&etc!==isoDay(t.etc))body.etc_at=etc+"T18:00:00";
+  if(start&&start!==isoDay(t.occurred||t.created))body.occurred_at=s91LocalToUtc(start,"09:00");
+  if(etc&&etc!==isoDay(t.etc))body.etc_at=s91LocalToUtc(etc,"18:00");
   if(start&&etc&&etc<start){toast("The deadline cannot be before the start date.");return}
   if(!Object.keys(body).length){S.modal=null;render();toast("No date changes to save.");return}
   body.reason=reason;
@@ -246,9 +247,10 @@
   window.renderModal=wrapped;
  }
 
- /* the older "Close Ticket" button injected into the ticket drawer is for the O&M Head only */
+ /* the older "Close Ticket" button injected into the ticket drawer: O&M Head, or the ticket's own Assignee */
  new MutationObserver(function(){
   if(isHead())return;
+  if(typeof s91CanCloseIssue==="function"&&S.modal==="ticket"&&s91CanCloseIssue(issue((S.modalCtx||{}).id)))return;
   const b=document.getElementById("cc-close-btn");if(b)b.remove();
  }).observe(document.body,{childList:true,subtree:true});
 })();

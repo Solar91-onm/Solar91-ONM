@@ -49,3 +49,5 @@ services:
         value: "1800"
       - key: BOOTSTRAP_CLOSED_ISSUE_DAYS
         value: "0"
+      - key: BOOTSTRAP_PM_HISTORY_DAYS
+        value: "180"

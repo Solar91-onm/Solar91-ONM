@@ -30,6 +30,8 @@
  }
  const canWork=t=>isHead()||(role()==="Assignee"&&mineAssigned(t));
  const canMessage=()=>["O&M Head","Assignee","Site Engineer"].includes(role());
+ const canEdit=t=>typeof s91CanEditIssue==="function"?s91CanEditIssue(t):isHead();
+ const canClose=t=>typeof s91CanCloseIssue==="function"&&typeof ccCloseDialog==="function"?s91CanCloseIssue(t):isHead();
  const stepIndex=s=>{if(s==="Pending Parts/Vendor")s="Pending Vendor";const i=STEPS.findIndex(x=>x[0]===s);return i<0?0:i};
  const timeOf=v=>{try{const d=new Date(v);return isNaN(d)?"":d.toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})}catch(e){return ""}};
  const dayOf=v=>{try{const d=new Date(v);if(isNaN(d))return "";const k=d.toISOString().slice(0,10);return k===TODAY?"Today":k===addDays(TODAY,-1)?"Yesterday":d.toLocaleDateString([],{day:"numeric",month:"short",year:"numeric"})}catch(e){return ""}};
@@ -110,7 +112,7 @@
    if(work)btns=b(done?"Confirm & resolve":"Submit resolution","openModal('resolve',{id:'"+id+"'})")+b("Log work","openModal('progress',{id:'"+id+"'})","o")+b("Waiting for parts","idkAct('"+id+"','pending')","o");
   }
   else if(t.status==="Pending Vendor"){text="On hold, waiting for parts or the vendor.";if(work)btns=b("Resume work","idkAct('"+id+"','resume')")+b("Submit resolution","openModal('resolve',{id:'"+id+"'})","o")}
-  else if(t.status==="Resolved"){text="Fix submitted. Waiting for the O&M Head to verify and close.";if(isHead())btns=b("Verify & close","openModal('verify',{id:'"+id+"'})")+b("Reopen","openModal('reopen',{id:'"+id+"'})","o")}
+  else if(t.status==="Resolved"){text="Fix submitted. Waiting for the O&M Head"+(work&&!isHead()?" or you":"")+" to verify and close.";if(isHead())btns=b("Verify & close","openModal('verify',{id:'"+id+"'})")+b("Reopen","openModal('reopen',{id:'"+id+"'})","o");else if(canClose(t))btns=b("Verify & close","ccCloseDialog('"+id+"')")}
   /* the O&M Head (any ticket) and the ticket's Assignee can take it back one stage when the result did not hold */
   if(canStepBack(t))btns+=b("↩ Back to "+esc(backTarget(t)==="In Progress"?"In progress":backTarget(t)),"idkAct('"+id+"','back')","g");
   return '<div class="idk-next'+(done&&t.status==="In Progress"?" hot":"")+'"><span class="idk-next-t">'+text+'</span>'+(btns?'<span class="idk-next-a">'+btns+'</span>':'')+'</div>';
@@ -161,7 +163,12 @@
    if(t.status!=="Closed"&&t.status!=="Resolved"&&typeof ccCloseDialog==="function")it("Close without resolution…","ccCloseDialog('"+id+"')");
    if((t.status!=="Open"||t.assignee)&&typeof m26ResetIssue==="function")it("Reset to Open","m26ResetIssue('"+id+"')","warn");
    if(t.dbId&&typeof s91ConfirmDeleteIssue==="function")it("Move to Deleted","s91ConfirmDeleteIssue('"+id+"')","danger");
-  }else if(role()==="Assignee"&&mineAssigned(t)&&t.status!=="Closed"&&typeof ticketDatesOpen==="function")it("Change dates","ticketDatesOpen('"+id+"')");
+  }else if(role()==="Assignee"&&mineAssigned(t)&&t.status!=="Closed"){
+   /* the ticket's Assignee: edit details and dates, change dates, close (the server checks the assignment) */
+   if(canEdit(t))it("Edit details","openModal('editTicket',{id:'"+id+"'})");
+   if(typeof ticketDatesOpen==="function")it("Change dates","ticketDatesOpen('"+id+"')");
+   if(t.status!=="Resolved"&&canClose(t))it("Close without resolution…","ccCloseDialog('"+id+"')");
+  }
   const pr=typeof plantRec==="function"?plantRec(t.plant):null;
   if(pr&&typeof openPlantPage==="function")it("Open plant page","closeModal();openPlantPage('"+q(pr.id)+"')");
   if(!items.length)return "";

@@ -234,6 +234,8 @@
 
 /* ---------- 8 · toasts (every toast() call) ---------- */
 body .cc-toasts{right:20px;bottom:22px;gap:12px;width:min(380px,calc(100vw - 32px))}
+/* while a dialog is open its Save / Close buttons sit bottom-right: show toasts at the top so they never cover them */
+body:has(.overlay) .cc-toasts,body:has(.s91-admin-shade) .cc-toasts,body:has(.pml-overlay) .cc-toasts{bottom:auto;top:18px}
 body .cc-toasts .cc-toast{--tc:var(--info);gap:12px;border:1px solid var(--gx-line);border-left:1px solid var(--gx-line);border-radius:18px;padding:13px 14px 15px 16px;
  background:color-mix(in srgb,var(--gx-card) 93%,transparent);backdrop-filter:blur(16px) saturate(160%);-webkit-backdrop-filter:blur(16px) saturate(160%);
  box-shadow:0 24px 50px rgba(6,24,14,.22),0 3px 8px rgba(6,24,14,.08);animation:gxToastIn .45s cubic-bezier(.2,1.1,.35,1)}

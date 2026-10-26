@@ -29,16 +29,19 @@ with sync_playwright() as p:
  S.tasks.push({id:'TR-1',plant:'Jodhpur',type:'Transformer',name:'Oil level test',freq:'Quarterly',quantity:2,status:'Scheduled',due:'2026-10-15',assignee:'Anil Kumar'});
  }''')
  page.add_script_tag(path=str(JS))
- page.evaluate('render()')
+ page.evaluate("S.pmLive.view='coverage';render()")
  page.wait_for_function("document.querySelector('.pml-coverage-table')")
+ page.evaluate("S.pmLive.view='register';render()")
  assert page.locator('.pml-consolidated-table tbody tr').count()==2,page.locator('.pml-consolidated-table').inner_text()
  assert 'Inverter × 12' in page.locator('.pml-consolidated-table').inner_text()
  assert page.locator('.pml-picker-btn').count()==1
  assert page.locator('[data-pml-select="plant"] option').count()==3
  page.locator('[data-pml-select="plant"]').select_option(label='SP-01 · Bhadla')
  assert page.locator('.pml-consolidated-table tbody tr').count()==1
+ page.click("[data-pmv-view=overview]")
  assert page.locator('.pml-plant-focus').count()==1
  assert '12' in page.locator('.pml-focus-row').first.inner_text()
+ page.click("[data-pmv-view=register]")
  page.locator('.pml-consolidated-table [data-pml-group]').last.click()
  assert page.locator('.pml-unit-drawer').count()==1
  assert '12' in page.locator('.pml-unit-metrics').inner_text()
@@ -48,10 +51,11 @@ with sync_playwright() as p:
  assert page.evaluate('window._opened && window._opened.kind')=='taskDetail'
  assert page.locator('.pml-unit-drawer').count()==0
  page.set_viewport_size({'width':390,'height':844})
- page.evaluate('render()')
+ page.evaluate("S.pmLive.view='overview';render()")
  assert page.locator('.pml-plant-focus').count()==1
+ page.evaluate("S.pmLive.view='register';render()")
  assert page.locator('[data-pml-select="plant"]').is_visible()
- page.evaluate('''() => {S.pmLive={plant:'Bhadla',status:'Overdue'};render()}''')
+ page.evaluate('''() => {S.pmLive={plant:'Bhadla',status:'Overdue',view:'register'};render()}''')
  assert page.locator('.pml-consolidated-table tbody tr').count()==1
  assert 'Inverter × 12' in page.locator('.pml-consolidated-table').inner_text()
  page.locator('.pml-consolidated-table [data-pml-group]').last.click()

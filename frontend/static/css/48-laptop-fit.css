@@ -1,0 +1,37 @@
+/* Laptop fit (loaded last). Checked at 1280×720, 1366×768, 1440×900, 1536×864, 1728×1117 and 1920×1080 —
+   the effective sizes of 14", 15.6" and 16" laptops at their usual display scaling.
+   1 sidebar badges · 2 page heroes · 3 PM views on short screens */
+
+/* ---------- 1 · sidebar: a long label shortens instead of pushing its count badge off the edge ---------- */
+#app .side-link>span:not(.side-badge){min-width:0;overflow:hidden;text-overflow:ellipsis}
+#app .side-link>.side-badge{flex-shrink:0}
+
+/* ---------- 2 · heroes keep their score beside the text on laptop widths (it wrapped below at ≤1440 px) ---------- */
+@media (min-width:821px){
+ .gx-hero{flex-wrap:nowrap}
+ .gx-hero-copy{flex:1 1 auto}
+ .gx-hero-score{flex:0 0 auto}
+}
+
+/* ---------- 3 · PM: views other than Overview show the KPI row only; tighten it on short laptop screens ---------- */
+.pmv-compact .cc-kpi2{min-height:0}
+@media (min-width:821px) and (max-height:900px){
+ .gx-hero{padding:16px 20px}
+ .gx-hero h2{font-size:21px;margin:6px 0 3px}
+ .pmc-hero-actions{margin-top:9px}
+ .pmv-compact .cc-kpi2{padding-top:10px!important;padding-bottom:10px!important}
+}
+
+/* ---------- 4 · Command Center "Operations overview": three cards share a 14" laptop's width (~315 px each), which
+   left 30 px for "Critical" / "Overdue". Narrow cards get a smaller ring and drop the % column (the count stays). ---------- */
+.ccx-card{container-type:inline-size}
+@container (max-width:380px){
+ .ccx-body{grid-template-columns:92px minmax(0,1fr);gap:10px}
+ .ccx-ring{width:92px;height:92px}
+ .ccx-mid b{font-size:22px}
+ .ccx-mid span{font-size:9px}
+ .ccx-row{grid-template-columns:10px minmax(0,1fr) auto;column-gap:6px;padding:6px 4px}
+ .ccx .ccx-row em{display:none}
+ .ccx-row u{grid-column:2/4}
+ .ccx-card h3{font-size:14px;white-space:normal;line-height:1.2}
+}

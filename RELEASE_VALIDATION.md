@@ -45,3 +45,13 @@ The uploaded archive included an internal `.git` folder with a stale `REBASE_HEA
 - Based on `Solar91-OM-2026-PM-Plant-Unit-Consolidated-FINAL.zip`; included the prior dashboard navigation, report preview/export, read-only Ask Solar91 panel, Washing updates, and compact PM equipment-unit grouping and plant selection.
 - Added O&M Head ticket correction with reason + before/after audit, reversible soft deletion, and restoration via Archived tickets register. Migration 025 required.
 - See `docs/ISSUE_EDIT_DELETE_2026.md` for workflow and database setup. Browser tests were simulated and live credentials were not provided.
+
+## Browser checks (local, no credentials) — October 2026
+
+Run after frontend changes; each starts its own isolated server or mock page:
+
+- `python scripts/browser_smoke.py` — real app on a temporary SQLite server: plants, ticket workflow, deadlines, the edit / close dialogs as O&M Head and as the ticket's Assignee, readable API errors, and closing a dialog and opening another screen in one click.
+- `python scripts/verify_laptop_layout.py` — every main screen at 1280×720, 1366×768, 1440×900, 1536×864, 1728×1117 and 1920×1080 (14", 15.6" and 16" laptops at their usual scaling). Fails on sideways scroll, content sticking out of the page or top bar, or a JavaScript error; keeps screenshots for a visual review.
+- `python scripts/verify_pm_command_view.py`, `python scripts/verify_pm_consolidation.py`, `python scripts/verify_command_experience.py` — Preventive Maintenance views and Command Centre with mock data.
+
+Laptop fixes from the October 2026 check (`frontend/static/css/48-laptop-fit.css` unless noted): sidebar labels shorten instead of pushing count badges off the edge; page heroes keep their score beside the text; Preventive Maintenance shows its large hero on Overview only, so the other tabs start with their work on a 720–768 px tall screen; the Command Centre overview cards keep readable labels at ~315 px wide; several newly overdue tickets raise one summary pop-up instead of four cards, and at most two stack under 800 px height (`08-actions-exports-and-submission.js`); closing a dialog and navigating in the same click no longer bounces back (`44-session-nav.js`); a ticket's conversation no longer stays on "Loading conversation…" when its work steps arrive first (`08-actions-exports-and-submission.js`).

@@ -317,7 +317,8 @@ function renderModal(){
   if(canWorkflow&&t.status==="Pending Vendor")acts+=b("Resume work","resumeTicket('"+t.id+"')","o")+b("Submit resolution","openModal('resolve',{id:'"+t.id+"'})");
   if(isHead&&t.status==="Resolved")acts+=b(I.check(13)+"Verify & close","openModal('verify',{id:'"+t.id+"'})","o")+b("Reopen","openModal('reopen',{id:'"+t.id+"'})","d");
   if(isHead&&t.status==="Closed")acts+=b("Reopen (recurred)","openModal('reopen',{id:'"+t.id+"'})","d");
-  if(isHead)acts+=b("Edit details","openModal('editTicket',{id:'"+t.id+"'})","o");
+  if(typeof s91CanEditIssue==="function"?s91CanEditIssue(t):isHead)acts+=b("Edit details","openModal('editTicket',{id:'"+t.id+"'})","o");
+  if(!isHead&&t.status==="Resolved"&&typeof s91CanCloseIssue==="function"&&s91CanCloseIssue(t))acts+=b(I.check(13)+"Verify & close","ccCloseDialog('"+t.id+"')","o");
   if(isHead&&t.dbId)acts+=b("Move to Deleted","s91ConfirmDeleteIssue('"+esc(t.id)+"')","d");
   acts+='<button class="btn o sm" onclick="closeModal()">Close</button>';
   const eqRec=s91IssueEquipment(t),eqLabel=s91IssueEquipmentLabel(t);

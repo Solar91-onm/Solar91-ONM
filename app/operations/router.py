@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
+from app.core.fastjson import json_response
 from app.core.legacy_state import load_state, sync_state
 from app.core.models import Plant, StateCollectionRevision, User
 from app.core.security import ROLE_MODULES, ROLE_PERMISSIONS, get_current_user, has_portfolio_scope, require_csrf, user_scoped_equipment_ids, user_scoped_equipment_types, user_scoped_plant_ids
@@ -52,7 +53,7 @@ def bootstrap(
     result["pending_access"] = (
         user.role == "Site Engineer" and len(scope["plant_ids"]) == 0
     ) or (user.role == "Assignee" and len(scope["equipment_types"]) == 0)
-    return result
+    return json_response(result)
 
 
 @router.get("/state/collections")

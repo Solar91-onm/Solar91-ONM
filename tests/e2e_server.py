@@ -57,7 +57,7 @@ with SessionLocal() as db:
 
 def browser_test_user(request: Request):
     # Test-only identity selector: this module cannot import without E2E_TEST_MODE.
-    subject = "e2e:site" if request.headers.get("X-S91-E2E-USER") == "site" else "e2e:isolated"
+    subject = {"site": "e2e:site", "assignee": "e2e:assignee"}.get(request.headers.get("X-S91-E2E-USER") or "", "e2e:isolated")
     with SessionLocal() as db:
         user = db.scalar(select(User).where(User.external_subject == subject))
         if not user:

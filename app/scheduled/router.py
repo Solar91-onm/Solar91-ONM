@@ -22,6 +22,8 @@ from app.storage.service import SupabaseStorage
 from app.issues.service import next_issue_ticket_no
 from app.pmplan.followups import FOLLOW_UP_OUTCOMES, follow_up_out, get_follow_up_state
 from app.pmplan.alerts import alert_log_out, task_alert_scope
+from app.core.fastjson import json_response
+from app.scheduled.history import history_since, recent_or_open
 from app.scheduled.washing_cycles import add_excused_reason, confirm_sheet_reports, create_daily_report, create_sheet_reports, day_activity, delete_daily_report, get_overview, list_assignees, list_excused_reasons, month_cycles, remove_excused_reason, review_daily_report, save_cycle_schedule, save_excused_reasons, set_cycle_date, setup_plant, update_daily_report
 from app.scheduled.washing_import import MAX_IMPORT_BYTES, export_bytes, import_setup, template_bytes
 from app.scheduled.washing_daily_import import MAX_DAILY_BYTES, daily_template_bytes, import_daily
@@ -248,12 +250,14 @@ def _audit(db: Session, user: User, action: str, task: OMTask, metadata: dict | 
 
 
 @router.get("/tasks")
-def list_tasks(db: Annotated[Session, Depends(get_db)], user: Annotated[User, Depends(get_current_user)]):
-    task_rows = db.execute(
-        select(OMTask, Plant.plant_name)
-        .outerjoin(Plant, Plant.id == OMTask.plant_id)
-        .order_by(OMTask.due_on, OMTask.created_at.desc())
-    ).all()
+def list_tasks(db: Annotated[Session, Depends(get_db)], user: Annotated[User, Depends(get_current_user)], history: str | None = None):
+    """PM work orders the user may see: all open work, and finished work from the recent history window
+    (app/scheduled/history.py). ``history=all`` adds every older finished record (exports and full reports)."""
+    since = None if (history or "").strip().lower() == "all" else history_since()
+    stmt = select(OMTask, Plant.plant_name).outerjoin(Plant, Plant.id == OMTask.plant_id)
+    if since is not None:
+        stmt = stmt.where(recent_or_open(since))
+    task_rows = db.execute(stmt.order_by(OMTask.due_on, OMTask.created_at.desc())).all()
     rows = [row[0] for row in task_rows]
     plant_names = {task.plant_id: name for task, name in task_rows if task.plant_id and name}
 
@@ -302,7 +306,8 @@ def list_tasks(db: Annotated[Session, Depends(get_db)], user: Annotated[User, De
             .where(ranked_follow_ups.c.row_number == 1)
         ):
             latest.setdefault(follow_up.task_id, follow_up)
-    return [_task_out(db, task, latest.get(task.id), followup_loaded=True, lookups=lookups) for task in visible]
+    rows = [_task_out(db, task, latest.get(task.id), followup_loaded=True, lookups=lookups) for task in visible]
+    return json_response(rows, headers={"X-PM-History-From": since.isoformat() if since else "all"})
 
 
 def _require_pm_follow_up_access(db: Session, user: User, task: OMTask) -> None:

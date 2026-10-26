@@ -67,6 +67,10 @@ class Settings(BaseSettings):
     # 0 = send every issue to the browser. Set e.g. 365 to leave out tickets closed more than a year ago
     # (they stay in the database and in /api/issues). Recommended once total issues pass ~20,000.
     bootstrap_closed_issue_days: int = 0
+    # Finished (Completed / Cancelled) PM work orders older than this many days are not sent at sign-in or by
+    # GET /api/scheduled/tasks; open work always is. They stay in the database and /api/scheduled/tasks?history=all.
+    # 0 = send every record (the behaviour before October 2026). See app/scheduled/history.py.
+    bootstrap_pm_history_days: int = 180
     # Retained for backwards-compatible config parsing. Full bootstrap includes washing because legacy views,
     # dashboards, reports, and the PM Excel export consume it; lite refreshes omit it explicitly.
     bootstrap_include_washing: bool = True

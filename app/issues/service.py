@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.core.models import AuditLog, Equipment, InventoryItem, InventoryMovement, Issue, IssueETCChange, IssueHistory, IssueStep, Plant, User, UserEquipmentTypeAssignment
 from app.core.security import EQUIPMENT_TYPES, resolve_equipment_id
+from app.issues.deadlines import default_deadline
 from app.issues.repository import IssueRepository
 from app.issues.schemas import AssignmentRequest, BulkAssignRequest, CloseRequest, StepBackRequest, IssueCreate, IssueUpdate, ProgressRequest, ResolveRequest
 
@@ -196,6 +197,9 @@ class IssueService:
         assignee = self._resolve_assignee(assigned_to, None) if assigned_to else None
         if assignee:
             self._ensure_assignee_scope(assignee, user, plant_id, equipment_id, payload.get("equipment_ref"), payload.get("vertical"))
+        if payload.get("etc_at") is None:
+            # No deadline sent: the priority's default duration, which the O&M Head sets (app/issues/deadlines.py).
+            payload["etc_at"] = default_deadline(self.db, payload["severity"])
         row = None
         for attempt in range(6):
             if auto_number:
@@ -256,8 +260,21 @@ class IssueService:
         if "description" in changes and (changes["description"] is None or not changes["description"].strip()):
             raise HTTPException(422,"Issue description cannot be blank")
         if "description" in changes: changes["description"]=changes["description"].strip()
-        before={key:getattr(row,key) for key in changes if getattr(row,key)!=changes[key]}
+        def utc(v):
+            if v is None: return None
+            return v.replace(tzinfo=timezone.utc) if v.tzinfo is None else v.astimezone(timezone.utc)
+        for key in ("occurred_at","etc_at"):
+            if key in changes:
+                if changes[key] is None: raise HTTPException(422,"The start date cannot be empty" if key=="occurred_at" else "The deadline cannot be empty")
+                changes[key]=utc(changes[key])
+        before={key:getattr(row,key) for key in changes if (utc(getattr(row,key)) if key in ("occurred_at","etc_at") else getattr(row,key))!=changes[key]}
         if not before: return row
+        new_start=changes.get("occurred_at",utc(row.occurred_at) or utc(row.created_at)); new_etc=changes.get("etc_at",utc(row.etc_at))
+        if ("occurred_at" in before or "etc_at" in before) and new_start and new_etc and new_etc<new_start:
+            raise HTTPException(422,"The deadline cannot be before the start date")
+        if "etc_at" in before:
+            # A deadline edit is logged like every other deadline change (ETC change history on the ticket).
+            self.db.add(IssueETCChange(issue_id=row.id,old_etc=row.etc_at,new_etc=changes["etc_at"],reason=reason or "Ticket details corrected",changed_by=user.id,changed_by_name=user.display_name))
         for key in before: setattr(row,key,changes[key])
         row.updated_at=datetime.now(timezone.utc)
         def stamp(v): return v.isoformat() if isinstance(v,(date,datetime,uuid.UUID)) else v
@@ -279,7 +296,7 @@ class IssueService:
         def utc(v):
             if v is None: return None
             return v.replace(tzinfo=timezone.utc) if v.tzinfo is None else v.astimezone(timezone.utc)
-        new_start=utc(fields["occurred_at"]) if "occurred_at" in fields else utc(issue.occurred_at)
+        new_start=utc(fields["occurred_at"]) if "occurred_at" in fields else (utc(issue.occurred_at) or utc(issue.created_at))
         new_etc=utc(fields["etc_at"]) if "etc_at" in fields else utc(issue.etc_at)
         if "occurred_at" in fields and new_start is None: raise HTTPException(422,"The start date cannot be empty")
         if "etc_at" in fields and new_etc is None: raise HTTPException(422,"The deadline cannot be empty")
@@ -847,8 +864,9 @@ class IssueService:
         row=self.repo.by_id(issue_id,for_update=True)
         if not row: raise HTTPException(404,"Issue not found")
         if data.direct:
-            if user.role!="O&M Head":
-                raise HTTPException(403,"Only the O&M Head can close a ticket directly")
+            # The router has already checked that an Assignee is the one this ticket is assigned to.
+            if user.role not in {"O&M Head","Assignee"}:
+                raise HTTPException(403,"Only the O&M Head or the ticket's Assignee can close a ticket directly")
             if row.status=="Closed":
                 raise HTTPException(409,"This ticket is already closed")
             if not (data.note or "").strip():

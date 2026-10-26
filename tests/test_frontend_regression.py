@@ -264,3 +264,120 @@ def test_pm_command_stylesheet_loads_last_and_pm_page_parses():
     assert '"/api/scheduled/tasks/"+encodeURIComponent(task.id)+"/assignee"' in js
     run=subprocess.run(['node','--check','frontend/static/js/29-pm-live-dashboard.js'],cwd=ROOT,capture_output=True,text=True,timeout=10)
     assert run.returncode==0,run.stderr
+
+
+def test_api_errors_read_as_sentences_not_bare_http_codes():
+    """FastAPI validation lists and proxy error pages must not reach people as "HTTP 422" / "HTTP 502"."""
+    script=textwrap.dedent(r'''
+      const fs=require('fs'),vm=require('vm'),assert=require('assert');
+      const s=fs.readFileSync('frontend/static/js/00-auth-data-and-imports.js','utf8');
+      const a=s.indexOf('const S91_HTTP_MESSAGES='),b=s.indexOf('async function apiFetch(');
+      assert(a>0&&b>a);
+      const box={};vm.createContext(box);vm.runInContext(s.slice(a,b)+';this.msg=s91ApiErrorMessage',box);
+      assert.strictEqual(box.msg(409,{detail:'Ticket is already closed'}),'Ticket is already closed');
+      const v=box.msg(422,{error:'validation_error',detail:[{loc:['body','etc_at'],msg:'Input should be a valid datetime'},{loc:['body','severity'],msg:'Value error, severity must be Critical or Medium'}]});
+      assert.strictEqual(v,'Please check: Etc at: Input should be a valid datetime; Severity: severity must be Critical or Medium');
+      assert(!/HTTP/.test(box.msg(502,{})),'proxy error page');
+      assert(/waking up/.test(box.msg(503,null)));
+      assert.strictEqual(box.msg(400,{detail:{message:'Bad file'}}),'Bad file');
+      assert(/HTTP 418/.test(box.msg(418,{})));
+    ''')
+    run=subprocess.run(['node','-e',script],cwd=ROOT,capture_output=True,text=True,timeout=10)
+    assert run.returncode==0,run.stderr
+
+
+def test_pm_views_and_issue_access_assets_are_loaded_in_order():
+    index=(ROOT/'frontend/templates/index.html').read_text(encoding='utf-8')
+    assert index.index('/static/css/47-pm-views.css')>index.index('/static/css/46-pm-command.css')
+    assert index.index('/static/js/45-issue-edit-access.js')>index.index('/static/js/44-session-nav.js')
+    js=(ROOT/'frontend/static/js/45-issue-edit-access.js').read_text(encoding='utf-8')
+    # the server decides; the page offers edit/close to the O&M Head or the ticket's own Assignee only
+    assert 'isHead()||(role()==="Assignee"&&mine(t)&&t.status!=="Closed")' in js
+    assert '"/api/issues/deadlines",{method:"PUT"' in js
+    pm=(ROOT/'frontend/static/js/29-pm-live-dashboard.js').read_text(encoding='utf-8')
+    for view in ('"overview"','"schedule"','"plants"','"coverage"','"register"'):
+        assert view in pm
+    for f in ('frontend/static/js/45-issue-edit-access.js','frontend/static/js/29-pm-live-dashboard.js'):
+        run=subprocess.run(['node','--check',f],cwd=ROOT,capture_output=True,text=True,timeout=10)
+        assert run.returncode==0,run.stderr
+
+
+def test_compliance_export_fetches_full_pm_history_when_the_page_has_a_window():
+    script=textwrap.dedent(r'''
+      const fs=require('fs'),vm=require('vm'),assert=require('assert');
+      const s=fs.readFileSync('frontend/static/js/05-preventive-maintenance-and-washing.js','utf8');
+      const a=s.indexOf('function pmHistoryNote('),b=s.indexOf('function renderScheduledHub(');
+      assert(a>0&&b>a);
+      const run=async(fail)=>{
+        const out={toasts:[],sheets:{},file:null,calls:[]};
+        const box={S:{tasks:[{id:'OPEN-1',status:'Scheduled'}],tasksHistoryFrom:'2026-04-28',washing:[],washMeta:{}},TODAY:'2026-10-25',
+          fmtDate:d=>d,pmDisplayTaskName:t=>t.name||'',ensureXlsxLoaded:async()=>{},toast:m=>out.toasts.push(m),
+          lastWash:()=>null,daysSince:()=>0,washedToday:()=>false,excToday:()=>false,wDue:()=>false,addDays:d=>d,pad2:n=>String(n),
+          apiFetch:async url=>{out.calls.push(url);if(fail)throw new Error('offline');return [{id:'OLD-1',status:'Completed'},{id:'OPEN-1',status:'Scheduled'}]},
+          XLSX:{utils:{book_new:()=>({}),json_to_sheet:rows=>rows,book_append_sheet:(wb,rows,name)=>{out.sheets[name]=rows}},writeFile:(wb,f)=>{out.file=f}}};
+        vm.createContext(box);vm.runInContext(s.slice(a,b)+';this.go=exportScheduledOMCompliance',box);
+        await box.go();return out;
+      };
+      (async()=>{
+        const ok=await run(false);
+        assert.deepStrictEqual(ok.calls,['/api/scheduled/tasks?history=all']);
+        assert.deepStrictEqual(ok.sheets['Preventive Maintenance'].map(r=>r['Work Order']),['OLD-1','OPEN-1']);
+        assert(!/recent_only/.test(ok.file),ok.file);
+        const bad=await run(true);
+        assert.deepStrictEqual(bad.sheets['Preventive Maintenance'].map(r=>r['Work Order']),['OPEN-1']);
+        assert(/recent_only/.test(bad.file)&&bad.toasts.some(m=>/could not load/.test(m)),JSON.stringify(bad));
+      })().catch(e=>{console.error(e);process.exitCode=1});
+    ''')
+    run=subprocess.run(['node','-e',script],cwd=ROOT,capture_output=True,text=True,timeout=10)
+    assert run.returncode==0,run.stderr
+
+
+def test_local_dates_typed_in_india_reach_the_api_as_exact_utc_instants():
+    """A deadline typed as 10:00 in the plant's time must not be stored as 10:00 UTC (15:30 IST)."""
+    script=textwrap.dedent(r'''
+      const fs=require('fs'),assert=require('assert');
+      const s=fs.readFileSync('frontend/static/js/00-auth-data-and-imports.js','utf8');
+      const a=s.indexOf('function s91LocalToUtc(');assert(a>0);
+      eval(s.slice(a,s.indexOf('\n',a)));
+      assert.strictEqual(s91LocalToUtc('2026-10-27T10:00'),'2026-10-27T04:30:00.000Z');
+      assert.strictEqual(s91LocalToUtc('2026-10-27','18:00'),'2026-10-27T12:30:00.000Z');
+      assert.strictEqual(s91LocalToUtc(''),null);assert.strictEqual(s91LocalToUtc('not a date'),null);
+    ''')
+    run=subprocess.run(['node','-e',script],cwd=ROOT,capture_output=True,text=True,timeout=10,env={**__import__('os').environ,'TZ':'Asia/Kolkata'})
+    assert run.returncode==0,run.stderr
+    bridge=(ROOT/'frontend/static/js/19-production-identity-and-domain-bridge.js').read_text(encoding='utf-8')
+    assert 'etc_at:s91LocalToUtc(' in bridge and 'T09:00:00"' not in bridge
+
+
+def test_laptop_fit_stylesheet_loads_last_and_dialog_history_step_is_deferred():
+    index=(ROOT/'frontend/templates/index.html').read_text(encoding='utf-8')
+    css=[line for line in index.splitlines() if 'rel="stylesheet" href="/static/css/' in line]
+    assert '48-laptop-fit.css' in css[-1]
+    nav=(ROOT/'frontend/static/js/44-session-nav.js').read_text(encoding='utf-8')
+    # history.back() for a closed dialog runs one tick later, and only if nothing navigated in the same click
+    assert 'setTimeout(()=>{const now=st();if(NAV.i===at&&now&&now.modal){NAV.skipPop+=1;history.back()}},0)' in nav
+
+
+def test_ticket_conversation_does_not_stay_loading_when_the_ticket_is_replaced_mid_request():
+    """Work steps (m26PatchIssue) replace the ticket with a copy while its history loads; the copy must not stay 'loading'."""
+    script=textwrap.dedent(r'''
+      const fs=require('fs'),vm=require('vm'),assert=require('assert');
+      const s=fs.readFileSync('frontend/static/js/08-actions-exports-and-submission.js','utf8');
+      const a=s.indexOf('async function refreshIssueActivity(');let i=s.indexOf('{',a),d=0,e=-1;
+      for(let j=i;j<s.length;j++){if(s[j]==='{')d++;else if(s[j]==='}'&&--d===0){e=j+1;break}}
+      let release;const box={S:{issues:[{id:'ISS-1',dbId:'db-1'}],modal:'ticket',modalCtx:{id:'ISS-1'}},renders:0,
+        render(){box.renders++},toast(){},apiFetch:()=>new Promise(r=>{release=r})};
+      vm.createContext(box);vm.runInContext(s.slice(a,e)+';this.go=refreshIssueActivity',box);
+      (async()=>{
+        const p=box.go('ISS-1',false);
+        // the steps response arrives first and replaces the ticket with a copy (still flagged as loading)
+        box.S.issues=box.S.issues.map(t=>Object.assign({},t,{steps:[],_stepsLoaded:true}));
+        assert.strictEqual(box.S.issues[0].activityLoading,true);
+        release([{action:'issue.message',note:'hi'}]);await p;
+        const now=box.S.issues[0];
+        assert.strictEqual(now.activityLoading,false);assert.strictEqual(now.activityLoaded,true);assert.strictEqual(now.activity.length,1);
+        assert(box.renders>=1);
+      })().catch(err=>{console.error(err);process.exitCode=1});
+    ''')
+    run=subprocess.run(['node','-e',script],cwd=ROOT,capture_output=True,text=True,timeout=10)
+    assert run.returncode==0,run.stderr

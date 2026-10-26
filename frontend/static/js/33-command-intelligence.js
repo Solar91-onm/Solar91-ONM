@@ -126,7 +126,7 @@
   }
   if(module==='pm'){
    const f=S.pmLive||(S.pmLive={});
-   Object.assign(f,{plant:plant==='all'?'all':plant,status:queue==='overdue'?'Overdue':queue==='due'?'Due soon':queue==='done'?'Done':'all',age:'all',week:'all',equipment:'all',query:'',page:1});
+   Object.assign(f,{plant:plant==='all'?'all':plant,status:queue==='overdue'?'Overdue':queue==='due'?'Due soon':queue==='done'?'Done':'all',age:'all',week:'all',equipment:'all',query:'',page:1,view:'register'});
    S.schedScope=plant;goScheduledOM('maintenance');
    destination('.pml-register','Preventive Maintenance');return;
   }
@@ -418,7 +418,7 @@
    if(issue&&typeof openIssue==='function'){openIssue(issue.id);return}
    if(typeof drillIssues==='function'){drillIssues({q:ticket||id,chip:'all'});return}
    if(typeof goTab==='function')goTab('issues');return}
-  if(kind==='pm'){if(typeof S!=='undefined'){S.pmLive=S.pmLive||{};S.pmLive.query=id;S.pmLive.status='all';if(S.schedF)S.schedF.q=id}if(typeof goScheduledOM==='function')goScheduledOM('maintenance');return}
+  if(kind==='pm'){if(typeof S!=='undefined'){S.pmLive=S.pmLive||{};S.pmLive.query=id;S.pmLive.status='all';S.pmLive.view='register';if(S.schedF)S.schedF.q=id}if(typeof goScheduledOM==='function')goScheduledOM('maintenance');return}
   if(kind==='washing'){if(typeof S!=='undefined'){S._washUi=S._washUi||{};S._washUi.q=plant||''}if(typeof washOpenRegister==='function')washOpenRegister();else if(typeof goScheduledOM==='function')goScheduledOM('washing');return}
   if(kind==='plants'||kind==='equipment'){if(role()==='Site Engineer'){if(typeof window.s91RadarFocus==='function')window.s91RadarFocus('all','all');return}if(typeof S!=='undefined'){S.plF=S.plF||{};S.plF.q=plant||id;}if(typeof goView==='function')goView('plants');return}
  }

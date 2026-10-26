@@ -61,14 +61,19 @@ def main():
                 # local FastAPI process. This tests browser execution + real DB writes,
                 # but does not certify native asset-network delivery or redirects.
                 transport_mode={"inline":False}
+                identity={"user":""}   # "" = O&M Head; "assignee" = QA Assignee (tests/e2e_server.py)
+                def as_user(who):
+                    identity["user"]=who
+                    page.set_extra_http_headers({"X-S91-E2E-USER":who} if who else {})
                 def transport(call):
                     url=call["url"]
                     if not url.startswith("/") or url.startswith("//"):
                         return {"status":400,"body":'{"detail":"Only local test API URLs permitted"}'}
                     body=call.get("body")
+                    headers={str(k):str(v) for k,v in (call.get("headers") or {}).items()}
+                    if identity["user"]:headers["X-S91-E2E-USER"]=identity["user"]
                     req=Request(base+url,data=body.encode("utf8") if body is not None else None,
-                                headers={str(k):str(v) for k,v in (call.get("headers") or {}).items()},
-                                method=call.get("method","GET"))
+                                headers=headers,method=call.get("method","GET"))
                     try:
                         with urlopen(req,timeout=65) as response:
                             return {"status":response.status,"body":response.read().decode("utf8")}
@@ -152,6 +157,50 @@ def main():
                 page.evaluate('goTab("issues")');page.wait_for_selector(".si-head",timeout=12000)
                 assert page.locator("#app").get_by_text(ticket["id"]).count()>=1
                 print("PASS: issue survives refresh and renders in issue register")
+                # Closing a dialog and opening another screen in one click (ticket -> "Open plant page") must stay there;
+                # the dialog's deferred history step used to send the person back to Site Issues.
+                page.evaluate('id=>openModal("ticket",{id})',ticket["id"]);page.wait_for_timeout(500)
+                page.evaluate('()=>{closeModal();openPlantPage("BROWSER01")}');page.wait_for_timeout(900)
+                assert page.evaluate("S.view")=="plant",page.evaluate("[S.view,location.hash]")
+                page.evaluate("history.back()");page.wait_for_timeout(700)
+                assert page.evaluate("S.modal")=="ticket","Back returns to the ticket the plant page was opened from"
+                page.evaluate("closeModal()");page.wait_for_timeout(500)
+                page.evaluate('goTab("issues")');page.wait_for_selector(".si-head",timeout=12000)
+                print("PASS: closing a dialog and navigating in one click keeps the new screen; Back returns to the dialog")
+                # O&M Head: default deadlines from the Site Issues header, saved on the server and used by the raise form.
+                assert page.locator(".si-head button",has_text="Deadlines").count()==1
+                page.locator(".si-head button",has_text="Deadlines").click()
+                page.wait_for_selector("#s91-deadlines")
+                page.locator("#dl-crit-n").fill("1");page.locator("#dl-crit-u").select_option("d")
+                page.locator("#dl-med-n").fill("72");page.locator("#dl-med-u").select_option("h")
+                # the server previews which open tickets would move (dry run); the QA ticket still has its default
+                page.wait_for_function('/would|No open ticket|Could not/.test(document.getElementById("dl-preview").textContent)',timeout=15000)
+                assert "would get the new deadline" in page.inner_text("#dl-preview"),page.inner_text("#dl-preview")
+                page.locator("#dl-apply").check()
+                page.once("dialog",lambda d:d.accept())
+                page.locator("#dl-save").click()
+                page.wait_for_function('!document.getElementById("s91-deadlines")',timeout=15000)
+                assert page.evaluate('[ETC_HRS.Critical,ETC_HRS.Medium]')==[24,72]
+                assert page.evaluate('async()=>(await apiFetch("/api/issues/deadlines")).hours')=={"Critical":24,"Medium":72}
+                moved=page.evaluate('async q=>(await apiFetch("/api/issues/"+q+"/activity")).filter(a=>a.action==="issue.etc_changed").length',ticket["dbId"])
+                assert moved==1,moved
+                print("PASS: O&M Head changes Critical/Medium deadlines; preview, saved, open ticket moved and logged")
+                # One edit dialog for details and dates; changing the priority moves an untouched deadline to its default.
+                page.evaluate('id=>openModal("editTicket",{id})',ticket["id"])
+                page.wait_for_selector("#edit-tk-reason")
+                page.locator("#edit-tk-sev").select_option("Critical")
+                assert "Critical default" in page.locator("#edit-tk-etc-note").inner_text()
+                page.locator("#edit-tk-desc").fill("Browser QA inverter overheating (edited)")
+                page.locator("#edit-tk-reason").fill("Priority corrected after site call")
+                page.locator("#edit-tk-save").click()
+                page.wait_for_function('S.issues.some(x=>x.desc==="Browser QA inverter overheating (edited)"&&x.severity==="Critical")',timeout=20000)
+                stored=page.evaluate('async q=>(await apiFetch("/api/issues?q="+encodeURIComponent(q)))[0]',"overheating (edited)")
+                assert stored["severity"]=="Critical" and stored["description"].endswith("(edited)"),stored
+                print("PASS: edit dialog saves details and deadline through PATCH; persisted")
+                # A validation error reads as a sentence, not "HTTP 422".
+                msg=page.evaluate('''async id=>{try{await apiFetch("/api/issues/"+id,{method:"PATCH",body:{etc_at:"not-a-date"}});return "saved"}catch(e){return e.message}}''',ticket["dbId"])
+                assert msg.startswith("Please check") and "HTTP" not in msg,msg
+                print("PASS: API validation errors are readable")
                 # Real HTTP workflow: assign, acknowledge, start, record work and
                 # close directly (resolution needs uploaded photographic evidence).
                 def action(path,body=None):
@@ -161,8 +210,50 @@ def main():
                 assert action("/acknowledge")["status"]=="Acknowledged"
                 assert action("/start")["status"]=="In Progress"
                 assert action("/progress",{"note":"Verified inverter temperature","hours":1})["status"]=="In Progress"
-                closed=action("/close",{"direct":True,"note":"QA direct-close verification without evidence"})
-                assert closed["status"]=="Closed"
+                # A second ticket for the Assignee to close themselves.
+                second=page.evaluate('async pid=>await apiFetch("/api/issues",{method:"POST",body:{plant_id:pid,vertical:"Inverter",description:"Browser QA duplicate report",severity:"Medium"}})',plant["id"])
+                page.evaluate('async id=>await apiFetch("/api/issues/"+id+"/assign",{method:"POST",body:{assignee_text:"QA Assignee"}})',second["id"])
+                # ---- as the ticket's Assignee: edit details from the desk menu, close their own ticket ----
+                as_user("assignee");load();page.wait_for_selector(".shell",timeout=20000)
+                assert page.evaluate("AUTH_IDENTITY.role")=="Assignee"
+                page.evaluate('goTab("issues")');page.wait_for_selector(".si-head",timeout=12000)
+                assert page.locator(".si-head button",has_text="Deadlines").count()==0
+                page.evaluate('id=>openModal("ticket",{id})',ticket["id"])
+                # the desk redraws once the ticket history has loaded; open the menu after that, as a person would
+                page.wait_for_function('id=>{const t=S.issues.find(x=>x.id===id);return t&&(t.activityLoaded||t.activityError)}',arg=ticket["id"],timeout=20000)
+                page.wait_for_timeout(300)
+                page.locator(".idk-menu summary").click()
+                menu=page.locator(".idk-menu").inner_text()
+                assert "Edit details" in menu and "Change dates" in menu and "Close without resolution" in menu and "Move to Deleted" not in menu,menu
+                page.locator(".idk-menu button",has_text="Edit details").click()
+                page.wait_for_selector("#edit-tk-reason")
+                page.locator("#edit-tk-desc").fill("Browser QA inverter overheating (assignee note)")
+                page.locator("#edit-tk-reason").fill("Fault narrowed down on site")
+                page.locator("#edit-tk-save").click()
+                page.wait_for_function('S.issues.some(x=>x.desc==="Browser QA inverter overheating (assignee note)")',timeout=20000)
+                stored=page.evaluate('async q=>(await apiFetch("/api/issues?q="+encodeURIComponent(q)))[0]',"(assignee note)")
+                assert stored and stored["description"].endswith("(assignee note)"),stored
+                # a ticket that is not theirs offers neither edit nor close
+                others=page.evaluate('S.issues.filter(x=>x.dbId&&!x.assignee).map(x=>x.id)')
+                for oid in others:
+                    assert not page.evaluate('id=>s91CanEditIssue(S.issues.find(x=>x.id===id))||s91CanCloseIssue(S.issues.find(x=>x.id===id))',oid),oid
+                second_id=page.evaluate('db=>S.issues.find(x=>x.dbId===db).id',second["id"])
+                page.evaluate('id=>ccCloseDialog(id)',second_id)
+                page.locator("#dc-rem").fill("Same fault as the first QA ticket")
+                page.locator("#dc-go").click()
+                page.wait_for_function('id=>(S.issues.find(x=>x.id===id)||{}).status==="Closed"',arg=second_id,timeout=20000)
+                print("PASS: the ticket's Assignee edits and closes their own tickets; other tickets offer neither")
+                as_user("");load();page.wait_for_selector(".shell",timeout=20000)
+                assert page.evaluate('db=>S.issues.find(x=>x.dbId===db).status',second["id"])=="Closed"
+                page.evaluate('goTab("issues")');page.wait_for_selector(".si-head",timeout=12000)
+                # Close through the ticket's close dialog (a reason is required for a direct close).
+                page.evaluate('id=>ccCloseDialog(id)',ticket["id"])
+                page.wait_for_selector("#cc-close-ovl #dc-go")
+                page.locator("#dc-go").click()
+                assert page.locator("#cc-close-ovl").count()==1,"closing without a reason must be refused"
+                page.locator("#dc-rem").fill("QA direct-close verification without evidence")
+                page.locator("#dc-go").click()
+                page.wait_for_function('id=>(S.issues.find(x=>x.id===id)||{}).status==="Closed"',arg=ticket["id"],timeout=20000)
                 load();page.wait_for_selector(".shell",timeout=20000)
                 assert page.evaluate('S.issues.find(x=>x.dbId==='+json.dumps(ticket["dbId"])+').status')=="Closed"
                 page.evaluate('goTab("issues")');page.wait_for_selector(".si-head",timeout=12000)

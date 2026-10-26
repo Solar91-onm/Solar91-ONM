@@ -14,6 +14,10 @@
 ## Settings (Render environment)
 * `BOOTSTRAP_CLOSED_ISSUE_DAYS` (default `0` = send everything). When total issues exceed ~20,000 set it to `365`:
   tickets closed longer ago are not sent to browsers (still in the database and `/api/issues`).
+* `BOOTSTRAP_PM_HISTORY_DAYS` (default `180`, `0` = send everything as before October 2026). Finished (Completed /
+  Cancelled) PM work orders older than this are not sent at sign-in or by `GET /api/scheduled/tasks`; open work always
+  is. `GET /api/scheduled/tasks?history=all` returns everything and the compliance export uses it. On-screen counts of
+  finished work (PM report, Completed tile) say "since <date>". See `app/scheduled/history.py`.
 * `DB_POOL_SIZE` / `DB_MAX_OVERFLOW`: keep (pool + overflow) below your Supabase pooler connection limit.
 * Run ONE web instance / ONE uvicorn worker: startup migrations run in the background and would race with several workers.
 

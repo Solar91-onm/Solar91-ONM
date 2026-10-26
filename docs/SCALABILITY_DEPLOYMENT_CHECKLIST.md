@@ -5,7 +5,7 @@ Use this checklist for a controlled staging rollout first. Configure secret valu
 ## Configuration and Render
 
 - [ ] Set `APP_ENV`, `DEBUG`, `DATABASE_URL`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_STORAGE_BUCKET`, `CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY`, `CLERK_ISSUER`, and `ALLOWED_ORIGINS`.
-- [ ] Review optional `DB_POOL_SIZE`, `DB_MAX_OVERFLOW`, `DB_POOL_RECYCLE_SECONDS`, `MAX_UPLOAD_MB`, `BOOTSTRAP_CLOSED_ISSUE_DAYS`, `STATE_SYNC_ENABLED`, and background-job settings.
+- [ ] Review optional `DB_POOL_SIZE`, `DB_MAX_OVERFLOW`, `DB_POOL_RECYCLE_SECONDS`, `MAX_UPLOAD_MB`, `BOOTSTRAP_CLOSED_ISSUE_DAYS`, `BOOTSTRAP_PM_HISTORY_DAYS`, `STATE_SYNC_ENABLED`, and background-job settings.
 - [ ] Confirm aggregate pool connections across every Render process/instance remain below the Supabase pooler quota with operational headroom.
 - [ ] Use the documented Supabase PostgreSQL Session Pooler connection mode for the Render service; do not infer that a successful app start proves schema completeness.
 - [ ] Keep one worker for the current single-process background-job/startup assumptions; only increase process/instance counts after reviewing pool capacity and scheduled-job behavior.

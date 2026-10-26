@@ -1,7 +1,8 @@
 """Browser check for the redesigned Preventive Maintenance page (no server, no credentials, no real data).
 
 Renders frontend/static/js/29-pm-live-dashboard.js with every portal stylesheet and generated data for 40 plants, then
-drives the toolbar menus, KPI/hero filters, day planner search and status filters, the register people filter and sort,
+drives the toolbar menus, the view tabs (Overview, Calendar, Plants, Coverage, Work register), KPI/hero filters, the
+month calendar and day planner search/status filters, the plants x equipment matrix, the register people filter and sort,
 and the Assign dialog against a mocked API (one partial failure, then success). Also checks phone width for sideways scroll.
 
     python scripts/verify_pm_command_view.py
@@ -106,17 +107,20 @@ def run(scenario, tmp):
             pg.click(".pmc-menu summary >> text=Upload plan");assert pg.locator(".pmc-menu[open]").count()==1
             pg.click(".pml-brand");assert pg.locator(".pmc-menu[open]").count()==0
             pg.click(".pmc-menu summary >> text=More");pg.click(".pmc-menu-list >> text=Unit counts");assert pg.locator(".pmc-menu[open]").count()==0
+            # opens on the Overview; the day planner lives in the Calendar view
+            assert pg.locator(".pmv-tab.on").inner_text().startswith("Overview") and pg.locator(".pmd-row").count()==0
+            pg.click("[data-pmv-view=schedule]");assert pg.locator(".pmcal-cell").count()==42
             # day planner: today empty -> jump to the next planned day
             pg.click("[data-pmd-jump]");assert pg.locator(".pmd-row").count()==12,pg.locator(".pmd-row").count()
             assert "Show all 40" in pg.inner_text(".pmd-more")
             pg.click("[data-pmd-all]");assert pg.locator(".pmd-row").count()==40
-            pg.fill(".pmd-search","jogi");assert pg.locator(".pmd-row").count()==1,pg.locator(".pmd-row").count()
+            pg.fill(".pmd-search","jogi");pg.wait_for_timeout(300);assert pg.locator(".pmd-row").count()==1,pg.locator(".pmd-row").count()
             assert pg.evaluate("document.activeElement.classList.contains('pmd-search')"),"focus kept while typing"
-            pg.fill(".pmd-search","")
+            pg.fill(".pmd-search","");pg.wait_for_timeout(300)
             pg.click("[data-pmd-status=done]");assert pg.locator(".pmd-row").count()==0
             pg.click("[data-pmd-status=all]")
             # hero pill / KPI: unassigned focus filters the register and shows a chip
-            pg.click(".pmc-pill.warn");assert pg.locator(".gx-focusbar").count()==1 and "No assignee" in pg.inner_text(".gx-focusbar")
+            pg.click("[data-pmv-view=overview]");pg.click(".pmc-pill.warn");assert pg.locator(".gx-focusbar").count()==1 and "No assignee" in pg.inner_text(".gx-focusbar")
             assert reg().count()==15
             pg.click(".gx-focusbar [data-pml-focus]");assert pg.locator(".gx-focusbar").count()==0
             # assign one group: two PATCH calls succeed, third fails -> partial message, nothing claimed
@@ -138,10 +142,11 @@ def run(scenario, tmp):
             assert pg.evaluate("window._patched.length")==n-2,pg.evaluate("window._patched.length")
             assert "assigned to Suresh Jat" in pg.evaluate("window._toast")
             assert "Suresh Jat" in reg().first.inner_text() and reg().first.locator("[data-pmc-assign]").count()==0
-            # coverage expands
-            pg.click("[data-pmc-cov]");assert pg.locator(".pml-coverage-table").count()==1
+            # coverage view shows the table
+            pg.click("[data-pmv-view=coverage]");assert pg.locator(".pml-coverage-table").count()==1
             assert "not in register" not in pg.inner_text(".pml-coverage-table")
             # people filter + sort
+            pg.click("[data-pmv-view=register]")
             pg.select_option('[data-pml-select="person"]',"Suresh Jat");assert reg().count()==1
             pg.select_option('[data-pml-select="person"]',"all")
             pg.select_option('[data-pml-select="sort"]',"plant");assert reg().first.locator("td").nth(1).inner_text().startswith("ABH01")
@@ -153,6 +158,30 @@ def run(scenario, tmp):
             assert lates[0].endswith("d late"), lates
             pg.click("[data-pml-action=clear] >> nth=0")
             pg.click("[data-pml-focus=today] >> nth=0");assert "On today’s plan" in pg.inner_text(".gx-focusbar")
+            pg.click("[data-pml-action=clear] >> nth=0")
+            # plants x equipment: worst plants first, a cell opens that plant + equipment in the register
+            pg.click("[data-pmv-view=plants]");assert pg.locator(".pmm-table tbody tr").count()==30
+            assert "Show all 40" in pg.inner_text(".pmm .pmd-more")
+            pg.fill(".pmm-search","jogi");pg.wait_for_timeout(300);assert pg.locator(".pmm-table tbody tr").count()==1
+            assert pg.evaluate("document.activeElement.classList.contains('pmm-search')"),"focus kept while typing"
+            pg.fill(".pmm-search","");pg.wait_for_timeout(300)
+            cell=pg.locator(".pmm-c.late button").first;plant,typ=cell.get_attribute("data-pmm-cell").split("|");cell.click()
+            assert pg.locator(".pmv-tab.on").inner_text().startswith("Work register")
+            assert pg.evaluate("[S.pmLive.plant,S.pmLive.equipment]")==[plant,typ]
+            assert reg().count()>0 and all(typ in reg().nth(i).inner_text() for i in range(reg().count()))
+            pg.click("[data-pml-action=clear] >> nth=0");pg.evaluate("S.pmLive.plant='all';render()")
+            # overview: upcoming day opens the calendar on that day
+            pg.click("[data-pmv-view=overview]");day=pg.locator("[data-pmup-day]").nth(1).get_attribute("data-pmup-day")
+            pg.locator("[data-pmup-day]").nth(1).click()
+            assert pg.locator(".pmcal-cell.on").get_attribute("data-pmcal-day")==day and pg.evaluate("S.pmLive.day")==day
+            pg.click("[data-pmcal-shift='1']");assert pg.evaluate("S.pmLive.calMonth")>day[:7]
+            # finished work older than the loaded history window is labelled, not silently missing
+            assert pg.locator(".pmcal-note").count()==0
+            pg.evaluate("S.tasksHistoryFrom='2026-10-01';render()")
+            assert "since 01 Oct" in pg.inner_text(".gx-kpis")
+            pg.click("[data-pmcal-shift='-1']");pg.click("[data-pmcal-shift='-1']")
+            assert "Export compliance" in pg.inner_text(".pmcal-note")
+            pg.evaluate("delete S.tasksHistoryFrom;render()")
         pg.set_viewport_size({"width": 390, "height": 844}); pg.evaluate("render()"); pg.wait_for_timeout(200)
         over = pg.evaluate("document.documentElement.scrollWidth-document.documentElement.clientWidth")
         assert over <= 0, f"phone layout scrolls sideways by {over}px"

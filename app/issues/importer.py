@@ -26,6 +26,7 @@ from sqlalchemy.orm import Session
 from app.core.models import AuditLog, Equipment, Issue, IssueHistory, Plant, User, UserEquipmentTypeAssignment
 from app.core.security import EQUIPMENT_TYPES, has_portfolio_scope, user_scoped_equipment_types, user_scoped_plant_ids
 from app.core.spreadsheet import cell_text, map_columns, neutralise_formulas, parse_sheet_date, read_upload_rows
+from app.issues.deadlines import deadline_hours
 from app.issues.schemas import ISSUE_SEVERITIES, normalize_issue_severity
 from app.issues.service import PLANT_TIMEZONE, IssueService, _lock_issue_ticket_numbers, issue_local_today, next_issue_ticket_no
 from app.plants.codes import normalize_site_code, plant_code_index
@@ -37,8 +38,6 @@ MAX_ISSUE_ROWS = 500
 SHEET = "Site issues"
 HEADERS = ("Site code", "Plant name", "Issue category", "Problem", "Description", "Severity", "Equipment / unit",
            "Occurred on", "Target date", "Assignee email", "Maker", "Impact", "Remarks")
-# Same default deadlines as the Raise Issue form (ETC_HRS in frontend/static/js/00-auth-data-and-imports.js).
-ETC_HOURS = {"Critical": 48, "Medium": 96}
 ALIASES = {
     "site_code": {"Site code", "Plant code", "Site", "Code"},
     "category": {"Issue category", "Category", "Vertical", "Equipment type", "Asset"},
@@ -69,6 +68,12 @@ def _active_assignees(db: Session) -> list[User]:
     return list(db.scalars(select(User).where(User.role == "Assignee", User.is_active.is_(True)).order_by(User.display_name)))
 
 
+def _deadline_text(hours: dict[str, int]) -> str:
+    def span(h: int) -> str:
+        return f"{h // 24} day{'s' if h // 24 != 1 else ''}" if h % 24 == 0 else f"{h} hours"
+    return f"Critical {span(hours['Critical'])}, Medium {span(hours['Medium'])}"
+
+
 def template_bytes(db: Session, user: User) -> bytes:
     allowed = _scoped_plants(db, user)
     plants = [plant for plant in db.scalars(select(Plant).order_by(Plant.site_code)) if allowed is None or plant.id in allowed]
@@ -83,7 +88,7 @@ def template_bytes(db: Session, user: User) -> bytes:
         "One row is one issue (ticket). Fill the 'Site issues' sheet; the lists for drop-downs are on the 'Lists' sheet.",
         "Required: Site code, Issue category, Description and Severity (Critical or Medium; an old 'Low' is read as Medium).",
         "Occurred on: the day the fault happened (DD-MM-YYYY). Blank means today.",
-        "Target date: when it should be fixed. Blank uses the usual deadline (Critical 2 days, Medium 4 days).",
+        "Target date: when it should be fixed. Blank uses the usual deadline ("+_deadline_text(deadline_hours(db))+").",
         "Assignee email: optional. It must be an active Assignee; the ticket then starts as Assigned instead of Open.",
         "Equipment / unit: optional code or name of the unit, e.g. INV-03. A registered unit of the plant is linked automatically.",
         "Remarks: optional. What is going on right now (e.g. 'Vendor called, spare expected Friday'). It becomes the ticket's first message.",
@@ -312,6 +317,8 @@ def import_issues(db: Session, user: User, filename: str, content: bytes, *, dry
         return result
 
     service = IssueService(db)
+    # Same default deadlines as the Raise Issue form; the O&M Head sets them (app/issues/deadlines.py).
+    hours = deadline_hours(db)
     try:
         number = int(next_issue_ticket_no(db)[4:])
         granted: set[tuple] = set()
@@ -331,7 +338,7 @@ def import_issues(db: Session, user: User, filename: str, content: bytes, *, dry
                 equipment_ref=record["equipment_ref"], vertical=record["category"], subcategory=record["problem"],
                 description=record["description"], severity=record["severity"],
                 status="Assigned" if assignee else "Open", occurred_at=occurred_at,
-                etc_at=_target_at(record["target"]) if record["target"] else now + timedelta(hours=ETC_HOURS[record["severity"]]),
+                etc_at=_target_at(record["target"]) if record["target"] else now + timedelta(hours=hours[record["severity"]]),
                 assigned_to=assignee.id if assignee else None, assignee_text=assignee.display_name if assignee else None,
                 maker=record["maker"], impact=record["impact"], photo_count=0, created_by=user.id,
                 legacy_payload={"supplier": None, "serial_number": None, "evidence": []},
