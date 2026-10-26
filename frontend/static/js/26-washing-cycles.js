@@ -693,8 +693,8 @@
   if(!r.editable)return '<tr class="'+cls+' wx-blank" id="wx-row-'+id+'"><td><b>'+dayName(r.date)+'</b></td><td colspan="4"><small>'+(r.locked?'Older than '+SE_BACK_DAYS+' days — ask the O&amp;M team to record it':'Not recorded')+'</small></td><td class="wx-run" id="wx-run-'+id+'"></td><td></td></tr>';
   const d=r.draft,f=r.files,pic=k=>'<label class="wx-pic'+(f[k].length?' on':'')+'" title="'+(k==="before"?"Before":"After")+' cleaning photos (up to 5)">'+(k==="before"?"Before":"After")+(f[k].length?' · '+f[k].length:'')+'<input type="file" accept="image/jpeg,image/png,image/webp" multiple hidden onchange="washSheetPhotos(\''+id+'\',\''+k+'\',this)"/></label>';
   return '<tr class="'+cls+'" id="wx-row-'+id+'"><td><b>'+dayName(r.date)+'</b></td>'+
-   '<td><input class="wx-in wx-num" type="number" min="0" max="5000" step="1" inputmode="numeric" placeholder="—" value="'+h(d.tables==null?"":d.tables)+'" aria-label="Tables cleaned on '+dayName(r.date)+' (0 if no washing)" oninput="washSheetInput(\''+id+'\',\'tables\',this)"/></td>'+
-   '<td><input class="wx-in" maxlength="4000" placeholder="Remarks" value="'+h(d.remarks||"")+'" aria-label="Remarks for '+dayName(r.date)+'" oninput="washSheetInput(\''+id+'\',\'remarks\',this)"/></td>'+
+   '<td><input class="wx-in wx-num" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="off" placeholder="—" value="'+h(d.tables==null?"":d.tables)+'" aria-label="Tables cleaned on '+dayName(r.date)+' (0 if no washing)" oninput="washSheetInput(\''+id+'\',\'tables\',this)" onkeydown="washSheetKey(event,this)"/></td>'+
+   '<td><input class="wx-in wx-rem" maxlength="4000" placeholder="Remarks" value="'+h(d.remarks||"")+'" aria-label="Remarks for '+dayName(r.date)+'" oninput="washSheetInput(\''+id+'\',\'remarks\',this)" onkeydown="washSheetKey(event,this)"/></td>'+
    '<td class="wx-pics">'+pic("before")+pic("after")+(r.needsPhotos?'<small>needed</small>':'')+'</td><td></td><td class="wx-run'+(r.toNext?' next':'')+'" id="wx-run-'+id+'">'+(r.n?h(r.runText):"")+'</td><td></td></tr>';
  }
  function sheetHtml(p){
@@ -717,10 +717,19 @@
  const sheetCtx=()=>{const p=rowOf(S.washDetailsPlant),month=S.washMonth||(data().today||"").slice(0,7),mc=p&&monthCache()[p.plant_id+"|"+month];return p&&mc&&mc.cycles?{p,mc,m:sheetModel(p,mc)}:null};
  /* typing never re-renders the table (focus stays put); only the running totals and the footer are updated in place */
  window.washSheetInput=function(date,field,el){
+  /* the count box is plain text (no spinner), so keep it to digits only */
+  if(field==="tables"){const v=el.value.replace(/\D/g,"");if(v!==el.value)el.value=v}
   const x=sheetCtx();if(!x)return;const st=sheetState(x.p.plant_id,x.mc.month),r=st.rows[date]=st.rows[date]||{tables:"",remarks:""};r[field]=el.value;
   const m=sheetModel(x.p,x.mc);
   m.rows.forEach(row=>{const c=document.getElementById("wx-run-"+row.date);if(c){c.textContent=row.runText||"";c.classList.toggle("next",!!row.toNext)}});
   const foot=document.getElementById("wx-sheet-foot");if(foot)foot.innerHTML=sheetFoot(m);
+ };
+ /* spreadsheet-style keys: ↓ / Enter go to the same box on the next day, ↑ / Shift+Enter to the previous day */
+ window.washSheetKey=function(e,el){
+  const k=e.key;if(k!=="ArrowDown"&&k!=="ArrowUp"&&k!=="Enter")return;
+  const up=k==="ArrowUp"||(k==="Enter"&&e.shiftKey),col=el.classList.contains("wx-num")?".wx-num":".wx-rem";
+  const ins=Array.from(document.querySelectorAll(".wx-sheet input"+col)),to=ins[ins.indexOf(el)+(up?-1:1)];
+  e.preventDefault();if(to){to.focus();if(to.select)to.select()}
  };
  window.washSheetPhotos=function(date,kind,input){
   const x=sheetCtx();if(!x)return;const st=sheetState(x.p.plant_id,x.mc.month),f=st.files[date]=st.files[date]||{before:[],after:[]};
