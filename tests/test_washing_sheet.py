@@ -189,7 +189,10 @@ def test_record_sheet_has_no_reason_column_and_accepts_zero():
     washing = (ROOT / "frontend/static/js/26-washing-cycles.js").read_text(encoding="utf-8")
     assert "<th>Not done reason</th>" not in washing
     assert "<th>Tables cleaned</th><th>Remarks</th>" in washing
-    assert 'type="number" min="0"' in washing
+    # the count box has no up/down spinner; arrow keys / Enter move between days instead
+    assert 'class="wx-in wx-num" type="text" inputmode="numeric"' in washing
+    assert 'onkeydown="washSheetKey(event,this)"' in washing
+    assert "window.washSheetKey=function(e,el)" in washing
     assert 'job_status:"Not done",tables_cleaned:0,exception_reason:"Other"' in washing
     assert "tables cleaned must be a whole number" not in washing
 
