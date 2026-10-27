@@ -40,3 +40,34 @@ def test_bootstrap_audit_rows_stay_small(client, db):
     state = client.get('/api/bootstrap').json()['state']
     assert all('before' not in row and 'after' not in row for row in state.get('audit', []))
     assert len(state.get('audit', [])) <= 500
+
+
+def test_pulse_is_shared_briefly_and_dropped_after_a_write(client, db):
+    from app.core.models import Issue
+    plant = make_plant(db, 'PULSE-QC')
+    login_user(client, db, role='O&M Head', name='Pulse Manager 4', email='pulse-manager4@example.com')
+    assert client.get('/api/issues/pulse').json()['count'] == 0
+    # a change that did not go through this worker's API (e.g. another worker) shows once the short cache expires
+    db.add(Issue(plant_id=plant.id, ticket_no='T-PULSE-1', description='x', severity='Medium', status='Open', vertical='Inverter'))
+    db.commit()
+    assert client.get('/api/issues/pulse').json()['count'] == 0
+    from app.issues import router as issues_router
+    issues_router._pulse_cache.clear()
+    assert client.get('/api/issues/pulse').json()['count'] == 1
+    # a write through the API drops the cache at once
+    created = client.post('/api/issues', json={'plant_id': str(plant.id), 'description': 'Fan noise', 'severity': 'Low', 'vertical': 'Inverter'})
+    assert created.status_code == 201, created.text
+    assert client.get('/api/issues/pulse').json()['count'] == 2
+
+
+def test_assignee_pulse_needs_an_equipment_type(client, db):
+    from app.core.models import UserEquipmentTypeAssignment
+    plant = make_plant(db, 'PULSE-QD')
+    login_user(client, db, role='O&M Head', name='Pulse Manager 5', email='pulse-manager5@example.com')
+    assert client.post('/api/issues', json={'plant_id': str(plant.id), 'description': 'Trip', 'severity': 'Low', 'vertical': 'Inverter'}).status_code == 201
+    assignee = login_user(client, db, role='Assignee', name='Pulse Assignee', email='pulse-assignee@example.com')
+    assert client.get('/api/issues/pulse').json() == {'count': 0, 'latest': None}
+    db.add(UserEquipmentTypeAssignment(user_id=assignee.id, equipment_type='Inverter')); db.commit()
+    from app.issues import router as issues_router
+    issues_router._pulse_cache.clear()
+    assert client.get('/api/issues/pulse').json()['count'] == 1

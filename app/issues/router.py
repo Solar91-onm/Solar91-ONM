@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Annotated
 from datetime import date, datetime, timedelta, timezone
+import time
 import uuid
 from uuid import UUID
 
@@ -13,7 +14,7 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.core.database import get_db
 from app.core.models import Issue, IssueHistory, User, UserEquipmentTypeAssignment
-from app.core.security import ensure_equipment_scope, ensure_plant_scope, equipment_scope_matches, get_current_user, is_head, require_csrf, require_permission, text_is_current_user, user_scoped_equipment_types, user_scoped_plant_ids
+from app.core.security import ensure_equipment_scope, ensure_plant_scope, has_portfolio_scope, equipment_scope_matches, get_current_user, is_head, require_csrf, require_permission, text_is_current_user, user_scoped_equipment_types, user_scoped_plant_ids
 from app.issues import importer as issue_importer
 from app.issues.deadlines import deadline_settings, save_deadline_hours
 from app.issues.repository import IssueRepository
@@ -57,20 +58,45 @@ def issue_upload_template(db:Annotated[Session,Depends(get_db)],user:Annotated[U
 def upload_issues(db:Annotated[Session,Depends(get_db)],user:Annotated[User,Depends(require_permission("issues.create"))],file:UploadFile=File(...),dry_run:bool=True):
     return issue_importer.import_issues(db,user,file.filename or "",file.file.read(issue_importer.MAX_ISSUE_BYTES+1),dry_run=dry_run)
 
+# Every open browser polls /pulse every 30 s, and each SQL statement costs one network round trip to the database
+# (about 0.2-0.3 s between Render and Supabase today). The answer for one visibility scope is therefore shared for a
+# few seconds and dropped after any write on this worker (main.py); another worker's write shows within the TTL.
+PULSE_TTL_SECONDS=10
+_pulse_cache:dict[object,tuple[float,dict]]={}
+
+def invalidate_pulse_cache()->None:
+    _pulse_cache.clear()
+
 @router.get("/pulse")
 def issues_pulse(db:Annotated[Session,Depends(get_db)],user:Annotated[User,Depends(get_current_user)]):
     """Very cheap change detector used by open browsers (one aggregate query, no row data).
 
     The browser re-fetches its data only when ``count`` or ``latest`` differ from the last pulse.
+    O&M Head / Administration and Assignees need no scope lookup first (an Assignee with any equipment type sees
+    every plant, checked inside the same query); a Site Engineer's plant is looked up as before.
     """
-    plant_scope=user_scoped_plant_ids(db,user)
     stmt=select(func.count(Issue.id),func.max(Issue.updated_at)).where(Issue.deleted_at.is_(None))
-    if plant_scope is not None:
+    if has_portfolio_scope(user):
+        key:object="all"
+    elif user.role=="Assignee":
+        key=("assignee",user.id)
+        stmt=stmt.where(select(UserEquipmentTypeAssignment.user_id).where(UserEquipmentTypeAssignment.user_id==user.id).exists())
+    else:
+        plant_scope=user_scoped_plant_ids(db,user)
         if not plant_scope:
             return {"count":0,"latest":None}
+        key=("plants",frozenset(plant_scope))
         stmt=stmt.where(Issue.plant_id.in_(plant_scope))
+    now=time.monotonic()
+    hit=_pulse_cache.get(key)
+    if hit and now-hit[0]<PULSE_TTL_SECONDS:
+        return hit[1]
     count,latest=db.execute(stmt).one()
-    return {"count":int(count or 0),"latest":latest.isoformat() if latest else None}
+    out={"count":int(count or 0),"latest":latest.isoformat() if latest else None}
+    if len(_pulse_cache)>500:
+        _pulse_cache.clear()
+    _pulse_cache[key]=(now,out)
+    return out
 
 @router.get("",response_model=list[IssueOut])
 def list_issues(db:Annotated[Session,Depends(get_db)],user:Annotated[User,Depends(get_current_user)],plant_id:UUID|None=None,status:str|None=None,severity:str|None=None,assignee:str|None=None,vertical:str|None=None,maker:str|None=None,equipment:str|None=None,site_code:str|None=None,project_number:str|None=None,occurred_from:datetime|None=None,occurred_to:datetime|None=None,q:str|None=None,offset:int=0,limit:int=Query(50,le=200)):

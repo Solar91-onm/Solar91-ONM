@@ -34,7 +34,7 @@ from app.plants.codes import normalize_site_code, plant_code_index
 from app.scheduled.washing_cycles import (
     MAX_BACKDATE_DAYS,
     MONTHLY_CYCLE_TARGET,
-    _completing_row,
+    _completing_rows,
     _cycle_sequence,
     _day_label,
     _is_washing_manager,
@@ -356,8 +356,8 @@ def import_daily(db: Session, user: User, filename: str, content: bytes, *, dry_
         for row, (cycle_no, extra) in zip(rows_of_month, _cycle_sequence([(row.tables_cleaned, True) for row in rows_of_month], totals.get(plant_id, 0))):
             row.cycle_no = cycle_no
             extra_of[id(row)] = extra
-        for cycle_no in range(1, MONTHLY_CYCLE_TARGET + 1):
-            completing = _completing_row([row for row in rows_of_month if row.cycle_no == cycle_no and row.confirmed], totals.get(plant_id, 0))
+        confirmed = [[row for row in rows_of_month if row.cycle_no == n and row.confirmed] for n in range(1, MONTHLY_CYCLE_TARGET + 1)]
+        for completing in _completing_rows(confirmed, totals.get(plant_id, 0)):
             if completing is not None:
                 completing.cycle_completed = True
     for record in new_records:

@@ -155,3 +155,8 @@ No production/staging connection, load test, setting change, migration, or deplo
 | `/api/scheduled/tasks` | 27,300 tasks, 24.9 MB (1.64 MB gzip), 5.3 s | 14,700 tasks, 13.3 MB (0.88 MB gzip), 1.7 s |
 
   Not measured on PostgreSQL, Render or a phone. The remaining time is mostly building each record in Python (~95 µs each); a column-row read like the washing overview's would be the next step if needed.
+
+### Addendum 2026-10-27: repeated `/api/issues/pulse` slow-request lines
+- Render logged `slow_or_failed_request route=/api/issues/pulse status=200 total_ms=1493 db_ms=1062 db_queries=4 health_checks=1 health_check_ms=212`. Status 200: slow, not failed. About 265 ms per statement and 212 ms for one idle-connection ping match the 2026-10-19 finding: the time is network round trips between Render and Supabase, not slow SQL. Every open browser polls the pulse every 30 s (`34-live-refresh.js`), so the line repeats.
+- Changes: the pulse answer is shared per visibility scope for 10 s (`PULSE_TTL_SECONDS`) and dropped after any API write on the same worker (`invalidate_pulse_cache` in `main.py`); an Assignee's scope check is part of the count query instead of two separate lookups. A cache hit costs only the signed-in user lookup. A change made through another worker shows within 10 s; the browser polls every 30 s anyway.
+- Not changed and not verified: the Render and Supabase regions. Each request still pays at least one round trip for the user lookup, plus a ping when the pooled connection was idle longer than `DB_PING_IDLE_SECONDS`. Moving the service and the database to the same region is the fix for the per-query cost; no production connection was used for this change.

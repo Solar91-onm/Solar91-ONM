@@ -690,7 +690,9 @@
   const cur=cyc.find(x=>x.c.cycle_no===pick),reports=mc.reports||[],st=sheetState(p.plant_id,mc.month);
   const dates=new Set(reports.filter(r=>r.cycle_no===pick).map(r=>r.report_date));
   if(cur.end)for(let d=cur.start;d<=cur.end;d=addDays(d,1))dates.add(d);
-  let run=0;
+  /* tables above a cycle's count carry over to the next cycle (app/scheduled/washing_cycles.py _cycle_sequence) */
+  const carriedIn=Number(cur.c.carried_in)||0,carriedOut=Number(cur.c.carried_out)||0;
+  let run=carriedIn;
   const rows=Array.from(dates).sort().map(date=>{
    const reps=reports.filter(r=>r.report_date===date),active=reps.filter(r=>r.review_status!=="Rejected"),rejected=reps.filter(r=>r.review_status==="Rejected");
    const mine=active.filter(r=>r.cycle_no===pick),elsewhere=active.filter(r=>r.cycle_no!==pick);
@@ -700,21 +702,25 @@
    run+=mine.filter(r=>r.job_status==="Done").reduce((a,r)=>a+r.tables_cleaned,0)+n;
    return{date,reps,mine,elsewhere,rejected,editable,draft,files,n,run,needsPhotos:isField()&&date>=photoFrom,locked:!editable&&!reps.length&&cur.kind==="open"&&date<minDate};
   });
-  const total=mc.table_count||p.table_count||0,recorded=rows.reduce((a,r)=>a+r.mine.filter(x=>x.job_status==="Done").reduce((b,x)=>b+x.tables_cleaned,0),0);
+  const total=mc.table_count||p.table_count||0,own=rows.reduce((a,r)=>a+r.mine.filter(x=>x.job_status==="Done").reduce((b,x)=>b+x.tables_cleaned,0),0);
+  const recorded=pick<3&&total>0?Math.min(total,carriedIn+own):carriedIn+own;
   /* a typed 0 is a real entry too (no washing that day), so any filled-in day counts */
   const fresh=rows.filter(r=>r.editable&&String(r.draft.tables==null?"":r.draft.tables).trim()!==""),newTables=fresh.reduce((a,r)=>a+r.n,0);
   /* Which cycle each typed day counts towards, exactly as the server decides it (days in date order, on top of
      what is already recorded): once the cycle's count is reached, later days start the next cycle by themselves. */
-  const rolls=!cur.extra&&total>0;let base=recorded,nextTables=0,completesOn=null;
+  const rolls=!cur.extra&&total>0;let base=carriedIn+own,nextTables=carriedOut,completesOn=null,prev=carriedIn;
   rows.forEach(r=>{
-   r.runText=(r.mine.length||r.n)?String(r.run):"";
+   /* the day that crosses the count completes the cycle; the tables above it are shown going to the next cycle */
+   const crossed=pick<3&&total>0&&prev<total&&r.run>=total&&r.mine.length;
+   r.runText=(r.mine.length||r.n)?(crossed?total+" ✓"+(r.run>total?" · +"+(r.run-total)+" → C"+(pick+1):""):String(r.run)):"";
+   prev=r.run;
    if(!r.editable||!r.n)return;
    if(rolls&&base>=total){r.toNext=true;nextTables+=r.n;r.runText="→ C"+Math.min(pick+1,3)+" · "+nextTables;return}
    base+=r.n;r.runText=String(base);
-   if(rolls&&base>=total&&!completesOn){completesOn=r.date;r.runText=base+" ✓ completes C"+pick}
+   if(rolls&&base>=total&&!completesOn){completesOn=r.date;nextTables+=pick<3?base-total:0;r.runText=(pick<3?total:base)+" ✓ completes C"+pick+(pick<3&&base>total?" · +"+(base-total)+" → C"+(pick+1):"")}
   });
   const pending=rows.flatMap(r=>r.mine.filter(x=>x.can_review)),ready=pending.filter(x=>!(x.photos_required&&(!x.has_before||!x.has_after)));
-  return{cyc,cur,pick,rows,total,recorded,fresh,newTables,left:Math.max(0,total-recorded),pending,ready,nextTables,completesOn};
+  return{cyc,cur,pick,rows,total,recorded,carriedIn,carriedOut,fresh,newTables,left:Math.max(0,total-recorded),pending,ready,nextTables,completesOn};
  }
  function sheetFoot(m){
   const team=!isField(),over=!m.cur.extra&&m.newTables>=m.left&&m.left>=0&&!!m.completesOn,days=m.fresh.length?plural(m.fresh.length,"day"):"days";
@@ -731,7 +737,7 @@
    const shown=r.mine.length?r.mine:r.elsewhere.length?r.elsewhere:r.rejected,photos=shown.reduce((a,x)=>a+(x.evidence||[]).length,0);
    const flag=shown.some(x=>x.review_status==="Pending"&&x.photos_required&&(!x.has_before||!x.has_after))?' '+chip("Needs photos","warn"):(!isField()&&shown.some(x=>x.review_status!=="Rejected"&&x.backfilled&&x.job_status==="Done"&&!(x.evidence||[]).length)?' '+chip("No photos · back-filled","mute"):'');
    const note=r.mine.length?'':r.elsewhere.length?' <small>Counted in cycle '+r.elsewhere.map(x=>x.cycle_no).join(", ")+'</small>':' <small>'+h(r.rejected[0].review_note||"Rejected")+'</small>';
-   return '<tr class="'+cls+'" id="wx-row-'+id+'"><td><b>'+dayName(r.date)+'</b></td><td>'+shown.map(val).join(" + ")+note+'</td><td>'+shown.filter(x=>x.remarks).map(x=>'<small>“'+h(x.remarks)+'”</small>').join(" ")+'</td><td>'+(photos||"—")+'</td><td class="wx-st">'+shown.map(st).join(" ")+flag+(by=>'<small class="wx-by" title="'+h(by)+'">'+h(by)+'</small>')(shown.map(x=>x.reported_by).filter((v,i,a)=>a.indexOf(v)===i).join(", "))+'</td><td class="wx-run" id="wx-run-'+id+'">'+(r.mine.length?r.run:"")+'</td><td><button type="button" class="btn g sm" onclick="washOpenDay(\''+id+'\')">Open</button></td></tr>';
+   return '<tr class="'+cls+'" id="wx-row-'+id+'"><td><b>'+dayName(r.date)+'</b></td><td>'+shown.map(val).join(" + ")+note+'</td><td>'+shown.filter(x=>x.remarks).map(x=>'<small>“'+h(x.remarks)+'”</small>').join(" ")+'</td><td>'+(photos||"—")+'</td><td class="wx-st">'+shown.map(st).join(" ")+flag+(by=>'<small class="wx-by" title="'+h(by)+'">'+h(by)+'</small>')(shown.map(x=>x.reported_by).filter((v,i,a)=>a.indexOf(v)===i).join(", "))+'</td><td class="wx-run" id="wx-run-'+id+'">'+(r.mine.length?h(r.runText):"")+'</td><td><button type="button" class="btn g sm" onclick="washOpenDay(\''+id+'\')">Open</button></td></tr>';
   }
   if(!r.editable)return '<tr class="'+cls+' wx-blank" id="wx-row-'+id+'"><td><b>'+dayName(r.date)+'</b></td><td colspan="4"><small>'+(r.locked?'Older than '+SE_BACK_DAYS+' days — ask the O&amp;M team to record it':'Not recorded')+'</small></td><td class="wx-run" id="wx-run-'+id+'"></td><td></td></tr>';
   const d=r.draft,f=r.files,pic=k=>'<label class="wx-pic'+(f[k].length?' on':'')+'" title="'+(k==="before"?"Before":"After")+' cleaning photos (up to 5)">'+(k==="before"?"Before":"After")+(f[k].length?' · '+f[k].length:'')+'<input type="file" accept="image/jpeg,image/png,image/webp" multiple hidden onchange="washSheetPhotos(\''+id+'\',\''+k+'\',this)"/></label>';
@@ -749,7 +755,7 @@
   const m=sheetModel(p,mc),team=!isField(),c=m.cur;
   const picker='<div class="wx-cpick" role="tablist" aria-label="Cycle">'+m.cyc.map(x=>'<button type="button" role="tab" aria-selected="'+(x.c.cycle_no===m.pick)+'" class="'+(x.c.cycle_no===m.pick?'on':'')+'" onclick="washSheetCycle('+x.c.cycle_no+')"><b>Cycle '+x.c.cycle_no+'</b><span>'+(x.extra?"Done "+fmt(x.c.completed_on)+" · add extra":x.kind==="done"?"Completed "+fmt(x.c.completed_on):x.kind==="open"?(x.c.late_days&&team?x.c.late_days+" d late":"Open now"):"Not started")+'</span></button>').join("")+'</div>';
   if(c.kind==="later")return nav+picker+'<div class="wc-empty">Cycle '+m.pick+' opens once cycle '+(m.pick-1)+' is complete. Washing done now counts towards the open cycle.</div>';
-  const head='<p class="sub"><b>Cycle '+m.pick+'</b> · planned '+fmt(c.c.start_date)+' → '+fmt(c.c.due_date)+' · '+m.recorded+' of '+m.total+' tables recorded'+(c.c.pending?' ('+c.c.pending+' awaiting confirmation)':'')+' · <b>'+m.left+' left</b>.'+(mc.summary&&mc.summary.confirmed_tables?' Tables washed <b>'+mc.summary.times_washed+' time'+(mc.summary.times_washed===1?'':'s')+'</b> this month'+(mc.summary.extra_times?' ('+mc.summary.extra_times+' extra after the 3 cycles)':'')+'.':'')+(c.extra?' <b>All 3 cycles are complete.</b> Days you add now are saved as extra washing.':'')+(c.kind==="open"?(team?' Your entries are saved as confirmed.':' The O&amp;M Head or the plant\'s Assignee confirms your entries. Days in the last '+PHOTO_DAYS+' days need before and after photos.'):'')+'</p>';
+  const head='<p class="sub"><b>Cycle '+m.pick+'</b> · planned '+fmt(c.c.start_date)+' → '+fmt(c.c.due_date)+' · '+m.recorded+' of '+m.total+' tables recorded'+(m.carriedIn?' (incl. '+m.carriedIn+' carried from cycle '+(m.pick-1)+')':'')+(m.carriedOut?' · <b>'+m.carriedOut+' carried to cycle '+(m.pick+1)+'</b>':'')+(c.c.pending?' ('+c.c.pending+' awaiting confirmation)':'')+' · <b>'+m.left+' left</b>.'+(mc.summary&&mc.summary.confirmed_tables?' Tables washed <b>'+mc.summary.times_washed+' time'+(mc.summary.times_washed===1?'':'s')+'</b> this month'+(mc.summary.extra_times?' ('+mc.summary.extra_times+' extra after the 3 cycles)':'')+'.':'')+(c.extra?' <b>All 3 cycles are complete.</b> Days you add now are saved as extra washing.':'')+(c.kind==="open"?(team?' Your entries are saved as confirmed.':' The O&amp;M Head or the plant\'s Assignee confirms your entries. Days in the last '+PHOTO_DAYS+' days need before and after photos.'):'')+'</p>';
   const review=m.pending.length?'<div class="wc-flow-note wx-review"><div><b>'+plural(m.pending.length,"day")+' awaiting your confirmation</b><p>'+m.pending.reduce((a,x)=>a+x.tables_cleaned,0)+' tables'+(m.pending.length>m.ready.length?' · '+(m.pending.length-m.ready.length)+' still need before/after photos':'')+'. Use <b>Open</b> on a day to see its photos or to reject it with a note.</p></div>'+(m.ready.length?'<button type="button" class="btn p sm" onclick="washSheetConfirm()"'+(S._washSheetConfirming?' disabled':'')+'>'+(S._washSheetConfirming?'Confirming…':'Confirm '+plural(m.ready.length,"day"))+'</button>':'')+'</div>':'';
   const th='<tr><th>Date</th><th>Tables cleaned</th><th>Remarks</th><th>Photos</th><th>Status</th><th>Total</th><th></th></tr>';
   const body=m.rows.length?m.rows.map(sheetRow).join(""):'<tr><td colspan="7" class="wc-empty">'+(month>thisMonth?'No days to fill yet.':'No days in this cycle yet.')+'</td></tr>';
@@ -758,12 +764,12 @@
    (c.kind==="open"?'<div class="wx-sheet-foot" id="wx-sheet-foot">'+sheetFoot(m)+'</div>':'');
  }
  /* Days are counted into cycles by date (app/scheduled/washing_cycles.py _cycle_sequence): each cycle fills up to the
-    table count and later days go to the next cycle. Months saved before edits moved days show a one-click recount. */
+    table count, the tables above it carry over and later days go to the next cycle. Months saved before edits moved days show a one-click recount. */
  function misplacedDays(mc){
   const total=mc.table_count||0,max=(mc.cycles||[]).length||3,rows=(mc.reports||[]).slice().sort((a,b)=>String(a.report_date).localeCompare(String(b.report_date)));
   let cycle=1,run=0;const out=[];
   rows.forEach(r=>{if(r.cycle_no!==cycle)out.push({date:r.report_date,from:r.cycle_no,to:cycle});
-   if(r.review_status==='Pending'||r.review_status==='Confirmed'){run+=Number(r.tables_cleaned)||0;if(total>0&&run>=total&&cycle<max){cycle++;run=0}}});
+   if(r.review_status==='Pending'||r.review_status==='Confirmed'){run+=Number(r.tables_cleaned)||0;if(total>0&&run>=total&&cycle<max){cycle++;run-=total}}});
   return out;
  }
  function recountNote(mc){

@@ -32,6 +32,7 @@ from app.pmplan.router import router as pmplan_router
 from app.scada.router import router as scada_router
 from app.scheduled.router import router as scheduled_router
 from app.scheduled.washing_cycles import invalidate_overview_cache
+from app.issues.router import invalidate_pulse_cache
 from app.services.router import router as services_router
 from app.users.invites import router as users_invites_router
 from app.users.router import router as users_router
@@ -62,6 +63,8 @@ async def lifespan(app: FastAPI):
         app.state.pm_job = asyncio.create_task(_start_pm_daily_job_loop())
     else:
         app.state.pm_job = None
+    # once per cycle-rule version: saved washing months are recounted so cycles, reports and compliance follow it
+    app.state.washing_recount = asyncio.create_task(_washing_recount_once()) if settings.app_env != "test" else None
 
     try:
         yield
@@ -72,6 +75,7 @@ async def lifespan(app: FastAPI):
                 getattr(app.state, "latency_probe", None),
                 getattr(app.state, "bootstrap_task", None),
                 getattr(app.state, "pm_job", None),
+                getattr(app.state, "washing_recount", None),
             )
             if task is not None and not task.done()
         ]
@@ -139,6 +143,7 @@ async def drop_washing_cache_after_writes(request: Request, call_next):
     finally:  # also runs if the write fails half-way, so the cached overview is never left stale
         if request.method not in ("GET", "HEAD", "OPTIONS") and request.url.path.startswith("/api/"):
             invalidate_overview_cache()
+            invalidate_pulse_cache()  # issue pulse: a change made here shows on the next poll
 
 from app.core.database import engine as _engine_for_timing
 from app.core.observability import install_connection_timing, install_query_counter, make_timing_middleware
@@ -231,6 +236,24 @@ async def _run_deploy_setup():
 
         await asyncio.sleep(delay)
         delay = min(delay * 2, SETUP_RETRY_MAX_SECONDS)
+
+async def _washing_recount_once():
+    """Recount every saved washing month once after a deploy that changes the cycle rule (recount_all_months)."""
+    def _run():
+        from app.core.database import SessionLocal
+        from app.scheduled.washing_cycles import recount_all_months
+        with SessionLocal() as db:
+            return recount_all_months(db)
+
+    while not app.state.bootstrap_ready:
+        await asyncio.sleep(10)
+    try:
+        result = await asyncio.to_thread(_run)
+        if not result.get("skipped"):
+            logger.info("Washing cycles recounted for the current rule: %s", result)
+    except Exception:  # never take the API down; the next start tries again (the marker is only set on success)
+        logging.getLogger("solar91.washing").exception("Washing cycle recount failed")
+
 
 async def _start_pm_daily_job_loop():
     """Hourly PM reminders and washing monthly-target notifications; opt in on one worker only."""

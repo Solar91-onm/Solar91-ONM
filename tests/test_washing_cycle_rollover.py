@@ -20,9 +20,10 @@ def test_om_sheet_rolls_into_the_next_cycle_in_one_save(client, db):
     d1, d2, d3, d4 = _days(4)
     r = _sheet(client, plant, [_done(d1, 3), _done(d2, 2), _done(d3, 3), _done(d4, 1)])
     assert r.status_code == 200, r.text
-    # d2 reaches the count (stays whole in cycle 1 and completes it); later days go to cycle 2 without another save
+    # d2 reaches the count and completes cycle 1; its 1 table above the count carries over to cycle 2, so d3 (1 + 3)
+    # completes cycle 2 and d4 starts cycle 3 — all without another save
     assert _cycles(db, plant) == [(3, 1, False, "Confirmed"), (2, 1, True, "Confirmed"),
-                                  (3, 2, False, "Confirmed"), (1, 2, True, "Confirmed")]
+                                  (3, 2, True, "Confirmed"), (1, 3, False, "Confirmed")]
 
 
 def test_site_engineer_keeps_going_while_the_full_cycle_awaits_confirmation(client, db):
@@ -107,3 +108,56 @@ def test_recount_fixes_a_month_saved_with_the_old_numbering(client, db):
     assert [c["confirmed"] for c in r.json()["cycles"]] == [4, 4, 3]
     _engineer(client, db, plant)
     assert client.post(f"{BASE}/plants/{plant.id}/recount", params={"month": month}).status_code == 403
+
+
+def test_tables_above_the_count_carry_over_to_the_next_cycle(client, db):
+    plant = _plant(db)                                   # 4 tables per cycle, like 206 at a real plant
+    head, _assignee = _setup_cycle_users(client, db, plant)
+    conftest._CURRENT_USER = head
+    d1, d2, d3, d4 = _days(4)
+    # cycle 1: 4. cycle 2: 2 + 3 = 5 -> complete on d3 with 1 carried over. cycle 3: 1 carried + 2 = 3
+    assert _sheet(client, plant, [_done(d1, 4), _done(d2, 2), _done(d3, 3), _done(d4, 2)]).status_code == 200
+    assert [c[1:3] for c in _cycles(db, plant)] == [(1, True), (2, False), (2, True), (3, False)]
+    month = d1.strftime("%Y-%m")
+    cycles = client.get(f"{BASE}/plants/{plant.id}/cycles", params={"month": month}).json()["cycles"]
+    assert [(c["confirmed"], c["carried_in"], c["carried_out"]) for c in cycles] == [(4, 0, 0), (4, 0, 1), (3, 1, 0)]
+    # an edit later in the cycle moves the carry with it: d3 rechecked as 1 table -> cycle 2 = 3, nothing carried
+    assert client.patch(f"{BASE}/daily-reports/{_report(db, plant, d3).id}", json={"tables_cleaned": 1}).status_code == 200
+    assert [c[1:3] for c in _cycles(db, plant)] == [(1, True), (2, False), (2, False), (2, True)]
+    cycles = client.get(f"{BASE}/plants/{plant.id}/cycles", params={"month": month}).json()["cycles"]
+    assert [(c["confirmed"], c["carried_out"]) for c in cycles] == [(4, 0), (4, 1), (1, 0)]
+
+
+def test_overview_counts_the_carried_tables_in_the_open_cycle(client, db):
+    plant = _plant(db)
+    head, _assignee = _setup_cycle_users(client, db, plant)
+    conftest._CURRENT_USER = head
+    from app.core.timeutil import business_today
+    today = business_today()
+    if today.day < 3:
+        return                                           # needs three days of this month
+    days = [today.replace(day=today.day - 2), today.replace(day=today.day - 1), today]
+    assert _sheet(client, plant, [_done(days[0], 4), _done(days[1], 6), _done(days[2], 1)]).status_code == 200
+    row = next(p for p in client.get(f"{BASE}/overview").json()["plants"] if p["plant_id"] == str(plant.id))
+    assert [(c["confirmed"], c["carried_in"]) for c in row["cycles"]] == [(4, 0), (4, 0), (3, 2)]
+
+
+def test_saved_months_are_recounted_once_automatically(client, db):
+    from app.core.models import AppSetting, AuditLog
+    from app.scheduled.washing_cycles import CYCLE_RULE_SETTING, CYCLE_RULE_VERSION, recount_all_months
+    plant = _plant(db)
+    head, _assignee = _setup_cycle_users(client, db, plant)
+    conftest._CURRENT_USER = head
+    d1, d2, d3 = _days(3)
+    assert _sheet(client, plant, [_done(d1, 4), _done(d2, 6), _done(d3, 1)]).status_code == 200
+    for report in db.query(WashingDailyReport).filter_by(plant_id=plant.id):      # as the old rule saved them:
+        report.cycle_no = 1 if report.report_date == d1 else 2                    # d2 kept whole in cycle 2, d3 too
+        report.cycle_completed = report.report_date in (d1, d2)
+    db.commit()
+    result = recount_all_months(db)
+    assert result["moved_days"] == 1 and result["plants"] >= 1
+    # cycle 2 = 6 -> complete on d2 with 2 carried over; d3 counts in cycle 3 (2 carried + 1)
+    assert [c[1:3] for c in _cycles(db, plant)] == [(1, True), (2, True), (3, False)]
+    assert db.get(AppSetting, CYCLE_RULE_SETTING).setting_value == CYCLE_RULE_VERSION
+    assert db.query(AuditLog).filter_by(action="Recounted washing cycles", actor_name="Solar91 (automatic)").count() == 1
+    assert recount_all_months(db) == {"skipped": True}                           # once per rule version

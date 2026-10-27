@@ -644,16 +644,9 @@ def _build_overview(db: Session, user: User, include_tables: bool = False, repor
                 completed_by_month.setdefault(report.cycle_month, set()).add(report.cycle_no)
         cycles_this_month = len(completed_by_month.get(month, set()))
         current_cycle = min(MONTHLY_CYCLE_TARGET, cycles_this_month + 1)
-        current_reports = [
-            report for report in reports
-            if report.cycle_month == month and report.cycle_no == current_cycle
-        ]
-        cleaned_confirmed = sum(
-            report.tables_cleaned for report in current_reports if report.review_status == "Confirmed"
-        )
-        cleaned_pending = sum(
-            report.tables_cleaned for report in current_reports if report.review_status == "Pending"
-        )
+        ledger = _cycle_ledger([r for r in reports if r.cycle_month == month], table_count)   # with carried-over tables
+        cleaned_confirmed = ledger[current_cycle]["confirmed"]
+        cleaned_pending = ledger[current_cycle]["pending"]
         table_codes: list[str] = []
         table_health: list[dict] = []
         if include_tables:  # nothing in the portal reads these two lists; opt in with ?include_tables=true
@@ -765,7 +758,7 @@ def _build_overview(db: Session, user: User, include_tables: bool = False, repor
         for cycle_no in range(1, MONTHLY_CYCLE_TARGET + 1):
             cycle_reports = [r for r in reports if r.cycle_month == month and r.cycle_no == cycle_no and r.review_status in ("Pending", "Confirmed")]
             done_on = completed_dates.get(cycle_no)
-            started_on = min((r.report_date for r in cycle_reports), default=None)
+            started_on = min((r.report_date for r in cycle_reports if r.tables_cleaned), default=None) or min((r.report_date for r in cycle_reports), default=None)
             state = "Completed" if done_on else ("In progress" if cycle_no == current_cycle and cycles_this_month < MONTHLY_CYCLE_TARGET else "Upcoming")
             due = due_dates[cycle_no - 1]
             planned_start = start_dates[cycle_no - 1]
@@ -780,8 +773,9 @@ def _build_overview(db: Session, user: User, include_tables: bool = False, repor
                 "due_overridden": due != _default_due_dates(today)[cycle_no - 1],
                 "started_on": started_on.isoformat() if started_on else None,
                 "completed_on": done_on.isoformat() if done_on else None,
-                "confirmed": sum(r.tables_cleaned for r in cycle_reports if r.review_status == "Confirmed"),
-                "pending": sum(r.tables_cleaned for r in cycle_reports if r.review_status == "Pending"),
+                "confirmed": ledger[cycle_no]["confirmed"],
+                "pending": ledger[cycle_no]["pending"],
+                "carried_in": ledger[cycle_no]["carried_in"],
                 "late_days": max(0, (done_on - due).days) if done_on else (max(0, (today - due).days) if state != "Upcoming" else 0),
             })
         for report in reports:
@@ -932,35 +926,6 @@ def _plant_table_count(db: Session, plant_id: UUID, config: WashingConfig | None
     return db.scalar(select(func.count(WashingTable.id)).where(WashingTable.plant_id == plant_id)) or 0
 
 
-def _refresh_cycle_completion(db: Session, plant_id: UUID, month: str, cycle_no: int, total_tables: int) -> bool:
-    """A cycle is complete once confirmed tables reach the plant's table count. The report on which the running
-    total first reaches that count carries the completion flag (its date is the cycle's completion date)."""
-    rows = list(db.scalars(select(WashingDailyReport).where(
-        WashingDailyReport.plant_id == plant_id,
-        WashingDailyReport.cycle_month == month,
-        WashingDailyReport.cycle_no == cycle_no,
-        WashingDailyReport.review_status == "Confirmed",
-    ).order_by(WashingDailyReport.report_date, WashingDailyReport.created_at)))
-    for row in rows:
-        row.cycle_completed = False
-    completing = _completing_row(rows, total_tables)
-    if completing is not None:
-        completing.cycle_completed = True
-    db.flush()
-    return completing is not None
-
-
-def _completing_row(rows, total_tables: int):
-    """The report on which a cycle's running confirmed total first reaches the plant's table count (None while the
-    cycle is still open). `rows` are the cycle's confirmed reports ordered by report date, then entry time."""
-    running = 0
-    for row in rows:
-        running += row.tables_cleaned
-        if total_tables > 0 and running >= total_tables:
-            return row
-    return None
-
-
 def _month_wash_summary(reports, table_count: int) -> dict:
     """How much washing a plant did in one month, for records and the monthly sheet.
 
@@ -972,7 +937,7 @@ def _month_wash_summary(reports, table_count: int) -> dict:
     completed_on = {r.cycle_no: r.report_date for r in sorted(confirmed, key=lambda r: r.report_date) if r.cycle_completed}
     cycles_completed = len(completed_on)
     confirmed_tables = sum(r.tables_cleaned for r in confirmed)
-    last_cycle_tables = sum(r.tables_cleaned for r in confirmed if r.cycle_no == MONTHLY_CYCLE_TARGET)
+    last_cycle_tables = _cycle_ledger(confirmed, table_count)[MONTHLY_CYCLE_TARGET]["confirmed"]   # with tables carried in
     extra_tables = max(0, last_cycle_tables - table_count) if cycles_completed >= MONTHLY_CYCLE_TARGET and table_count else 0
     return {
         "tables_per_cycle": table_count,
@@ -992,19 +957,51 @@ def _cycle_sequence(entries, total_tables: int) -> list[tuple[int, bool]]:
     """Cycle of each day of one plant-month, in date order: (cycle_no, extra) per entry of `entries`, which are
     (tables_cleaned, counts) in date order (counts = awaiting confirmation or confirmed; rejected days fill nothing).
 
-    A cycle fills up to the plant's table count. The day that reaches the count stays whole in that cycle and every
-    later day goes to the next one, so editing or back-filling a day moves the days after it to the right cycle
-    (e.g. a day changed from 0 to 40 after cycle 2 was already full counts in cycle 3). After cycle 3 is full,
-    further days stay on cycle 3 as extra washing (`extra`)."""
+    A cycle fills up to the plant's table count. The day that reaches the count belongs to that cycle and completes
+    it; the tables above the count carry over to the next cycle (206 tables per cycle, 234 recorded: 28 count in
+    cycle 3), and later days go to the next cycle. Editing or back-filling a day moves the days after it accordingly.
+    After cycle 3 is full, further days stay on cycle 3 as extra washing (`extra`)."""
     out: list[tuple[int, bool]] = []
-    cycle, running = 1, 0
+    cycle, counted = 1, 0
     for tables, counts in entries:
-        out.append((cycle, cycle == MONTHLY_CYCLE_TARGET and total_tables > 0 and running >= total_tables))
+        out.append((cycle, cycle == MONTHLY_CYCLE_TARGET and total_tables > 0 and counted >= total_tables))
         if counts:
-            running += tables or 0
-            if total_tables > 0 and running >= total_tables and cycle < MONTHLY_CYCLE_TARGET:
-                cycle, running = cycle + 1, 0
+            counted += tables or 0
+            if total_tables > 0 and counted >= total_tables and cycle < MONTHLY_CYCLE_TARGET:
+                cycle, counted = cycle + 1, counted - total_tables
     return out
+
+
+def _completing_rows(by_cycle, total_tables: int) -> list:
+    """`by_cycle[n - 1]`: cycle n's confirmed days in date order. Returns the day each cycle was completed on (None while
+    it is open), counting the tables carried over from the cycle before (_cycle_sequence)."""
+    out, carry = [], 0
+    for n, rows in enumerate(by_cycle, 1):
+        running, done = carry, None
+        for row in rows:
+            running += row.tables_cleaned or 0
+            if done is None and total_tables > 0 and running >= total_tables:
+                done = row
+        out.append(done)
+        carry = running - total_tables if done is not None and n < MONTHLY_CYCLE_TARGET else 0
+    return out
+
+
+def _cycle_ledger(reports, total_tables: int) -> dict[int, dict]:
+    """Tables counted towards each cycle of one plant-month, with the tables carried over between cycles: cycles 1
+    and 2 count up to the plant's table count and pass the rest on; cycle 3 keeps everything (above the count it is
+    extra washing). `confirmed` / `pending` are what each cycle shows; `carried_in` / `carried_out` explain them."""
+    def walk(statuses: tuple[str, ...]) -> dict[int, tuple[int, int, int]]:
+        carry, out = 0, {}
+        for n in range(1, MONTHLY_CYCLE_TARGET + 1):
+            total = carry + sum(r.tables_cleaned or 0 for r in reports if r.cycle_no == n and r.review_status in statuses)
+            over = total - total_tables if n < MONTHLY_CYCLE_TARGET and total_tables > 0 and total >= total_tables else 0
+            out[n] = (carry, total - over, over)
+            carry = over
+        return out
+    recorded, confirmed = walk(("Pending", "Confirmed")), walk(("Confirmed",))
+    return {n: {"confirmed": confirmed[n][1], "pending": max(0, recorded[n][1] - confirmed[n][1]),
+                "carried_in": recorded[n][0], "carried_out": recorded[n][2]} for n in recorded}
 
 
 def _completed_cycles(db: Session, plant_id: UUID, month: str) -> set[int]:
@@ -1026,18 +1023,62 @@ def _resequence_month(db: Session, plant_id: UUID, month: str, total_tables: int
         if row.cycle_no != cycle_no:
             moved.append({"report_date": row.report_date.isoformat(), "from": row.cycle_no, "to": cycle_no})
             row.cycle_no = cycle_no
+    for row in rows:
+        row.cycle_completed = False
+    confirmed = [[row for row in rows if row.cycle_no == n and row.review_status == "Confirmed"]
+                 for n in range(1, MONTHLY_CYCLE_TARGET + 1)]
+    for row in _completing_rows(confirmed, total_tables):
+        if row is not None:
+            row.cycle_completed = True
     db.flush()
-    for cycle_no in range(1, MONTHLY_CYCLE_TARGET + 1):
-        _refresh_cycle_completion(db, plant_id, month, cycle_no, total_tables)
     return moved
 
 
-def _audit_moves(db: Session, user: User, plant: Plant, month: str, moved: list[dict], reason: str) -> None:
+def _audit_moves(db: Session, user: User | None, plant: Plant, month: str, moved: list[dict], reason: str) -> None:
     if moved:
         db.add(AuditLog(
-            user_id=user.id, actor_name=user.display_name, action="Recounted washing cycles", module="Washing",
+            user_id=user.id if user else None, actor_name=user.display_name if user else "Solar91 (automatic)",
+            action="Recounted washing cycles", module="Washing",
             entity_type="plant", entity_id=plant.site_code, metadata_json={"month": month, "reason": reason, "moved": moved},
         ))
+
+
+# Bump when the cycle counting rule changes: every saved month is recounted once, automatically, on the next start.
+CYCLE_RULE_SETTING = "washing_cycle_rule"
+CYCLE_RULE_VERSION = "date-order-carry-over-1"
+
+
+def recount_all_months(db: Session) -> dict:
+    """Bring every saved plant-month in line with the current cycle rule (_cycle_sequence) once after a deploy, so
+    plant cycles, the monthly sheet, reports and compliance figures follow it without anyone pressing Recount.
+    One plant at a time under its washing lock (the same lock every report save takes); idempotent, so a second
+    worker doing the same at the same time changes nothing. Each move is in the audit log. No notifications."""
+    marker = db.get(AppSetting, CYCLE_RULE_SETTING)
+    if marker is not None and marker.setting_value == CYCLE_RULE_VERSION:
+        return {"skipped": True}
+    plants = moved_days = months = 0
+    for plant_id in list(db.scalars(select(WashingConfig.plant_id).order_by(WashingConfig.plant_id))):
+        config = db.scalar(select(WashingConfig).where(WashingConfig.plant_id == plant_id).with_for_update())
+        plant = db.get(Plant, plant_id)
+        if config is None or plant is None:
+            db.rollback()
+            continue
+        total = _plant_table_count(db, plant_id, config)
+        for month in sorted(set(db.scalars(select(WashingDailyReport.cycle_month).where(WashingDailyReport.plant_id == plant_id)))):
+            moved = _resequence_month(db, plant_id, month, total)
+            _audit_moves(db, None, plant, month, moved, f"cycle rule {CYCLE_RULE_VERSION}")
+            moved_days += len(moved)
+            months += 1
+        db.commit()            # one plant per transaction: report saves for other plants never wait long
+        plants += 1
+    marker = db.get(AppSetting, CYCLE_RULE_SETTING)
+    if marker is None:
+        db.add(AppSetting(setting_key=CYCLE_RULE_SETTING, setting_value=CYCLE_RULE_VERSION))
+    else:
+        marker.setting_value = CYCLE_RULE_VERSION
+    db.commit()
+    invalidate_overview_cache()
+    return {"plants": plants, "months": months, "moved_days": moved_days}
 
 
 def _ordered_codes(db: Session, plant_id: UUID) -> list[str]:
@@ -1488,10 +1529,10 @@ def month_cycles(db: Session, user: User, plant_id: UUID, month: str) -> dict:
     specific = (config.cycle_overrides or {}).get(month) or {}
     today = business_today()
     cycles = []
+    ledger = _cycle_ledger(reports, table_count)
     for n in range(1, MONTHLY_CYCLE_TARGET + 1):
         rows = [r for r in reports if r.cycle_no == n]
-        confirmed = sum(r.tables_cleaned for r in rows if r.review_status == "Confirmed")
-        pending = sum(r.tables_cleaned for r in rows if r.review_status == "Pending")
+        confirmed, pending = ledger[n]["confirmed"], ledger[n]["pending"]
         done_on = next((r.report_date for r in rows if r.cycle_completed and r.review_status == "Confirmed"), None)
         due = dues[n - 1]
         state = "Completed" if done_on else "In progress" if rows else ("Missed" if due < today else "Upcoming")
@@ -1500,6 +1541,7 @@ def month_cycles(db: Session, user: User, plant_id: UUID, month: str) -> dict:
             "default_start_date": default_starts[n - 1].isoformat(), "default_due_date": default_dues[n - 1].isoformat(),
             "start_set_for_month": f"s{n}" in specific, "due_set_for_month": str(n) in specific,
             "state": state, "confirmed": confirmed, "pending": pending, "reports": len(rows),
+            "carried_in": ledger[n]["carried_in"], "carried_out": ledger[n]["carried_out"],
             # the first day with tables washed (not-done days before it are listed in the cycle but do not start it)
             "started_on": next((r.report_date for r in rows if r.tables_cleaned), rows[0].report_date).isoformat() if rows else None,
             "completed_on": done_on.isoformat() if done_on else None,

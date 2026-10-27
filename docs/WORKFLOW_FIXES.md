@@ -43,6 +43,18 @@
   the full registered table count. Before and after evidence must be stored before a Done report can be confirmed. The next free tables of the
   cycle are assigned automatically. When all tables of the plant are cleaned **and confirmed by the O&M team**, the cycle
   completes and the next cycle starts. 3 cycles are due every month (deadlines: 10th, 20th, month-end).
+- **Days are counted into cycles by date, with carry-over** (`_cycle_sequence` in `app/scheduled/washing_cycles.py`).
+  Each cycle fills up to the plant's table count; the day that reaches it completes the cycle, the tables above the
+  count carry over to the next cycle (206 per cycle, 234 recorded: cycle 2 shows 206 and cycle 3 starts with 28), and
+  later days go to the next cycle. After cycle 3 is full, further days stay on cycle 3 as extra washing. Adding,
+  back-filling, editing, deleting, confirming or rejecting a day (and the daily Excel upload) recounts that month, so
+  an edit moves the days after it to the right cycle; every move is in the audit log ("Recounted washing cycles").
+  Completion counts confirmed tables only. The cycle sheet shows "+28 → C3" on the day that crosses the count.
+- **Automatic recount after a rule change**: on start the app recounts every saved plant-month once per
+  `CYCLE_RULE_VERSION` (marker `washing_cycle_rule` in `app_settings`; one plant per transaction, idempotent, no
+  notifications). Cycle cards, the monthly sheet export and compliance then follow the new rule without any action.
+  The O&M team still sees a *Recount cycles* note in a month whose days are out of place
+  (`POST /api/scheduled/washing/plants/{id}/recount?month=YYYY-MM`).
 - **Weekly compliance** is compared with the plant's target (default 85%) for O&M team tracking only; Site Engineers see neither compliance scores nor daily targets.
 - **Overdue matrix (1 / 3 / 7 days)**: how many days a plant is past the deadline of its next cycle — On track, 1+ day,
   3+ days, 7+ days. Alerts are sent once at each level (daily job `check_washing_overdue`).

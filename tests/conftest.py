@@ -48,6 +48,8 @@ def clean_db():
     _CURRENT_USER = None
     Base.metadata.drop_all(engine)
     Base.metadata.create_all(engine)
+    from app.issues.router import invalidate_pulse_cache
+    invalidate_pulse_cache()   # each test has a fresh database; a pulse cached by an earlier test must not leak in
     yield
     _CURRENT_USER = None
 
