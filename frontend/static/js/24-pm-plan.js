@@ -19,6 +19,7 @@
   const plantObj=name=>(S.plants||[]).find(p=>p.name===name||p.id===name);
   const plantKey=p=>p.dbId||p.id;
   const mdash=a=>a.length>1?a[0]+"–"+a[a.length-1]:String(a[0]);
+  const ONE_JOB=["ACCB Panel","Miscellaneous"];   /* one PM job per plant (app/pmplan/cycle.py ONE_JOB_TYPES) */
   /* Equipment <select> grouped by scope section. EVERY type stays selectable, whatever its section. */
   function typeOpts(sel){
     const names=typeNames(),secs=(typeof SCOPE_SECTIONS!=="undefined"?SCOPE_SECTIONS:[]).filter(s=>s.types),named=[];
@@ -120,6 +121,9 @@
     else{const r=cfgFor(v("pq-plant"),v("pq-type"));t.placeholder=(r&&r.reg)?"Register: "+r.reg:"e.g. 10";
       t.value=r&&r.cfg?r.cfg.total_units:(r&&r.reg)||"";
       d.placeholder=r&&r.cfg&&r.cfg.total_units&&r.cfg.units_per_day?"Saved pace: "+Math.ceil(r.cfg.total_units/r.cfg.units_per_day)+" day(s)":"e.g. 3"}
+    /* ACCB-1 + ACCB-2 and the Miscellaneous items are one job per plant; the server plans them as one unit too */
+    const one=ONE_JOB.indexOf(v("pq-type"))>=0;t.disabled=one;
+    if(one){t.value="1";t.title=v("pq-type")==="ACCB Panel"?"ACCB-1 and ACCB-2 are maintained together as one job":"Street Light, ERT and other small items are one job"}else t.title="";
     window.pmCycleHint("pq");
     window.pmUnitHint("pq");
   };

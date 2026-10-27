@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date, timedelta
 
 from app.core.models import OMTask, Plant
-from app.pmplan.cycle import CYCLE, CYCLE_DAYS, phase_for, window
+from app.pmplan.cycle import CYCLE, CYCLE_DAYS, phase_for, phase_index, window
 from tests.conftest import login_user
 
 START = date(2026, 11, 1)
@@ -67,17 +67,35 @@ def test_single_unit_equipment_uses_its_turn_in_the_cycle(client, db):
         assert task.due_on == START + timedelta(days=end_day - 1)      # one unit: due on the last day of its turn
 
 
-def test_accb_units_share_two_days_and_template_apply_follows_cycle(client, db):
+def test_accb_1_and_2_are_one_job_and_template_apply_follows_cycle(client, db):
     login_user(client, db, role="O&M Head")
     _plant(db)
-    res = client.post("/api/pm-plan/tasks", json=_body(equipment_type="ACCB Panel", task_name="ACCB PM", total_units=2, save_template=True))
+    res = client.post("/api/pm-plan/tasks", json=_body(equipment_type="ACCB Panel", task_name="ACCB PM", total_units=2,
+                                                      units_per_day=2, save_template=True))
     assert res.status_code == 200, res.text
-    assert sorted(t.due_on for t in db.query(OMTask).all()) == [START + timedelta(days=7), START + timedelta(days=8)]
+    task = db.query(OMTask).one()                                       # ACCB-1 + ACCB-2: one job, not two
+    assert (task.unit_no, task.total_units, task.quantity) == (1, 1, 1)
+    assert (task.start_on, task.due_on) == (START + timedelta(days=7), START + timedelta(days=8))
     _plant(db, "B_01", "Plant B")
     tpl = client.get("/api/pm-plan/templates").json()[0]
     res = client.post(f"/api/pm-plan/templates/{tpl['id']}/apply", json={"plants": ["B_01"], "start_date": START.isoformat(),
                                                                           "follow_cycle": True, "total_units": 2})
     assert res.status_code == 200 and res.json()["cycle"]["start_day"] == 8
+    assert res.json()["count"] == 1
+
+
+def test_miscellaneous_is_one_plant_side_job_after_earthing(client, db):
+    assert phase_for("Miscellaneous")["phase"] == "Miscellaneous" and phase_for("Miscellaneous")["area"] == "Plant side"
+    assert phase_index("Earthing") < phase_index("Miscellaneous") < phase_index("Transmission line")
+    assert phase_for("Street Light") is phase_for("Miscellaneous")
+    login_user(client, db, role="O&M Head")
+    _plant(db)
+    res = client.post("/api/pm-plan/tasks", json=_body(equipment_type="Miscellaneous", task_name="Street Light, ERT",
+                                                      total_units=4))
+    assert res.status_code == 200, res.text
+    task = db.query(OMTask).one()
+    assert (task.unit_no, task.total_units) == (1, 1)
+    assert (task.start_on, task.due_on) == (START + timedelta(days=19), START + timedelta(days=21))     # cycle days 20-22
 
 
 def test_without_cycle_dates_are_unchanged(client, db):
@@ -142,8 +160,8 @@ def test_accb_added_later_starts_after_the_plants_inverter_round(client, db):
     assert res.status_code == 200, res.text
     due = lambda plant: sorted(t.due_on for t in db.query(OMTask).filter(OMTask.task_type == "ACCB Panel",
                                                                           OMTask.plant_id == plant.id))
-    assert due(kerli) == [date(2026, 11, 11), date(2026, 11, 12)]          # the day after Kerli's last inverter
-    assert due(other) == [date(2026, 11, 8), date(2026, 11, 9)]            # standard cycle days 8-9
+    assert due(kerli) == [date(2026, 11, 12)]          # one job, from the day after Kerli's last inverter (Nov 11-12)
+    assert due(other) == [date(2026, 11, 9)]           # standard cycle days 8-9
     moved = res.json()["cycle_moved"]
     assert [m["plant"] for m in moved] == ["Kerli"] and moved[0]["moved_days"] == 3
 
@@ -232,7 +250,9 @@ def test_plant_then_gss_templates_upload_in_order(client, db):
     spans = [(s["equipment_type"], s["start"], s["end"]) for s in res.json()["schedule"]]
     assert spans[0] == ("Inverter", "2026-11-01", "2026-11-07")
     assert ("ACCB Panel", "2026-11-08", "2026-11-09") in spans and ("MCCB", "2026-11-08", "2026-11-09") in spans
-    assert spans[-1] == ("Transmission line", "2026-11-23", "2026-11-24")
+    assert spans[-2:] == [("Miscellaneous", "2026-11-20", "2026-11-22"), ("Transmission line", "2026-11-23", "2026-11-24")]
+    assert db.query(OMTask).filter(OMTask.task_type == "ACCB Panel").count() == 1
+    assert db.query(OMTask).filter(OMTask.task_type == "Miscellaneous").count() == 1
     assert all(a[2] < b[1] for a, b in zip(spans, spans[1:]) if a[1] != b[1])        # one equipment after the other
     gss = client.post(f"/api/pm-plan/import?dry_run=false&{q}",
                       files={"file": ("gss.xlsx", _filled_template("PM_GSS_Side_Template.xlsx", "KRN_01"), xlsx)})

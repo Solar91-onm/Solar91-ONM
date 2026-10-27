@@ -4,13 +4,14 @@ A cycle is CYCLE_DAYS (30) days from its start date, the same length as the Mont
 (FREQ_DAYS["Monthly"]), so every unit comes back on the same cycle day next month.
 
   Plant side   Inverter (all units)            7 days
-               ACCB Panel (ACCB-1, -2) + MCCB  2 days, done together
+               ACCB Panel (ACCB-1, -2) + MCCB  2 days, done together; ACCB-1 + ACCB-2 count as one job
                VCB Panel                       2 days
                Transformer (IDT)               2 days
                Aux. Transformer                2 days
                4 Pole                          2 days
                Earthing (earth pit)            2 days
-               Miscellaneous                   3 days  (every type not named in this table)
+               Miscellaneous                   3 days  (the Miscellaneous job - Street Light, ERT, ... - counts as
+                                                        one job; every type not named in this table is here too)
                Transmission line               remaining days
   GSS side     VCB - GSS side                  2 days
                4 Pole - GSS side               2 days
@@ -30,6 +31,9 @@ from typing import Any
 
 CYCLE_DAYS = 30
 MISC = "Miscellaneous"
+# One PM job per plant whatever the unit count: ACCB-1 and ACCB-2 are maintained together, and the
+# Miscellaneous job covers the small items (Street Light, ERT, ...) in one visit.
+ONE_JOB_TYPES = ("ACCB Panel", MISC)
 
 # (area, phase name, equipment types, days; None = share the remaining days)
 _PHASES: list[tuple[str, str, tuple[str, ...], int | None]] = [
@@ -40,7 +44,7 @@ _PHASES: list[tuple[str, str, tuple[str, ...], int | None]] = [
     ("Plant side", "Aux. Transformer", ("Aux. Transformer",), 2),
     ("Plant side", "4 Pole", ("4 Pole",), 2),
     ("Plant side", "Earth pit", ("Earthing",), 2),
-    ("Plant side", MISC, (), 3),
+    ("Plant side", MISC, (MISC,), 3),
     ("Plant side", "Transmission line", ("Transmission line",), None),
     ("GSS side", "VCB", ("VCB - GSS side",), 2),
     ("GSS side", "4 Pole", ("4 Pole - GSS side",), 2),
@@ -72,6 +76,11 @@ NAMED_TYPES = [t for p in CYCLE for t in p["equipment_types"]]
 def phase_for(equipment_type: str) -> dict[str, Any]:
     """The phase an equipment type is maintained in; types not named in the cycle go to Miscellaneous."""
     return _BY_TYPE.get((equipment_type or "").strip().casefold(), _MISC_PHASE)
+
+
+def one_job(equipment_type: str) -> bool:
+    """True when the equipment is planned as a single PM job per plant (ONE_JOB_TYPES)."""
+    return (equipment_type or "").strip().casefold() in {t.casefold() for t in ONE_JOB_TYPES}
 
 
 def phase_index(equipment_type: str) -> int:

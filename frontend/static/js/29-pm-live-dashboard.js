@@ -88,6 +88,9 @@
   return(S.plants||[]).filter(p=>(role!=="Site Engineer"||!S._sePlant||p.name===S._sePlant)&&(f.plant==="all"||p.name===f.plant));
  });
  function coverageData(){return once("coverage",buildCoverageData)}
+ /* ACCB-1 + ACCB-2 and the Miscellaneous items are one PM job per plant (app/pmplan/cycle.py ONE_JOB_TYPES) */
+ const ONE_JOB=["ACCB Panel","Miscellaneous"];
+ const pmUnits=(type,n)=>n>0&&ONE_JOB.indexOf(type)>=0?1:n;
  function buildCoverageData(){
   const cfg=S._pmCfg||{configs:[],register:[]},plants=scopedPlants();
   const rows=new Map(),byName=new Map(plants.map(p=>[p.name,p])),byId=new Map(plants.map(p=>[String(p.dbId||p.id),p]));
@@ -100,11 +103,11 @@
   const plantOf=id=>byId.get(String(id));
   (cfg.configs||[]).forEach(c=>{
    const row=put(plantOf(c.plant_id),c.equipment_type);
-   if(row){row.units=Number(c.total_units)||null;row.daily=Number(c.units_per_day)||null;row.source="Configured units"}
+   if(row){row.units=pmUnits(row.type,Number(c.total_units))||null;row.daily=Number(c.units_per_day)||null;row.source="Configured units"}
   });
   (cfg.register||[]).forEach(c=>{
    const row=put(plantOf(c.plant_id),c.equipment_type);
-   if(row&&Number(c.units)>0){row.units=Number(c.units);row.source="Equipment register"}
+   if(row&&Number(c.units)>0){row.units=pmUnits(row.type,Number(c.units));row.source="Equipment register"}
    if(row){row.critical=Number(c.critical)||0;row.faulty=Number(c.faulty)||0}
   });
   currentScopeTasks().forEach(t=>{const row=put(byName.get(t.plant),t.type);if(row)row.tasks.push(t)});
@@ -409,7 +412,7 @@
    '<div class="pmcal-legend"><span><i class="lv1"></i>Light day</span><span><i class="lv3"></i>Busy day</span><span><i class="late"></i>Overdue work due that day</span><span><i class="done"></i>Share done</span></div></article>';
  }
  /* Plants × equipment: one row per plant, one cell per equipment type, coloured by the most urgent state */
- const TYPE_ORDER=["Inverter","ACCB Panel","MCCB","VCB Panel","Transformer","Aux. Transformer","4 Pole","Earthing","Transmission line","VCB - GSS side","4 Pole - GSS side","Transmission line - GSS side"];
+ const TYPE_ORDER=["Inverter","ACCB Panel","MCCB","VCB Panel","Transformer","Aux. Transformer","4 Pole","Earthing","Miscellaneous","Transmission line","VCB - GSS side","4 Pole - GSS side","Transmission line - GSS side"];
  const typeRank=t=>{const i=TYPE_ORDER.indexOf(t);return i<0?TYPE_ORDER.length:i};
  function matrixHtml(tasks){
   const f=state(),types=[...new Set(tasks.map(t=>t.type).filter(Boolean))].sort((a,b)=>typeRank(a)-typeRank(b)||a.localeCompare(b));
@@ -499,7 +502,7 @@
   /* the PM plan import is O&M Head only on the server (PLANNER_ROLES); Administration is read-only */
   const uploadButton=role==="O&M Head"&&typeof pmImportPick==="function"?'<details class="pmc-menu"><summary class="btn o sm">Upload plan <span aria-hidden="true">▾</span></summary><div class="pmc-menu-list" role="menu">'+
    item('onclick="pmImportPick()"',"Upload Excel / CSV plan","Checked first (dry run), then you confirm")+'<span class="pmc-menu-label">Templates</span>'+
-   link("/static/templates/PM_Plant_Side_Template.xlsx","Plant side Excel","Inverter, ACCB + MCCB, VCB, IDT, Aux. Transformer, 4 Pole, Earthing, Transmission line")+
+   link("/static/templates/PM_Plant_Side_Template.xlsx","Plant side Excel","Inverter, ACCB + MCCB, VCB, IDT, Aux. Transformer, 4 Pole, Earthing, Miscellaneous, Transmission line")+
    link("/static/templates/PM_GSS_Side_Template.xlsx","GSS side Excel","VCB, 4 Pole and Transmission line on the GSS side")+
    link("/static/templates/PM_Task_Plan_Template.xlsx","General plan Excel","Any equipment, each row with its own start date")+
    item('onclick="pmDownloadCsvTemplate()"',"CSV template","Header row for a CSV upload")+'</div></details>':"";

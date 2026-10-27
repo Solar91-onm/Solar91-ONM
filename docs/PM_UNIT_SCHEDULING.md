@@ -30,13 +30,13 @@ Defined once in `app/pmplan/cycle.py` and served read-only at `GET /api/pm-plan/
 | Area | Equipment | Cycle days |
 | --- | --- | --- |
 | Plant side | Inverter (all units, spread over the week) | 1–7 |
-| Plant side | ACCB Panel (ACCB-1, ACCB-2) + MCCB, together | 8–9 |
+| Plant side | ACCB Panel (ACCB-1 + ACCB-2 as one job) + MCCB, together | 8–9 |
 | Plant side | VCB Panel | 10–11 |
 | Plant side | Transformer (IDT) | 12–13 |
 | Plant side | Aux. Transformer | 14–15 |
 | Plant side | 4 Pole | 16–17 |
 | Plant side | Earthing (earth pit) | 18–19 |
-| Plant side | Miscellaneous — every type not named here (RMS, CCTV, LA, ABT meters, OLTC(RTCC), WMS…) | 20–22 |
+| Plant side | Miscellaneous — the *Miscellaneous* job (Street Light, ERT, …; one job), plus every type not named here (RMS, CCTV, LA, ABT meters, OLTC(RTCC), WMS…) | 20–22 |
 | Plant side | Transmission line | 23–24 |
 | GSS side | VCB - GSS side | 25–26 |
 | GSS side | 4 Pole - GSS side | 27–28 |
@@ -46,11 +46,13 @@ The two Transmission line phases share the days left after the fixed phases.
 - **Add PM task / Assign to plants**: *Follow the 30-day PM cycle* is ticked by default (`follow_cycle` on `/api/pm-plan/tasks` and template apply). The date becomes the cycle start (day 1); the job starts on its equipment's first cycle day and its units spread over that phase (*Finish within* still overrides). A single unit is due on the last day of its phase. Unticked = previous behaviour.
 - **Upload (Excel/CSV)**: the upload dialog asks for the cycle start (`follow_cycle=true&cycle_start=YYYY-MM-DD` on `/api/pm-plan/import`). A row's own Start date is that row's cycle start; blank rows use the dialog date. The dry run returns `schedule` (equipment, area, dates, task count), shown in the confirmation.
 - `4 Pole - GSS side` and `Transmission line - GSS side` are new equipment types (like `VCB - GSS side`) so 4 Pole and Transmission line can be planned on both sides. Assignees need these types in their equipment assignment to work on them.
-- Scope library defaults follow the cycle: Plant Side = Inverter, ACCB Panel, MCCB, VCB Panel, Transformer, Aux. Transformer, 4 Pole, Earthing, Transmission line; GSS Side = the three GSS-side types; PV Area = Piling and Foundation, WMS; everything else is Miscellaneous. A scope the O&M Head already saved is kept; use *Restore standard lists* to adopt the new defaults.
+- **One job per plant** (`ONE_JOB_TYPES` in `app/pmplan/cycle.py`): *ACCB Panel* (ACCB-1 and ACCB-2 are maintained together) and *Miscellaneous* are always planned as a single unit (unit 1 of 1), whatever the request, Unit configuration, Equipment Register or upload says. Add PM task locks *Number of units* to 1 for them and Equipment coverage counts their inventory as 1. Work orders created earlier (e.g. two ACCB units) are left as they are.
+- **Miscellaneous** is an equipment type on the Plant side between Earthing and Transmission line. Its task suggestions are Street Light, ERT and other small items, done in one visit. Assignees need *Miscellaneous* in their equipment assignment to work on it.
+- Scope library defaults follow the cycle: Plant Side = Inverter, ACCB Panel, MCCB, VCB Panel, Transformer, Aux. Transformer, 4 Pole, Earthing, Miscellaneous, Transmission line; GSS Side = the three GSS-side types; PV Area = Piling and Foundation, WMS; everything else is Miscellaneous. A scope the O&M Head already saved is kept; use *Restore standard lists* to adopt the new defaults.
 
 ## No overlap: each equipment follows the one before it (October 2026)
 - The cycle is an **order**, not only fixed days. At each plant a phase starts on its own cycle day or the day after the previous phase's last due date there, whichever is later (`chained_window` in `app/pmplan/cycle.py`). Example: cycle start Nov 1, 20 inverters at 2 a day run Nov 1–10, so ACCB + MCCB move to Nov 11–12, VCB to Nov 13–14, and so on; the GSS side moves too. Work that finishes early never pulls later phases forward.
-- "Previous phase" means PM work already in the register at that plant in this cycle's 30 days (any status except Cancelled; Daily/Weekly jobs ignored; e.g. inverters set up earlier with Add PM task) plus earlier rows of the same upload. Miscellaneous counts only work in the same request, because that phase holds every other equipment type.
+- "Previous phase" means PM work already in the register at that plant in this cycle's 30 days (any status except Cancelled; Daily/Weekly jobs ignored; e.g. inverters set up earlier with Add PM task) plus earlier rows of the same upload. For Miscellaneous only *Miscellaneous* work orders count from the register; the other types in that phase count only within the same request.
 - Uploads are processed in cycle order whatever the row order in the file. Each plant gets its own dates. The dry run's `schedule` entries carry `plants`, `moved_days` and `past_cycle_days`. Add PM task / Assign to plants return `cycle_moved` (plants whose turn moved).
 - Tasks that already exist are never moved. Only new tasks are placed after them.
 

@@ -29,8 +29,8 @@ from app.core.models import AuditLog, Equipment, OMTask, NotificationPreference,
 from app.core.security import equipment_scope_matches, get_current_user, require_csrf, user_scoped_plant_ids
 from app.plants.codes import find_plant_by_code
 from app.pmplan.alerts import PM_ALERT_EVENTS, PM_TEAM_RECIPIENT_MODES, default_pm_preferences, get_pm_preferences
-from app.pmplan.cycle import (CYCLE, CYCLE_DAYS, NAMED_TYPES, chained_window, phase_for, phase_index,
-                               window as cycle_window, window_out)
+from app.pmplan.cycle import (CYCLE, CYCLE_DAYS, NAMED_TYPES, ONE_JOB_TYPES, chained_window, one_job, phase_for,
+                               phase_index, window as cycle_window, window_out)
 from app.pmplan.units import distribute, next_cycle_id, run_daily  # noqa: F401  (next_cycle_id re-exported for the scheduled router)
 from app.scheduled.schemas import ALLOWED_ASSETS, ALLOWED_FREQUENCIES
 
@@ -195,6 +195,7 @@ def _units_for(db: Session, plant: Plant, tpl: dict[str, Any], per_unit: bool, u
 
     Total units: request override > plant configuration > Equipment Register > legacy hint.
     Units per day: request override > plant configuration > template default > everything on day 1.
+    ACCB Panel and Miscellaneous (ONE_JOB_TYPES) are always one unit: ACCB-1 + ACCB-2 is one job.
     """
     plan = plan or {}
     etype = tpl["equipment_type"]
@@ -206,6 +207,9 @@ def _units_for(db: Session, plant: Plant, tpl: dict[str, Any], per_unit: bool, u
     if total <= 1 and not refs and not (cfg or plan.get("total_units")):
         return [{"ref": None, "unit_no": None, "total": None, "day": None,     # nothing known: one task, as before
                  "due_day": plan.get("phase_days")}]
+    if one_job(etype):
+        plan = {**plan, "total_units": 1, "unit_numbers": [1], "units_per_day": 1}
+        total = 1
     total = max(1, total)
     nums = plan.get("unit_numbers") or list(range(1, total + 1))
     bad = [n for n in nums if n < 1 or n > total]
@@ -411,7 +415,8 @@ def _booked(db: Session, plant_ids: list[Any], cycle_start: date,
 
     Counts PM work already in the register (any status but Cancelled, not Daily/Weekly; e.g. inverters set
     up earlier from Add PM task) plus `planned` (plant, phase, last due) from earlier rows of the same upload.
-    Miscellaneous holds every other equipment type, so only work planned in the same request counts for it."""
+    For the Miscellaneous phase only the Miscellaneous job itself counts from the register, because that phase
+    also holds every other equipment type; those count only when planned in the same request."""
     lo, hi = cycle_start, cycle_start + timedelta(days=CYCLE_DAYS - 1)
     out: dict[Any, dict[int, date]] = {}
 
@@ -598,7 +603,7 @@ def quick_add(payload: QuickTaskIn, db: Annotated[Session, Depends(get_db)], use
 def get_cycle(user: Annotated[User, Depends(get_current_user)]):
     """The 30-day PM cycle (Plant side, then GSS side) used when a job or upload follows the cycle."""
     _require(user, CREATOR_ROLES, "The PM cycle is available to the O&M Head and Assignees")
-    return {"cycle_days": CYCLE_DAYS, "phases": CYCLE}
+    return {"cycle_days": CYCLE_DAYS, "phases": CYCLE, "one_job_types": list(ONE_JOB_TYPES)}
 
 
 # ───────────────────────── maintenance scope library (editable by the O&M Head) ─────────────────────────

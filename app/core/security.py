@@ -98,6 +98,7 @@ EQUIPMENT_TYPES = [
     "ABT meters", "Street Light", "MMS", "Other",
     "MCCB", "OLTC(RTCC)", "4 Pole", "VCB - GSS side",   # PM scope additions (Plant Side / GSS Side)
     "4 Pole - GSS side", "Transmission line - GSS side",   # GSS side of the 30-day PM cycle
+    "Miscellaneous",   # Plant side PM job for Street Light, ERT, ... (one job per plant)
 ]
 
 

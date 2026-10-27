@@ -19,7 +19,7 @@ from openpyxl.worksheet.datavalidation import DataValidation
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from app.pmplan.cycle import CYCLE, CYCLE_DAYS, phase_for  # noqa: E402
+from app.pmplan.cycle import CYCLE, CYCLE_DAYS, MISC, phase_for  # noqa: E402
 
 OUT = ROOT / "frontend" / "static" / "templates"
 BASE = OUT / "PM_Task_Plan_Template.xlsx"
@@ -39,8 +39,9 @@ ROWS = {
     "plant": [
         ("Inverter", "Inverter preventive maintenance", "PTW + LOTO required", 2,
          "1. Isolate. 2. Clean fans and filters. 3. Check DC / AC terminal torque. 4. Review alarms. 5. Record readings.", None),
-        ("ACCB Panel", "ACCB panel PM (ACCB-1, ACCB-2)", "PTW + LOTO required", 2,
-         "1. Isolate. 2. Breaker operation check. 3. Busbar / terminal thermal scan. 4. Cable lugs. 5. Panel cleaning.", 2),
+        ("ACCB Panel", "ACCB panel PM (ACCB-1 + ACCB-2, one job)", "PTW + LOTO required", 2,
+         "1. Isolate. 2. Breaker operation check. 3. Busbar / terminal thermal scan. 4. Cable lugs. 5. Panel cleaning. "
+         "Do ACCB-1 and ACCB-2 in the same job.", 1),
         ("MCCB", "MCCB PM", "PTW + LOTO required", 1,
          "1. Visual / thermal inspection. 2. Terminal tightening. 3. Trip and manual operation test.", None),
         ("VCB Panel", "VCB panel PM (plant side)", "PTW + LOTO required", 3,
@@ -53,6 +54,8 @@ ROWS = {
          "1. Structure & foundation. 2. Insulators / jumpers. 3. Earthing connection. 4. Hardware tightening.", None),
         ("Earthing", "Earth pit maintenance", "—", 2,
          "1. Earth-pit condition. 2. Resistance measurement. 3. Connection tightening. 4. Watering / treatment.", None),
+        ("Miscellaneous", "Miscellaneous PM (Street Light, ERT, …)", "—", 2,
+         "1. Street Light. 2. ERT. 3. Any other small item at the plant. All in one job.", 1),
         ("Transmission line", "Transmission line patrol & PM (plant side)", "PTW required", 4,
          "1. Line patrol. 2. Conductor / sag. 3. Insulators / jumpers. 4. Poles / towers. 5. Vegetation & ROW.", None),
     ],
@@ -84,6 +87,7 @@ def _base_types_and_ideas() -> tuple[list[str], dict[str, str]]:
     ideas = {r[0]: r[1] for r in wb["Task ideas"].iter_rows(min_row=2, values_only=True) if r and r[0]}
     ideas.setdefault("4 Pole - GSS side", ideas.get("4 Pole"))
     ideas.setdefault("Transmission line - GSS side", ideas.get("Transmission line"))
+    ideas.setdefault(MISC, "Street Light, ERT and other small items — one job per plant")
     return types, ideas
 
 
@@ -98,8 +102,11 @@ def _how_to(ws, side: str) -> None:
     ws.column_dimensions["A"].width, ws.column_dimensions["B"].width, ws.column_dimensions["C"].width = 3, 26, 92
     other = "GSS side" if side == "plant" else "Plant side"
     phases = [p for p in CYCLE if p["area"] == TITLE[side]]
-    order = "\n".join(f"{i}. {p['phase']} ({', '.join(p['equipment_types']) or 'every other equipment type'}) — cycle {_days(p)}"
-                      for i, p in enumerate(phases, 1))
+    def what(p: dict) -> str:
+        if p["phase"] == MISC:
+            return "Street Light, ERT, … as one Miscellaneous job; any other equipment type not listed here"
+        return ", ".join(p["equipment_types"])
+    order = "\n".join(f"{i}. {p['phase']} ({what(p)}) — cycle {_days(p)}" for i, p in enumerate(phases, 1))
     ws["B2"] = f"Solar91 O&M — {TITLE[side]} Preventive Maintenance plan"
     ws["B2"].font = Font(name="Arial", size=16, bold=True, color=GREEN)
     ws["B3"] = (f"Only {TITLE[side]} equipment goes in this file. {other} equipment is rejected on upload — "
@@ -123,8 +130,8 @@ def _how_to(ws, side: str) -> None:
         ("Safety needed", "— (none), PTW required, LOTO required, or PTW + LOTO required."),
         ("Est. time (hours)", "Approximate hours per unit, as a number."),
         ("How to do it", "Steps / checklist in plain words."),
-        ("No. of units", "Optional. How many units the plant has (ACCB-1 and ACCB-2 = 2). Blank = the plant's Unit configuration "
-                         "or Equipment Register."),
+        ("No. of units", "Optional. How many units the plant has. Blank = the plant's Unit configuration "
+                         "or Equipment Register. ACCB Panel (ACCB-1 + ACCB-2) and Miscellaneous are always one job per plant."),
         ("Units per day", "Optional. Most units done in one day. Blank = spread the units over the equipment's cycle days."),
         ("Remarks", "Optional. Added to the log of every task the row creates."),
         ("Order in PM cycle", "For information only; the portal ignores this column."),
