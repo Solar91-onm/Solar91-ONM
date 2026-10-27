@@ -96,4 +96,4 @@ def test_day_summary_button_and_compact_sheet_are_wired():
     css = (ROOT / "frontend/static/css/40-washing-and-picker.css").read_text(encoding="utf-8")
     assert "openWashDaySummary()" in js and "/api/scheduled/washing/day-activity" in js
     assert 'S.modal==="washingDaySummary"' in js and "todayStrip()+feedHtml()" in js
-    assert ".wx-sheet{max-height:max(500px,66vh)}" in css
+    assert ".wx-sheet{max-height:none;overflow-y:visible}" in css      # the whole cycle in one view, no inner scroll box

@@ -161,3 +161,30 @@ def test_saved_months_are_recounted_once_automatically(client, db):
     assert db.get(AppSetting, CYCLE_RULE_SETTING).setting_value == CYCLE_RULE_VERSION
     assert db.query(AuditLog).filter_by(action="Recounted washing cycles", actor_name="Solar91 (automatic)").count() == 1
     assert recount_all_months(db) == {"skipped": True}                           # once per rule version
+
+
+def test_overview_for_an_earlier_month_shows_it_as_it_stood_at_month_end(client, db):
+    from datetime import timedelta
+    from app.core.timeutil import business_today
+    plant = _plant(db)
+    head, _assignee = _setup_cycle_users(client, db, plant)
+    conftest._CURRENT_USER = head
+    today = business_today()
+    last_month_end = today.replace(day=1) - timedelta(days=1)
+    earlier = last_month_end - timedelta(days=2)
+    db.add_all([WashingDailyReport(plant_id=plant.id, cycle_month=earlier.strftime("%Y-%m"), cycle_no=1, report_date=earlier,
+                                   job_status="Done", tables_cleaned=4, cleaned_table_codes=[], reported_by="T", review_status="Confirmed",
+                                   cycle_completed=True),
+                WashingDailyReport(plant_id=plant.id, cycle_month=today.strftime("%Y-%m"), cycle_no=1, report_date=today,
+                                   job_status="Done", tables_cleaned=2, cleaned_table_codes=[], reported_by="T", review_status="Confirmed")])
+    db.commit()
+    past = client.get(f"{BASE}/overview", params={"month": last_month_end.strftime("%Y-%m")})
+    assert past.status_code == 200, past.text
+    body = past.json()
+    assert body["past_month"] is True and body["today"] == last_month_end.isoformat() and body["actual_today"] == today.isoformat()
+    row = next(p for p in body["plants"] if p["plant_id"] == str(plant.id))
+    assert row["cycles_this_month"] == 1 and row["last_report_date"] == earlier.isoformat()      # this month's report left out
+    now = client.get(f"{BASE}/overview").json()
+    assert now["past_month"] is False and now["month"] == today.strftime("%Y-%m")
+    future = (today.replace(day=28) + timedelta(days=5)).strftime("%Y-%m")
+    assert client.get(f"{BASE}/overview", params={"month": future}).status_code == 422

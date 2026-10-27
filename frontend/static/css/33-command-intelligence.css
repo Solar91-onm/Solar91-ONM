@@ -191,3 +191,31 @@ body>.toast.s91-toast-success{border-left-color:#22b061!important}body>.toast.s9
 .cp-suggest small{font-size:11.5px;color:#5c6f65}
 .cp-sg-ico{flex:none;display:grid;place-items:center;width:28px;height:28px;border-radius:8px;background:#f1f5f2;font-size:13px}
 .cp-suggest p{margin:4px 9px 2px;font-size:11px;color:#7d9387}
+
+/* ---------- Ask Solar91: layered home (topic tiles) and folded answer sections (Oct 2026) ---------- */
+.cp-topics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.cp-topic{display:flex;flex-direction:column;align-items:flex-start;gap:5px;padding:11px 11px 10px;border-radius:14px;border:1px solid #e3ece6;background:#fff;cursor:pointer;text-align:left;font:inherit;transition:transform .15s ease,box-shadow .15s ease,border-color .15s ease}
+.cp-topic-ico{display:grid;place-items:center;width:30px;height:30px;border-radius:10px;background:color-mix(in srgb,var(--c) 14%,#fff);color:var(--c);font-size:15px;font-weight:800}
+.cp-topic b{font-size:13px;font-weight:800;color:#10231a;line-height:1.2}
+.cp-topic small{font-size:11px;font-weight:600;color:#6b7d72}
+.cp-topic:hover{border-color:var(--c);transform:translateY(-1px);box-shadow:0 8px 18px rgba(16,40,26,.08)}
+.cp-topic:focus-visible{outline:2px solid var(--c);outline-offset:2px}
+.cp-topic.on{border-color:var(--c);background:color-mix(in srgb,var(--c) 8%,#fff);box-shadow:0 0 0 3px color-mix(in srgb,var(--c) 18%,transparent)}
+.cp-topic-panel{display:flex;flex-direction:column;gap:2px;padding:6px;border-radius:14px;background:#fff;border:1px solid color-mix(in srgb,var(--c) 30%,#e3ece6);box-shadow:0 8px 20px rgba(16,40,26,.06);animation:cp-in .18s ease}
+.cp-topic-panel button{display:flex;justify-content:space-between;align-items:center;gap:8px;border:0;background:none;border-radius:10px;padding:9px 10px;font:inherit;font-size:13.5px;font-weight:650;color:#10231a;text-align:left;cursor:pointer}
+.cp-topic-panel button:hover,.cp-topic-panel button:focus-visible{background:color-mix(in srgb,var(--c) 9%,#fff);outline:none}
+.cp-topic-panel i{font-style:normal;color:var(--c);font-weight:800;font-size:16px}
+.cp-pick-hint{margin:0;font-size:12.5px;color:#6b7d72;text-align:center}
+.cp-fold{border-top:1px solid #e6eee9;padding-top:4px}
+.cp-fold summary{list-style:none;display:flex;align-items:center;gap:8px;cursor:pointer;padding:6px 2px;font-size:12px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;color:#3d5045;border-radius:8px}
+.cp-fold summary::-webkit-details-marker{display:none}
+.cp-fold summary:hover{color:#0c6b3a}
+.cp-fold summary:focus-visible{outline:2px solid #0c6b3a;outline-offset:1px}
+.cp-fold summary b{background:#eef4f0;color:#10231a;border-radius:999px;padding:1px 8px;font-size:11px;letter-spacing:0}
+.cp-fold summary i{margin-left:auto;font-style:normal;color:#6b7d72;font-size:16px;transition:transform .15s ease}
+.cp-fold[open] summary i{transform:rotate(90deg)}
+.cp-fold-body{padding:4px 0 2px}
+.cp-fold .cp-follow>span{display:none}
+@keyframes cp-in{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
+@media (max-width:420px){.cp-topics{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (prefers-reduced-motion:reduce){.cp-topic,.cp-topic-panel,.cp-fold summary i{transition:none;animation:none}}

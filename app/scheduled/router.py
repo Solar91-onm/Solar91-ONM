@@ -737,8 +737,8 @@ def washing_assignees(db: Annotated[Session, Depends(get_db)], user: Annotated[U
 
 
 @router.get("/washing/overview")
-def washing_overview(db: Annotated[Session, Depends(get_db)], user: Annotated[User, Depends(get_current_user)], include_tables: bool = False, report_days: int = 35):
-    return get_overview(db, user, include_tables=include_tables, report_days=report_days)
+def washing_overview(db: Annotated[Session, Depends(get_db)], user: Annotated[User, Depends(get_current_user)], include_tables: bool = False, report_days: int = 35, month: str | None = None):
+    return get_overview(db, user, include_tables=include_tables, report_days=report_days, month=month)
 
 
 @router.get("/washing/day-activity")

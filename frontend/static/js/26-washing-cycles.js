@@ -26,11 +26,34 @@
  const onWashing=()=>S.view==="dashboard"||(S.view==="om-module"&&S.omTab==="washing");
 
  async function loadOverview(){
-  if(S._washCycleLoading)return S._washCycleLoading;
-  S._washCycleLoading=apiFetch("/api/scheduled/washing/overview"+(S._washReportDays?"?report_days="+S._washReportDays:"")).then(d=>{S._washCycles=d;S._washLoadedAt=Date.now();S._washCycleError=null;S._washCycleLoading=null;if(onWashing()&&!busyTyping())render();return d}).catch(e=>{S._washCycleLoading=null;S._washCycleError=e;if(onWashing())render();throw e});
+  const want=S._washViewMonth||null;
+  if(S._washCycleLoading&&S._washCycleLoadingMonth===want)return S._washCycleLoading;
+  const q=[];if(S._washReportDays)q.push("report_days="+S._washReportDays);if(want)q.push("month="+encodeURIComponent(want));
+  S._washCycleLoadingMonth=want;
+  S._washCycleLoading=apiFetch("/api/scheduled/washing/overview"+(q.length?"?"+q.join("&"):"")).then(d=>{
+   if((S._washViewMonth||null)!==want)return d;   /* the month was changed again while this was loading */
+   S._washCycles=d;S._washLoadedAt=Date.now();S._washCycleError=null;S._washCycleLoading=null;if(onWashing()&&!busyTyping())render();return d}).catch(e=>{S._washCycleLoading=null;S._washCycleError=e;if(onWashing())render();throw e});
   return S._washCycleLoading;
  }
  window.washCyclesReload=loadOverview;
+ /* Month shown on the Washing page: the current month, or an earlier one as it stood on its last day (the server's
+    ?month=). Opening a plant then opens that month's sheet, so its days can be recorded or corrected there. */
+ const currentMonth=()=>String(data().actual_today||data().today||isoDaysAgo(0)).slice(0,7);
+ const viewMonth=()=>S._washViewMonth||currentMonth();
+ window.washViewMonth=function(n){
+  const cur=currentMonth(),base=viewMonth(),d=new Date(Number(base.slice(0,4)),Number(base.slice(5,7))-1+n,1);
+  let next=n===0?cur:d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0");
+  if(next>cur)next=cur;
+  S._washViewMonth=next===cur?null:next;S.washMonth=next;S.washSheetCycle=null;
+  if(S._washUi)S._washUi.repDay=null;
+  S._washSwitching=true;render();
+  loadOverview().catch(e=>toast(detailOf(e,"Could not load that month."))).finally(()=>{S._washSwitching=false;render()});
+ };
+ function monthPicker(){
+  const cur=currentMonth(),m=viewMonth(),label=new Date(m+"-01T00:00:00").toLocaleDateString("en-GB",{month:"long",year:"numeric"});
+  return '<div class="wx-month" role="group" aria-label="Month shown"><button type="button" onclick="washViewMonth(-1)" aria-label="Previous month">‹</button><b>'+h(label)+(S._washSwitching?' <small>loading…</small>':'')+'</b>'+
+   '<button type="button" onclick="washViewMonth(1)" aria-label="Next month"'+(m>=cur?' disabled':'')+'>›</button>'+(m<cur?'<button type="button" class="wx-month-now" onclick="washViewMonth(0)">This month</button>':'')+'</div>';
+ }
  /* Reports, confirmations and recounts by other people change the plants all the time. The overview is loaded once and
     then kept fresh: reloaded in the background when it is older than a minute while washing data is on screen
     (Washing page, Command Center, Plant Pulse), never while someone is typing or has a form open. */
@@ -151,7 +174,7 @@
  const REP_DAYS=10;
  /* the day picker is an O&M team control (O&M Head / Assignee); Site Engineers always see today for their own plant */
  const repDay=()=>{const t=todayIso(),d=(S._washUi||{}).repDay;return isTeam()&&d&&d<=t&&d>=addDays(t,-(REP_DAYS-1))?d:t};
- const repLabel=d=>d===todayIso()?"Not reported today":"Not reported on "+dayName(d);
+ const repLabel=d=>d===todayIso()&&!data().past_month?"Not reported today":"Not reported on "+dayName(d);
  function dayEntry(day){
   if(S._washDayFor!==S._washCycles){S._washDayFor=S._washCycles;S._washDays={}}
   const c=S._washDays;
@@ -487,7 +510,7 @@
    :'<b>'+done+' of '+target+' cycles complete</b> · '+(pf.pending_reviews||0)+' report'+((pf.pending_reviews||0)===1?'':'s')+' awaiting confirmation';
   const hero='<div class="gx-hero gx-hero-wash"><div class="gx-hero-copy"><span class="gx-eyebrow">PLANT WASHING · AT A GLANCE</span><h2>'+(f.plant!=="all"?h((plants.concat(unconfigured).find(p=>p.plant_id===f.plant)||{}).plant||"Selected plant"):"Portfolio washing")+'</h2><p>'+heroLine+'</p>'+
    (head&&late?'<button type="button" class="gx-hero-cta" onclick="washGlance(\'state\',\'late\')">Show late plants →</button>':'')+'</div>'+
-   '<div class="gx-hero-score">'+(G?G.scoreRing(head?(wk==null?0:wk):cyPct,scoreColor):'')+'<div><b>'+(head?(wk==null?"—":wk+"%"):cyPct+"%")+'</b><small>'+(head?(cc&&cc.cycle_no?"cycle "+cc.cycle_no+" compliance":"current cycle compliance"):"cycles complete")+'</small><span>'+(head?"target "+thr+"% · "+done+" / "+target+" cycles":done+" / "+target+" cycles this month")+'</span></div></div></div>';
+   '<div class="gx-hero-score">'+(G?G.scoreRing(head?(wk==null?0:wk):cyPct,scoreColor):'')+'<div><b>'+(head?(wk==null?"—":wk+"%"):cyPct+"%")+'</b><small>'+(head?(cc&&cc.cycle_no?"cycle "+cc.cycle_no+" compliance":"current cycle compliance"):"cycles complete")+'</small><span>'+(head?"target "+thr+"%":done+" / "+target+" cycles this month")+'</span></div></div></div>';
   const donutCard=G?G.donut({title:"Where the plants stand",sub:"Click a slice to list those plants",noun:"plants",attr:"data-wx-state",active:f.state,slices}):'';
   const maxCycles=Math.max(3,...plants.map(p=>p.monthly_target||3));
   const cycRows=[];for(let n=1;n<=maxCycles;n++){const c={n,done:0,run:0,wait:0,due:""};plants.forEach(p=>{const cy=(p.cycles||[]).find(x=>Number(x.cycle_no)===n);if(!cy)return;if(cy.state==="Completed")c.done++;else if(cy.state==="In progress")c.run++;else c.wait++;if(head&&cy.due_date&&(!c.due||cy.due_date<c.due))c.due=cy.due_date});cycRows.push(c)}
@@ -497,7 +520,7 @@
   const compCard=head?'<article class="gx-card"><header><h3>Lowest cycle compliance</h3><p>Current cycle, against tables due by today · click a plant to open its cycles and reports</p></header>'+(lowest.length?'<div class="gx-hbars gx-comp">'+lowest.map(p=>{const v=ccPct(p),t=p.compliance_threshold_percent||thr,c=v>=t?"#16A34A":v>=t-15?"#D97706":"#DC2626";return '<button type="button" class="gx-hbar" style="--c:'+c+'" onclick="openWashingPlantDetails(\''+h(p.plant_id)+'\')" title="'+h(p.plant+': '+ccRatio(p.cycle_compliance)+' tables ('+v+'%, target '+t+'%)')+'"><span>'+h(p.plant)+'</span><i><b style="width:'+Math.max(v?4:0,Math.min(100,v))+'%"></b><u style="left:'+Math.min(100,t)+'%"></u></i><strong>'+v+'%</strong></button>'}).join("")+'</div>':'<div class="gx-allclear"><span>✓</span><b>No compliance data yet</b><small>Compliance appears once daily reports are confirmed.</small></div>')+'</article>':'';
   const stats='<div class="gx-glance gx-wash">'+hero+kpis+'<div class="gx-grid '+(head?'gx-grid-3':'gx-grid-2')+'">'+donutCard+cycleCard+compCard+'</div></div>';
   const counts={all:allN,attention:plants.filter(p=>p.active&&(p.overdue_bucket!=="on_track"||ccPct(p)<p.compliance_threshold_percent)).length,review:plants.filter(p=>p.pending_tables_cleaned>0).length,notreported:0,notsetup:unconfigured.length,mine:plants.filter(p=>p.assignee_user_id===S._currentUserId).length};
-  const rd=repDay(),rdLoaded=!!dayEntry(rd).status||rd===todayIso(),repName=rd===todayIso()?"Not reported today":"Not reported "+fmt(rd);
+  const rd=repDay(),rdLoaded=!!dayEntry(rd).status||rd===todayIso(),repName=rd===todayIso()&&!data().past_month?"Not reported today":"Not reported "+fmt(rd);
   counts.notreported=rdLoaded?plants.filter(p=>notReportedOn(p,rd)).length:"…";
   const views=head?[["all","All"],["attention","Needs attention"],["review","Awaiting review"],["notreported",repName],["notsetup","Not set up"]].concat(role()==="Assignee"?[["mine","Mine"]]:[]):[];
   const plantOpts=plants.map(p=>[p.plant_id,p.site_code+" · "+p.plant]).concat(unconfigured.map(p=>[p.plant_id,p.site_code+" · "+p.plant+"  — not set up"])).sort((a,b)=>a[1].localeCompare(b[1]));
@@ -506,7 +529,7 @@
   /* plant picker, quick views, day filter and Assignee filter: O&M team only. Site Engineers just see their own plant(s),
      which the server already limits the washing data to. */
   const bar=head?'<div class="wx-bar">'+
-   '<label class="wx-plant"><span>⌕</span><select data-pp aria-label="Choose a plant" onchange="washFilter(\'plant\',this.value)"><option value="all">All plants ('+allN+')</option>'+plantOpts.map(o=>'<option value="'+h(o[0])+'"'+(f.plant===o[0]?' selected':'')+'>'+h(o[1])+'</option>').join("")+'</select></label>'+
+   '<label class="wx-plant"><span>⌕</span><select data-pp aria-label="Choose a plant" onchange="washFilter(\'plant\',this.value)"><option value="all">All plants ('+allN+')</option>'+plantOpts.map(o=>'<option value="'+h(o[0])+'"'+(f.plant===o[0]?' selected':'')+'>'+h(o[1])+'</option>').join("")+'</select></label>'+monthPicker()+
    '<div class="wx-seg" role="tablist" aria-label="Quick views">'+views.map(v=>'<button type="button" role="tab" aria-selected="'+(f.show===v[0])+'" class="'+(f.show===v[0]?'on':'')+'" onclick="washFilter(\'show\',\''+v[0]+'\')">'+v[1]+' <b>'+counts[v[0]]+'</b></button>').join("")+'</div>'+
    (f.show==="notreported"?repDaySelect("washRepDay(this.value)"):'')+
    '<span class="wx-grow"></span>'+
@@ -519,7 +542,8 @@
   const results='<div class="wc-card wx-results" id="wc-results"><div class="wx-results-h"><h2>'+(f.plant!=="all"?"Plant":"Plants")+' <span>'+shown+' of '+allN+'</span></h2>'+(ui.view!=="table"?legend:'<span class="wx-grow"></span>')+tools+'</div>'+washFocusBar(f)+'<div id="wc-register">'+resultsHtml()+'</div></div>';
   const lower='<div class="wc-two">'+'<div class="wc-card"><div class="row between wrap" style="gap:8px;align-items:center"><h2>Cycle updates'+(head?' &amp; confirmations':'')+'</h2><button type="button" class="btn o sm" onclick="openWashDaySummary()" title="Cycles completed and confirmations done on one day, for one plant or all plants">📊 Day summary</button></div><p class="sub">Reports waiting for confirmation, cycles completed and the next cycle that started.</p>'+todayStrip()+feedHtml()+'</div>'+
    (head?'<div class="wc-card"><h2>Assignee performance</h2><p class="sub">Ranked by current-cycle compliance, then average delay. O&amp;M team only.</p>'+rankingHtml()+'</div>':'')+'</div>';
-  return '<div class="wc-page wx-page">'+header+stats+bar+results+lower+'</div>';
+  const pastNote=data().past_month?'<div class="wx-pastmonth"><b>'+h(new Date(viewMonth()+"-01T00:00:00").toLocaleDateString("en-GB",{month:"long",year:"numeric"}))+'</b> as it stood on '+h(fmt(data().today))+'. Open a plant to record or correct days of this month.</div>':'';
+  return '<div class="wc-page wx-page">'+header+stats+bar+pastNote+results+lower+'</div>';
  };
 
  /* The washing tab gets a compact switcher instead of the full Preventive Maintenance banner. */
@@ -701,7 +725,7 @@
   return out;
  }
  function sheetModel(p,mc){
-  const today=todayIso(),minDate=isField()?addDays(today,-SE_BACK_DAYS):"0000-00-00",photoFrom=addDays(today,-(PHOTO_DAYS-1));
+  const today=todayIso(),real=data().actual_today||today,minDate=isField()?addDays(real,-SE_BACK_DAYS):"0000-00-00",photoFrom=addDays(real,-(PHOTO_DAYS-1));
   const cyc=sheetCycles(mc),open=cyc.find(x=>x.kind==="open");
   let pick=S.washSheetCycle;if(!cyc.some(x=>x.c.cycle_no===pick))pick=(open||cyc.filter(x=>x.kind==="done").pop()||cyc[0]).c.cycle_no;
   const cur=cyc.find(x=>x.c.cycle_no===pick),reports=mc.reports||[],st=sheetState(p.plant_id,mc.month);

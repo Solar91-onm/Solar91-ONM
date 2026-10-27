@@ -254,10 +254,16 @@
   if(!(f.severities||[]).length)Object.entries(fc.severity||{}).forEach(([v,n])=>offers.push(add('severities','severity',v,v,n)));
   if(!f.plant)Object.entries(fc.plant||{}).slice(0,5).forEach(([v,n])=>offers.push(add('plant','plant',v,v,n)));
   const sort=x.sort||'relevance',sorts=[['relevance','Best match'],['priority','Priority'],['due','Due date'],['recent','Recent']];
-  return '<div class="cp-layer cp-refine"><div class="cp-layer-h">Refine</div>'+
+  return '<div class="cp-refine">'+
    (applied.length?'<div class="cp-fchips">'+applied.join('')+'</div>':'')+
    (offers.length&&(x.records||[]).length>1?'<div class="cp-fchips cp-offer">'+offers.slice(0,12).join('')+'</div>':'')+
    ((x.records||[]).length>1?'<div class="cp-refine-row"><label class="cp-within"><span aria-hidden="true">⌕</span><input data-cp-within="'+i+'" placeholder="Filter these results…" aria-label="Filter these results"></label><div class="cp-sort" role="group" aria-label="Sort results">'+sorts.map(([k,l])=>'<button type="button" class="'+(k===sort?'on':'')+'" aria-pressed="'+(k===sort)+'" data-cp-sort="'+i+'|'+k+'">'+l+'</button>').join('')+'</div></div>':'')+'</div>';
+ }
+ /* Answers open with the headline, one sentence and the top records; breakdown, refining and follow-up questions are
+    folded until asked for. Which folds are open is remembered, so refining a result keeps its section open. */
+ function fold(i,key,label,count,body){
+  const id=i+':'+key,open=!!(assistant.folds&&assistant.folds[id]);
+  return '<details class="cp-fold" data-cp-fold="'+id+'"'+(open?' open':'')+'><summary><span>'+esc91(label)+'</span>'+(count!==''&&count!=null?'<b>'+esc91(count)+'</b>':'')+'<i aria-hidden="true">›</i></summary><div class="cp-fold-body">'+body+'</div></details>';
  }
  function answerCard(x,i){
   if(x.who==='user')return '<div class="cp-q"><span>'+esc91(x.text)+'</span></div>';
@@ -265,7 +271,7 @@
   if(/^Checking permitted live records|^Refining…/.test(x.text))return '<article class="cp-a cp-loading" aria-busy="true"><div class="cp-a-top"><span class="cp-orb sm"></span><span>Searching the records your role can access…</span></div><i class="cp-sk"></i><i class="cp-sk w70"></i><i class="cp-sk w45"></i></article>';
   if(x.error)return '<article class="cp-a cp-err"><div class="cp-a-top"><span class="cp-orb sm"></span><span>Live data unavailable · '+time+'</span></div><p class="cp-text">'+esc91(x.text)+'</p>'+(x.q?'<div class="cp-follow"><button type="button" data-s91-question="'+esc91(x.q)+'">↻ Try again</button></div>':'')+'</article>';
   if(!x.q&&!x.records?.length&&!x.summary)return '<article class="cp-a"><p class="cp-text">'+esc91(x.text).replace(/\n/g,'<br>')+'</p></article>';
-  const recs=x.records||[],all=assistant.expandedRecs&&assistant.expandedRecs[i],shown=all?recs:recs.slice(0,4);
+  const recs=x.records||[],all=assistant.expandedRecs&&assistant.expandedRecs[i],shown=all?recs:recs.slice(0,3);
   const bd=(x.breakdown||[]).filter(b=>b&&b.label!=null),bdMax=Math.max(1,...bd.map(b=>Number(b.value)||0));
   const follows=followups(x);
   return '<article class="cp-a">'+
@@ -273,35 +279,41 @@
    (x.summary&&x.summary.value!=null?'<div class="cp-hero"><strong>'+esc91(x.summary.value)+'</strong><span>'+esc91(x.summary.label||'Result')+'</span></div>':'')+
    '<p class="cp-text">'+esc91(x.text).replace(/\n/g,'<br>')+'</p>'+
    (x.narration?'<div class="cp-ai"><b>✦ AI context</b><p>'+esc91(x.narration)+'</p></div>':'')+
-   (bd.length?'<div class="cp-layer"><div class="cp-layer-h">Breakdown</div><div class="cp-bars">'+bd.map(b=>{const v=Number(b.value)||0;return '<div class="cp-bar"><span>'+esc91(b.label)+'</span><i><b style="width:'+Math.max(v?6:0,Math.round(100*v/bdMax))+'%"></b></i><strong>'+esc91(b.value)+'</strong></div>'}).join('')+'</div></div>':'')+
-   refineHtml(x,i)+
-   (recs.length?'<div class="cp-layer"><div class="cp-layer-h">Supporting records <b>'+recs.length+(x.limited?'+':'')+'</b></div><div class="cp-recs">'+recs.map((r,k)=>k<shown.length?recordCard(r):recordCard(r).replace('class="cp-rec"','class="cp-rec cp-extra"')).join('')+'</div>'+(recs.length>4?'<button type="button" class="cp-more" data-cp-more="'+i+'">'+(all?'Show fewer':'Show all '+recs.length+' records')+'</button>':'')+'</div>':'')+
+   (bd.length?fold(i,'bd','Breakdown',bd.length,'<div class="cp-bars">'+bd.map(b=>{const v=Number(b.value)||0;return '<div class="cp-bar"><span>'+esc91(b.label)+'</span><i><b style="width:'+Math.max(v?6:0,Math.round(100*v/bdMax))+'%"></b></i><strong>'+esc91(b.value)+'</strong></div>'}).join('')+'</div>'):'')+
+   (x.filters&&(recs.length>1||(x.filters.statuses||[]).length||(x.filters.modules||[]).length)?fold(i,'rf','Refine results','',refineHtml(x,i)):'')+
+   (recs.length?'<div class="cp-layer"><div class="cp-layer-h">Supporting records <b>'+recs.length+(x.limited?'+':'')+'</b></div><div class="cp-recs">'+recs.map((r,k)=>k<shown.length?recordCard(r):recordCard(r).replace('class="cp-rec"','class="cp-rec cp-extra"')).join('')+'</div>'+(recs.length>3?'<button type="button" class="cp-more" data-cp-more="'+i+'">'+(all?'Show fewer':'Show all '+recs.length+' records')+'</button>':'')+'</div>':'')+
    '<div class="cp-actions">'+(x.action?'<button type="button" class="cp-primary" data-s91-assist-go="'+x.action.join(':')+'">Open filtered register ↗</button>':'')+'<button type="button" data-cp-copy="'+i+'">Copy answer</button></div>'+
-   (follows.length?'<div class="cp-follow"><span>Go deeper</span>'+follows.map(f=>'<button type="button" data-s91-question="'+esc91(f)+'">'+esc91(f)+'</button>').join('')+'</div>':'')+
+   (follows.length?fold(i,'gd','Go deeper',follows.length,'<div class="cp-follow">'+follows.map(f=>'<button type="button" data-s91-question="'+esc91(f)+'">'+esc91(f)+'</button>').join('')+'</div>'):'')+
    (x.source?'<small class="cp-src">'+esc91(x.source)+(x.limited?' · more records exist; open the register for the full list':'')+'</small>':'')+
    '</article>';
  }
+ const TOPIC_ICON={'My work':'👤','Site issues':'⚠','Preventive maintenance':'🛠','Washing':'💧','Quick searches':'⌕','Recent':'↺'};
+ /* Home: greeting, the live counts, then one tile per topic. Only the tapped topic's questions are shown. */
  function homeHtml(){
   const name=(typeof AUTH_IDENTITY!=='undefined'&&AUTH_IDENTITY.name?String(AUTH_IDENTITY.name).split(/\s+/)[0]:'');
   const hr=new Date().getHours(),greet=hr<12?'Good morning':hr<17?'Good afternoon':'Good evening';
   const recent=[...new Set(assistant.log.filter(x=>x.who==='user').map(x=>x.text).reverse())].slice(0,5);
-  return '<div class="cp-home"><div class="cp-hello"><span class="cp-orb lg" aria-hidden="true"></span><div><b>'+greet+(name?', '+esc91(name):'')+'</b><span>Ask about site issues, maintenance, washing, a plant or a ticket. Every answer comes from live records your role can access.</span></div></div>'+
-   '<div class="cp-snap-h">Right now'+(focusPlant()?' at '+esc91(focusPlant()):'')+' <small>from records loaded on this page · tap for the live answer</small></div>'+
+  const topics=promptGroups().concat(recent.length?[['Recent','#64748B',recent]]:[]);
+  const open=topics.find(t=>t[0]===assistant.topic);
+  return '<div class="cp-home"><div class="cp-hello"><span class="cp-orb lg" aria-hidden="true"></span><div><b>'+greet+(name?', '+esc91(name):'')+'</b><span>What would you like to know?</span></div></div>'+
+   '<div class="cp-snap-h">Right now'+(focusPlant()?' at '+esc91(focusPlant()):'')+'</div>'+
    '<div class="cp-snap">'+snapshot().map(t=>'<button type="button" style="--c:'+t[3]+'" data-s91-question="'+esc91(t[2])+'"><b>'+esc91(t[0])+'</b><span>'+esc91(t[1])+'</span></button>').join('')+'</div>'+
-   promptGroups().map(g=>'<div class="cp-group" style="--c:'+g[1]+'"><h4>'+esc91(g[0])+'</h4><div>'+g[2].map(q=>'<button type="button" data-s91-question="'+esc91(q)+'">'+esc91(q)+'</button>').join('')+'</div></div>').join('')+
-   (recent.length?'<div class="cp-group cp-recent" style="--c:#64748B"><h4>Recent questions</h4><div>'+recent.map(q=>'<button type="button" data-s91-question="'+esc91(q)+'">↺ '+esc91(q)+'</button>').join('')+'</div></div>':'')+'</div>';
+   '<div class="cp-snap-h">Pick a topic</div>'+
+   '<div class="cp-topics" role="group" aria-label="Topics">'+topics.map(t=>'<button type="button" class="cp-topic'+(open===t?' on':'')+'" style="--c:'+t[1]+'" data-cp-topic="'+esc91(t[0])+'" aria-expanded="'+(open===t)+'"><span class="cp-topic-ico" aria-hidden="true">'+(TOPIC_ICON[t[0]]||'•')+'</span><b>'+esc91(t[0]==='Preventive maintenance'?'Maintenance':t[0])+'</b><small>'+t[2].length+' question'+(t[2].length===1?'':'s')+'</small></button>').join('')+'</div>'+
+   (open?'<div class="cp-topic-panel" style="--c:'+open[1]+'">'+open[2].map(q=>'<button type="button" data-s91-question="'+esc91(q)+'"><span>'+esc91(q)+'</span><i aria-hidden="true">›</i></button>').join('')+'</div>'
+    :'<p class="cp-pick-hint">Tap a topic to see its questions, or type your own below.</p>')+'</div>';
  }
  function copilotHtml(){
   const plants=hasAppState()?(S.plants||[]).filter(pl=>role()!=='Site Engineer'||!S._sePlant||pl.name===S._sePlant):[];
   const opts='<option value="all">All plants in my scope</option>'+plants.slice().sort((a,b)=>String(a.name).localeCompare(String(b.name))).map(pl=>'<option value="'+esc91(pl.name)+'"'+(assistant.focus===pl.name?' selected':'')+'>'+esc91((pl.id?pl.id+' · ':'')+pl.name)+'</option>').join('');
   const conv=assistant.log.length?assistant.log.map(answerCard).join(''):homeHtml();
   return '<section class="s91-assistant-panel s91-copilot'+(assistant.wide?' is-wide':'')+'" role="dialog" aria-label="Ask Solar91 operations copilot">'+
-   '<header class="cp-head"><span class="cp-orb" aria-hidden="true"></span><div><h2>Ask Solar91</h2><small>Operations copilot · live, role-scoped records · read-only</small></div>'+
+   '<header class="cp-head"><span class="cp-orb" aria-hidden="true"></span><div><h2>Ask Solar91</h2><small>Live answers from the records you can see</small></div>'+
    '<div class="cp-head-tools">'+(assistant.log.length?'<button type="button" data-cp-new title="Start a new conversation" aria-label="New conversation">✎</button>':'')+'<button type="button" data-cp-wide title="'+(assistant.wide?'Narrow':'Widen')+' panel" aria-label="'+(assistant.wide?'Narrow':'Widen')+' panel">'+(assistant.wide?'⇥':'⇤')+'</button><button type="button" data-s91-assist="close" aria-label="Close assistant">×</button></div></header>'+
    '<div class="cp-context"><label><span>Focus</span><select data-cp-plant aria-label="Focus suggestions on a plant">'+opts+'</select></label><span class="cp-badge">● Live</span></div>'+
    '<div class="s91-assistant-conversation cp-body" aria-live="polite">'+conv+'</div>'+
-   '<div id="cp-suggest-slot" class="cp-suggest-slot"></div><form id="s91-assistant-form" class="cp-composer"><input id="s91-assistant-query" maxlength="300" aria-label="Ask an operations question" placeholder="Search or ask: critical inverter issues at a plant, a ticket number…" autocomplete="off"'+(assistant.busy?' disabled':'')+'><button type="submit" aria-label="Ask"'+(assistant.busy?' disabled':'')+'>'+(assistant.busy?'<span class="gx-spin" aria-hidden="true"></span>':'↑')+'</button></form>'+
-   '<p class="cp-foot">Search with plain words: “critical inverter issues at '+esc91((plants[0]&&plants[0].id)||'QA02')+'”, “overdue maintenance”, “unassigned issues”, or a ticket number. Then refine with one tap. Answers never change data.</p></section>';
+   '<div id="cp-suggest-slot" class="cp-suggest-slot"></div><form id="s91-assistant-form" class="cp-composer"><input id="s91-assistant-query" maxlength="300" aria-label="Ask an operations question" placeholder="Ask anything, or type a ticket / plant…" autocomplete="off"'+(assistant.busy?' disabled':'')+'><button type="submit" aria-label="Ask"'+(assistant.busy?' disabled':'')+'>'+(assistant.busy?'<span class="gx-spin" aria-hidden="true"></span>':'↑')+'</button></form>'+
+   '<p class="cp-foot">Read-only · try “overdue maintenance at '+esc91((plants[0]&&plants[0].id)||'QA02')+'” or a ticket number</p></section>';
  }
  function assistantRoot(){let root=document.getElementById('s91-assistant-root');if(!root){root=document.createElement('div');root.id='s91-assistant-root';document.body.append(root)}return root}
  function drawAssistant(){syncAssistantUser();const root=assistantRoot();root.hidden=!document.querySelector('#app .shell');
@@ -430,6 +442,7 @@
   const record=e.target.closest('[data-s91-record-kind]');if(record){openAssistantRecord(record.dataset.s91RecordKind,record.dataset.s91RecordId,record.dataset.s91RecordPlant,record.dataset.s91RecordTicket);return}
   if(e.target.closest('[data-cp-new]')){assistant.log=[];assistant.expandedRecs={};assistant.lastQuery='';saveAssistantHistory([]);drawAssistant();return}
   if(e.target.closest('[data-cp-wide]')){assistant.wide=!assistant.wide;drawAssistant();return}
+  const topic=e.target.closest('[data-cp-topic]');if(topic){assistant.topic=assistant.topic===topic.dataset.cpTopic?null:topic.dataset.cpTopic;drawAssistant();if(!assistant.log.length){const panel=document.querySelector('.cp-topic-panel');if(panel&&panel.scrollIntoView)panel.scrollIntoView({block:'nearest'})}return}
   const more=e.target.closest('[data-cp-more]');if(more){const i=Number(more.dataset.cpMore);assistant.expandedRecs=assistant.expandedRecs||{};assistant.expandedRecs[i]=!assistant.expandedRecs[i];const c=document.querySelector('.cp-body'),top=c?c.scrollTop:0;drawAssistant();const n=document.querySelector('.cp-body');if(n)n.scrollTop=top;return}
   const copy=e.target.closest('[data-cp-copy]');if(copy){const x=assistant.log[Number(copy.dataset.cpCopy)];if(x){const lines=[x.text].concat(x.summary&&x.summary.value!=null?[x.summary.label+': '+x.summary.value]:[]).concat((x.breakdown||[]).map(b=>'- '+b.label+': '+b.value)).concat((x.records||[]).map(r=>'- '+[r.ticket||(!isUuid(r.id)?r.id:''),r.title,r.plant,r.status].filter(Boolean).join(' · ')));try{navigator.clipboard.writeText(lines.join('\n')).then(()=>{if(typeof toast==='function')toast('Answer copied')},()=>{if(typeof toast==='function')toast('Copy is not available in this browser')})}catch(err){if(typeof toast==='function')toast('Copy is not available in this browser')}}return}
   const drop=e.target.closest('[data-cp-drop]');if(drop){const [i,kind,v]=drop.dataset.cpDrop.split('|');refine(Number(i),{drop:[kind,v]});return}
@@ -437,6 +450,7 @@
   const sortb=e.target.closest('[data-cp-sort]');if(sortb){const [i,k]=sortb.dataset.cpSort.split('|');refine(Number(i),{sort:k});return}
   const go=e.target.closest('[data-s91-assist-go]');if(go){const [kind,queue]=go.dataset.s91AssistGo.split(':');assistant.open=false;drawAssistant();window.s91OpenQueue(kind,queue);return}
  });
+ document.addEventListener('toggle',e=>{const d=e.target;if(d&&d.dataset&&d.dataset.cpFold){assistant.folds=assistant.folds||{};assistant.folds[d.dataset.cpFold]=d.open}},true);
  document.addEventListener('input',e=>{
   const el=e.target;if(!el||!el.matches)return;
   if(el.matches('[data-cp-within]')){

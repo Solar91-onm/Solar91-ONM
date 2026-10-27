@@ -551,17 +551,31 @@ def list_assignees(db: Session, user: User) -> list[dict]:
     return [{"id": str(user_id), "name": name, "has_washing_scope": user_id in scoped} for user_id, name in users]
 
 
-def get_overview(db: Session, user: User, include_tables: bool = False, report_days: int = OVERVIEW_SEND_REPORT_DAYS) -> dict:
+def _overview_as_of(month: str | None) -> date | None:
+    """`month` (YYYY-MM) chosen on the Washing page: an earlier month is shown as it stood on its last day; the current
+    month (or none) is shown as of today. Later months have nothing to show yet."""
+    if not month:
+        return None
+    first = _parse_month(month)
+    current = business_today().replace(day=1)
+    if first > current:
+        raise HTTPException(422, "Washing can be shown up to the current month")
+    return None if first == current else first.replace(day=monthrange(first.year, first.month)[1])
+
+
+def get_overview(db: Session, user: User, include_tables: bool = False, report_days: int = OVERVIEW_SEND_REPORT_DAYS,
+                 month: str | None = None) -> dict:
     report_days = max(1, min(int(report_days), OVERVIEW_REPORT_DAYS))
+    as_of = _overview_as_of(month)
     ttl = 0 if get_settings().app_env == "test" else OVERVIEW_CACHE_SECONDS
     if ttl <= 0:
-        return _build_overview(db, user, include_tables, report_days)
-    key = (str(user.id), user.role, include_tables, report_days, business_today().isoformat())
+        return _build_overview(db, user, include_tables, report_days, as_of)
+    key = (str(user.id), user.role, include_tables, report_days, business_today().isoformat(), as_of)
     hit = _OVERVIEW_CACHE.get(key)
     if hit and datetime.now(timezone.utc).timestamp() - hit[0] < ttl:
         return hit[1]
     version = _OVERVIEW_VERSION
-    result = _build_overview(db, user, include_tables, report_days)
+    result = _build_overview(db, user, include_tables, report_days, as_of)
     if version == _OVERVIEW_VERSION:  # no write happened while this was being built
         if len(_OVERVIEW_CACHE) > 50:
             _OVERVIEW_CACHE.clear()
@@ -569,7 +583,10 @@ def get_overview(db: Session, user: User, include_tables: bool = False, report_d
     return result
 
 
-def _build_overview(db: Session, user: User, include_tables: bool = False, report_days: int = OVERVIEW_SEND_REPORT_DAYS) -> dict:
+def _build_overview(db: Session, user: User, include_tables: bool = False, report_days: int = OVERVIEW_SEND_REPORT_DAYS,
+                    as_of: date | None = None) -> dict:
+    """Washing overview as of today, or as of `as_of` (the last day of an earlier month chosen on the page): reports
+    after that day are left out, so cycles, compliance, deadlines and the day-by-day status read as they stood then."""
     manager = _is_washing_manager(db, user)
     allowed_plant_ids = user_scoped_plant_ids(db, user) or set() if user.role == "Site Engineer" else set()
 
@@ -585,6 +602,8 @@ def _build_overview(db: Session, user: User, include_tables: bool = False, repor
         )
         .where(WashingDailyReport.plant_id.in_(configured_plants))
     )
+    if as_of is not None:
+        latest_reports_query = latest_reports_query.where(WashingDailyReport.report_date <= as_of)
     if user.role == "Site Engineer":
         table_counts_query = table_counts_query.where(WashingTable.plant_id.in_(allowed_plant_ids))
         latest_reports_query = latest_reports_query.where(WashingDailyReport.plant_id.in_(allowed_plant_ids))
@@ -637,12 +656,15 @@ def _build_overview(db: Session, user: User, include_tables: bool = False, repor
                 .order_by(WashingTable.plant_id, WashingTable.table_code)
             ).all():
                 codes_by_plant.setdefault(plant_id, []).append(code or legacy_id)
-        report_cutoff = business_today() - timedelta(days=OVERVIEW_REPORT_DAYS)
+        report_cutoff = (as_of or business_today()) - timedelta(days=OVERVIEW_REPORT_DAYS)
+        report_stmt = select(WashingDailyReport).where(
+            WashingDailyReport.plant_id.in_(visible_ids),
+            or_(WashingDailyReport.report_date >= report_cutoff, WashingDailyReport.review_status == "Pending"),
+        )
+        if as_of is not None:
+            report_stmt = report_stmt.where(WashingDailyReport.report_date >= report_cutoff, WashingDailyReport.report_date <= as_of)
         for report in db.scalars(
-            select(WashingDailyReport).where(
-                WashingDailyReport.plant_id.in_(visible_ids),
-                or_(WashingDailyReport.report_date >= report_cutoff, WashingDailyReport.review_status == "Pending"),
-            )
+            report_stmt
             .order_by(WashingDailyReport.plant_id, WashingDailyReport.report_date.desc(), WashingDailyReport.created_at.desc())
         ):
             reports_by_plant.setdefault(report.plant_id, []).append(report)
@@ -652,7 +674,7 @@ def _build_overview(db: Session, user: User, include_tables: bool = False, repor
         if table_count:
             visible.append((plant, config, table_count, reports_by_plant.get(plant.id, [])))
 
-    today = business_today()
+    today = as_of or business_today()
     month = _month_key(today)
     start_month = today.replace(day=1)
     first_chart_month = start_month.replace(day=1)
@@ -883,6 +905,9 @@ def _build_overview(db: Session, user: User, include_tables: bool = False, repor
             })
     result = {
         "today": today.isoformat(),
+        "actual_today": business_today().isoformat(),
+        "month": month,
+        "past_month": as_of is not None,
         "viewer_user_id": str(user.id),
         "monthly_target": MONTHLY_CYCLE_TARGET,
         "plants": plant_rows,
