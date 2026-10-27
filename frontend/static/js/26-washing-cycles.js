@@ -754,9 +754,33 @@
   const th='<tr><th>Date</th><th>Tables cleaned</th><th>Remarks</th><th>Photos</th><th>Status</th><th>Total</th><th></th></tr>';
   const body=m.rows.length?m.rows.map(sheetRow).join(""):'<tr><td colspan="7" class="wc-empty">'+(month>thisMonth?'No days to fill yet.':'No days in this cycle yet.')+'</td></tr>';
   if(S.washSheetFocus){const f=S.washSheetFocus;setTimeout(()=>{const el=document.getElementById("wx-row-"+f);if(el&&el.scrollIntoView)el.scrollIntoView({block:"center",behavior:"smooth"});S.washSheetFocus=null},80)}
-  return nav+picker+head+review+'<div class="wc-table-wrap wx-sheet"><table class="wc-table wc-compact"><thead>'+th+'</thead><tbody>'+body+'</tbody></table></div>'+
+  return nav+picker+head+recountNote(mc)+review+'<div class="wc-table-wrap wx-sheet"><table class="wc-table wc-compact"><thead>'+th+'</thead><tbody>'+body+'</tbody></table></div>'+
    (c.kind==="open"?'<div class="wx-sheet-foot" id="wx-sheet-foot">'+sheetFoot(m)+'</div>':'');
  }
+ /* Days are counted into cycles by date (app/scheduled/washing_cycles.py _cycle_sequence): each cycle fills up to the
+    table count and later days go to the next cycle. Months saved before edits moved days show a one-click recount. */
+ function misplacedDays(mc){
+  const total=mc.table_count||0,max=(mc.cycles||[]).length||3,rows=(mc.reports||[]).slice().sort((a,b)=>String(a.report_date).localeCompare(String(b.report_date)));
+  let cycle=1,run=0;const out=[];
+  rows.forEach(r=>{if(r.cycle_no!==cycle)out.push({date:r.report_date,from:r.cycle_no,to:cycle});
+   if(r.review_status==='Pending'||r.review_status==='Confirmed'){run+=Number(r.tables_cleaned)||0;if(total>0&&run>=total&&cycle<max){cycle++;run=0}}});
+  return out;
+ }
+ function recountNote(mc){
+  if(!mc.can_edit)return'';const off=misplacedDays(mc);if(!off.length)return'';
+  const first=off[0];
+  return'<div class="wc-flow-note wx-review"><div><b>'+plural(off.length,"day")+' counted in the wrong cycle</b><p>For example '+h(fmt(first.date))+' counts in cycle '+first.from+' but belongs to cycle '+first.to+' (the cycle before it was already full). Recount to put every day in the cycle its date gives it.</p></div>'+
+   '<button type="button" class="btn p sm" onclick="washRecountMonth()"'+(S._washRecounting?' disabled':'')+'>'+(S._washRecounting?'Recounting…':'Recount cycles')+'</button></div>';
+ }
+ window.washRecountMonth=async function(){
+  const plantId=S.washDetailsPlant,month=S.washMonth||(data().today||'').slice(0,7);if(!plantId||S._washRecounting)return;
+  S._washRecounting=true;render();
+  try{const r=await apiFetch('/api/scheduled/washing/plants/'+encodeURIComponent(plantId)+'/recount?month='+encodeURIComponent(month),{method:'POST'});
+   monthCache()[plantId+'|'+month]=r;S.washSheetCycle=null;toast((r.moved||[]).length?plural(r.moved.length,'day')+' moved to the right cycle.':'Every day was already in the right cycle.');
+   refreshPlantMonths(plantId);loadOverview().catch(()=>{});
+  }catch(e){toast(detailOf(e,'Could not recount the cycles.'))}
+  finally{S._washRecounting=false;render()}
+ };
  const sheetCtx=()=>{const p=rowOf(S.washDetailsPlant),month=S.washMonth||(data().today||"").slice(0,7),mc=p&&monthCache()[p.plant_id+"|"+month];return p&&mc&&mc.cycles?{p,mc,m:sheetModel(p,mc)}:null};
  /* typing never re-renders the table (focus stays put); only the running totals and the footer are updated in place */
  window.washSheetInput=function(date,field,el){

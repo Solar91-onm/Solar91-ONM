@@ -849,6 +849,47 @@ def run_daily_now(db: Annotated[Session, Depends(get_db)], user: Annotated[User,
     return run_daily(db)
 
 
+# ───────────────────────── bring old work orders in line with the PM rules ─────────────────────────
+@router.post("/tidy", dependencies=[Depends(require_csrf)])
+def tidy_open_work(db: Annotated[Session, Depends(get_db)], user: Annotated[User, Depends(get_current_user)],
+                   dry_run: bool = True):
+    """Open work orders created before NOT_IN_PM / ONE_JOB_TYPES: cancel MCCB work, cancel extra units (2, 3, ...)
+    of one-job equipment and make unit 1 "1 of 1". Nothing is deleted and completed work is never touched."""
+    _require(user, PLANNER_ROLES, "Only the O&M Head can apply PM rule changes to existing work orders")
+    open_rows = select(OMTask).where(OMTask.status.not_in(["Completed", "Cancelled"]))
+    removed = list(db.scalars(open_rows.where(func.lower(OMTask.task_type).in_([t.casefold() for t in NOT_IN_PM]))))
+    one = list(db.scalars(open_rows.where(func.lower(OMTask.task_type).in_([t.casefold() for t in ONE_JOB_TYPES]),
+                                          OMTask.unit_no.is_not(None),
+                                          (OMTask.unit_no > 1) | (OMTask.total_units > 1))))
+    extra = [t for t in one if t.unit_no > 1]
+    first = [t for t in one if t.unit_no == 1]
+    out = {"dry_run": dry_run, "cancelled_not_in_pm": len(removed), "cancelled_extra_units": len(extra),
+           "made_single_unit": len(first),
+           "by_type": _count_types(removed + extra)}
+    if dry_run or not (removed or extra or first):
+        return out
+    for t in removed + extra:
+        why = (f"{t.task_type} is no longer part of Preventive Maintenance" if t in removed
+               else f"{t.task_type} is one job per plant; extra unit removed")
+        t.status = "Cancelled"
+        t.log = [{"at": log_stamp(), "text": f"Cancelled: {why}; kept as history", "actor": user.display_name}, *(t.log or [])]
+    for t in first:
+        t.total_units, t.quantity = 1, 1
+        t.log = [{"at": log_stamp(), "text": f"{t.task_type} is one job per plant: now 1 of 1 unit", "actor": user.display_name},
+                 *(t.log or [])]
+    db.add(AuditLog(user_id=user.id, actor_name=user.display_name, action="Applied PM rule changes to open work orders",
+                    module="Scheduled O&M", metadata_json={k: v for k, v in out.items() if k != "dry_run"}))
+    db.commit()
+    return out
+
+
+def _count_types(rows: list[OMTask]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for t in rows:
+        counts[t.task_type or "—"] = counts.get(t.task_type or "—", 0) + 1
+    return counts
+
+
 # ───────────────────────── Excel plan import ─────────────────────────
 def _header_key(text: Any) -> str | None:
     h = str(text or "").strip().casefold()

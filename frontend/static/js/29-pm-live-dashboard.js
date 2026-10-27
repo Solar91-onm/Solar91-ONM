@@ -91,11 +91,15 @@
  /* ACCB-1 + ACCB-2, Aux. Transformer, ACDB and the Miscellaneous items are one PM job per plant (app/pmplan/cycle.py ONE_JOB_TYPES) */
  const ONE_JOB=typeof PM_ONE_JOB_TYPES!=="undefined"?PM_ONE_JOB_TYPES:[];
  const pmUnits=(type,n)=>n>0&&ONE_JOB.indexOf(type)>=0?1:n;
+ /* MCCB is no longer maintained under PM (app/pmplan/cycle.py NOT_IN_PM): left out of coverage and the plant grid */
+ const notInPm=type=>typeof PM_NOT_IN_PM!=="undefined"&&PM_NOT_IN_PM.indexOf(type)>=0;
+ /* Open work orders made before those rules: MCCB jobs, and units 2, 3, … of one-job equipment (O&M Head can tidy them) */
+ const staleJob=t=>isOpen(t)&&(notInPm(t.type)||(ONE_JOB.indexOf(t.type)>=0&&Number(t.unitNo)>1));
  function buildCoverageData(){
   const cfg=S._pmCfg||{configs:[],register:[]},plants=scopedPlants();
   const rows=new Map(),byName=new Map(plants.map(p=>[p.name,p])),byId=new Map(plants.map(p=>[String(p.dbId||p.id),p]));
   const put=(plant,type)=>{
-   if(!plant||!type)return null;
+   if(!plant||!type||notInPm(type))return null;
    const key=plant.name+"\u0000"+type;
    if(!rows.has(key))rows.set(key,{plant:plant.name,plantId:plant.id,type,units:null,source:"Not configured",daily:null,tasks:[],critical:0,faulty:0});
    return rows.get(key);
@@ -120,20 +124,29 @@
    }});
    const perUnit=latestByUnit.size>0;
    const effective=perUnit?[...latestByUnit.values()]:all;
-   const maintained=perUnit?effective.filter(t=>taskStatus(t)==="Done").length:effective.filter(t=>taskStatus(t)==="Done").reduce((n,t)=>n+quantity(t),0);
-   const overdue=perUnit?effective.filter(t=>taskStatus(t)==="Overdue").length:effective.filter(t=>taskStatus(t)==="Overdue").reduce((n,t)=>n+quantity(t),0);
-   const planned=perUnit?effective.length:effective.reduce((n,t)=>n+quantity(t),0);
+   let maintained=perUnit?effective.filter(t=>taskStatus(t)==="Done").length:effective.filter(t=>taskStatus(t)==="Done").reduce((n,t)=>n+quantity(t),0);
+   let overdue=perUnit?effective.filter(t=>taskStatus(t)==="Overdue").length:effective.filter(t=>taskStatus(t)==="Overdue").reduce((n,t)=>n+quantity(t),0);
+   let planned=perUnit?effective.length:effective.reduce((n,t)=>n+quantity(t),0);
+   if(ONE_JOB.indexOf(row.type)>=0&&all.length){
+    /* one job per plant, also for older work orders with ACCB-1 / ACCB-2 as two units: count the latest round as one */
+    const stamp=t=>String(t.plannedDue||t.due||""),latest=all.reduce((a,t)=>stamp(t)>stamp(a)?t:a,all[0]);
+    const round=latest.cycleId?all.filter(t=>t.cycleId===latest.cycleId):[latest];
+    maintained=round.every(t=>taskStatus(t)==="Done")?1:0;overdue=round.some(t=>taskStatus(t)==="Overdue")?1:0;planned=1;
+   }
    const label=!all.length?"Not planned":overdue?"Overdue":maintained&&(!row.units||maintained>=row.units)?"Maintained":"Scheduled";
    /* units named on the PM jobs themselves ("No. of units" on upload); shown only as a labelled fallback, never as inventory */
-   const jobUnits=perUnit?Math.max(latestByUnit.size,...effective.map(t=>Number(t.totalUnits)||0)):planned;
+   const jobUnits=ONE_JOB.indexOf(row.type)>=0?planned:perUnit?Math.max(latestByUnit.size,...effective.map(t=>Number(t.totalUnits)||0)):planned;
    return Object.assign(row,{maintained:Math.min(maintained,row.units||maintained),overdue,planned:row.units?Math.min(planned,row.units):planned,workOrders:all.length,label,jobUnits});
   }).sort((a,b)=>a.plant.localeCompare(b.plant)||a.type.localeCompare(b.type));
  }
  /* Equipment coverage: ONE row per equipment type across the selected plants. The per-plant breakdown opens
     as a dropdown under the row, so an "All plants" inverter job no longer fills the table with a row per plant. */
- const COV_RANK={late:0,missing:1,stray:2,scheduled:3,unknown:4,done:5};
+ const COV_RANK={late:0,missing:1,stray:2,scheduled:3,unknown:4,done:5,none:6};
+ /* Plant side then GSS side equipment of the PM cycle, always listed (even before any job exists), in cycle order */
+ const standardTypes=()=>TYPE_ORDER.filter(t=>typeof pmTypeVisible!=="function"||pmTypeVisible(t));
  function coverageGroups(){
   const map=new Map(),data=coverageData(),hasInventory=data.some(r=>r.units!==null);
+  standardTypes().forEach(t=>map.set(t,{type:t,rows:[]}));
   data.forEach(r=>{if(!map.has(r.type))map.set(r.type,{type:r.type,rows:[]});map.get(r.type).rows.push(r)});
   return[...map.values()].map(g=>{
    const rs=g.rows,sum=k=>rs.reduce((n,r)=>n+(Number(r[k])||0),0);
@@ -144,14 +157,39 @@
    g.missing=rs.filter(r=>r.units&&!r.workOrders);
    /* with no register / unit counts anywhere, "not in register" is true of every plant and says nothing: one notice covers it */
    g.stray=hasInventory?rs.filter(r=>r.units===null&&r.workOrders):[];
-   g.status=g.late.length?"late":g.missing.length?"missing":g.stray.length?"stray":(g.units&&g.maintained>=g.units)?"done":g.planned?"scheduled":"unknown";
+   g.status=!rs.length?"none":g.late.length?"late":g.missing.length?"missing":g.stray.length?"stray":(g.units&&g.maintained>=g.units)?"done":g.planned?"scheduled":"unknown";
    g.rows=rs.slice().sort((a,b)=>(COV_RANK[rowState(a,hasInventory)]-COV_RANK[rowState(b,hasInventory)])||a.plant.localeCompare(b.plant));
    return g;
-  }).sort((a,b)=>(COV_RANK[a.status]-COV_RANK[b.status])||(b.critical-a.critical)||a.type.localeCompare(b.type));
+  }).sort((a,b)=>typeRank(a.type)-typeRank(b.type)||a.type.localeCompare(b.type));     /* PM cycle order, then A–Z */
  }
  function rowState(r,hasInventory){if(r.units===null&&r.workOrders&&hasInventory===false)return r.overdue?"late":r.planned&&r.maintained>=r.planned?"done":"scheduled";return r.units===null?(r.workOrders?"stray":"unknown"):r.label==="Not planned"?"missing":r.label==="Overdue"?"late":r.label==="Maintained"?"done":"scheduled"}
- const STATE_LABEL={late:"Overdue",missing:"No PM job",stray:"Not in register",scheduled:"Scheduled",unknown:"Set unit count",done:"Maintained"};
+ const STATE_LABEL={late:"Overdue",missing:"No PM job",stray:"Not in register",scheduled:"Scheduled",unknown:"Set unit count",done:"Maintained",none:"No PM job yet"};
  function miniBar(done,late,total){const t=Math.max(1,total);return'<div class="pml-unit-bar" role="img" aria-label="'+done+' of '+total+' units done, '+late+' overdue"><i class="done" style="width:'+Math.min(100,100*done/t)+'%"></i><i class="overdue" style="width:'+Math.min(100,100*late/t)+'%"></i></div>'}
+ /* Old open work orders that break the current PM rules; the O&M Head can bring them in line (POST /api/pm-plan/tidy) */
+ function tidyNotice(){
+  const stale=(S.tasks||[]).filter(staleJob);if(!stale.length)return"";
+  const mccb=stale.filter(t=>notInPm(t.type)).length,extra=stale.length-mccb;
+  const text=[mccb?mccb+" open MCCB work order"+(mccb===1?"":"s")+" (MCCB is no longer in PM)":"",extra?extra+" open extra unit"+(extra===1?"":"s")+" of equipment that is now one job per plant (e.g. ACCB-2)":""].filter(Boolean).join(" and ");
+  return'<div class="pmc-notice"><span><b>Older work orders still follow the previous rules:</b> '+escape(text)+'. Coverage already counts them the new way.</span>'+
+   (canAssign()?'<button type="button" class="btn p sm" onclick="pmTidyOldJobs()">Apply changes to old jobs</button>':'<span>The O&amp;M Head can apply the changes.</span>')+'</div>';
+ }
+ window.pmTidyOldJobs=async function(){
+  try{
+   const pre=await apiFetch("/api/pm-plan/tidy?dry_run=true",{method:"POST"});
+   const n=pre.cancelled_not_in_pm+pre.cancelled_extra_units;
+   if(!n&&!pre.made_single_unit){toast("Nothing to change — every open work order already follows the PM rules.");return}
+   const types=Object.entries(pre.by_type||{}).map(([k,v])=>"• "+k+": "+v+" cancelled").join("\n");
+   if(!confirm("Apply the PM rule changes to existing open work orders?\n\n"+
+     (pre.cancelled_not_in_pm?pre.cancelled_not_in_pm+" MCCB work order(s) will be cancelled.\n":"")+
+     (pre.cancelled_extra_units?pre.cancelled_extra_units+" extra unit(s) of one-job equipment (ACCB-2 …) will be cancelled.\n":"")+
+     (pre.made_single_unit?pre.made_single_unit+" work order(s) will become 1 of 1 unit.\n":"")+(types?"\n"+types+"\n":"")+
+     "\nNothing is deleted: cancelled work orders stay as history with a log note. Completed work is not changed."))return;
+   const res=await apiFetch("/api/pm-plan/tidy?dry_run=false",{method:"POST"});
+   try{S.tasks=await apiFetch("/api/scheduled/tasks")}catch(e){toast("Saved, but the list could not refresh. Reload the page.")}
+   repaint();
+   toast((res.cancelled_not_in_pm+res.cancelled_extra_units)+" work order(s) cancelled, "+res.made_single_unit+" set to 1 unit.");
+  }catch(e){toast((e&&e.message)||"The changes could not be applied.")}
+ };
  function coverageHtml(inView){
   const f=state(),all=f.plant==="all",open=new Set(f.covOpen||[]),collapsed=!inView&&f.covCollapsed!==false;
   let groups=coverageGroups().filter(g=>f.equipment==="all"||g.type===f.equipment);
@@ -165,19 +203,21 @@
   const lateTypes=groups.filter(g=>g.late.length).length,missingPlants=groups.reduce((n,g)=>n+g.missing.length,0);
   const summary='<div class="pml-coverage-metrics"><span><b>'+totalUnits.toLocaleString("en-IN")+'</b>'+(hasInventory?'Registered units':'Units in PM jobs')+' · '+groups.length+' equipment types</span><span class="'+(critical||faulty?"crit":"")+'"><b>'+critical+'</b>Critical units'+(faulty?' · '+faulty+' in fault':'')+'</span><span class="'+(lateTypes?"late":"")+'"><b>'+lateTypes+'</b>Equipment types with overdue work</span><span class="'+(missingPlants?"warn":"")+'"><b>'+missingPlants+'</b>Plant · equipment pairs without a PM job</span></div>';
   const notice=!hasInventory&&groups.length?'<div class="pmc-notice"><span><b>No equipment register or saved unit counts yet.</b> Unit totals here come from the PM jobs themselves. Save each plant’s counts once so coverage can also show equipment that has no PM job.</span>'+(typeof pmOpenUnitCfg==="function"&&["O&M Head","Assignee","Administration"].includes(S._roleLabel||S.currentRole||"")?'<button type="button" class="btn o sm" onclick="pmOpenUnitCfg()">Unit counts</button>':'')+'</div>':'';
-  if(collapsed)return'<article class="pml-card pml-coverage pml-eqx is-collapsed">'+head+summary+notice+'</article>';
-  if(f.covShow==="attention")groups=groups.filter(g=>g.late.length||g.missing.length||g.stray.length);
+  const tidy=tidyNotice();
+  if(collapsed)return'<article class="pml-card pml-coverage pml-eqx is-collapsed">'+head+summary+tidy+notice+'</article>';
+  if(f.covShow==="attention")groups=groups.filter(g=>g.late.length||g.missing.length||g.stray.length||g.status==="none");
   else if(f.covShow==="critical")groups=groups.filter(g=>g.critical||g.faulty);
-  else if(f.covShow==="missing")groups=groups.filter(g=>g.missing.length);
-  const chips=g=>[g.late.length?'<span class="pmx-chip late">'+g.late.length+' plant'+(g.late.length>1?'s':'')+' overdue</span>':'',g.missing.length?'<span class="pmx-chip warn">'+g.missing.length+' plant'+(g.missing.length>1?'s':'')+' without a PM job</span>':'',g.stray.length?'<span class="pmx-chip gray" title="A PM job exists but the equipment register has none of this type there">'+g.stray.length+' plant'+(g.stray.length>1?'s':'')+' not in register</span>':''].join("")||'<span class="pmx-chip ok">On track</span>';
+  else if(f.covShow==="missing")groups=groups.filter(g=>g.missing.length||g.status==="none");
+  const canAdd=["O&M Head","Assignee","Administration"].includes(S._roleLabel||S.currentRole||"");
+  const chips=g=>g.status==="none"?'<span class="pmx-chip warn">No PM job yet</span>':[g.late.length?'<span class="pmx-chip late">'+g.late.length+' plant'+(g.late.length>1?'s':'')+' overdue</span>':'',g.missing.length?'<span class="pmx-chip warn">'+g.missing.length+' plant'+(g.missing.length>1?'s':'')+' without a PM job</span>':'',g.stray.length?'<span class="pmx-chip gray" title="A PM job exists but the equipment register has none of this type there">'+g.stray.length+' plant'+(g.stray.length>1?'s':'')+' not in register</span>':''].join("")||'<span class="pmx-chip ok">On track</span>';
   const critCell=(c,fl)=>(c?'<span class="pmx-crit">'+c+' high</span>':'<span class="pmx-muted">—</span>')+(fl?'<span class="pmx-fault">'+fl+' fault</span>':'');
   const unitsCell=(units,jobUnits)=>units!==null&&units!==undefined?'<b>'+Number(units).toLocaleString("en-IN")+'</b>':jobUnits?'<b>'+Number(jobUnits).toLocaleString("en-IN")+'</b><small>in PM jobs</small>':'<span class="pmx-muted">—</span>';
   const body=groups.map(g=>{
    const isOpenRow=open.has(g.type)||groups.length===1;
-   let h='<tr class="pmx-row'+(isOpenRow?" open":"")+' st-'+g.status+'" data-pmx-type="'+escape(g.type)+'" title="'+(isOpenRow?"Hide":"Show")+' plants"><td><span class="pmx-chev">›</span><b>'+escape(g.type)+'</b><small>'+(g.equipped.length?'registered at '+g.equipped.length+' plant'+(g.equipped.length>1?'s':''):hasInventory?'not in the register yet':g.rows.length+' plant'+(g.rows.length===1?'':'s')+' with PM jobs')+'</small></td>'+
+   let h='<tr class="pmx-row'+(isOpenRow?" open":"")+' st-'+g.status+'" data-pmx-type="'+escape(g.type)+'" title="'+(isOpenRow?"Hide":"Show")+' plants"><td><span class="pmx-chev">›</span><b>'+escape(g.type)+'</b><small>'+(g.status==="none"?'Not planned at any plant yet':g.equipped.length?'registered at '+g.equipped.length+' plant'+(g.equipped.length>1?'s':''):hasInventory?'not in the register yet':g.rows.length+' plant'+(g.rows.length===1?'':'s')+' with PM jobs')+'</small></td>'+
     '<td>'+unitsCell(g.units,g.jobUnits)+'</td><td>'+critCell(g.critical,g.faulty)+'</td>'+
     '<td>'+miniBar(g.maintained,g.overdue,Math.max(g.planned,g.units||0))+'<small>'+g.maintained+' done · '+g.overdue+' overdue · '+g.planned+' planned</small></td>'+
-    '<td class="pmx-chips">'+chips(g)+'</td><td><button type="button" class="btn o sm" data-pml-coverage="'+escape(g.type)+'">View jobs</button></td></tr>';
+    '<td class="pmx-chips">'+chips(g)+'</td><td>'+(g.status!=="none"?'<button type="button" class="btn o sm" data-pml-coverage="'+escape(g.type)+'">View jobs</button>':canAdd?'<button type="button" class="btn p sm" data-pmx-add="'+escape(g.type)+'">+ Add job</button>':'')+'</td></tr>';
    if(isOpenRow)h+=g.rows.map(r=>{const st=rowState(r,hasInventory);
     return'<tr class="pmx-sub st-'+st+'"><td><button type="button" class="pml-link" data-pml-plant="'+escape(r.plant)+'">'+escape(r.plant)+'</button><small>'+escape(r.plantId||"")+'</small></td><td>'+unitsCell(r.units,r.jobUnits)+'</td><td>'+critCell(r.critical,r.faulty)+'</td>'+
      '<td>'+miniBar(r.maintained,r.overdue,Math.max(r.planned,r.units||0))+'<small>'+r.maintained+' done · '+r.overdue+' overdue · '+r.planned+' planned</small></td>'+
@@ -186,7 +226,7 @@
   }).join("");
   const table='<div class="pml-coverage-scroll"><table class="pml-coverage-table pmx-table"><thead><tr><th>Equipment</th><th>Units</th><th>Critical</th><th>PM progress</th><th>Needs attention</th><th></th></tr></thead><tbody>'+(body||'<tr><td colspan="6"><div class="pml-empty">No equipment types match “'+escape({attention:"Needs attention",critical:"Has critical / faulty units",missing:"Without a PM job"}[f.covShow]||"this filter")+'”.</div></td></tr>')+'</tbody></table></div>';
   const foot='<div class="pml-coverage-foot">Critical = equipment marked High criticality in the equipment register.'+(hasInventory?' “Not in register” means a PM job exists at a plant whose register has none of that equipment.':'')+'</div>';
-  return'<article class="pml-card pml-coverage pml-eqx">'+head+summary+notice+(groups.length||f.covShow!=="all"?table:'<div class="pml-empty">No registered equipment or PM work orders for this plant / equipment filter.</div>')+foot+'</article>';
+  return'<article class="pml-card pml-coverage pml-eqx">'+head+summary+tidy+notice+(groups.length||f.covShow!=="all"?table:'<div class="pml-empty">No registered equipment or PM work orders for this plant / equipment filter.</div>')+foot+'</article>';
  }
 
  /* Day planner: pick a day, see every plant and the equipment being maintained that day. */
@@ -415,7 +455,7 @@
  const TYPE_ORDER=["Inverter","ACCB Panel","VCB Panel","Transformer","Aux. Transformer","ACDB","4 Pole","Earthing","Miscellaneous","Transmission line","VCB - GSS side","4 Pole - GSS side","Transmission line - GSS side"];
  const typeRank=t=>{const i=TYPE_ORDER.indexOf(t);return i<0?TYPE_ORDER.length:i};
  function matrixHtml(tasks){
-  const f=state(),types=[...new Set(tasks.map(t=>t.type).filter(Boolean))].sort((a,b)=>typeRank(a)-typeRank(b)||a.localeCompare(b));
+  const f=state(),types=[...new Set(tasks.map(t=>t.type).filter(t=>t&&!notInPm(t)))].sort((a,b)=>typeRank(a)-typeRank(b)||a.localeCompare(b));
   const rows=new Map(scopedPlants().map(p=>[p.name,{plant:p,cells:new Map(),late:0,soon:0,open:0,done:0,oldest:0}]));
   tasks.forEach(t=>{
    const row=rows.get(t.plant);if(!row||!t.type)return;
@@ -465,7 +505,7 @@
   const onTime=done.filter(task=>task.completion&&Number(task.completion.delay||task.delayDays||0)<=0);
   const onTimePercent=done.length?percent(onTime.length,done.length):0;
   const configuredTypes=unitLoaded&&!unitError?coverageData().map(row=>row.type):[];
-  const equipmentTypes=[...new Set(tasks.map(task=>task.type).concat(configuredTypes).filter(Boolean))].sort();
+  const equipmentTypes=[...new Set(tasks.map(task=>task.type).concat(configuredTypes).filter(Boolean))].sort((a,b)=>typeRank(a)-typeRank(b)||a.localeCompare(b));
   const todayOpen=tasks.filter(task=>isOpen(task)&&onDay(task,TODAY)),noOwner=tasks.filter(task=>isOpen(task)&&unassigned(task));
   const plantsOf=list=>new Set(list.map(task=>task.plant).filter(Boolean)).size;
   const byPlant=new Map();tasks.forEach(task=>{let list=byPlant.get(task.plant);if(!list)byPlant.set(task.plant,list=[]);list.push(task)});
@@ -508,6 +548,7 @@
    item('onclick="pmDownloadCsvTemplate()"',"CSV template","Header row for a CSV upload")+'</div></details>':"";
   const moreMenu='<details class="pmc-menu pmc-menu-end"><summary class="btn o sm">More <span aria-hidden="true">▾</span></summary><div class="pmc-menu-list" role="menu">'+
    (canCreate&&typeof pmOpenUnitCfg==="function"?item('onclick="pmOpenUnitCfg()"',"Unit counts","How many of each equipment every plant has"):'')+
+   (canAssign()?item('onclick="pmTidyOldJobs()"',"Apply PM changes to old jobs","Cancel open MCCB jobs and extra ACCB units; checked first"):'')+
    item('data-pml-action="alerts"',"Alerts","Which PM events notify you, in-app or by email")+
    item('onclick="exportScheduledOMCompliance()"',"Export compliance","Excel report of PM work")+item('onclick="window.print()"',"Print / PDF","")+'</div></details>';
   const addButton=canCreate?'<button type="button" class="btn p sm" onclick="openProblemScheduledTask()">+ Add job</button>':"";
@@ -695,7 +736,7 @@
   window._pmDayEvents=true;
   document.addEventListener("click",event=>{
    const t=event.target.closest("[data-pmd-day],[data-pmd-shift],[data-pmd-today],[data-pmd-equip],[data-pmx-type],[data-pmd-overdue],[data-pmx-jobs],[data-pmd-status],[data-pmd-all],[data-pmd-jump]");
-   if(!t||event.target.closest("[data-pml-coverage],[data-pml-plant]"))return;
+   if(!t||event.target.closest("[data-pml-coverage],[data-pml-plant],[data-pmx-add]"))return;
    const f=state();
    if(t.dataset.pmdDay!==undefined){f.day=t.dataset.pmdDay;f.dayEquip="all";f.dayAll=false}
    else if(t.dataset.pmdStatus!==undefined){f.dayStatus=t.dataset.pmdStatus;f.dayAll=false}
@@ -711,7 +752,7 @@
   });
   document.addEventListener("change",event=>{if(event.target.matches&&event.target.matches("[data-pmx-show]")){state().covShow=event.target.value;repaint()}});
   document.addEventListener("click",event=>{
-   const t=event.target.closest("[data-pmv-view],[data-pmcal-day],[data-pmcal-shift],[data-pmcal-today],[data-pmup-day],[data-pmm-cell],[data-pmm-plant],[data-pmm-all],[data-pmm-show],[data-pm-addon]");
+   const t=event.target.closest("[data-pmv-view],[data-pmcal-day],[data-pmcal-shift],[data-pmcal-today],[data-pmup-day],[data-pmm-cell],[data-pmm-plant],[data-pmm-all],[data-pmm-show],[data-pm-addon],[data-pmx-add]");
    if(!t)return;
    const f=state();
    const pickDay=d=>{f.day=d;f.dayEquip="all";f.dayAll=false;if(d<f.dayFrom||d>addDays(f.dayFrom,13))f.dayFrom=addDays(d,-2)};
@@ -725,6 +766,7 @@
    else if(t.dataset.pmmAll!==undefined)f.mxAll=!f.mxAll;
    else if(t.dataset.pmmShow!==undefined){f.mxShow=f.mxShow===t.dataset.pmmShow?"all":t.dataset.pmmShow;f.mxAll=false}
    else if(t.dataset.pmAddon!==undefined){addJobOn(t.dataset.pmAddon);return}
+   else if(t.dataset.pmxAdd!==undefined){if(typeof openProblemScheduledTask==="function")openProblemScheduledTask(t.dataset.pmxAdd);return}
    repaint();
   });
   /* "Today's PM plan" notification opens the day planner on that date. */

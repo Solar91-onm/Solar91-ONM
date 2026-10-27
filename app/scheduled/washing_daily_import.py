@@ -35,14 +35,14 @@ from app.scheduled.washing_cycles import (
     MAX_BACKDATE_DAYS,
     MONTHLY_CYCLE_TARGET,
     _completing_row,
+    _cycle_sequence,
     _day_label,
     _is_washing_manager,
     _month_key,
     _month_wash_summary,
     _notify_wash,
-    _open_cycle_no,
     _plant_table_count,
-    _refresh_cycle_completion,
+    _resequence_month,
 )
 
 MAX_DAILY_BYTES = 2 * 1024 * 1024
@@ -338,40 +338,34 @@ def import_daily(db: Session, user: User, filename: str, content: bytes, *, dry_
                 f"Already saved for {_day_label(day)} as {_describe(saved.job_status, saved.tables_cleaned)} "
                 f"({status}). Change that day in the plant's washing sheet in the portal")
 
-    # Work out each new day's cycle exactly as saving them one by one in date order would (see _add_report).
+    # Work out each day's cycle exactly as saving does (_cycle_sequence): every day of the month in date order fills
+    # the cycles up to the plant's table count, so a back-filled day also moves the days after it.
     new_records = sorted((r for r in candidates if not r["errors"] and r["action"] == "New"),
                          key=lambda r: (str(r["plant"].id), r["date"]))
     state: dict[tuple[UUID, str], list[_Planned]] = {}
-    # Same rule as _cycle_for_new_work: a cycle is full once it is confirmed complete or its recorded tables
-    # (confirmed + awaiting confirmation) reach the plant's table count; new days go to the cycle after it.
     for report in existing:
         state.setdefault((report.plant_id, report.cycle_month), []).append(_Planned(
             report.report_date, (0, report.created_at.timestamp() if report.created_at else 0.0),
-            report.tables_cleaned, report.cycle_no, bool(report.cycle_completed) and report.review_status == "Confirmed",
-            report.review_status == "Confirmed"))
+            report.tables_cleaned, report.cycle_no, False, report.review_status == "Confirmed"))
     for sequence, record in enumerate(new_records):
-        plant, day = record["plant"], record["date"]
-        month = _month_key(day)
-        rows_of_month = state.setdefault((plant.id, month), [])
-        recorded: dict[int, int] = {}
-        for row in rows_of_month:
-            recorded[row.cycle_no] = recorded.get(row.cycle_no, 0) + (row.tables_cleaned or 0)
-        done = {row.cycle_no for row in rows_of_month if row.cycle_completed}
-        done |= {n for n, tables in recorded.items() if totals[plant.id] > 0 and tables >= totals[plant.id]}
-        cycle_no = _open_cycle_no(done)
-        record["cycle_no"] = cycle_no
-        # all three cycles already complete (e.g. robot cleaning): the day is still saved, as extra work on cycle 3
-        record["extra"] = len(done) >= MONTHLY_CYCLE_TARGET
-        planned = _Planned(day, (1, sequence), record["tables"], cycle_no, confirmed=manager)
-        rows_of_month.append(planned)
-        if manager:
-            cycle_rows = sorted((row for row in rows_of_month if row.cycle_no == cycle_no and row.confirmed), key=lambda row: (row.report_date, row.order))
-            for row in cycle_rows:
-                row.cycle_completed = False
-            completing = _completing_row(cycle_rows, totals[plant.id])
+        record["planned"] = _Planned(record["date"], (1, sequence), record["tables"], 1, confirmed=manager)
+        state.setdefault((record["plant"].id, _month_key(record["date"])), []).append(record["planned"])
+    extra_of: dict[int, bool] = {}
+    for (plant_id, _month), rows_of_month in state.items():
+        rows_of_month.sort(key=lambda row: (row.report_date, row.order))
+        for row, (cycle_no, extra) in zip(rows_of_month, _cycle_sequence([(row.tables_cleaned, True) for row in rows_of_month], totals.get(plant_id, 0))):
+            row.cycle_no = cycle_no
+            extra_of[id(row)] = extra
+        for cycle_no in range(1, MONTHLY_CYCLE_TARGET + 1):
+            completing = _completing_row([row for row in rows_of_month if row.cycle_no == cycle_no and row.confirmed], totals.get(plant_id, 0))
             if completing is not None:
                 completing.cycle_completed = True
-            record["planned"] = planned
+    for record in new_records:
+        record["cycle_no"] = record["planned"].cycle_no
+        # all three cycles already complete (e.g. robot cleaning): the day is still saved, as extra work on cycle 3
+        record["extra"] = extra_of[id(record["planned"])]
+        if not manager:
+            record["planned"] = None
     for record in new_records:
         if record["errors"]:
             continue
@@ -426,9 +420,8 @@ def import_daily(db: Session, user: User, filename: str, content: bytes, *, dry_
             db.add(report)
             created.append((record, report))
         db.flush()
-        if manager:
-            for plant_id, month, cycle_no in sorted({(str(r.plant_id), r.cycle_month, r.cycle_no) for _rec, r in created}):
-                _refresh_cycle_completion(db, UUID(plant_id), month, cycle_no, totals[UUID(plant_id)])
+        for plant_id, month in sorted({(str(r.plant_id), r.cycle_month) for _rec, r in created}):
+            _resequence_month(db, UUID(plant_id), month, totals[UUID(plant_id)])
         for record, report in created:
             db.add(AuditLog(
                 user_id=user.id, actor_name=user.display_name, action="Submitted daily washing report",

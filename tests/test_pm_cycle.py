@@ -142,6 +142,30 @@ def test_mccb_is_removed_from_preventive_maintenance(client, db):
     assert db.query(OMTask).count() == 0
 
 
+def test_tidy_brings_old_open_work_orders_in_line(client, db):
+    plant = _plant(db)
+    mk = lambda wo, etype, status="Scheduled", unit=None, total=None: OMTask(
+        work_order_no=wo, plant_id=plant.id, task_name=f"{etype} PM", task_type=etype, frequency="Monthly",
+        due_on=START, status=status, unit_no=unit, total_units=total, log=[])
+    db.add_all([mk("WO-M1", "MCCB"), mk("WO-M2", "MCCB", "Completed"), mk("WO-A1", "ACCB Panel", unit=1, total=2),
+                mk("WO-A2", "ACCB Panel", unit=2, total=2), mk("WO-I2", "Inverter", unit=2, total=2)])
+    db.commit()
+    login_user(client, db, role="Assignee", email="as@example.com")
+    assert client.post("/api/pm-plan/tidy?dry_run=false").status_code == 403
+    login_user(client, db, role="O&M Head")
+    pre = client.post("/api/pm-plan/tidy").json()
+    assert (pre["dry_run"], pre["cancelled_not_in_pm"], pre["cancelled_extra_units"], pre["made_single_unit"]) == (True, 1, 1, 1)
+    assert db.query(OMTask).filter(OMTask.status == "Cancelled").count() == 0
+    assert client.post("/api/pm-plan/tidy?dry_run=false").status_code == 200
+    db.expire_all()
+    status = {t.work_order_no: (t.status, t.total_units) for t in db.query(OMTask)}
+    assert status["WO-M1"][0] == "Cancelled" and status["WO-M2"][0] == "Completed"     # finished work untouched
+    assert status["WO-A2"][0] == "Cancelled" and status["WO-A1"] == ("Scheduled", 1)
+    assert status["WO-I2"] == ("Scheduled", 2)                                           # inverters keep their units
+    assert db.query(OMTask).count() == 5                                                 # nothing deleted
+    assert client.post("/api/pm-plan/tidy").json()["cancelled_not_in_pm"] == 0
+
+
 def test_without_cycle_dates_are_unchanged(client, db):
     login_user(client, db, role="O&M Head")
     _plant(db)

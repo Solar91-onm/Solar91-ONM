@@ -24,7 +24,7 @@ from app.pmplan.followups import FOLLOW_UP_OUTCOMES, follow_up_out, get_follow_u
 from app.pmplan.alerts import alert_log_out, task_alert_scope
 from app.core.fastjson import json_response
 from app.scheduled.history import history_since, recent_or_open
-from app.scheduled.washing_cycles import add_excused_reason, confirm_sheet_reports, create_daily_report, create_sheet_reports, day_activity, delete_daily_report, get_overview, list_assignees, list_excused_reasons, month_cycles, remove_excused_reason, review_daily_report, save_cycle_schedule, save_excused_reasons, set_cycle_date, setup_plant, update_daily_report
+from app.scheduled.washing_cycles import add_excused_reason, confirm_sheet_reports, create_daily_report, create_sheet_reports, day_activity, delete_daily_report, get_overview, list_assignees, list_excused_reasons, month_cycles, recount_month, remove_excused_reason, review_daily_report, save_cycle_schedule, save_excused_reasons, set_cycle_date, setup_plant, update_daily_report
 from app.scheduled.washing_import import MAX_IMPORT_BYTES, export_bytes, import_setup, template_bytes
 from app.scheduled.washing_daily_import import MAX_DAILY_BYTES, daily_template_bytes, import_daily
 
@@ -957,6 +957,11 @@ def change_washing_cycle_date(plant_id: UUID, payload: WashingCycleDateRequest, 
 @router.get("/washing/plants/{plant_id}/cycles")
 def washing_month_cycles(plant_id: UUID, month: str, db: Annotated[Session, Depends(get_db)], user: Annotated[User, Depends(get_current_user)]):
     return month_cycles(db, user, plant_id, month)
+
+
+@router.post("/washing/plants/{plant_id}/recount", dependencies=[Depends(require_csrf)])
+def recount_washing_cycles(plant_id: UUID, month: str, db: Annotated[Session, Depends(get_db)], user: Annotated[User, Depends(get_current_user)]):
+    return recount_month(db, user, plant_id, month)
 
 
 @router.put("/washing/plants/{plant_id}/cycle-schedule", dependencies=[Depends(require_csrf)])

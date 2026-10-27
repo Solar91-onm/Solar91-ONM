@@ -988,11 +988,56 @@ def _month_wash_summary(reports, table_count: int) -> dict:
     }
 
 
-def _open_cycle_no(done: set[int]) -> int:
-    """The cycle new work counts towards: the one after the highest completed cycle. Once all three are complete
-    (e.g. robot cleaning finished the month early) further washing is still recorded, as extra work on the last cycle;
-    it never re-opens or adds a cycle."""
-    return min(max(done, default=0) + 1, MONTHLY_CYCLE_TARGET)
+def _cycle_sequence(entries, total_tables: int) -> list[tuple[int, bool]]:
+    """Cycle of each day of one plant-month, in date order: (cycle_no, extra) per entry of `entries`, which are
+    (tables_cleaned, counts) in date order (counts = awaiting confirmation or confirmed; rejected days fill nothing).
+
+    A cycle fills up to the plant's table count. The day that reaches the count stays whole in that cycle and every
+    later day goes to the next one, so editing or back-filling a day moves the days after it to the right cycle
+    (e.g. a day changed from 0 to 40 after cycle 2 was already full counts in cycle 3). After cycle 3 is full,
+    further days stay on cycle 3 as extra washing (`extra`)."""
+    out: list[tuple[int, bool]] = []
+    cycle, running = 1, 0
+    for tables, counts in entries:
+        out.append((cycle, cycle == MONTHLY_CYCLE_TARGET and total_tables > 0 and running >= total_tables))
+        if counts:
+            running += tables or 0
+            if total_tables > 0 and running >= total_tables and cycle < MONTHLY_CYCLE_TARGET:
+                cycle, running = cycle + 1, 0
+    return out
+
+
+def _completed_cycles(db: Session, plant_id: UUID, month: str) -> set[int]:
+    return set(db.scalars(select(WashingDailyReport.cycle_no).where(
+        WashingDailyReport.plant_id == plant_id, WashingDailyReport.cycle_month == month,
+        WashingDailyReport.cycle_completed.is_(True), WashingDailyReport.review_status == "Confirmed",
+    )))
+
+
+def _resequence_month(db: Session, plant_id: UUID, month: str, total_tables: int) -> list[dict]:
+    """Re-number one plant-month's days into cycles by date (_cycle_sequence) and refresh each cycle's completion.
+    Returns the days that moved to another cycle (for the audit log)."""
+    rows = list(db.scalars(select(WashingDailyReport).where(
+        WashingDailyReport.plant_id == plant_id, WashingDailyReport.cycle_month == month,
+    ).order_by(WashingDailyReport.report_date, WashingDailyReport.created_at)))
+    sequence = _cycle_sequence([(row.tables_cleaned, row.review_status in ("Pending", "Confirmed")) for row in rows], total_tables)
+    moved = []
+    for row, (cycle_no, _extra) in zip(rows, sequence):
+        if row.cycle_no != cycle_no:
+            moved.append({"report_date": row.report_date.isoformat(), "from": row.cycle_no, "to": cycle_no})
+            row.cycle_no = cycle_no
+    db.flush()
+    for cycle_no in range(1, MONTHLY_CYCLE_TARGET + 1):
+        _refresh_cycle_completion(db, plant_id, month, cycle_no, total_tables)
+    return moved
+
+
+def _audit_moves(db: Session, user: User, plant: Plant, month: str, moved: list[dict], reason: str) -> None:
+    if moved:
+        db.add(AuditLog(
+            user_id=user.id, actor_name=user.display_name, action="Recounted washing cycles", module="Washing",
+            entity_type="plant", entity_id=plant.site_code, metadata_json={"month": month, "reason": reason, "moved": moved},
+        ))
 
 
 def _ordered_codes(db: Session, plant_id: UUID) -> list[str]:
@@ -1007,39 +1052,6 @@ def _validate_report_date(user: User, manager: bool, value: date) -> None:
         raise HTTPException(422, "The report date cannot be in the future")
     if not manager and (today - value).days > MAX_BACKDATE_DAYS:
         raise HTTPException(422, f"A report can be entered for the last {MAX_BACKDATE_DAYS} days only; ask the O&M Head for older dates")
-
-
-def _next_open_cycle(db: Session, plant_id: UUID, month: str, exclude_report_id: UUID | None = None) -> int:
-    stmt = select(WashingDailyReport.cycle_no).where(
-        WashingDailyReport.plant_id == plant_id,
-        WashingDailyReport.cycle_month == month,
-        WashingDailyReport.cycle_completed.is_(True),
-        WashingDailyReport.review_status == "Confirmed",
-    )
-    if exclude_report_id:
-        stmt = stmt.where(WashingDailyReport.id != exclude_report_id)
-    return _open_cycle_no(set(db.scalars(stmt)))
-
-
-def _cycle_for_new_work(db: Session, plant_id: UUID, month: str, total_tables: int) -> int:
-    """The cycle a newly entered day counts towards. A cycle is full once it is confirmed complete OR the tables
-    recorded on it (confirmed + awaiting confirmation) reach the plant's table count, so the next cycle starts the
-    moment the count is reached: no separate save, and a Site Engineer need not wait for the O&M review to go on.
-    The day that reaches the count stays whole in that cycle (one report per date); later days go to the next one."""
-    recorded: dict[int, int] = {}
-    full: set[int] = set()
-    for cycle_no, tables, completed, status in db.execute(select(
-        WashingDailyReport.cycle_no, WashingDailyReport.tables_cleaned, WashingDailyReport.cycle_completed, WashingDailyReport.review_status,
-    ).where(
-        WashingDailyReport.plant_id == plant_id,
-        WashingDailyReport.cycle_month == month,
-        WashingDailyReport.review_status.in_(["Pending", "Confirmed"]),
-    )):
-        recorded[cycle_no] = recorded.get(cycle_no, 0) + (tables or 0)
-        if completed and status == "Confirmed":
-            full.add(cycle_no)
-    full |= {n for n, tables in recorded.items() if total_tables > 0 and tables >= total_tables}
-    return _open_cycle_no(full)
 
 
 def _locked_report_plant(db: Session, user: User, plant_id: UUID) -> tuple[Plant, WashingConfig, bool, int]:
@@ -1067,13 +1079,12 @@ def _add_report(
     """Create one daily report (no commit, no notification). Returns the report and whether it completed a cycle."""
     _validate_report_date(user, manager, report_date)
     month = _month_key(report_date)
-    cycle_no = _cycle_for_new_work(db, plant.id, month, total_tables)
     # Teams only report HOW MANY tables they cleaned that day. The plant's number is a target, never a limit,
     # so nothing is rejected for being above or below it and no individual tables are tracked.
     report = WashingDailyReport(
         plant_id=plant.id,
         cycle_month=month,
-        cycle_no=cycle_no,
+        cycle_no=1,  # the real cycle is set by _resequence_month below, from the day's place in the month
         report_date=report_date,
         job_status=job_status,
         tables_cleaned=tables_cleaned,
@@ -1092,13 +1103,14 @@ def _add_report(
         report.review_note = "Entered by O&M"
     db.add(report)
     db.flush()
-    cycle_completed = False
-    if report.review_status == "Confirmed":
-        cycle_completed = _refresh_cycle_completion(db, plant.id, month, cycle_no, total_tables)
+    # a back-filled day takes its place by date; the days after it move to the right cycle
+    moved = [m for m in _resequence_month(db, plant.id, month, total_tables) if m["report_date"] != report_date.isoformat()]
+    _audit_moves(db, user, plant, month, moved, f"{report_date.isoformat()} added")
+    cycle_completed = bool(report.cycle_completed)
     db.add(AuditLog(
         user_id=user.id, actor_name=user.display_name, action="Submitted daily washing report",
         module="Washing", entity_type="washing_daily_report", entity_id=str(report.id),
-        metadata_json={"plant": plant.site_code, "cycle_month": month, "cycle_no": cycle_no, "report_date": report_date.isoformat(), "job_status": report.job_status, "tables_cleaned": report.tables_cleaned, "exception_reason": report.exception_reason, "cycle_completed": cycle_completed},
+        metadata_json={"plant": plant.site_code, "cycle_month": month, "cycle_no": report.cycle_no, "report_date": report_date.isoformat(), "job_status": report.job_status, "tables_cleaned": report.tables_cleaned, "exception_reason": report.exception_reason, "cycle_completed": cycle_completed},
     ))
     return report, cycle_completed
 
@@ -1204,7 +1216,7 @@ def update_daily_report(db: Session, user: User, report_id: UUID, payload: Washi
     total_tables = _plant_table_count(db, plant.id, config)
     before = {"report_date": report.report_date.isoformat(), "tables_cleaned": report.tables_cleaned, "job_status": report.job_status,
               "exception_reason": report.exception_reason, "remarks": report.remarks, "cycle_no": report.cycle_no, "cycle_month": report.cycle_month}
-    old_month, old_cycle = report.cycle_month, report.cycle_no
+    old_month = report.cycle_month
 
     new_date = payload.report_date or report.report_date
     _validate_report_date(user, manager, new_date)
@@ -1221,21 +1233,10 @@ def update_daily_report(db: Session, user: User, report_id: UUID, payload: Washi
             raise HTTPException(422, "Choose the reason the work was not done")
 
     new_month = _month_key(new_date)
-    cycle_no = report.cycle_no
-    if new_month != report.cycle_month:
-        cycle_no = _next_open_cycle(db, plant.id, new_month, exclude_report_id=report.id)
-    others = list(db.scalars(select(WashingDailyReport).where(
-        WashingDailyReport.plant_id == plant.id,
-        WashingDailyReport.cycle_month == new_month,
-        WashingDailyReport.cycle_no == cycle_no,
-        WashingDailyReport.review_status.in_(["Pending", "Confirmed"]),
-        WashingDailyReport.id != report.id,
-    )))
     codes: list[str] = []
 
     report.report_date = new_date
     report.cycle_month = new_month
-    report.cycle_no = cycle_no
     report.job_status = status
     report.tables_cleaned = tables
     report.cleaned_table_codes = codes
@@ -1252,8 +1253,12 @@ def update_daily_report(db: Session, user: User, report_id: UUID, payload: Washi
     report.cycle_completed = False
     db.add(report)
     db.flush()
-    for month, cyc in {(old_month, old_cycle), (new_month, cycle_no)}:
-        _refresh_cycle_completion(db, plant.id, month, cyc, total_tables)
+    # The edited day and every day after it take the cycle their date order gives them: a day changed from 0 to 40
+    # after cycle 2 was already full counts in cycle 3, and cycle 3 starts there.
+    for month in dict.fromkeys((old_month, new_month)):
+        moved = _resequence_month(db, plant.id, month, total_tables)
+        _audit_moves(db, user, plant, month, moved, f"{before['report_date']} edited")
+    cycle_no = report.cycle_no
     db.add(AuditLog(
         user_id=user.id, actor_name=user.display_name, action="Edited daily washing report",
         module="Washing", entity_type="washing_daily_report", entity_id=str(report.id),
@@ -1271,7 +1276,7 @@ def delete_daily_report(db: Session, user: User, report_id: UUID) -> dict:
     info = {"plant": plant.site_code, "report_date": report.report_date.isoformat(), "tables_cleaned": report.tables_cleaned, "cycle_month": month, "cycle_no": cycle_no, "review_status": report.review_status}
     db.delete(report)
     db.flush()
-    _refresh_cycle_completion(db, plant.id, month, cycle_no, total_tables)
+    _audit_moves(db, user, plant, month, _resequence_month(db, plant.id, month, total_tables), f"{info['report_date']} deleted")
     db.add(AuditLog(
         user_id=user.id, actor_name=user.display_name, action="Deleted daily washing report",
         module="Washing", entity_type="washing_daily_report", entity_id=str(report_id), metadata_json=info,
@@ -1495,7 +1500,8 @@ def month_cycles(db: Session, user: User, plant_id: UUID, month: str) -> dict:
             "default_start_date": default_starts[n - 1].isoformat(), "default_due_date": default_dues[n - 1].isoformat(),
             "start_set_for_month": f"s{n}" in specific, "due_set_for_month": str(n) in specific,
             "state": state, "confirmed": confirmed, "pending": pending, "reports": len(rows),
-            "started_on": rows[0].report_date.isoformat() if rows else None,
+            # the first day with tables washed (not-done days before it are listed in the cycle but do not start it)
+            "started_on": next((r.report_date for r in rows if r.tables_cleaned), rows[0].report_date).isoformat() if rows else None,
             "completed_on": done_on.isoformat() if done_on else None,
             "late_days": max(0, (done_on - due).days) if done_on else (max(0, (today - due).days) if state in ("In progress", "Missed") else 0),
         })
@@ -1509,6 +1515,22 @@ def month_cycles(db: Session, user: User, plant_id: UUID, month: str) -> dict:
         "reports": [_report_out(r, plant, user, config, manager, table_count) for r in month_reports],
         "today": today.isoformat(),
     }
+
+
+def recount_month(db: Session, user: User, plant_id: UUID, month: str) -> dict:
+    """O&M Head / washing Assignee: re-number a month's days into cycles by date (_cycle_sequence). Fixes months saved
+    before days moved with their edits, e.g. a day changed to 40 tables that still counted in an already full cycle."""
+    if not _is_washing_manager(db, user):
+        raise HTTPException(403, "Only the O&M Head or the washing Assignee can recount washing cycles")
+    plant = _plant_for_id(db, plant_id)
+    config = db.scalar(select(WashingConfig).where(WashingConfig.plant_id == plant.id).with_for_update())
+    if not config:
+        raise HTTPException(409, "Washing has not been set up for this plant")
+    _parse_month(month)
+    moved = _resequence_month(db, plant.id, month, _plant_table_count(db, plant.id, config))
+    _audit_moves(db, user, plant, month, moved, "recount")
+    db.commit()
+    return {**month_cycles(db, user, plant.id, month), "moved": moved}
 
 
 def save_cycle_schedule(db: Session, user: User, plant_id: UUID, payload) -> dict:
@@ -1587,25 +1609,11 @@ def review_daily_report(db: Session, user: User, report_id: UUID, payload: Washi
     report.review_note = (payload.remarks or "").strip() or None
     db.add(report)
     db.flush()
-    cycle_completed = False
-    if report.review_status == "Confirmed":
-        already_complete = db.scalar(select(WashingDailyReport.id).where(
-            WashingDailyReport.plant_id == plant.id,
-            WashingDailyReport.cycle_month == report.cycle_month,
-            WashingDailyReport.cycle_no == report.cycle_no,
-            WashingDailyReport.review_status == "Confirmed",
-            WashingDailyReport.cycle_completed.is_(True),
-            WashingDailyReport.id != report.id,
-        ).limit(1)) is not None  # extra washing after the month's last cycle was already complete
-        total_confirmed = db.scalar(select(func.coalesce(func.sum(WashingDailyReport.tables_cleaned), 0)).where(
-            WashingDailyReport.plant_id == plant.id,
-            WashingDailyReport.cycle_month == report.cycle_month,
-            WashingDailyReport.cycle_no == report.cycle_no,
-            WashingDailyReport.review_status == "Confirmed",
-        )) or 0
-        if not already_complete and total_confirmed >= total_tables:
-            report.cycle_completed = True
-            cycle_completed = True
+    # A confirmation can complete a cycle; a rejection empties the day, so the days after it may move back a cycle.
+    done_before = _completed_cycles(db, plant.id, report.cycle_month)
+    moved = _resequence_month(db, plant.id, report.cycle_month, total_tables)
+    _audit_moves(db, user, plant, report.cycle_month, moved, f"{report.report_date.isoformat()} {report.review_status.lower()}")
+    cycle_completed = report.cycle_no in (_completed_cycles(db, plant.id, report.cycle_month) - done_before)
 
     db.add(report)
     db.add(AuditLog(
@@ -1670,7 +1678,6 @@ def confirm_sheet_reports(db: Session, user: User, payload: WashingBulkConfirmRe
     if missing:
         raise HTTPException(409, "Upload before and after photos first for " + ", ".join(_day_label(report.report_date) for report in missing))
 
-    cycles = {(report.cycle_month, report.cycle_no) for report in reports}
     already_done = set(db.execute(select(WashingDailyReport.cycle_month, WashingDailyReport.cycle_no).where(
         WashingDailyReport.plant_id == plant.id,
         WashingDailyReport.cycle_completed.is_(True),
@@ -1690,7 +1697,11 @@ def confirm_sheet_reports(db: Session, user: User, payload: WashingBulkConfirmRe
             metadata_json={"decision": "Confirmed", "bulk": True, "cycle_month": report.cycle_month, "cycle_no": report.cycle_no},
         ))
     db.flush()
-    completed = sorted(key for key in cycles if _refresh_cycle_completion(db, plant.id, key[0], key[1], total_tables) and key not in already_done)
+    done_now: set[tuple[str, int]] = set()
+    for month in sorted({report.cycle_month for report in reports}):
+        _audit_moves(db, user, plant, month, _resequence_month(db, plant.id, month, total_tables), "days confirmed")
+        done_now |= {(month, n) for n in _completed_cycles(db, plant.id, month)}
+    completed = sorted(done_now - already_done)
 
     reporters = list(dict.fromkeys(report.reported_by_id for report in reports if report.reported_by_id))
     tables = sum(report.tables_cleaned for report in reports)

@@ -138,8 +138,9 @@
     set("pq-freq",t.frequency);set("pq-safety",t.safety);set("pq-hours",t.est_hours);
     window.pmUnitHint("pq");
   };
-  window.openProblemScheduledTask=async function(){
+  window.openProblemScheduledTask=async function(type){
     if(!canCreate()){toast("Site Engineer can execute assigned Preventive Maintenance work, but cannot create it.");return}
+    S._pmAddType=typeof type==="string"?type:null;   /* "+ Add job" on an equipment coverage row */
     S.modal="pmQuickTask";S.modalCtx={};render();
     setTimeout(()=>{try{window.pmQuickCfg()}catch(e){}},0);
     Promise.all([loadTemplates(),loadUnitCfg(),loadCycle()]).then(()=>{
@@ -150,7 +151,7 @@
     });
   };
   function quickModal(){
-    const types=typeNames(),filteredType=S.pmLive&&S.pmLive.equipment&&S.pmLive.equipment!=="all"?S.pmLive.equipment:null;
+    const types=typeNames(),filteredType=S._pmAddType||(S.pmLive&&S.pmLive.equipment&&S.pmLive.equipment!=="all"?S.pmLive.equipment:null);
     const type=filteredType&&types.includes(filteredType)?filteredType:(types.indexOf("Inverter")>=0?"Inverter":(types[0]||"Other"));
     const activePmPlant=S.pmLive&&S.pmLive.plant&&S.pmLive.plant!=="all"?S.pmLive.plant:null;
     const first=activePmPlant||(S.schedScope&&S.schedScope!=="all"?S.schedScope:"__all");
