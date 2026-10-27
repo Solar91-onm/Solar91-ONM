@@ -13,7 +13,7 @@ from app.core.models import (
     WashingDailyReport,
     WashingTable,
 )
-from app.scheduled.washing_cycles import check_missed_monthly_targets, check_weekly_compliance_alerts
+from app.scheduled.washing_cycles import check_cycle_compliance_alerts, check_missed_monthly_targets
 from tests.conftest import login_user
 from tests import conftest
 
@@ -177,7 +177,7 @@ def test_missed_monthly_target_notification_is_deduplicated(client, db):
     assert "0 of 3 required cycles" in alert.message
 
 
-def test_weekly_compliance_alert_uses_threshold_and_is_deduplicated(client, db):
+def test_cycle_compliance_alert_uses_threshold_and_is_deduplicated(client, db):
     login_user(client, db, role="O&M Head", name="Compliance Head", email="compliance-head@example.com")
     plant = _plant(db)
     db.add(WashingConfig(plant_id=plant.id, team=[], frequency_days=14, compliance_threshold_percent=85))
@@ -185,11 +185,12 @@ def test_weekly_compliance_alert_uses_threshold_and_is_deduplicated(client, db):
                for number in range(1, 11))
     db.commit()
 
-    week_day = date(2026, 11, 8)
-    assert check_weekly_compliance_alerts(db, week_day) == 1
-    assert check_weekly_compliance_alerts(db, week_day) == 0
-    notification = db.query(Notification).filter_by(event_type="washing_weekly_compliance_low").one()
-    assert "0%" in notification.message
+    assert check_cycle_compliance_alerts(db, date(2026, 11, 8)) == 0      # cycle 1 (1-10 Nov) has not ended yet
+    assert check_cycle_compliance_alerts(db, date(2026, 11, 11)) == 1     # the day after it ends
+    assert check_cycle_compliance_alerts(db, date(2026, 11, 12)) == 0     # once per cycle
+    notification = db.query(Notification).filter_by(event_type="washing_cycle_compliance_low").one()
+    assert "Cycle 1 ended with 0 of 10 tables done (0%)" in notification.message
+    assert notification.user_id is not None
 
 
 def test_setup_lists_every_assignee_and_grants_the_washing_scope(client, db):
@@ -427,9 +428,9 @@ def test_site_engineer_report_counts_can_vary_by_day_without_daily_target(client
     assert second.status_code == 200, second.text
     overview = client.get(f"{BASE}/overview").json()
     plant_row = next(row for row in overview["plants"] if row["plant_id"] == str(plant.id))
-    assert "weekly_compliance_percent" not in plant_row
+    assert "cycle_compliance_percent" not in plant_row and "cycle_compliance" not in plant_row
     assert all("target" not in day for day in plant_row["daily_status"])
-    assert "weekly_compliance_percent" not in overview["portfolio"]
+    assert "cycle_compliance" not in overview["portfolio"]
 
 
 def test_engineer_cannot_change_cycle_dates_or_confirmed_reports(client, db):

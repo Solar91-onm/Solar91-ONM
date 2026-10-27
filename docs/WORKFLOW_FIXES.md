@@ -55,7 +55,18 @@
   notifications). Cycle cards, the monthly sheet export and compliance then follow the new rule without any action.
   The O&M team still sees a *Recount cycles* note in a month whose days are out of place
   (`POST /api/scheduled/washing/plants/{id}/recount?month=YYYY-MM`).
-- **Weekly compliance** is compared with the plant's target (default 85%) for O&M team tracking only; Site Engineers see neither compliance scores nor daily targets.
+- **Cycle compliance** (replaces weekly compliance) follows the cycle whose planned window contains today: cycle 1 =
+  days 1–10, cycle 2 = 11–20, cycle 3 = 21–month end, or the plant's own cycle dates. It is the confirmed tables
+  counted in that cycle (with tables carried over from the previous one) against the tables due from the window's
+  start to today (each day's share of the plant's count; excused days left out), shown as a tables ratio, e.g.
+  `60 / 80 tables` (`_cycle_compliance`, overview `cycle_compliance` per plant and for the portfolio). A plant still
+  finishing the previous cycle shows low compliance for the current one; in the portfolio total a plant ahead of its
+  target counts only up to it. It is compared with the plant's target (default 85%); the Command Center washing tile
+  shows the portfolio ratio for the current cycle and how many plants are below target. O&M Head and washing
+  Assignees only: Site Engineers keep recording their days and never see compliance or daily targets.
+- **Low-compliance alert** once per cycle and plant, the day after the cycle's window ends below the target
+  (`check_cycle_compliance_alerts`, event `washing_cycle_compliance_low`, looks back 3 days), to the O&M Head and
+  washing Assignees only. It replaces the weekly alert.
 - **Overdue matrix (1 / 3 / 7 days)**: how many days a plant is past the deadline of its next cycle — On track, 1+ day,
   3+ days, 7+ days. Alerts are sent once at each level (daily job `check_washing_overdue`).
 - **Register of all plants** (including plants not yet set up), sortable by lateness, with cycle progress, monthly cycle

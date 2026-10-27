@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.core.database import get_db
-from app.core.models import Issue, IssueHistory, User, UserEquipmentTypeAssignment
+from app.core.models import Issue, IssueHistory, OMTask, User, UserEquipmentTypeAssignment
 from app.core.security import ensure_equipment_scope, ensure_plant_scope, has_portfolio_scope, equipment_scope_matches, get_current_user, is_head, require_csrf, require_permission, text_is_current_user, user_scoped_equipment_types, user_scoped_plant_ids
 from app.issues import importer as issue_importer
 from app.issues.deadlines import deadline_settings, save_deadline_hours
@@ -71,11 +71,14 @@ def invalidate_pulse_cache()->None:
 def issues_pulse(db:Annotated[Session,Depends(get_db)],user:Annotated[User,Depends(get_current_user)]):
     """Very cheap change detector used by open browsers (one aggregate query, no row data).
 
-    The browser re-fetches its data only when ``count`` or ``latest`` differ from the last pulse.
+    The browser re-fetches its data only when ``count``, ``latest`` or ``tasks`` differ from the last pulse.
+    ``tasks`` fingerprints the PM work orders in the same scope (count and last change), so a job created or changed
+    by someone else also reaches open browsers; it costs no extra round trip (sub-queries of the same statement).
     O&M Head / Administration and Assignees need no scope lookup first (an Assignee with any equipment type sees
     every plant, checked inside the same query); a Site Engineer's plant is looked up as before.
     """
-    stmt=select(func.count(Issue.id),func.max(Issue.updated_at)).where(Issue.deleted_at.is_(None))
+    tasks=select(func.count(OMTask.id)).scalar_subquery(),select(func.max(OMTask.updated_at)).scalar_subquery()
+    stmt=select(func.count(Issue.id),func.max(Issue.updated_at),*tasks).where(Issue.deleted_at.is_(None))
     if has_portfolio_scope(user):
         key:object="all"
     elif user.role=="Assignee":
@@ -84,15 +87,18 @@ def issues_pulse(db:Annotated[Session,Depends(get_db)],user:Annotated[User,Depen
     else:
         plant_scope=user_scoped_plant_ids(db,user)
         if not plant_scope:
-            return {"count":0,"latest":None}
+            return {"count":0,"latest":None,"tasks":"0|"}
         key=("plants",frozenset(plant_scope))
-        stmt=stmt.where(Issue.plant_id.in_(plant_scope))
+        tasks=(select(func.count(OMTask.id)).where(OMTask.plant_id.in_(plant_scope)).scalar_subquery(),
+               select(func.max(OMTask.updated_at)).where(OMTask.plant_id.in_(plant_scope)).scalar_subquery())
+        stmt=select(func.count(Issue.id),func.max(Issue.updated_at),*tasks).where(Issue.deleted_at.is_(None),Issue.plant_id.in_(plant_scope))
     now=time.monotonic()
     hit=_pulse_cache.get(key)
     if hit and now-hit[0]<PULSE_TTL_SECONDS:
         return hit[1]
-    count,latest=db.execute(stmt).one()
-    out={"count":int(count or 0),"latest":latest.isoformat() if latest else None}
+    count,latest,task_count,task_latest=db.execute(stmt).one()
+    out={"count":int(count or 0),"latest":latest.isoformat() if latest else None,
+         "tasks":f"{int(task_count or 0)}|{task_latest.isoformat() if task_latest else ''}"}
     if len(_pulse_cache)>500:
         _pulse_cache.clear()
     _pulse_cache[key]=(now,out)

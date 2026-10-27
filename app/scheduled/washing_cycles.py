@@ -239,6 +239,39 @@ def _cycle_windows(value: date, overrides: dict | None = None) -> list[tuple[dat
     return list(zip(_cycle_start_dates(value, overrides), _cycle_due_dates(value, overrides)))
 
 
+def _current_window(value: date, overrides: dict | None = None) -> tuple[int, date, date]:
+    """The cycle whose planned window contains `value`: cycle 1 = days 1-10, 2 = 11-20, 3 = 21-month end, or the
+    dates the O&M team set. Between moved windows it is the latest window that has started (before the first: 1)."""
+    windows = _cycle_windows(value, overrides)
+    for n, (start, end) in enumerate(windows, 1):
+        if start <= value <= end:
+            return n, start, end
+    started = [n for n, (start, _end) in enumerate(windows, 1) if start <= value]
+    n = started[-1] if started else 1
+    return n, windows[n - 1][0], windows[n - 1][1]
+
+
+def _cycle_compliance(table_count: int, today: date, overrides: dict | None, ledger: dict[int, dict],
+                      excused_dates: set[date], window: tuple[int, date, date] | None = None) -> dict:
+    """Compliance of one cycle (the one whose window contains `today` unless `window` is given): the confirmed tables
+    counted in that cycle, including tables carried over from the previous one (_cycle_ledger), against the tables
+    due from the window's start up to today (each day's share of the plant's count, excused days left out).
+    A plant still finishing the previous cycle shows low compliance for the current one."""
+    n, start, end = window or _current_window(today, overrides)
+    upto = min(today, end)
+    due = 0
+    day = start
+    while day <= upto:
+        if day not in excused_dates:
+            due += _daily_table_target(table_count, day, overrides)
+        day += timedelta(days=1)
+    due = min(due, table_count)
+    done = ledger.get(n, {}).get("confirmed", 0)
+    return {"cycle_no": n, "start": start.isoformat(), "end": end.isoformat(), "due": due, "done": done,
+            "pending": ledger.get(n, {}).get("pending", 0),
+            "percent": min(100, round(100 * done / due)) if due else 100}
+
+
 def _overdue_info(completed_cycles: int, today: date, due_dates: list[date] | None = None) -> dict:
     """How late the plant is against the month's fixed cycle deadlines.
 
@@ -691,16 +724,7 @@ def _build_overview(db: Session, user: User, include_tables: bool = False, repor
         due_by_today = min(MONTHLY_CYCLE_TARGET, (today.day - 1) // 10 + 1)
         completed_due = sum(1 for cycle_no in completed_dates if cycle_no <= due_by_today)
         today_target = _daily_table_target(table_count, today, config.cycle_overrides)
-        weekly_due = sum(
-            _daily_table_target(table_count, week_start + timedelta(days=offset), config.cycle_overrides)
-            for offset in range(7)
-            if week_start + timedelta(days=offset) <= today
-            and week_start + timedelta(days=offset) not in excused_dates
-        )
-        weekly_washed = sum(
-            report.tables_cleaned for report in reports
-            if week_start <= report.report_date <= today and report.review_status == "Confirmed"
-        )
+        compliance = _cycle_compliance(table_count, today, config.cycle_overrides, ledger, excused_dates)
         due_dates = _cycle_due_dates(today, config.cycle_overrides)
         start_dates = _cycle_start_dates(today, config.cycle_overrides)
         delays = [
@@ -816,7 +840,8 @@ def _build_overview(db: Session, user: User, include_tables: bool = False, repor
                 min(100, round(100 * today_cleaned / today_target)) if today_target else 100
             ),
             "monthly_compliance_percent": round(100 * completed_due / due_by_today) if due_by_today else 100,
-            "weekly_compliance_percent": min(100, round(100 * weekly_washed / weekly_due)) if weekly_due else 100,
+            "cycle_compliance": compliance,
+            "cycle_compliance_percent": compliance["percent"],
             "average_delay_days": round(sum(delays) / len(delays), 1) if delays else 0,
             "exceptions_this_month": sum(1 for report in reports if report.cycle_month == month and report.exception_reason),
             "productivity": [{"person": person, "tables": count} for person, count in sorted(productivity.items())],
@@ -870,9 +895,7 @@ def _build_overview(db: Session, user: User, include_tables: bool = False, repor
             "monthly_compliance_percent": round(
                 sum(row["monthly_compliance_percent"] for row in plant_rows) / len(plant_rows)
             ) if plant_rows else 100,
-            "weekly_compliance_percent": round(
-                sum(row["weekly_compliance_percent"] for row in plant_rows) / len(plant_rows)
-            ) if plant_rows else 100,
+            "cycle_compliance": _portfolio_compliance(plant_rows),
             "average_delay_days": round(
                 sum(row["average_delay_days"] for row in plant_rows) / len(plant_rows), 1
             ) if plant_rows else 0,
@@ -893,13 +916,13 @@ def _build_overview(db: Session, user: User, include_tables: bool = False, repor
         "cycles_completed_month": sum(row["cycles_this_month"] for row in plant_rows),
         "cycles_target_month": MONTHLY_CYCLE_TARGET * sum(1 for row in plant_rows if row["active"]),
         "plants_overdue": sum(matrix[key] for key in ("1d", "3d", "7d")),
-        "plants_below_threshold": sum(1 for row in plant_rows if row["active"] and row["weekly_compliance_percent"] < row["compliance_threshold_percent"]),
+        "plants_below_threshold": sum(1 for row in plant_rows if row["active"] and row["cycle_compliance_percent"] < row["compliance_threshold_percent"]),
         "not_set_up": len(result["unconfigured"]),
         "pending_reviews": sum(1 for report in reports_out if report["review_status"] == "Pending"),
     })
     if not manager:
         # Compliance / delay / ranking figures are O&M performance metrics; field users never receive them.
-        hidden = ("weekly_compliance_percent", "monthly_compliance_percent", "daily_compliance_percent", "average_delay_days",
+        hidden = ("cycle_compliance", "cycle_compliance_percent", "monthly_compliance_percent", "daily_compliance_percent", "average_delay_days",
                   "compliance_threshold_percent", "overdue_days", "overdue_bucket", "overdue_cycle", "productivity",
                   "daily_productivity", "exceptions_this_month", "tables_due_today", "tables_pending_today",
                   "excused_days_late_cycle", "delay_excused")
@@ -911,9 +934,22 @@ def _build_overview(db: Session, user: User, include_tables: bool = False, repor
             for day in row.get("daily_status", []):
                 day.pop("target", None)
         result["overdue_matrix"] = {"on_track": 0, "1d": 0, "3d": 0, "7d": 0}
-        for key in ("weekly_compliance_percent", "plants_overdue", "plants_below_threshold", "tables_due_today"):
+        for key in ("cycle_compliance", "plants_overdue", "plants_below_threshold", "tables_due_today"):
             result["portfolio"].pop(key, None)
     return result
+
+
+def _portfolio_compliance(plant_rows: list[dict]) -> dict:
+    """All active plants' current cycles together: tables done / tables due by today. A plant ahead of its target
+    counts only up to it, so it cannot hide another plant that is behind."""
+    rows = [row["cycle_compliance"] for row in plant_rows if row.get("active", True)]
+    due = sum(c["due"] for c in rows)
+    done = sum(min(c["done"], c["due"]) for c in rows)
+    cycles = {(c["cycle_no"], c["start"], c["end"]) for c in rows}
+    one = next(iter(cycles)) if len(cycles) == 1 else None
+    return {"done": done, "due": due, "percent": min(100, round(100 * done / due)) if due else 100,
+            "cycle_no": one[0] if one else None, "start": one[1] if one else None, "end": one[2] if one else None,
+            "plants": len(rows)}
 
 
 def _plant_table_count(db: Session, plant_id: UUID, config: WashingConfig | None = None) -> int:
@@ -1824,10 +1860,11 @@ def check_missed_monthly_targets(db: Session, today: date | None = None) -> int:
     return notified
 
 
-def check_weekly_compliance_alerts(db: Session, today: date | None = None) -> int:
+def check_cycle_compliance_alerts(db: Session, today: date | None = None) -> int:
+    """Once per cycle and plant: when a cycle's planned window has ended (day 10, 20, month end, or the dates the
+    O&M team set) with compliance below the plant's target, the O&M Head and washing Assignees are told
+    (_cycle_compliance; never Site Engineers). Looks back 3 days so a missed daily run still sends it."""
     current = today or business_today()
-    week_start = current - timedelta(days=6)
-    week_key = f"{current.isocalendar().year}-W{current.isocalendar().week:02d}"
     notified = 0
     patterns = _reason_patterns(excused_reasons(db))
     for config in db.scalars(select(WashingConfig).with_for_update()):
@@ -1837,41 +1874,33 @@ def check_weekly_compliance_alerts(db: Session, today: date | None = None) -> in
         total_tables = _plant_table_count(db, config.plant_id, config)
         if not plant or not total_tables:
             continue
-        excused_dates = _excused_dates(db.scalars(select(WashingDailyReport).where(
-            WashingDailyReport.plant_id == plant.id,
-            WashingDailyReport.report_date >= week_start,
-            WashingDailyReport.report_date <= current,
-            WashingDailyReport.review_status != "Rejected",
-        )).all(), patterns)
-        expected = sum(
-            _daily_table_target(total_tables, week_start + timedelta(days=offset), config.cycle_overrides)
-            for offset in range(7)
-            if week_start + timedelta(days=offset) <= current
-            and week_start + timedelta(days=offset) not in excused_dates
-        )
-        confirmed = list(db.scalars(select(WashingDailyReport).where(
-            WashingDailyReport.plant_id == plant.id,
-            WashingDailyReport.report_date >= week_start,
-            WashingDailyReport.report_date <= current,
-            WashingDailyReport.review_status == "Confirmed",
-            WashingDailyReport.tables_cleaned > 0,
-        )))
-        cleaned = sum(report.tables_cleaned for report in confirmed)
-        compliance = min(100, round(100 * cleaned / expected)) if expected else 100
-        if compliance >= config.compliance_threshold_percent:
-            continue
-        dedupe_key = f"washing-weekly-compliance:{plant.id}:{week_key}"
-        if db.scalar(select(Notification.id).where(or_(Notification.dedupe_key == dedupe_key, Notification.dedupe_key.like(dedupe_key + ":%"))).limit(1)):
-            continue
-        _notify_wash(
-            db, plant, config,
-            event_type="washing_weekly_compliance_low",
-            title=f"Washing compliance below target — {week_key}",
-            message=f"Weekly compliance is {compliance}% against the configured {config.compliance_threshold_percent}% threshold ({cleaned} of {expected} tables reported clean).",
-            dedupe_key=dedupe_key,
-            managers_only=True,  # performance metric: O&M team only
-        )
-        notified += 1
+        for back in range(1, 4):
+            ended = current - timedelta(days=back)
+            window = next(((n, start, end) for n, (start, end) in enumerate(_cycle_windows(ended, config.cycle_overrides), 1)
+                           if end == ended), None)
+            if window is None:
+                continue
+            n, start, end = window
+            month = _month_key(end)
+            dedupe_key = f"washing-cycle-compliance:{plant.id}:{month}:{n}"
+            if db.scalar(select(Notification.id).where(Notification.dedupe_key.like(dedupe_key + "%")).limit(1)):
+                continue
+            month_reports = list(db.scalars(select(WashingDailyReport).where(
+                WashingDailyReport.plant_id == plant.id, WashingDailyReport.cycle_month == month)))
+            compliance = _cycle_compliance(total_tables, end, config.cycle_overrides, _cycle_ledger(month_reports, total_tables),
+                                           _excused_dates(month_reports, patterns), window)
+            if compliance["percent"] >= config.compliance_threshold_percent:
+                continue
+            _notify_wash(
+                db, plant, config,
+                event_type="washing_cycle_compliance_low",
+                title=f"Washing compliance below target — Cycle {n} ({_day_label(start)}–{_day_label(end)})",
+                message=(f"Cycle {n} ended with {compliance['done']} of {compliance['due']} tables done ({compliance['percent']}%) "
+                         f"against the {config.compliance_threshold_percent}% target."),
+                dedupe_key=dedupe_key,
+                managers_only=True,  # performance metric: O&M Head and washing Assignees only
+            )
+            notified += 1
     if notified:
         db.commit()
     else:

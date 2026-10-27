@@ -10,8 +10,9 @@ from app.scheduled.washing_cycles import (
     DEFAULT_EXCUSED_REASONS,
     EXCUSED_REASONS_SETTING,
     _daily_table_target,
+    _current_window,
     _month_key,
-    check_weekly_compliance_alerts,
+    check_cycle_compliance_alerts,
 )
 from tests import conftest
 from tests.conftest import login_user
@@ -42,15 +43,21 @@ def _day(db, plant, day, tables, remarks=None, status="Confirmed", reason=None):
     db.commit()
 
 
-def _weekly(client, plant):
+def _cycle_due(client, plant):
+    """The plant's compliance for the current cycle (window from the cycle's start to today)."""
     overview = client.get(f"{BASE}/overview")
     assert overview.status_code == 200, overview.text
-    return next(p for p in overview.json()["plants"] if p["plant_id"] == str(plant.id))["weekly_compliance_percent"]
+    row = next(p for p in overview.json()["plants"] if p["plant_id"] == str(plant.id))
+    c = row["cycle_compliance"]
+    assert row["cycle_compliance_percent"] == c["percent"] == (min(100, round(100 * c["done"] / c["due"])) if c["due"] else 100)
+    return c["due"]
 
 
 def _expected(today, washed, skip=()):
-    due = sum(_daily_table_target(TABLES, today - timedelta(days=n)) for n in range(7) if today - timedelta(days=n) not in skip)
-    return min(100, round(100 * washed / due)) if due else 100
+    """Tables due in the current cycle's window up to today, excused days left out (`washed` is not part of it)."""
+    _n, start, _end = _current_window(today)
+    days = [start + timedelta(days=i) for i in range((today - start).days + 1)]
+    return min(TABLES, sum(_daily_table_target(TABLES, d) for d in days if d not in skip))
 
 
 def test_listed_reasons_excuse_a_zero_day_and_other_zero_days_lower_the_score(client, db):
@@ -60,13 +67,13 @@ def test_listed_reasons_excuse_a_zero_day_and_other_zero_days_lower_the_score(cl
     _day(db, plant, worked, 5)
     _day(db, plant, rain, 0, "Heavy RAIN since   morning")        # listed reason, any case / spacing
     _day(db, plant, labour, 0, "Labour absent")                    # not listed: counts as 0 cleaned
-    assert _weekly(client, plant) == _expected(today, 5, skip={rain})
+    assert _cycle_due(client, plant) == _expected(today, 5, skip={rain})
 
     # once the O&M Head lists "labour absent", that day stops lowering the score too
     added = client.post(f"{BASE}/compliance-reasons", json={"reason": "  Labour   absent "})
     assert added.status_code == 200, added.text
     assert added.json()["reasons"] == [*DEFAULT_EXCUSED_REASONS, "Labour absent"]
-    assert _weekly(client, plant) == _expected(today, 5, skip={rain, labour})
+    assert _cycle_due(client, plant) == _expected(today, 5, skip={rain, labour})
 
 
 def test_reasons_match_whole_words_and_older_specific_reasons(client, db):
@@ -76,7 +83,7 @@ def test_reasons_match_whole_words_and_older_specific_reasons(client, db):
     _day(db, plant, training, 0, "Team training day")              # "rain" inside "training" is not a match
     _day(db, plant, water, 0, "water shortage at site")
     _day(db, plant, legacy, 0, None, reason="Rain")                # older entry saved with the Rain reason
-    assert _weekly(client, plant) == _expected(today, 0, skip={water, legacy})
+    assert _cycle_due(client, plant) == _expected(today, 0, skip={water, legacy})
 
 
 def test_pending_listed_day_is_excused_at_once_and_a_rejected_one_is_not(client, db):
@@ -85,7 +92,7 @@ def test_pending_listed_day_is_excused_at_once_and_a_rejected_one_is_not(client,
     pending, rejected = today - timedelta(days=1), today - timedelta(days=2)
     _day(db, plant, pending, 0, "Work not started", status="Pending")
     _day(db, plant, rejected, 0, "Rain", status="Rejected")
-    assert _weekly(client, plant) == _expected(today, 0, skip={pending})
+    assert _cycle_due(client, plant) == _expected(today, 0, skip={pending})
 
 
 def test_weekly_alert_and_day_view_follow_the_same_rule(client, db):
@@ -102,10 +109,13 @@ def test_weekly_alert_and_day_view_follow_the_same_rule(client, db):
 
     db.query(Notification).delete()
     db.commit()
-    assert check_weekly_compliance_alerts(db, today) == 1
-    message = db.query(Notification).filter_by(event_type="washing_weekly_compliance_low").first().message
-    due = sum(_daily_table_target(TABLES, today - timedelta(days=n)) for n in range(7) if today - timedelta(days=n) != rain)
-    assert f"0 of {due} tables" in message
+    # the cycle containing the rain day is checked the day after its window ends; the rain day is not due
+    n, start, end = _current_window(rain)
+    assert check_cycle_compliance_alerts(db, end + timedelta(days=1)) == 1
+    message = db.query(Notification).filter_by(event_type="washing_cycle_compliance_low").first().message
+    days = [start + timedelta(days=i) for i in range((end - start).days + 1)]
+    due = min(TABLES, sum(_daily_table_target(TABLES, d) for d in days if d != rain))
+    assert f"Cycle {n} ended with 0 of {due} tables" in message
 
 
 def test_only_the_om_head_changes_the_list_and_every_change_is_audited(client, db):
@@ -166,3 +176,19 @@ def test_late_plant_is_not_on_track_when_excused_days_fall_short(client, db, mon
     washing_cycles.invalidate_overview_cache()
     field_row = client.get(f"{BASE}/overview").json()["plants"][0]
     assert "delay_excused" not in field_row and "excused_days_late_cycle" not in field_row
+
+
+def test_compliance_is_for_the_cycle_whose_window_contains_today():
+    from app.scheduled.washing_cycles import _cycle_compliance, _portfolio_compliance
+    today = date(2026, 10, 14)                                   # days 11-20: cycle 2
+    ledger = {1: {"confirmed": 200, "pending": 0}, 2: {"confirmed": 60, "pending": 10}, 3: {"confirmed": 0, "pending": 0}}
+    c = _cycle_compliance(200, today, None, ledger, set())       # 200 tables over 10 days = 20 a day; 11-14 Oct = 80
+    assert (c["cycle_no"], c["start"], c["end"], c["due"], c["done"], c["pending"], c["percent"]) == (
+        2, "2026-10-11", "2026-10-20", 80, 60, 10, 75)
+    assert _cycle_compliance(200, today, None, ledger, {date(2026, 10, 12)})["due"] == 60     # an excused day is not due
+    late = _cycle_compliance(200, today, None, {1: {"confirmed": 150}, 2: {"confirmed": 0}}, set())
+    assert late["percent"] == 0                                  # still on cycle 1: nothing done for cycle 2 yet
+    ahead = {"active": True, "cycle_compliance": {**c, "done": 150}}
+    behind = {"active": True, "cycle_compliance": {**c, "done": 20}}
+    total = _portfolio_compliance([ahead, behind])
+    assert (total["done"], total["due"], total["percent"], total["cycle_no"]) == (100, 160, 62, 2)   # ahead counts only up to its due

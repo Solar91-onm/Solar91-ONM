@@ -134,6 +134,9 @@ async def security_headers(request: Request, call_next):
         response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
     if request.url.path == "/":
         response.headers["Cache-Control"] = "no-store"
+    elif request.url.path.startswith("/api/"):
+        # live, role-scoped data: never kept by the browser or a proxy (routes that set their own policy keep it)
+        response.headers.setdefault("Cache-Control", "no-store")
     return response
 
 @app.middleware("http")
@@ -262,9 +265,9 @@ async def _start_pm_daily_job_loop():
         from app.pmplan.units import run_daily
         with SessionLocal() as db:
             result = run_daily(db)
-            from app.scheduled.washing_cycles import check_missed_monthly_targets, check_washing_overdue, check_weekly_compliance_alerts
+            from app.scheduled.washing_cycles import check_missed_monthly_targets, check_washing_overdue, check_cycle_compliance_alerts
             result["washing_monthly_targets_notified"] = check_missed_monthly_targets(db)
-            result["washing_weekly_compliance_alerts"] = check_weekly_compliance_alerts(db)
+            result["washing_cycle_compliance_alerts"] = check_cycle_compliance_alerts(db)
             result["washing_overdue_alerts"] = check_washing_overdue(db)
             return result
 

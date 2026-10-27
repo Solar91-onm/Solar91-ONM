@@ -1,6 +1,6 @@
 "use strict";
 /* Plant washing: tables cleaned per day roll up into cycles (3 per month, due 10th / 20th / month-end),
-   weekly compliance target, overdue 1/3/7 matrix, plant overlay with before/after photos and O&M confirmation. */
+   current-cycle compliance (tables done / due by today), overdue 1/3/7 matrix, plant overlay with before/after photos and O&M confirmation. */
 (function(){
  const role=()=>S._roleLabel||S.currentRole||"O&M Head";
  /* O&M team = O&M Head + every Assignee (same washing powers). Site Engineers are field users: they only report counts. */
@@ -27,14 +27,29 @@
 
  async function loadOverview(){
   if(S._washCycleLoading)return S._washCycleLoading;
-  S._washCycleLoading=apiFetch("/api/scheduled/washing/overview"+(S._washReportDays?"?report_days="+S._washReportDays:"")).then(d=>{S._washCycles=d;S._washCycleError=null;S._washCycleLoading=null;if(onWashing())render();return d}).catch(e=>{S._washCycleLoading=null;S._washCycleError=e;if(onWashing())render();throw e});
+  S._washCycleLoading=apiFetch("/api/scheduled/washing/overview"+(S._washReportDays?"?report_days="+S._washReportDays:"")).then(d=>{S._washCycles=d;S._washLoadedAt=Date.now();S._washCycleError=null;S._washCycleLoading=null;if(onWashing()&&!busyTyping())render();return d}).catch(e=>{S._washCycleLoading=null;S._washCycleError=e;if(onWashing())render();throw e});
   return S._washCycleLoading;
  }
  window.washCyclesReload=loadOverview;
- window.washCyclesEnsureLoaded=function(){if(!S._washCycles&&!S._washCycleLoading&&!S._washCycleError)loadOverview().catch(()=>{})};
+ /* Reports, confirmations and recounts by other people change the plants all the time. The overview is loaded once and
+    then kept fresh: reloaded in the background when it is older than a minute while washing data is on screen
+    (Washing page, Command Center, Plant Pulse), never while someone is typing or has a form open. */
+ const WASH_STALE_MS=60000;
+ const busyTyping=()=>{const a=document.activeElement,t=a&&a.tagName;return t==="INPUT"||t==="TEXTAREA"||t==="SELECT"||!!(a&&a.isContentEditable)};
+ const washStale=()=>!!S._washCycles&&Date.now()-(S._washLoadedAt||0)>WASH_STALE_MS;
+ function refreshIfStale(){if(washStale()&&!S._washCycleLoading&&!document.hidden&&!busyTyping()&&!(S.modal&&S.modal!=="washingPlantDetails"))loadOverview().catch(()=>{})}
+ window.washCyclesEnsureLoaded=function(){if(!S._washCycles&&!S._washCycleLoading&&!S._washCycleError)loadOverview().catch(()=>{});else refreshIfStale()};
+ setInterval(()=>{if(S._washCycles&&(onWashing()||S.view==="dashboard"||S.modal==="washingPlantDetails"))refreshIfStale()},WASH_STALE_MS);
+ document.addEventListener("visibilitychange",()=>{if(!document.hidden)refreshIfStale()});
  window.washHasData=()=>!!(S._washCycles&&((S._washCycles.plants||[]).length));
  window.washDueCount=()=>{const m=data().overdue_matrix||{};return (m["1d"]||0)+(m["3d"]||0)+(m["7d"]||0)};
- window.washCompliancePct=()=>{const p=data().portfolio||{};return typeof p.weekly_compliance_percent==="number"?p.weekly_compliance_percent:100};
+ window.washCompliancePct=()=>{const c=(data().portfolio||{}).cycle_compliance;return c&&typeof c.percent==="number"?c.percent:100};
+ /* Compliance follows the cycle whose window contains today (1-10, 11-20, 21-month end, or the plant's own dates):
+    confirmed tables counted in that cycle / tables due by today (app/scheduled/washing_cycles.py _cycle_compliance). */
+ const ccPct=p=>typeof p.cycle_compliance_percent==="number"?p.cycle_compliance_percent:null;
+ const ccRatio=c=>c?Number(c.done).toLocaleString("en-IN")+" / "+Number(c.due).toLocaleString("en-IN"):"—";
+ const ccTone=(v,t)=>v>=t?"ok":v>=t-15?"warn":"crit";
+ const ccWin=c=>c?"Cycle "+c.cycle_no+(c.start?" · "+fmt(c.start)+"–"+fmt(c.end):""):"";
 
  function plantSetupModal(){
   const plants=plantOptions();
@@ -51,7 +66,7 @@
   return modal("Set up plant washing","Set the plant table count and the Assignee responsible for this site.",
    '<div class="pm-form"><div class="field"><span class="lbl">Plant</span><select id="wc-plant" class="inp" onchange="washSetupPlantChanged()">'+plants.map(p=>'<option value="'+h(plantIdOf(p))+'"'+(plantIdOf(p)===draft.plantId?" selected":"")+'>'+h(typeof pmPlantLabelText==="function"?pmPlantLabelText(p.name):p.name)+'</option>').join("")+'</select></div>'+
    '<div class="kgrid" style="grid-template-columns:1fr 1fr;gap:12px"><div class="field"><span class="lbl">Number of tables</span><input id="wc-tables" class="inp" type="number" min="1" max="5000" value="'+h(draft.tables)+'" placeholder="e.g. 120" oninput="washSetupDraftChanged()"/></div><div class="field"><span class="lbl">Washing Assignee</span><select id="wc-assignee" class="inp" onchange="washSetupDraftChanged()">'+options+'</select></div></div>'+
-   '<div class="field"><span class="lbl">Alert when weekly compliance falls below (%)</span><input id="wc-threshold" class="inp" type="number" min="1" max="100" value="'+h(draft.threshold)+'" oninput="washSetupDraftChanged()"/></div>'+hint+nextSteps+'</div>',
+   '<div class="field"><span class="lbl">Alert when cycle compliance falls below (%)</span><input id="wc-threshold" class="inp" type="number" min="1" max="100" value="'+h(draft.threshold)+'" oninput="washSetupDraftChanged()"/></div>'+hint+nextSteps+'</div>',
    '<button class="btn o" onclick="closeModal()">Cancel</button><button class="btn p" onclick="saveWashingSetup()">Save plant setup</button>',true);
  }
 
@@ -107,7 +122,7 @@
  /* ---------- register ---------- */
  function bar(p){const t=p.table_count||1,c=Math.min(100,100*p.confirmed_tables_cleaned/t),q=Math.min(100-c,100*p.pending_tables_cleaned/t);return '<div class="wc-bar"><i class="wc-bar-ok" style="width:'+c+'%"></i><i class="wc-bar-pend" style="width:'+q+'%"></i></div>'}
  function dots(p){return '<div class="wc-dots">'+(p.cycles||[]).map(c=>'<span class="wc-dot wc-dot-'+h(c.state)+'" title="Cycle '+c.cycle_no+' · '+h(c.state)+' · due '+fmt(c.due_date)+'">'+c.cycle_no+'</span>').join("")+'</div>'}
- function weekly(p){const v=p.weekly_compliance_percent,t=p.compliance_threshold_percent;return chip(v+"%",v>=t?"ok":v>=t-15?"warn":"crit")}
+ function cycleCompliance(p){const c=p.cycle_compliance,v=ccPct(p);if(!c||v==null)return"—";return '<span title="'+h(ccWin(c)+': '+c.done+' of '+c.due+' tables due by today ('+v+'%) · target '+p.compliance_threshold_percent+'%')+'">'+chip('C'+c.cycle_no+' · '+ccRatio(c),ccTone(v,p.compliance_threshold_percent))+'</span>'}
  function todayChip(p){const d=(p.daily_status||[]).slice(-1)[0];return d?chip(d.status+(isTeam()&&d.target?" · "+d.target+" due":""),dtone(d.status)):chip("—","mute")}
  /* ---- compact register: one row per plant, Cycle 1/2/3 for the month, latest update on top ---- */
  function cycleCell(p,c){
@@ -169,13 +184,13 @@
   const stOk=p=>!f.state||f.state==="all"||(f.state==="late"?tileState(p).indexOf("late-")===0:tileState(p)===f.state);
   const cycOk=p=>{if(!f.cyc||f.cyc==="all")return true;const parts=String(f.cyc).split(":");return (p.cycles||[]).some(c=>String(c.cycle_no)===parts[0]&&(parts[1]==="Not started"?c.state!=="Completed"&&c.state!=="In progress":c.state===parts[1]))};
   const configured=(data().plants||[]).filter(p=>hit(p)&&stOk(p)&&cycOk(p)&&(f.bucket==="all"||p.overdue_bucket===f.bucket)&&
-   (f.show==="all"||(f.show==="review"&&p.pending_tables_cleaned>0)||(f.show==="mine"&&p.assignee_user_id===S._currentUserId)||(f.show==="done"&&p.cycles_this_month>=p.monthly_target)||(f.show==="attention"&&head&&p.active&&(p.overdue_bucket!=="on_track"||p.weekly_compliance_percent<p.compliance_threshold_percent))||(f.show==="late"&&p.overdue_bucket!=="on_track")||(f.show==="below"&&p.active&&p.weekly_compliance_percent<p.compliance_threshold_percent)||(f.show==="ontrack"&&p.active&&p.overdue_bucket==="on_track")||(f.show==="excused"&&p.active&&p.overdue_bucket&&p.overdue_bucket!=="on_track"&&p.delay_excused)||(f.show==="notontrack"&&p.active&&p.overdue_bucket&&p.overdue_bucket!=="on_track"&&!p.delay_excused)||(f.show==="notreported"&&notReportedOn(p,rd))||(f.show==="mine"&&p.assignee_user_id===S._currentUserId))&&
+   (f.show==="all"||(f.show==="review"&&p.pending_tables_cleaned>0)||(f.show==="mine"&&p.assignee_user_id===S._currentUserId)||(f.show==="done"&&p.cycles_this_month>=p.monthly_target)||(f.show==="attention"&&head&&p.active&&(p.overdue_bucket!=="on_track"||ccPct(p)<p.compliance_threshold_percent))||(f.show==="late"&&p.overdue_bucket!=="on_track")||(f.show==="below"&&p.active&&ccPct(p)<p.compliance_threshold_percent)||(f.show==="ontrack"&&p.active&&p.overdue_bucket==="on_track")||(f.show==="excused"&&p.active&&p.overdue_bucket&&p.overdue_bucket!=="on_track"&&p.delay_excused)||(f.show==="notontrack"&&p.active&&p.overdue_bucket&&p.overdue_bucket!=="on_track"&&!p.delay_excused)||(f.show==="notreported"&&notReportedOn(p,rd))||(f.show==="mine"&&p.assignee_user_id===S._currentUserId))&&
    (f.assignee==="all"||(f.assignee==="unassigned"?!p.assignee_user_id:f.assignee===p.assignee_user_id))&&
    (f.region==="all"||f.region===(p.district||p.location||"")));
   const un=(data().unconfigured||[]).filter(hit).map(p=>Object.assign({not_setup:true},p)).filter(p=>(!f.state||f.state==="all"||f.state==="unset")&&(!f.cyc||f.cyc==="all")&&(f.show==="all"||f.show==="notsetup")&&f.bucket==="all"&&(f.assignee==="all"||f.assignee==="unassigned")&&f.region==="all");
   let rows=f.show==="notsetup"?[]:configured;
   if(f.sort==="name")rows.sort((a,b)=>a.plant.localeCompare(b.plant));
-  else if(f.sort==="compliance")rows.sort((a,b)=>(b.weekly_compliance_percent||0)-(a.weekly_compliance_percent||0)||a.plant.localeCompare(b.plant));
+  else if(f.sort==="compliance")rows.sort((a,b)=>(ccPct(b)||0)-(ccPct(a)||0)||a.plant.localeCompare(b.plant));
   else if(f.sort==="progress")rows.sort((a,b)=>(b.confirmed_tables_cleaned/(b.table_count||1))-(a.confirmed_tables_cleaned/(a.table_count||1))||a.plant.localeCompare(b.plant));
   else rows.sort((a,b)=>(b.overdue_days||0)-(a.overdue_days||0)||lastAct(b).localeCompare(lastAct(a))||a.plant.localeCompare(b.plant));
   un.sort((a,b)=>a.plant.localeCompare(b.plant));
@@ -196,7 +211,7 @@
    const action=head?'<div class="wc-row-actions"><button class="btn p sm" onclick="event.stopPropagation();openWashingPlantDetails(\''+h(p.plant_id)+'\')">Cycle &amp; reports</button><button class="btn o sm" onclick="event.stopPropagation();openWashingSetup(\''+h(p.plant_id)+'\')">Edit setup</button></div>':isField()?'<button class="btn p sm" onclick="event.stopPropagation();openWashingDailyReport(\''+h(p.plant_id)+'\')">Report today</button>':'<button class="btn o sm" onclick="event.stopPropagation();openWashingPlantDetails(\''+h(p.plant_id)+'\')">View</button>';
    return '<tr class="wc-row'+(isOpen?" open":"")+'" onclick="openWashingPlantDetails(\''+h(p.plant_id)+'\')"><td>'+checkbox+'</td><td class="wc-plant"><div><b>'+(fresh?'<i class="wc-live" title="Updated today"></i>':'')+h(p.plant)+'</b><small>'+h(p.site_code)+' · '+plural(p.table_count,"table")+'</small></div></td>'+
     '<td>'+progress+'</td><td><div class="wc-cycle-summary">'+dots(p)+'</div><small class="wc-cycle-label">'+(currentNo?'Cycle '+currentNo+' · ':'')+p.cycles_this_month+' of '+p.monthly_target+' this month</small></td>'+
-    '<td>'+todayCell+'<small class="wc-upd">'+updateText(p)+'</small></td>'+(head?'<td>'+weekly(p)+'</td>':'')+'<td>'+status+'</td><td>'+(!p.assignee_user_id&&head?chip("Unassigned","crit"):h(p.assignee_name||"—"))+'</td><td>'+action+'</td></tr>'+
+    '<td>'+todayCell+'<small class="wc-upd">'+updateText(p)+'</small></td>'+(head?'<td>'+cycleCompliance(p)+'</td>':'')+'<td>'+status+'</td><td>'+(!p.assignee_user_id&&head?chip("Unassigned","crit"):h(p.assignee_name||"—"))+'</td><td>'+action+'</td></tr>'+
     (isOpen?'<tr class="wc-exrow"><td colspan="'+(head?9:8)+'">'+expandHtml(p)+'</td></tr>':'');
   }).join("");
   const pageCount=Math.max(1,Math.ceil(list.length/ui.pageSize)),start=list.length?(ui.page-1)*ui.pageSize+1:0,end=Math.min(list.length,ui.page*ui.pageSize);
@@ -205,7 +220,7 @@
   const selectAll=head&&selected.size?'<div class="wc-select-all">Selected '+selected.size+' plant(s). <button class="btn g sm" onclick="washSelectAllMatching()">Select all '+list.length+' matching</button><button class="btn g sm" onclick="washClearSelection()">Clear selection</button></div>':"";
   const bulk=head&&selected.size?'<div class="wc-bulk-bar"><b>'+selected.size+' selected</b><button class="btn o sm" onclick="washImportExportSelected()">Export selected</button><button class="btn g sm" onclick="washClearSelection()">Clear selection</button></div>':"";
   const columns=head?9:8;
-  return selectAll+bulk+'<div class="wc-table-wrap"><table class="wc-table wc-compact wc-portfolio-table"><thead><tr><th>'+(head?'<input type="checkbox" aria-label="Select plants on this page" '+(allChecked?"checked":"")+' onclick="washSelectPage(this.checked)"/>':'')+'</th><th>Plant</th><th>Current cycle progress</th><th>Monthly cycles</th><th>Today / latest report</th>'+(head?'<th>Weekly compliance</th>':'')+'<th>Deadline</th><th>Assignee</th><th></th></tr></thead><tbody>'+(body||'<tr><td colspan="'+columns+'" class="wc-empty">No plants match. Clear a filter to see more.</td></tr>')+'</tbody></table></div>'+pager;
+  return selectAll+bulk+'<div class="wc-table-wrap"><table class="wc-table wc-compact wc-portfolio-table"><thead><tr><th>'+(head?'<input type="checkbox" aria-label="Select plants on this page" '+(allChecked?"checked":"")+' onclick="washSelectPage(this.checked)"/>':'')+'</th><th>Plant</th><th>Current cycle progress</th><th>Monthly cycles</th><th>Today / latest report</th>'+(head?'<th>Cycle compliance</th>':'')+'<th>Deadline</th><th>Assignee</th><th></th></tr></thead><tbody>'+(body||'<tr><td colspan="'+columns+'" class="wc-empty">No plants match. Clear a filter to see more.</td></tr>')+'</tbody></table></div>'+pager;
  }
  /* ---- day-by-day: All plants (totals per day) or a single plant ---- */
  function dayRows(sel){
@@ -227,7 +242,7 @@
   const photos=date=>reports.filter(r=>r.plant_id===sel&&r.report_date===date).reduce((n,r)=>n+(r.evidence||[]).length,0);
   const head='<div class="wc-day-top"><div class="field" style="min-width:240px"><span class="lbl">Show</span><select class="sel" onchange="washDaySelect(this.value)"><option value="all"'+(single?"":" selected")+'>All plants ('+plants.length+')</option>'+plants.map(p=>'<option value="'+h(p.plant_id)+'"'+(p.plant_id===sel?" selected":"")+'>'+h(p.plant)+' · '+h(p.site_code)+'</option>').join("")+'</select></div>'+
    '<div class="wc-day-sum">'+chip(tot.c+" tables cleaned this month","ok")+(tot.p?chip(tot.p+" awaiting confirmation","info"):"")+(todayRow?chip("Today: "+(todayRow.confirmed+todayRow.pending)+" tables","mute"):"")+
-   (single&&pl?chip(pl.cycles_this_month+" of "+pl.monthly_target+" cycles done","info")+(team&&pl.weekly_compliance_percent!=null?chip("Weekly compliance "+pl.weekly_compliance_percent+"%",pl.weekly_compliance_percent>=pl.compliance_threshold_percent?"ok":pl.weekly_compliance_percent>=pl.compliance_threshold_percent-15?"warn":"crit"):"")+(pl.assignee_name?chip("Assignee: "+pl.assignee_name,"mute"):""):chip(rows.length?(rows[0].plants.length+" plants"):"0 plants","mute"))+'</div></div>';
+   (single&&pl?chip(pl.cycles_this_month+" of "+pl.monthly_target+" cycles done","info")+(team&&ccPct(pl)!=null?chip(ccWin(pl.cycle_compliance)+" compliance "+ccRatio(pl.cycle_compliance)+" tables",ccTone(ccPct(pl),pl.compliance_threshold_percent)):"")+(pl.assignee_name?chip("Assignee: "+pl.assignee_name,"mute"):""):chip(rows.length?(rows[0].plants.length+" plants"):"0 plants","mute"))+'</div></div>';
   const th='<th>Date</th><th>Tables cleaned</th><th>Awaiting confirmation</th>'+(team?'<th>Target</th><th>vs target</th>':'')+(single?'<th>Status</th><th>Reported by</th><th>Photos</th>':'<th>Plants reported</th>');
   const body=rows.map(r=>{
    const n=r.confirmed+r.pending,pct=r.target?Math.min(100,Math.round(100*r.confirmed/r.target)):null,bar='<div class="wc-bar wc-bar-sm"><i class="wc-bar-ok" style="width:'+Math.round(100*r.confirmed/max)+'%"></i><i class="wc-bar-pend" style="width:'+Math.round(100*r.pending/max)+'%"></i></div>';
@@ -267,10 +282,10 @@
  function rankingHtml(){
   const by={};
   (data().plants||[]).forEach(p=>{if(!p.assignee_name)return;const r=by[p.assignee_name]=by[p.assignee_name]||{name:p.assignee_name,plants:0,done:0,target:0,wk:0,delay:0,ex:0,t7:0,thr:0};
-   r.plants++;r.done+=p.cycles_this_month||0;r.target+=p.monthly_target||3;r.wk+=p.weekly_compliance_percent||0;r.delay+=p.average_delay_days||0;r.ex+=p.exceptions_this_month||0;r.thr+=p.compliance_threshold_percent||85;r.t7+=(p.productivity||[]).reduce((n,x)=>n+x.tables,0)});
+   r.plants++;r.done+=p.cycles_this_month||0;r.target+=p.monthly_target||3;r.wk+=ccPct(p)||0;r.delay+=p.average_delay_days||0;r.ex+=p.exceptions_this_month||0;r.thr+=p.compliance_threshold_percent||85;r.t7+=(p.productivity||[]).reduce((n,x)=>n+x.tables,0)});
   const list=Object.values(by).map(r=>({name:r.name,plants:r.plants,done:r.done,target:r.target,wk:Math.round(r.wk/r.plants),thr:Math.round(r.thr/r.plants),delay:Math.round(10*r.delay/r.plants)/10,ex:r.ex,t7:r.t7})).sort((a,b)=>b.wk-a.wk||a.delay-b.delay||b.done-a.done);
   if(!list.length)return '<div class="wc-empty">No plant has an Assignee yet.</div>';
-  return '<div class="wc-table-wrap"><table class="wc-table wc-compact" style="min-width:640px"><thead><tr><th>Rank</th><th>Assignee</th><th>Plants</th><th>Cycles this month</th><th>Weekly compliance</th><th>Avg delay</th><th>Tables cleaned (7 d)</th><th>Exceptions</th></tr></thead><tbody>'+list.map((r,i)=>'<tr><td><b>#'+(i+1)+'</b></td><td><b>'+h(r.name)+'</b></td><td>'+r.plants+'</td><td>'+r.done+' / '+r.target+'</td><td>'+chip(r.wk+"%",r.wk>=r.thr?"ok":r.wk>=r.thr-15?"warn":"crit")+'</td><td>'+r.delay+' d</td><td>'+r.t7+'</td><td>'+r.ex+'</td></tr>').join("")+'</tbody></table></div>';
+  return '<div class="wc-table-wrap"><table class="wc-table wc-compact" style="min-width:640px"><thead><tr><th>Rank</th><th>Assignee</th><th>Plants</th><th>Cycles this month</th><th>Cycle compliance</th><th>Avg delay</th><th>Tables cleaned (7 d)</th><th>Exceptions</th></tr></thead><tbody>'+list.map((r,i)=>'<tr><td><b>#'+(i+1)+'</b></td><td><b>'+h(r.name)+'</b></td><td>'+r.plants+'</td><td>'+r.done+' / '+r.target+'</td><td>'+chip(r.wk+"%",r.wk>=r.thr?"ok":r.wk>=r.thr-15?"warn":"crit")+'</td><td>'+r.delay+' d</td><td>'+r.t7+'</td><td>'+r.ex+'</td></tr>').join("")+'</tbody></table></div>';
  }
 
  window.washOpenRegister=function(bucket){const ui=S._washUi=S._washUi||{q:"",bucket:"all",show:"all",assignee:"all",region:"all",sort:"late",page:1,pageSize:12,selected:[]};ui.bucket=bucket||"all";ui.page=1;S.washF=Object.assign({},ui);S.view="om-module";S.omTab="washing";render()};
@@ -434,7 +449,7 @@
   const f=S.washF=Object.assign({},ui);
   const plants=d.plants||[],unconfigured=d.unconfigured||[],allN=plants.length+unconfigured.length,m=d.overdue_matrix||{};
   S._currentUserId=d.viewer_user_id||S._currentUserId;
-  const wk=pf.weekly_compliance_percent,thr=(plants[0]&&plants[0].compliance_threshold_percent)||85;
+  const cc=pf.cycle_compliance||null,wk=cc&&cc.due?cc.percent:null,thr=(plants[0]&&plants[0].compliance_threshold_percent)||85;
   const done=pf.cycles_completed_month||0,target=pf.cycles_target_month||0,late=(m["1d"]||0)+(m["3d"]||0)+(m["7d"]||0);
   const howTo=head?"Every plant needs 3 full washing cycles a month (all tables each time), due by the 10th, 20th and month-end — the dates can be changed per plant. Site Engineers report the tables cleaned each day; once all tables are confirmed the next cycle starts automatically.":"Report how many tables you cleaned each day with before and after photos. When all tables are cleaned and confirmed, the next cycle starts automatically.";
   const header='<div class="wx-head"><div class="wx-title"><span class="wx-ico" aria-hidden="true">💧</span><div><h1>Plant washing</h1><p>'+allN+' plant'+(allN===1?'':'s')+' · 3 cycles a month <span class="wx-info" tabindex="0" title="'+h(howTo)+'">ⓘ How it works</span></p></div></div>'+
@@ -463,7 +478,7 @@
   const kt=(label,value,note,color,attr,on,pct)=>kpiTile(label,value,note,color,attr,{on:!!on,pct});
   const kpis='<div class="gx-kpis">'+
    kt("Cycles this month",done+' <em class="gx-of">/ '+target+'</em>',cyPct+"% of monthly cycles complete","var(--success)",'onclick="washGlance(\'state\',\'done\')"',f.state==="done",cyPct)+
-   (head?kt("Weekly compliance",wk==null?"—":wk+"%","target "+thr+"% · "+plural(pf.plants_below_threshold||0,"plant")+" below",wkTone,'onclick="washGlance(\'show\',\'below\')"',f.show==="below",wk==null?undefined:wk):'')+
+   (head?kt("Compliance"+(cc&&cc.cycle_no?" · cycle "+cc.cycle_no:""),wk==null?"—":ccRatio(cc)+' <em class="gx-of">tables</em>',(cc&&cc.start?fmt(cc.start)+"–"+fmt(cc.end)+" · ":"")+"target "+thr+"% · "+plural(pf.plants_below_threshold||0,"plant")+" below",wkTone,'onclick="washGlance(\'show\',\'below\')"',f.show==="below",wk==null?undefined:wk):'')+
    (head?kt("Behind deadline",late,late?plural(late,"plant")+" past a cycle deadline":"every plant on track",late?"var(--danger)":"var(--success)",'onclick="washGlance(\'state\',\'late\')"',f.state==="late",allN?Math.round(100*late/allN):0):'')+
    kt("Awaiting confirmation",pf.pending_reviews||0,"daily report"+((pf.pending_reviews||0)===1?"":"s")+" to review","var(--info)",'onclick="washGlance(\'show\',\'review\')"',f.show==="review")+
    kt("Tables cleaned today",pf.tables_washed_today||0,"confirmed today","#0891B2","")+'</div>';
@@ -472,16 +487,16 @@
    :'<b>'+done+' of '+target+' cycles complete</b> · '+(pf.pending_reviews||0)+' report'+((pf.pending_reviews||0)===1?'':'s')+' awaiting confirmation';
   const hero='<div class="gx-hero gx-hero-wash"><div class="gx-hero-copy"><span class="gx-eyebrow">PLANT WASHING · AT A GLANCE</span><h2>'+(f.plant!=="all"?h((plants.concat(unconfigured).find(p=>p.plant_id===f.plant)||{}).plant||"Selected plant"):"Portfolio washing")+'</h2><p>'+heroLine+'</p>'+
    (head&&late?'<button type="button" class="gx-hero-cta" onclick="washGlance(\'state\',\'late\')">Show late plants →</button>':'')+'</div>'+
-   '<div class="gx-hero-score">'+(G?G.scoreRing(head?(wk==null?0:wk):cyPct,scoreColor):'')+'<div><b>'+(head?(wk==null?"—":wk+"%"):cyPct+"%")+'</b><small>'+(head?"weekly compliance":"cycles complete")+'</small><span>'+(head?"target "+thr+"% · "+done+" / "+target+" cycles":done+" / "+target+" cycles this month")+'</span></div></div></div>';
+   '<div class="gx-hero-score">'+(G?G.scoreRing(head?(wk==null?0:wk):cyPct,scoreColor):'')+'<div><b>'+(head?(wk==null?"—":ccRatio(cc)):cyPct+"%")+'</b><small>'+(head?(cc&&cc.cycle_no?"cycle "+cc.cycle_no+" compliance (tables)":"current cycle compliance (tables)"):"cycles complete")+'</small><span>'+(head?"target "+thr+"% · "+done+" / "+target+" cycles":done+" / "+target+" cycles this month")+'</span></div></div></div>';
   const donutCard=G?G.donut({title:"Where the plants stand",sub:"Click a slice to list those plants",noun:"plants",attr:"data-wx-state",active:f.state,slices}):'';
   const maxCycles=Math.max(3,...plants.map(p=>p.monthly_target||3));
   const cycRows=[];for(let n=1;n<=maxCycles;n++){const c={n,done:0,run:0,wait:0,due:""};plants.forEach(p=>{const cy=(p.cycles||[]).find(x=>Number(x.cycle_no)===n);if(!cy)return;if(cy.state==="Completed")c.done++;else if(cy.state==="In progress")c.run++;else c.wait++;if(head&&cy.due_date&&(!c.due||cy.due_date<c.due))c.due=cy.due_date});cycRows.push(c)}
   const cycSeg=(n,state,count,cls,label)=>count?'<button type="button" class="gx-seg '+cls+(f.cyc===n+":"+state?" on":"")+'" style="flex:'+count+'" data-wx-cyc="'+n+':'+state+'" title="Cycle '+n+' · '+label+': '+plural(count,"plant")+' · click to list">'+count+'</button>':'';
   const cycleCard='<article class="gx-card"><header><h3>Cycle progress this month</h3><p>Plants per cycle · click a segment to list those plants</p></header><div class="gx-cycles">'+cycRows.map(c=>{const tot=c.done+c.run+c.wait;return '<div class="gx-cycle"><div class="gx-cycle-h"><b>Cycle '+c.n+'</b><small>'+(c.due?'first deadline '+fmt(c.due)+' · ':'')+c.done+' / '+tot+' done</small></div><div class="gx-segbar">'+(tot?cycSeg(c.n,"Completed",c.done,"done","Completed")+cycSeg(c.n,"In progress",c.run,"run","In progress")+cycSeg(c.n,"Not started",c.wait,"wait","Not started"):'<span class="gx-seg-empty">No plants set up</span>')+'</div></div>'}).join("")+'</div><div class="gx-mini-legend"><span><i style="background:#16A34A"></i>Completed</span><span><i style="background:#2563EB"></i>In progress</span><span><i style="background:#CBD5E1"></i>Not started</span></div></article>';
-  const lowest=plants.filter(p=>p.active!==false&&typeof p.weekly_compliance_percent==="number").sort((x,y)=>x.weekly_compliance_percent-y.weekly_compliance_percent||x.plant.localeCompare(y.plant)).slice(0,6);
-  const compCard=head?'<article class="gx-card"><header><h3>Lowest weekly compliance</h3><p>Plants furthest below target · click a plant to open its cycles and reports</p></header>'+(lowest.length?'<div class="gx-hbars gx-comp">'+lowest.map(p=>{const v=p.weekly_compliance_percent,t=p.compliance_threshold_percent||thr,c=v>=t?"#16A34A":v>=t-15?"#D97706":"#DC2626";return '<button type="button" class="gx-hbar" style="--c:'+c+'" onclick="openWashingPlantDetails(\''+h(p.plant_id)+'\')" title="'+h(p.plant)+': '+v+'% (target '+t+'%)"><span>'+h(p.plant)+'</span><i><b style="width:'+Math.max(v?4:0,Math.min(100,v))+'%"></b><u style="left:'+Math.min(100,t)+'%"></u></i><strong>'+v+'%</strong></button>'}).join("")+'</div>':'<div class="gx-allclear"><span>✓</span><b>No compliance data yet</b><small>Compliance appears once daily reports are confirmed.</small></div>')+'</article>':'';
+  const lowest=plants.filter(p=>p.active!==false&&ccPct(p)!=null).sort((x,y)=>ccPct(x)-ccPct(y)||x.plant.localeCompare(y.plant)).slice(0,6);
+  const compCard=head?'<article class="gx-card"><header><h3>Lowest cycle compliance</h3><p>Current cycle: tables done / due by today · click a plant to open its cycles and reports</p></header>'+(lowest.length?'<div class="gx-hbars gx-comp">'+lowest.map(p=>{const v=ccPct(p),t=p.compliance_threshold_percent||thr,c=v>=t?"#16A34A":v>=t-15?"#D97706":"#DC2626";return '<button type="button" class="gx-hbar" style="--c:'+c+'" onclick="openWashingPlantDetails(\''+h(p.plant_id)+'\')" title="'+h(p.plant+': '+ccRatio(p.cycle_compliance)+' tables ('+v+'%, target '+t+'%)')+'"><span>'+h(p.plant)+'</span><i><b style="width:'+Math.max(v?4:0,Math.min(100,v))+'%"></b><u style="left:'+Math.min(100,t)+'%"></u></i><strong>'+ccRatio(p.cycle_compliance)+'</strong></button>'}).join("")+'</div>':'<div class="gx-allclear"><span>✓</span><b>No compliance data yet</b><small>Compliance appears once daily reports are confirmed.</small></div>')+'</article>':'';
   const stats='<div class="gx-glance gx-wash">'+hero+kpis+'<div class="gx-grid '+(head?'gx-grid-3':'gx-grid-2')+'">'+donutCard+cycleCard+compCard+'</div></div>';
-  const counts={all:allN,attention:plants.filter(p=>p.active&&(p.overdue_bucket!=="on_track"||p.weekly_compliance_percent<p.compliance_threshold_percent)).length,review:plants.filter(p=>p.pending_tables_cleaned>0).length,notreported:0,notsetup:unconfigured.length,mine:plants.filter(p=>p.assignee_user_id===S._currentUserId).length};
+  const counts={all:allN,attention:plants.filter(p=>p.active&&(p.overdue_bucket!=="on_track"||ccPct(p)<p.compliance_threshold_percent)).length,review:plants.filter(p=>p.pending_tables_cleaned>0).length,notreported:0,notsetup:unconfigured.length,mine:plants.filter(p=>p.assignee_user_id===S._currentUserId).length};
   const rd=repDay(),rdLoaded=!!dayEntry(rd).status||rd===todayIso(),repName=rd===todayIso()?"Not reported today":"Not reported "+fmt(rd);
   counts.notreported=rdLoaded?plants.filter(p=>notReportedOn(p,rd)).length:"…";
   const views=head?[["all","All"],["attention","Needs attention"],["review","Awaiting review"],["notreported",repName],["notsetup","Not set up"]].concat(role()==="Assignee"?[["mine","Mine"]]:[]):[];
@@ -503,7 +518,7 @@
    '<div class="wx-view" role="group" aria-label="Layout"><button type="button" class="'+(ui.view!=="table"?'on':'')+'" onclick="washSetView(\'tiles\')" title="Plant tiles" aria-label="Plant tiles">▦</button><button type="button" class="'+(ui.view==="table"?'on':'')+'" onclick="washSetView(\'table\')" title="Table" aria-label="Table">☰</button></div></div>';
   const results='<div class="wc-card wx-results" id="wc-results"><div class="wx-results-h"><h2>'+(f.plant!=="all"?"Plant":"Plants")+' <span>'+shown+' of '+allN+'</span></h2>'+(ui.view!=="table"?legend:'<span class="wx-grow"></span>')+tools+'</div>'+washFocusBar(f)+'<div id="wc-register">'+resultsHtml()+'</div></div>';
   const lower='<div class="wc-two">'+'<div class="wc-card"><div class="row between wrap" style="gap:8px;align-items:center"><h2>Cycle updates'+(head?' &amp; confirmations':'')+'</h2><button type="button" class="btn o sm" onclick="openWashDaySummary()" title="Cycles completed and confirmations done on one day, for one plant or all plants">📊 Day summary</button></div><p class="sub">Reports waiting for confirmation, cycles completed and the next cycle that started.</p>'+todayStrip()+feedHtml()+'</div>'+
-   (head?'<div class="wc-card"><h2>Assignee performance</h2><p class="sub">Ranked by weekly compliance, then average delay. O&amp;M team only.</p>'+rankingHtml()+'</div>':'')+'</div>';
+   (head?'<div class="wc-card"><h2>Assignee performance</h2><p class="sub">Ranked by current-cycle compliance, then average delay. O&amp;M team only.</p>'+rankingHtml()+'</div>':'')+'</div>';
   return '<div class="wc-page wx-page">'+header+stats+bar+results+lower+'</div>';
  };
 
@@ -538,7 +553,9 @@
  };
 
  /* ---------- plant overlay ---------- */
- window.openWashingPlantDetails=function(id){S.washTab=null;S.washMonth=(data().today||"").slice(0,7);S.washDetailsPlant=id;S.washReportPlant=id;S.washDayFocus=null;S.washEditReport=null;S.washShowAllReports=false;S.washSheetCycle=null;S.washSheetFocus=null;S.washReportDraft={status:"Done",tables:"",remarks:"",date:""};S.modal="washingPlantDetails";S.modalCtx={};render()};
+ window.openWashingPlantDetails=function(id){
+  /* a month sheet loaded more than a minute ago is fetched again: someone else may have recorded or confirmed days */
+  const mc=monthCache();Object.keys(mc).forEach(k=>{if(k.startsWith(id+"|")&&Date.now()-(mc[k]._at||0)>WASH_STALE_MS)delete mc[k]});S.washTab=null;S.washMonth=(data().today||"").slice(0,7);S.washDetailsPlant=id;S.washReportPlant=id;S.washDayFocus=null;S.washEditReport=null;S.washShowAllReports=false;S.washSheetCycle=null;S.washSheetFocus=null;S.washReportDraft={status:"Done",tables:"",remarks:"",date:""};S.modal="washingPlantDetails";S.modalCtx={};render()};
  window.washShowAllReports=async function(){S.washShowAllReports=true;S._washReportDays=90;render();try{await loadOverview()}catch(e){toast(detailOf(e,"Could not load older reports."))}};
  window.washFocusDay=function(d){S.washDayFocus=S.washDayFocus===d?null:d;render()};
  /* Site Engineer: pick any day in the last 45 days, enter the cleaned count and add before/after photos. The O&M Head / the plant's Assignee confirm it. */
@@ -576,7 +593,7 @@
   if(!force&&old)return;
   if(old&&old.cycles)old.refreshing=true;else c[key]={loading:true};
   apiFetch("/api/scheduled/washing/plants/"+encodeURIComponent(plantId)+"/cycles?month="+encodeURIComponent(month))
-   .then(r=>{c[key]=r}).catch(e=>{if(old&&old.cycles){old.refreshing=false;toast(detailOf(e,"Could not refresh this month."))}else c[key]={error:detailOf(e,"Could not load this month.")}})
+   .then(r=>{r._at=Date.now();c[key]=r}).catch(e=>{if(old&&old.cycles){old.refreshing=false;toast(detailOf(e,"Could not refresh this month."))}else c[key]={error:detailOf(e,"Could not load this month.")}})
    .finally(()=>{if(S.modal==="washingPlantDetails"&&S.washDetailsPlant===plantId)render()});
  }
  function monthNav(month){
@@ -637,7 +654,7 @@
   const shown=focus?recent.slice(0,200):S.washShowAllReports?reports.slice(0,200):pending.concat(reports.filter(r=>!r.can_review).slice(0,Math.max(0,12-pending.length)));
   const photoCount=day=>reports.filter(r=>r.report_date===day).reduce((n,r)=>n+(r.evidence||[]).length,0),canDayReport=isField()||isTeam();
   const days=(p.daily_status||[]).slice().reverse().map(d=>'<tr class="wc-day'+(focus===d.date?" focus":"")+'" onclick="washFocusDay(\''+d.date+'\');washTab(\'reports\')"><td><b>'+fmt(d.date)+'</b></td>'+(head?'<td>'+d.target+'</td>':'')+'<td>'+d.confirmed+'</td><td>'+(d.pending||"—")+'</td><td>'+chip(d.status,dtone(d.status))+'</td><td>'+h(d.reported_by||"—")+'</td><td>'+(photoCount(d.date)||"—")+'</td>'+(canDayReport?'<td>'+(d.date<=todayIso()&&(head||d.date>=isoDaysAgo(45))?'<button class="btn o sm" onclick="event.stopPropagation();washReportForDay(\''+d.date+'\');washTab(\'record\')">Report / photos</button>':'')+'</td>':'')+'</tr>').join("");
-  const wk=p.weekly_compliance_percent,thr=p.compliance_threshold_percent;
+  const wk=ccPct(p),thr=p.compliance_threshold_percent;
   const canReport=isField()||isTeam();
   const allReports=reports.length>shown.length&&!focus;
   const reviewGuidance=head?(pending.length?'<div class="wc-flow-note"><b>'+pending.length+' daily report'+(pending.length===1?'':'s')+' waiting for your review</b><p>Check the before and after photos, then confirm. The cycle completes automatically once all registered tables are confirmed.</p></div>':''):'';
@@ -648,7 +665,7 @@
   const cur=(p.cycles||[]).find(c=>c.state==="In progress")||(p.cycles||[]).find(c=>c.state==="Upcoming");
   const conf=cur?cur.confirmed||0:p.table_count,pend=cur?cur.pending||0:0;
   const top='<div class="wx-ov-top">'+ring(conf,pend,p.table_count,cur?"Cycle "+cur.cycle_no:"Done")+'<div class="wx-ov-k"><b>'+(cur?conf+(pend?' <em>+'+pend+' awaiting</em>':'')+' of '+p.table_count+' tables · cycle '+cur.cycle_no:'All 3 cycles done this month')+'</b><div class="wx-ov-chips">'+
-   (head?(p.overdue_bucket==="on_track"?chip("On track · next deadline "+fmt(p.next_due),"ok"):chip(p.overdue_days+" d late · cycle "+p.overdue_cycle+" was due "+fmt(p.next_due),TONE[p.overdue_bucket]))+chip("Weekly "+wk+"% (target "+thr+"%)",wk>=thr?"ok":wk>=thr-15?"warn":"crit"):'')+chip(p.cycles_this_month+" of "+p.monthly_target+" cycles this month","info")+'</div></div>'+
+   (head?(p.overdue_bucket==="on_track"?chip("On track · next deadline "+fmt(p.next_due),"ok"):chip(p.overdue_days+" d late · cycle "+p.overdue_cycle+" was due "+fmt(p.next_due),TONE[p.overdue_bucket]))+(wk==null?"":chip(ccWin(p.cycle_compliance)+": "+ccRatio(p.cycle_compliance)+" tables due by today (target "+thr+"%)",ccTone(wk,thr))):'')+chip(p.cycles_this_month+" of "+p.monthly_target+" cycles this month","info")+'</div></div>'+
    (head?'<button class="btn g sm" onclick="openWashingSetup(\''+h(p.plant_id)+'\')">Edit setup</button>':'')+'</div>';
   const body=tab==="cycles"?monthCyclesHtml(p):tab==="record"?sheetHtml(p):tab==="reports"?reviewGuidance+reportSection:daySection;
   return modal(h(p.plant)+' <small style="font-weight:500;color:var(--muted-foreground)">'+h(p.site_code)+'</small>',plural(p.table_count,"table")+' · washing Assignee: '+h(p.assignee_name||"not set"),

@@ -1,6 +1,6 @@
 /* Solar91 live refresh.
    Without this, every browser shows the data it loaded at login until the user reloads. Here each open tab asks a
-   very cheap server endpoint ("pulse": count + latest change time of issues) every 30 s. Only when that changes
+   very cheap server endpoint ("pulse": count + latest change time of issues and of PM work orders) every 30 s. Only when that changes
    does it fetch fresh data, update the lists in place, and raise a notification for fixed / newly assigned tickets. */
 (function(){
   "use strict";
@@ -61,7 +61,7 @@
     busy=true;lastTick=Date.now();
     try{
       var p=await apiFetch("/api/issues/pulse");
-      var fp=String(p&&p.count)+"|"+String(p&&p.latest);
+      var fp=String(p&&p.count)+"|"+String(p&&p.latest)+"|"+String(p&&p.tasks);   /* issues and PM work orders */
       if(base===null){base=fp;return}
       if(fp!==base&&!uiBusy()&&Date.now()-lastRefresh>=MIN_REFRESH_GAP){
         if(await refresh())base=fp;
