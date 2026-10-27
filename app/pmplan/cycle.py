@@ -4,10 +4,10 @@ A cycle is CYCLE_DAYS (30) days from its start date, the same length as the Mont
 (FREQ_DAYS["Monthly"]), so every unit comes back on the same cycle day next month.
 
   Plant side   Inverter (all units)            7 days
-               ACCB Panel (ACCB-1, -2) + MCCB  2 days, done together; ACCB-1 + ACCB-2 count as one job
+               ACCB Panel (ACCB-1, -2)         2 days; ACCB-1 + ACCB-2 count as one job
                VCB Panel                       2 days
                Transformer (IDT)               2 days
-               Aux. Transformer                2 days
+               Aux. Transformer + ACDB         2 days, shared; two separate jobs, each a single unit per plant
                4 Pole                          2 days
                Earthing (earth pit)            2 days
                Miscellaneous                   3 days  (the Miscellaneous job - Street Light, ERT, ... - counts as
@@ -21,8 +21,11 @@ The two "remaining days" phases share what is left of the 30 days after the fixe
 
 Phases never overlap at a plant (chained_window): a phase starts on its own cycle day or the day after the
 previous phase's work ends there, whichever is later. If the inverters at a plant run Nov 5-11 in a cycle that
-starts Nov 1, ACCB + MCCB move to Nov 12-13 and every later phase, through the GSS side, moves with them.
+starts Nov 1, ACCB moves to Nov 12-13 and every later phase, through the GSS side, moves with them.
 Used only by Preventive Maintenance planning (Add PM task, Assign to plants, Excel/CSV upload).
+
+NOT_IN_PM types (MCCB) are not maintained under PM at all: no new PM jobs, templates or unit counts for them.
+Work orders created before the change are kept as they are.
 """
 from __future__ import annotations
 
@@ -31,17 +34,20 @@ from typing import Any
 
 CYCLE_DAYS = 30
 MISC = "Miscellaneous"
-# One PM job per plant whatever the unit count: ACCB-1 and ACCB-2 are maintained together, and the
-# Miscellaneous job covers the small items (Street Light, ERT, ...) in one visit.
-ONE_JOB_TYPES = ("ACCB Panel", MISC)
+# One PM job per plant whatever the unit count: ACCB-1 and ACCB-2 are maintained together, a plant has one
+# Aux. Transformer and one ACDB (separate jobs), and the Miscellaneous job covers the small items
+# (Street Light, ERT, ...) in one visit.
+ONE_JOB_TYPES = ("ACCB Panel", "Aux. Transformer", "ACDB", MISC)
+# Removed from Preventive Maintenance (still an equipment / issue type elsewhere)
+NOT_IN_PM = ("MCCB",)
 
 # (area, phase name, equipment types, days; None = share the remaining days)
 _PHASES: list[tuple[str, str, tuple[str, ...], int | None]] = [
     ("Plant side", "Inverter", ("Inverter",), 7),
-    ("Plant side", "ACCB + MCCB", ("ACCB Panel", "MCCB"), 2),
+    ("Plant side", "ACCB", ("ACCB Panel",), 2),
     ("Plant side", "VCB", ("VCB Panel",), 2),
     ("Plant side", "IDT Transformer", ("Transformer",), 2),
-    ("Plant side", "Aux. Transformer", ("Aux. Transformer",), 2),
+    ("Plant side", "Aux. Transformer + ACDB", ("Aux. Transformer", "ACDB"), 2),
     ("Plant side", "4 Pole", ("4 Pole",), 2),
     ("Plant side", "Earth pit", ("Earthing",), 2),
     ("Plant side", MISC, (MISC,), 3),
@@ -81,6 +87,11 @@ def phase_for(equipment_type: str) -> dict[str, Any]:
 def one_job(equipment_type: str) -> bool:
     """True when the equipment is planned as a single PM job per plant (ONE_JOB_TYPES)."""
     return (equipment_type or "").strip().casefold() in {t.casefold() for t in ONE_JOB_TYPES}
+
+
+def in_pm(equipment_type: str) -> bool:
+    """False for equipment removed from Preventive Maintenance (NOT_IN_PM)."""
+    return (equipment_type or "").strip().casefold() not in {t.casefold() for t in NOT_IN_PM}
 
 
 def phase_index(equipment_type: str) -> int:

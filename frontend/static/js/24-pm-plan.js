@@ -19,7 +19,9 @@
   const plantObj=name=>(S.plants||[]).find(p=>p.name===name||p.id===name);
   const plantKey=p=>p.dbId||p.id;
   const mdash=a=>a.length>1?a[0]+"–"+a[a.length-1]:String(a[0]);
-  const ONE_JOB=["ACCB Panel","Miscellaneous"];   /* one PM job per plant (app/pmplan/cycle.py ONE_JOB_TYPES) */
+  const ONE_JOB=typeof PM_ONE_JOB_TYPES!=="undefined"?PM_ONE_JOB_TYPES:[];   /* one PM job per plant (app/pmplan/cycle.py ONE_JOB_TYPES) */
+  const ONE_JOB_NOTE={"ACCB Panel":"ACCB-1 and ACCB-2 are maintained together as one job","Aux. Transformer":"One Aux. Transformer per plant","ACDB":"One ACDB per plant","Miscellaneous":"The chosen items are one job"};
+  const MISC_ITEMS=typeof PM_MISC_ITEMS!=="undefined"?PM_MISC_ITEMS:[];
   /* Equipment <select> grouped by scope section. EVERY type stays selectable, whatever its section. */
   function typeOpts(sel){
     const names=typeNames(),secs=(typeof SCOPE_SECTIONS!=="undefined"?SCOPE_SECTIONS:[]).filter(s=>s.types),named=[];
@@ -64,7 +66,7 @@
   }
   async function loadTemplates(){try{S._pmTpl=await apiFetch("/api/pm-plan/templates")}catch(e){S._pmTpl=S._pmTpl||[]}return S._pmTpl}
   async function refreshTasks(){try{S.tasks=await apiFetch("/api/scheduled/tasks")}catch(e){}}
-  /* 30-day PM cycle: Plant side (Inverter days 1–7, ACCB + MCCB, VCB, …) then GSS side. Source: GET /api/pm-plan/cycle. */
+  /* 30-day PM cycle: Plant side (Inverter days 1–7, ACCB, VCB, …) then GSS side. Source: GET /api/pm-plan/cycle. */
   async function loadCycle(){if(!S._pmCycle)try{S._pmCycle=await apiFetch("/api/pm-plan/cycle")}catch(e){}return S._pmCycle}
   function cycleWin(type,start){
     const ph=(S._pmCycle&&S._pmCycle.phases)||[];if(!ph.length||!start)return null;
@@ -123,7 +125,9 @@
       d.placeholder=r&&r.cfg&&r.cfg.total_units&&r.cfg.units_per_day?"Saved pace: "+Math.ceil(r.cfg.total_units/r.cfg.units_per_day)+" day(s)":"e.g. 3"}
     /* ACCB-1 + ACCB-2 and the Miscellaneous items are one job per plant; the server plans them as one unit too */
     const one=ONE_JOB.indexOf(v("pq-type"))>=0;t.disabled=one;
-    if(one){t.value="1";t.title=v("pq-type")==="ACCB Panel"?"ACCB-1 and ACCB-2 are maintained together as one job":"Street Light, ERT and other small items are one job"}else t.title="";
+    if(one){t.value="1";t.title=ONE_JOB_NOTE[v("pq-type")]||"One job per plant"}else t.title="";
+    const misc=document.getElementById("pq-misc");if(misc)misc.style.display=v("pq-type")==="Miscellaneous"?"":"none";
+    const task=document.getElementById("pq-task");if(task&&v("pq-type")==="Miscellaneous"&&!task.value.trim())task.value="Miscellaneous PM";else if(task&&v("pq-type")!=="Miscellaneous"&&task.value==="Miscellaneous PM")task.value="";
     window.pmCycleHint("pq");
     window.pmUnitHint("pq");
   };
@@ -155,7 +159,11 @@
        '<div class="field"><span class="lbl">Equipment type</span><select id="pq-type" class="inp" onchange="pmQuickType()">'+typeOpts(type)+'</select></div>'+
        '<div class="field"><span class="lbl">Plant</span><select id="pq-plant" class="inp" onchange="pmQuickCfg()"><option value="__all"'+(first==="__all"?" selected":"")+'>All plants</option>'+(S.plants||[]).map(p=>'<option value="'+esc(p.name)+'"'+(p.name===first?" selected":"")+'>'+esc(typeof pmPlantLabelText==="function"?pmPlantLabelText(p.name):p.name)+'</option>').join("")+'</select></div>'+
       '</div>'+
-      '<div class="field"><span class="lbl">Task — what to do</span><input id="pq-task" class="inp" list="pq-sugg" oninput="pmQuickFill()" placeholder="Pick a suggestion or type your own"/><datalist id="pq-sugg">'+suggestions(type).map(x=>'<option value="'+esc(x)+'"></option>').join("")+'</datalist></div>'+cycleBox("pq")+
+      '<div class="field"><span class="lbl">Task — what to do</span><input id="pq-task" class="inp" list="pq-sugg" oninput="pmQuickFill()" placeholder="Pick a suggestion or type your own"/><datalist id="pq-sugg">'+suggestions(type).map(x=>'<option value="'+esc(x)+'"></option>').join("")+'</datalist></div>'+
+      /* Miscellaneous: pick what this one job covers; the choice is saved as the task's remark */
+      '<div id="pq-misc" class="field"'+(type==="Miscellaneous"?'':' style="display:none"')+'><span class="lbl">Items in this Miscellaneous job (saved as the remark)</span>'+
+       '<div style="display:flex;flex-wrap:wrap;gap:6px 16px;margin:2px 0 6px">'+MISC_ITEMS.map(x=>'<label style="display:flex;gap:6px;align-items:center;font-size:12.5px"><input type="checkbox" class="pq-misc-item" value="'+esc(x)+'"/> '+esc(x)+'</label>').join("")+'</div>'+
+       '<input id="pq-misc-other" class="inp" maxlength="200" placeholder="Other item(s), optional — e.g. fire extinguisher"/></div>'+cycleBox("pq")+
       '<div class="kgrid" style="grid-template-columns:1fr 1fr 1fr;gap:12px">'+
        '<div class="field"><span class="lbl">Number of units</span><input id="pq-total" class="inp" type="number" min="1" max="500" oninput="pmUnitHint(\'pq\')"/></div>'+
        '<div class="field"><span class="lbl">Finish within (days)</span><input id="pq-days" class="inp" type="number" min="1" max="366" placeholder="e.g. 3" oninput="pmUnitHint(\'pq\')"/></div>'+
@@ -180,7 +188,14 @@
     const sel=v("pq-plant"),plant=sel==="__all"?null:plantObj(sel);
     if(sel!=="__all"&&!plant){toast("Select a valid plant.");return}
     const total=parseInt(v("pq-total"),10)||null,days=parseInt(v("pq-days"),10)||null;
-    await run("/api/pm-plan/tasks",{
+    let remarks=null;
+    if(v("pq-type")==="Miscellaneous"){
+      const items=[].slice.call(document.querySelectorAll(".pq-misc-item")).filter(e=>e.checked).map(e=>e.value),other=v("pq-misc-other").trim();
+      if(other)items.push(other);
+      if(!items.length){toast("Choose at least one item for the Miscellaneous job (e.g. Street Light, ERT).");return}
+      remarks=items.join(", ");
+    }
+    await run("/api/pm-plan/tasks",{remarks,
       equipment_type:v("pq-type"),task_name:task,frequency:v("pq-freq"),safety:v("pq-safety"),
       est_hours:parseFloat(v("pq-hours"))||null,plants:plant?[plantKey(plant)]:["All plants"],
       start_date:v("pq-due"),assignees:v("pq-assignee")?[v("pq-assignee")]:[],
@@ -271,14 +286,15 @@
   function scopeModal(){
     const secOf=n=>{if(!pmTypeVisible(n))return "hidden";const s=SCOPE_SECTIONS.find(x=>x.types&&x.types.indexOf(n)>=0);return s?s.key:"misc"};
     const choices=[["pv","PV Area / Photovoltaic Area"],["plant","Plant Side"],["gss","GSS Side"],["misc","Miscellaneous"],["hidden","Hidden — not offered in PM"]];
-    const rows=TASK_TYPES.map(t=>t.name).map(n=>{const cur=secOf(n);
+    const rows=TASK_TYPES.map(t=>t.name).filter(n=>PM_NOT_IN_PM.indexOf(n)<0).map(n=>{const cur=secOf(n);
       return '<div class="row between" style="gap:10px;padding:6px 0;border-top:1px solid var(--border)"><span style="font-size:13px">'+esc(n)+'</span><select class="inp pm-scope-sel" data-type="'+esc(n)+'" style="max-width:250px">'+choices.map(o=>'<option value="'+o[0]+'"'+(o[0]===cur?" selected":"")+'>'+o[1]+'</option>').join("")+'</select></div>'}).join("");
     return modal("Edit maintenance scope","Choose the section for each equipment. Hidden equipment is not offered in Add PM task / template or the scope library. Existing tasks and Washing are not affected.",
       '<div style="max-height:56vh;overflow:auto;padding-right:6px">'+rows+'</div>',
       '<button class="btn o" onclick="pmScopeReset()">Restore standard lists</button><button class="btn o" onclick="closeModal()">Cancel</button><button class="btn p" onclick="pmScopeSave()">Save scope</button>',true);
   }
   window.pmScopeSave=async function(){
-    const body={sections:{pv:[],plant:[],gss:[]},hidden:[]};
+    /* `known`: every type on screen now, so equipment added to the standard lists later can be placed automatically */
+    const body={sections:{pv:[],plant:[],gss:[]},hidden:[],known:TASK_TYPES.map(t=>t.name)};
     [].slice.call(document.querySelectorAll(".pm-scope-sel")).forEach(e=>{const k=e.value,n=e.getAttribute("data-type");if(k==="hidden")body.hidden.push(n);else if(body.sections[k])body.sections[k].push(n)});
     try{const c=await apiFetch("/api/pm-plan/scope",{method:"PUT",body});applyScopeConfig(c);closeModal();render();toast("Maintenance scope saved.")}catch(e){toast(errText(e))}
   };

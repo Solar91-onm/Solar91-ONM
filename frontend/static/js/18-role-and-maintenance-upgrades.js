@@ -184,7 +184,7 @@
       '<div class="bn-info banner"><b>Problem → planned task</b> — this uses the same asset/problem language as Site Issues, but creates recurring preventive work instead of a sudden-fault ticket.</div>'+
       '<div class="kgrid" style="grid-template-columns:1fr 1fr;gap:12px">'+
        '<div class="field"><span class="lbl">Plant</span><select id="pst-plant" class="inp">'+S.plants.map(p=>'<option'+(p.name===first?' selected':'')+'>'+esc(p.name)+'</option>').join("")+'</select></div>'+
-       '<div class="field"><span class="lbl">Asset / problem area</span><select id="pst-asset" class="inp" onchange="rev12RefreshProblemTask()">'+TASK_TYPES.map(t=>'<option>'+esc(t.name)+'</option>').join("")+'</select></div>'+
+       '<div class="field"><span class="lbl">Asset / problem area</span><select id="pst-asset" class="inp" onchange="rev12RefreshProblemTask()">'+TASK_TYPES.filter(t=>typeof PM_NOT_IN_PM==="undefined"||PM_NOT_IN_PM.indexOf(t.name)<0).map(t=>'<option>'+esc(t.name)+'</option>').join("")+'</select></div>'+
       '</div>'+
       '<div class="kgrid" style="grid-template-columns:1fr 1fr;gap:12px">'+
        '<div class="field"><span class="lbl">Problem / condition</span><select id="pst-problem" class="inp" onchange="rev12RefreshTaskOptions()">'+rev12Problems(asset).map(x=>'<option>'+esc(x)+'</option>').join("")+'</select></div>'+

@@ -74,7 +74,7 @@ def test_config_only_head_can_edit(client, db):
 
 def test_new_equipment_types_accepted_and_template_units(client, db):
     login_user(client, db, role="O&M Head")
-    for et in ("MCCB", "OLTC(RTCC)", "4 Pole", "VCB - GSS side"):
+    for et in ("OLTC(RTCC)", "4 Pole", "VCB - GSS side", "ACDB", "Miscellaneous"):
         r = client.post("/api/pm-plan/templates", json={"equipment_type": et, "task_name": f"{et} check", "units_per_day": 3})
         assert r.status_code == 201 and r.json()["units_per_day"] == 3
 

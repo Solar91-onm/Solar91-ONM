@@ -1404,8 +1404,10 @@ const TASK_TYPES=[
   {name:"VCB - GSS side",vertical:"VCB - GSS side",sub:["Breaker mechanical operation","Contact / terminal inspection","Relay & trip-circuit test","Spring charging mechanism","Interlock / indication check"]},
   {name:"4 Pole - GSS side",vertical:"4 Pole - GSS side",sub:["Structure and foundation inspection","Insulator / jumper inspection","Earthing connection check","Hardware tightening","Hotspot / corona inspection"]},
   {name:"Transmission line - GSS side",vertical:"Transmission line - GSS side",sub:["Line patrol","Conductor / sag inspection","Insulator / jumper inspection","Tower / pole / foundation inspection","Vegetation & ROW clearance"]},
-  /* Plant side PM job after Earthing: the small items done in one visit, counted as one job per plant (app/pmplan/cycle.py ONE_JOB_TYPES) */
-  {name:"Miscellaneous",vertical:"Miscellaneous",sub:["Street Light","ERT","Other miscellaneous item"]},
+  /* Plant side, shares the Aux. Transformer days as its own job: one ACDB per plant (app/pmplan/cycle.py ONE_JOB_TYPES) */
+  {name:"ACDB",vertical:"ACDB",sub:["Incomer / outgoing breaker operation","Busbar / terminal thermal scan","Cable / lug tightening","Indication / metering check","Panel cleaning"]},
+  /* Plant side PM job after Earthing: the items chosen from PM_MISC_ITEMS are done in one visit and saved as the job's remark */
+  {name:"Miscellaneous",vertical:"Miscellaneous",sub:["Check each item named in the remarks","Record readings / observations","Attach photo evidence","Raise an issue for any fault"]},
   {name:"BIKE",vertical:"BIKE",sub:[
    "Bike Not Starting",
    "Accident / Body Damage",
@@ -1429,7 +1431,7 @@ const TASK_TYPES=[
    Plant Side / GSS Side follow the order of the 30-day PM cycle (app/pmplan/cycle.py). */
 const SCOPE_DEFAULTS={
  pv:["Piling and Foundation","WMS"],
- plant:["Inverter","ACCB Panel","MCCB","VCB Panel","Transformer","Aux. Transformer","4 Pole","Earthing","Miscellaneous","Transmission line"],
+ plant:["Inverter","ACCB Panel","VCB Panel","Transformer","Aux. Transformer","ACDB","4 Pole","Earthing","Miscellaneous","Transmission line"],
  gss:["VCB - GSS side","4 Pole - GSS side","Transmission line - GSS side"],
  hidden:["Module","String","Modules cleaning","MMS","Switchyard - Plant side","Switchyard - GSS side","VCB-Kiosk"]};
 const SCOPE_SECTIONS=[
@@ -1440,13 +1442,28 @@ const SCOPE_SECTIONS=[
 ];
 /* Hidden = not offered in Add PM task / Add PM template / the scope library (data and washing are untouched). O&M Head can edit this. */
 let PM_HIDDEN=SCOPE_DEFAULTS.hidden.slice();
-function pmTypeVisible(n){return PM_HIDDEN.indexOf(n)<0}
+/* Removed from Preventive Maintenance altogether, whatever a saved scope says (app/pmplan/cycle.py NOT_IN_PM) */
+const PM_NOT_IN_PM=["MCCB"];
+function pmTypeVisible(n){return PM_HIDDEN.indexOf(n)<0&&PM_NOT_IN_PM.indexOf(n)<0}
+/* Equipment added to the standard lists after scopes could be saved; a scope saved without `known` never saw them. */
+const SCOPE_ADDED=["Miscellaneous","ACDB"];
 function applyScopeConfig(c){
  const d=c&&c.customised?c:{sections:SCOPE_DEFAULTS,hidden:SCOPE_DEFAULTS.hidden};
  SCOPE_SECTIONS.forEach(s=>{if(s.types)s.types=(d.sections[s.key]||[]).slice()});
  PM_HIDDEN=(d.hidden||[]).slice();
+ if(d===c){
+  /* a saved scope keeps the O&M Head's choices; equipment it never listed goes to its standard section, after the type before it */
+  const seen=new Set([].concat(PM_HIDDEN,d.known||[],...SCOPE_SECTIONS.filter(s=>s.types).map(s=>s.types)));
+  const fresh=n=>!seen.has(n)&&(Array.isArray(d.known)||SCOPE_ADDED.indexOf(n)>=0);
+  SCOPE_SECTIONS.forEach(s=>{if(!s.types)return;(SCOPE_DEFAULTS[s.key]||[]).forEach((n,i,arr)=>{if(!fresh(n))return;
+   const prev=arr.slice(0,i).reverse().find(p=>s.types.indexOf(p)>=0);s.types.splice(prev?s.types.indexOf(prev)+1:0,0,n);seen.add(n)})});
+ }
 }
 function scopeSectionOf(name){const s=SCOPE_SECTIONS.find(x=>x.types&&x.types.indexOf(name)>=0);return s?s.title:"Miscellaneous"}
+/* One PM job per plant whatever the unit count (app/pmplan/cycle.py ONE_JOB_TYPES) */
+const PM_ONE_JOB_TYPES=["ACCB Panel","Aux. Transformer","ACDB","Miscellaneous"];
+/* What a Miscellaneous PM job can cover; the chosen items are saved as the job's remark */
+const PM_MISC_ITEMS=["Street Light","ERT"];
 const TVERT={};TASK_TYPES.forEach(t=>TVERT[t.name]=t.vertical);
 const TSUB={};TASK_TYPES.forEach(t=>TSUB[t.name]=t.sub);
 const ESC_M=[{d:1,a:"Reminder sent to assignee"},{d:3,a:"Supervisor notified"},{d:7,a:"O&M Head notified"}];
@@ -1461,7 +1478,7 @@ function buildTables(plant,ninv,tpi,team){
 }
 function seedWashing(){const rows=[];Object.keys(WASH_TEAM).forEach(p=>{rows.push(...buildTables(p,6,4,WASH_TEAM[p]))});return rows}
 const EXC_REASONS=["Rain","Water shortage","Equipment breakdown","Access restriction","Safety stand-down","Other"];
-const VERTICALS=["Inverter", "Module", "Transformer", "Aux. Transformer", "VCB Panel", "VCB-Kiosk", "ACCB Panel", "Switchyard - Plant side", "Switchyard - GSS side", "Transmission line", "RMS", "WMS", "CCTV", "Boundary wall", "String", "Earthing", "LA", "Water pipe line", "Vegetation", "Modules cleaning", "ABT meters", "Street Light", "MMS", "Other", "MCCB", "OLTC(RTCC)", "4 Pole", "VCB - GSS side", "4 Pole - GSS side", "Transmission line - GSS side", "Miscellaneous"];
+const VERTICALS=["Inverter", "Module", "Transformer", "Aux. Transformer", "VCB Panel", "VCB-Kiosk", "ACCB Panel", "Switchyard - Plant side", "Switchyard - GSS side", "Transmission line", "RMS", "WMS", "CCTV", "Boundary wall", "String", "Earthing", "LA", "Water pipe line", "Vegetation", "Modules cleaning", "ABT meters", "Street Light", "MMS", "Other", "MCCB", "OLTC(RTCC)", "4 Pole", "VCB - GSS side", "4 Pole - GSS side", "Transmission line - GSS side", "Miscellaneous", "ACDB"];
 /* old category names (saved data from earlier versions) -> new vertical list */
 const VERT_MIGRATE={"Module/String":"Module","Combiner Box":"String","SCADA/Monitoring":"RMS","Civil/Structural":"Boundary wall","Security":"CCTV","Grid/Evacuation":"Transmission line","Weather Damage":"Other"};
 const SUBCATS={"Inverter": ["Fault code", "Communication loss", "Fan failure", "IGBT failure", "FirmWare"], "Module": ["Hotspot", "Glass breakage", "Delamination / discolouration", "Connector burn"], "Transformer": ["Oil leak", "DGA abnormality", "Bushing", "Tap changer"], "Aux. Transformer": ["Oil leak", "Tripping", "Bushing"], "VCB Panel": ["Breaker trip", "Relay fault", "Spring charging failure", "Terminal heating"], "VCB-Kiosk": ["Breaker trip", "Relay fault", "Door / enclosure damage"], "ACCB Panel": ["Breaker trip", "Terminal heating", "Metering fault"], "Switchyard - Plant side": ["Isolator fault", "CT / PT issue", "Insulator damage", "Earth switch"], "Switchyard - GSS side": ["Isolator fault", "CT / PT issue", "Insulator damage", "Breaker"], "Transmission line": ["Feeder trip", "Conductor damage", "Insulator damage", "Tower / pole damage"], "RMS": ["Communication loss", "Data gap", "Sensor failure"], "WMS": ["Sensor failure", "Communication loss", "Data gap", "Calibration"], "CCTV": ["Camera outage", "DVR / NVR failure", "Recording gap"], "Boundary wall": ["Crack / settlement", "Collapse", "Fence breach"], "String": ["Fuse failure", "String underperformance", "Terminal loose", "Cable damage"], "Earthing": ["High resistance", "Pit damage", "Loose connection"], "LA": ["Lightning strike damage", "Loose connection", "Counter fault"], "Water pipe line": ["Leakage", "Blockage", "Pump failure"], "Vegetation": ["Overgrowth", "Shading on modules", "Fire risk"], "Modules cleaning": ["Missed cleaning", "Water shortage", "Equipment failure"], "ABT meters": ["Communication loss", "Meter fault", "Data mismatch"], "Street Light": ["Fixture failure", "Cable fault", "Timer / control fault"], "MMS": ["Structure corrosion", "Loose bolts", "Foundation damage", "Tracker fault"], "Other": ["Other"]};

@@ -25,10 +25,10 @@ def _body(**over):
 def test_cycle_order_and_days_fill_thirty_days():
     days = {(p["area"], p["phase"]): (p["start_day"], p["end_day"]) for p in CYCLE}
     assert days[("Plant side", "Inverter")] == (1, 7)
-    assert days[("Plant side", "ACCB + MCCB")] == (8, 9)
+    assert days[("Plant side", "ACCB")] == (8, 9)
     assert days[("Plant side", "VCB")] == (10, 11)
     assert days[("Plant side", "IDT Transformer")] == (12, 13)
-    assert days[("Plant side", "Aux. Transformer")] == (14, 15)
+    assert days[("Plant side", "Aux. Transformer + ACDB")] == (14, 15)
     assert days[("Plant side", "4 Pole")] == (16, 17)
     assert days[("Plant side", "Earth pit")] == (18, 19)
     assert days[("Plant side", "Miscellaneous")] == (20, 22)
@@ -37,7 +37,7 @@ def test_cycle_order_and_days_fill_thirty_days():
     assert days[("GSS side", "4 Pole")] == (27, 28)
     assert days[("GSS side", "Transmission line")] == (29, 30)
     assert CYCLE[-1]["end_day"] == CYCLE_DAYS == 30
-    assert phase_for("ACCB Panel") is phase_for("MCCB")
+    assert phase_for("ACCB Panel")["equipment_types"] == ["ACCB Panel"]        # MCCB is no longer in PM
     assert phase_for("RMS")["phase"] == phase_for("CCTV")["phase"] == "Miscellaneous"
     assert phase_for("VCB Panel")["area"] == "Plant side" and phase_for("VCB - GSS side")["area"] == "GSS side"
     assert window("Earthing", START)["start"] == START + timedelta(days=17)
@@ -96,6 +96,50 @@ def test_miscellaneous_is_one_plant_side_job_after_earthing(client, db):
     task = db.query(OMTask).one()
     assert (task.unit_no, task.total_units) == (1, 1)
     assert (task.start_on, task.due_on) == (START + timedelta(days=19), START + timedelta(days=21))     # cycle days 20-22
+
+
+def test_miscellaneous_items_are_saved_as_the_remark(client, db):
+    login_user(client, db, role="O&M Head")
+    _plant(db)
+    res = client.post("/api/pm-plan/tasks", json=_body(equipment_type="Miscellaneous", task_name="Miscellaneous PM",
+                                                      remarks="Street Light, ERT"))
+    assert res.status_code == 200, res.text
+    assert "Remarks: Street Light, ERT" in [e["text"] for e in db.query(OMTask).one().log]
+
+
+def test_aux_transformer_and_acdb_are_separate_single_jobs_sharing_two_days(client, db):
+    assert phase_for("ACDB") is phase_for("Aux. Transformer") and phase_for("ACDB")["area"] == "Plant side"
+    login_user(client, db, role="O&M Head")
+    _plant(db)
+    for etype in ("Aux. Transformer", "ACDB"):
+        res = client.post("/api/pm-plan/tasks", json=_body(equipment_type=etype, task_name=f"{etype} PM", total_units=3))
+        assert res.status_code == 200, res.text
+        task = db.query(OMTask).filter(OMTask.task_type == etype).one()                 # one job each, not three
+        assert (task.unit_no, task.total_units) == (1, 1)
+        assert (task.start_on, task.due_on) == (START + timedelta(days=13), START + timedelta(days=14))   # cycle days 14-15
+    assert phase_for("4 Pole")["start_day"] == 16                                       # later phases keep their days
+
+
+def test_saved_scope_remembers_known_types(client, db):
+    login_user(client, db, role="O&M Head")
+    res = client.put("/api/pm-plan/scope", json={"sections": {"plant": ["Inverter"]}, "hidden": [],
+                                                 "known": ["Inverter", "ACDB", "not a type"]})
+    assert res.status_code == 200, res.text
+    assert client.get("/api/pm-plan/scope").json()["known"] == ["Inverter", "ACDB"]
+
+
+def test_mccb_is_removed_from_preventive_maintenance(client, db):
+    login_user(client, db, role="O&M Head")
+    _plant(db)
+    res = client.post("/api/pm-plan/tasks", json=_body(equipment_type="MCCB", task_name="MCCB PM"))
+    assert res.status_code == 422 and "no longer part of Preventive Maintenance" in res.text
+    assert client.post("/api/pm-plan/templates", json={"equipment_type": "MCCB", "task_name": "MCCB PM"}).status_code == 422
+    assert client.put("/api/pm-plan/unit-config", json={"plant": "KRN_01", "equipment_type": "MCCB", "total_units": 2,
+                                                        "units_per_day": 1}).status_code == 422
+    csv = "Equipment type,Plant(s),Task - what to do,Frequency\nMCCB,KRN_01,MCCB PM,Monthly\n".encode()
+    up = client.post("/api/pm-plan/import?dry_run=true", files={"file": ("plan.csv", csv, "text/csv")})
+    assert up.status_code == 422 and "no longer part of Preventive Maintenance" in up.text
+    assert db.query(OMTask).count() == 0
 
 
 def test_without_cycle_dates_are_unchanged(client, db):
@@ -249,10 +293,13 @@ def test_plant_then_gss_templates_upload_in_order(client, db):
     assert res.status_code == 200, res.text
     spans = [(s["equipment_type"], s["start"], s["end"]) for s in res.json()["schedule"]]
     assert spans[0] == ("Inverter", "2026-11-01", "2026-11-07")
-    assert ("ACCB Panel", "2026-11-08", "2026-11-09") in spans and ("MCCB", "2026-11-08", "2026-11-09") in spans
+    assert ("ACCB Panel", "2026-11-08", "2026-11-09") in spans and "MCCB" not in {s[0] for s in spans}
     assert spans[-2:] == [("Miscellaneous", "2026-11-20", "2026-11-22"), ("Transmission line", "2026-11-23", "2026-11-24")]
     assert db.query(OMTask).filter(OMTask.task_type == "ACCB Panel").count() == 1
     assert db.query(OMTask).filter(OMTask.task_type == "Miscellaneous").count() == 1
+    assert ("ACDB", "2026-11-14", "2026-11-15") in spans and db.query(OMTask).filter(OMTask.task_type == "ACDB").count() == 1
+    misc = db.query(OMTask).filter(OMTask.task_type == "Miscellaneous").one()
+    assert "Remarks: Street Light, ERT" in [e["text"] for e in misc.log]
     assert all(a[2] < b[1] for a, b in zip(spans, spans[1:]) if a[1] != b[1])        # one equipment after the other
     gss = client.post(f"/api/pm-plan/import?dry_run=false&{q}",
                       files={"file": ("gss.xlsx", _filled_template("PM_GSS_Side_Template.xlsx", "KRN_01"), xlsx)})

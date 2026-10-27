@@ -5,6 +5,8 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from typing import Literal
 from uuid import UUID
 
+from app.pmplan.cycle import in_pm
+
 
 ALLOWED_ASSETS = {
     "Inverter", "Module", "Transformer", "Aux. Transformer", "VCB Panel", "VCB-Kiosk",
@@ -12,7 +14,7 @@ ALLOWED_ASSETS = {
     "RMS", "WMS", "CCTV", "Boundary wall", "String", "Earthing", "LA", "Water pipe line",
     "Vegetation", "Modules cleaning", "ABT meters", "Street Light", "MMS", "BIKE", "Piling and Foundation", "Other",
     "MCCB", "OLTC(RTCC)", "4 Pole", "VCB - GSS side", "4 Pole - GSS side", "Transmission line - GSS side",
-    "Miscellaneous",
+    "Miscellaneous", "ACDB",
 }
 ALLOWED_FREQUENCIES = {"Daily", "Weekly", "Monthly", "Quarterly", "Half-yearly", "Annual"}
 
@@ -36,6 +38,8 @@ class ProblemTaskCreate(BaseModel):
     def asset_allowed(cls, value: str) -> str:
         if value not in ALLOWED_ASSETS:
             raise ValueError("Unsupported maintenance category")
+        if not in_pm(value):
+            raise ValueError(f"{value} is no longer part of Preventive Maintenance")
         return value
 
     @field_validator("frequency")

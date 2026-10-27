@@ -19,7 +19,7 @@ from openpyxl.worksheet.datavalidation import DataValidation
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from app.pmplan.cycle import CYCLE, CYCLE_DAYS, MISC, phase_for  # noqa: E402
+from app.pmplan.cycle import CYCLE, CYCLE_DAYS, MISC, in_pm, phase_for  # noqa: E402
 
 OUT = ROOT / "frontend" / "static" / "templates"
 BASE = OUT / "PM_Task_Plan_Template.xlsx"
@@ -42,20 +42,21 @@ ROWS = {
         ("ACCB Panel", "ACCB panel PM (ACCB-1 + ACCB-2, one job)", "PTW + LOTO required", 2,
          "1. Isolate. 2. Breaker operation check. 3. Busbar / terminal thermal scan. 4. Cable lugs. 5. Panel cleaning. "
          "Do ACCB-1 and ACCB-2 in the same job.", 1),
-        ("MCCB", "MCCB PM", "PTW + LOTO required", 1,
-         "1. Visual / thermal inspection. 2. Terminal tightening. 3. Trip and manual operation test.", None),
         ("VCB Panel", "VCB panel PM (plant side)", "PTW + LOTO required", 3,
          "1. Breaker mechanical operation. 2. Contacts / terminals. 3. Relay & trip-circuit test. 4. Interlocks.", None),
         ("Transformer", "IDT transformer PM", "PTW + LOTO required", 3,
          "1. Oil level / leakage. 2. Bushings & breather. 3. Temperature / protection checks. 4. Earthing & terminals.", None),
         ("Aux. Transformer", "Aux. transformer PM", "PTW + LOTO required", 2,
-         "1. Oil / enclosure. 2. Bushings & cables. 3. Voltage / current reading. 4. Earthing continuity.", None),
+         "1. Oil / enclosure. 2. Bushings & cables. 3. Voltage / current reading. 4. Earthing continuity.", 1),
+        ("ACDB", "ACDB panel PM", "PTW + LOTO required", 1,
+         "1. Isolate. 2. Incomer / outgoing breaker operation. 3. Busbar / terminal thermal scan. 4. Cable lugs. "
+         "5. Panel cleaning.", 1),
         ("4 Pole", "4 Pole structure PM (plant side)", "PTW required", 2,
          "1. Structure & foundation. 2. Insulators / jumpers. 3. Earthing connection. 4. Hardware tightening.", None),
         ("Earthing", "Earth pit maintenance", "—", 2,
          "1. Earth-pit condition. 2. Resistance measurement. 3. Connection tightening. 4. Watering / treatment.", None),
-        ("Miscellaneous", "Miscellaneous PM (Street Light, ERT, …)", "—", 2,
-         "1. Street Light. 2. ERT. 3. Any other small item at the plant. All in one job.", 1),
+        ("Miscellaneous", "Miscellaneous PM", "—", 2,
+         "Check each item named in Remarks (Street Light, ERT, …). All in one job.", 1),
         ("Transmission line", "Transmission line patrol & PM (plant side)", "PTW required", 4,
          "1. Line patrol. 2. Conductor / sag. 3. Insulators / jumpers. 4. Poles / towers. 5. Vegetation & ROW.", None),
     ],
@@ -69,6 +70,8 @@ ROWS = {
     ],
 }
 TITLE = {"plant": "Plant side", "gss": "GSS side"}
+# Pre-filled Remarks: the items a Miscellaneous job covers (keep the ones the plant has, add others)
+REMARKS = {MISC: "Street Light, ERT"}
 
 
 def _days(p: dict) -> str:
@@ -87,7 +90,8 @@ def _base_types_and_ideas() -> tuple[list[str], dict[str, str]]:
     ideas = {r[0]: r[1] for r in wb["Task ideas"].iter_rows(min_row=2, values_only=True) if r and r[0]}
     ideas.setdefault("4 Pole - GSS side", ideas.get("4 Pole"))
     ideas.setdefault("Transmission line - GSS side", ideas.get("Transmission line"))
-    ideas.setdefault(MISC, "Street Light, ERT and other small items — one job per plant")
+    ideas.setdefault(MISC, "Street Light, ERT and other small items — one job per plant; list them in Remarks")
+    ideas.setdefault("ACDB", "Incomer / outgoing breaker operation, busbar / terminal thermal scan, cable lugs, panel cleaning")
     return types, ideas
 
 
@@ -95,7 +99,7 @@ def _side_types(side: str, all_types: list[str]) -> list[str]:
     if side == "gss":
         return [t for p in CYCLE if p["area"] == "GSS side" for t in p["equipment_types"]]
     named = [t for p in CYCLE if p["area"] == "Plant side" for t in p["equipment_types"]]
-    return named + [t for t in all_types if t not in named and phase_for(t)["area"] != "GSS side"]
+    return named + [t for t in all_types if t not in named and phase_for(t)["area"] != "GSS side" and in_pm(t)]
 
 
 def _how_to(ws, side: str) -> None:
@@ -131,9 +135,11 @@ def _how_to(ws, side: str) -> None:
         ("Est. time (hours)", "Approximate hours per unit, as a number."),
         ("How to do it", "Steps / checklist in plain words."),
         ("No. of units", "Optional. How many units the plant has. Blank = the plant's Unit configuration "
-                         "or Equipment Register. ACCB Panel (ACCB-1 + ACCB-2) and Miscellaneous are always one job per plant."),
+                         "or Equipment Register. ACCB Panel (ACCB-1 + ACCB-2), Aux. Transformer, ACDB and Miscellaneous "
+                         "are always one job per plant."),
         ("Units per day", "Optional. Most units done in one day. Blank = spread the units over the equipment's cycle days."),
-        ("Remarks", "Optional. Added to the log of every task the row creates."),
+        ("Remarks", "Optional. Added to the log of every task the row creates. For Miscellaneous, list the items the "
+                    "job covers (pre-filled: Street Light, ERT — remove or add items)."),
         ("Order in PM cycle", "For information only; the portal ignores this column."),
     ]
     ws["B5"], ws["C5"] = "Column / topic", "What to enter"
@@ -171,8 +177,8 @@ def build(side: str) -> Path:
             c.font = Font(name="Arial", size=10, italic=info, color="FF666666" if info else "FF000000")
             c.alignment = Alignment(vertical="top", wrap_text=col in (3, 8, 11, 12))
     for r, (etype, task, safety, hours, how, units) in enumerate(ROWS[side], start=2):
-        for col, value in enumerate([etype, None, task, "Monthly", None, safety, hours, how, units, None, None,
-                                     _order_note(etype)], start=1):
+        for col, value in enumerate([etype, None, task, "Monthly", None, safety, hours, how, units, None,
+                                     REMARKS.get(etype), _order_note(etype)], start=1):
             ws.cell(r, col, value)
 
     lists = wb.create_sheet("Lists")

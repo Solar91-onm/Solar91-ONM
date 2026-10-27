@@ -29,8 +29,8 @@ from app.core.models import AuditLog, Equipment, OMTask, NotificationPreference,
 from app.core.security import equipment_scope_matches, get_current_user, require_csrf, user_scoped_plant_ids
 from app.plants.codes import find_plant_by_code
 from app.pmplan.alerts import PM_ALERT_EVENTS, PM_TEAM_RECIPIENT_MODES, default_pm_preferences, get_pm_preferences
-from app.pmplan.cycle import (CYCLE, CYCLE_DAYS, NAMED_TYPES, ONE_JOB_TYPES, chained_window, one_job, phase_for,
-                               phase_index, window as cycle_window, window_out)
+from app.pmplan.cycle import (CYCLE, CYCLE_DAYS, NAMED_TYPES, NOT_IN_PM, ONE_JOB_TYPES, chained_window, in_pm, one_job,
+                               phase_for, phase_index, window as cycle_window, window_out)
 from app.pmplan.units import distribute, next_cycle_id, run_daily  # noqa: F401  (next_cycle_id re-exported for the scheduled router)
 from app.scheduled.schemas import ALLOWED_ASSETS, ALLOWED_FREQUENCIES
 
@@ -44,6 +44,10 @@ MAX_TASKS_PER_CALL = 2000
 _ASSET_BY_LOWER = {a.casefold(): a for a in ALLOWED_ASSETS}
 _FREQ_BY_LOWER = {f.casefold(): f for f in ALLOWED_FREQUENCIES}
 _SAFETY_BY_LOWER = {s.casefold(): s for s in SAFETY_OPTIONS}
+
+
+def _not_in_pm_text(equipment_type: str) -> str:
+    return f"{equipment_type} is no longer part of Preventive Maintenance"
 
 
 class PMAlertEventPreference(BaseModel):
@@ -83,6 +87,8 @@ class TemplateIn(BaseModel):
         key = (v or "").strip().casefold()
         if key not in _ASSET_BY_LOWER:
             raise ValueError("Unsupported equipment type")
+        if not in_pm(key):
+            raise ValueError(_not_in_pm_text(_ASSET_BY_LOWER[key]))
         return _ASSET_BY_LOWER[key]
 
     @field_validator("frequency")
@@ -121,6 +127,7 @@ class ApplyIn(BaseModel):
 
 class QuickTaskIn(TemplateIn, ApplyIn):
     save_template: bool = False
+    remarks: str | None = Field(default=None, max_length=500)   # e.g. the items a Miscellaneous job covers (Street Light, ERT)
 
 
 # ───────────────────────── helpers ─────────────────────────
@@ -555,6 +562,8 @@ def apply_template(template_id: uuid.UUID, payload: ApplyIn, db: Annotated[Sessi
     if not row:
         raise HTTPException(404, "Template not found")
     tpl = {k: v for k, v in _template_out(row).items() if k != "id"}
+    if not in_pm(tpl["equipment_type"]):
+        raise HTTPException(422, _not_in_pm_text(tpl["equipment_type"]))
     plants = _resolve_plants(db, payload.plants)
     without: list[Plant] = []
     if _asks_all_plants(payload.plants):
@@ -588,7 +597,7 @@ def quick_add(payload: QuickTaskIn, db: Annotated[Session, Depends(get_db)], use
     wins = _fit_to_cycle(db, items, tpl["equipment_type"], payload.start_date) if w else {}
     if not payload.dry_run and items:
         tid = str(_upsert_template(db, user, tpl).id) if payload.save_template else None
-        _create_tasks(db, user, tpl, items, start, tid)
+        _create_tasks(db, user, tpl, items, start, tid, (payload.remarks or "").strip() or None)
         if payload.save_unit_config:
             spread = plan["spread_days"]
             spread_pace = -(-payload.total_units // spread) if payload.total_units and spread else None
@@ -603,7 +612,7 @@ def quick_add(payload: QuickTaskIn, db: Annotated[Session, Depends(get_db)], use
 def get_cycle(user: Annotated[User, Depends(get_current_user)]):
     """The 30-day PM cycle (Plant side, then GSS side) used when a job or upload follows the cycle."""
     _require(user, CREATOR_ROLES, "The PM cycle is available to the O&M Head and Assignees")
-    return {"cycle_days": CYCLE_DAYS, "phases": CYCLE, "one_job_types": list(ONE_JOB_TYPES)}
+    return {"cycle_days": CYCLE_DAYS, "phases": CYCLE, "one_job_types": list(ONE_JOB_TYPES), "not_in_pm": list(NOT_IN_PM)}
 
 
 # ───────────────────────── maintenance scope library (editable by the O&M Head) ─────────────────────────
@@ -613,6 +622,7 @@ SCOPE_KEYS = ("pv", "plant", "gss")      # everything else is Miscellaneous
 class ScopeIn(BaseModel):
     sections: dict[str, list[str]]
     hidden: list[str] = Field(default_factory=list)
+    known: list[str] = Field(default_factory=list)   # every type the editor showed; types added later get their standard section
 
     @field_validator("sections")
     @classmethod
@@ -644,7 +654,8 @@ def _scope_clean(payload: ScopeIn) -> dict[str, Any]:
             raise HTTPException(422, f"{canon} cannot be both in a section and hidden")
         if canon not in hidden:
             hidden.append(canon)
-    return {"sections": sections, "hidden": hidden}
+    known = list(dict.fromkeys(c for c in (_ASSET_BY_LOWER.get((n or "").strip().casefold()) for n in payload.known) if c))
+    return {"sections": sections, "hidden": hidden, "known": known}
 
 
 @router.get("/scope")
@@ -691,6 +702,8 @@ class UnitConfigIn(BaseModel):
         key = (v or "").strip().casefold()
         if key not in _ASSET_BY_LOWER:
             raise ValueError("Unsupported equipment type")
+        if not in_pm(key):
+            raise ValueError(_not_in_pm_text(_ASSET_BY_LOWER[key]))
         return _ASSET_BY_LOWER[key]
 
 
@@ -995,6 +1008,9 @@ def _clean_row(cell: dict[str, Any]) -> tuple[dict[str, Any] | None, list[str]]:
     equipment_type = _ASSET_BY_LOWER.get(str(raw_type or "").strip().casefold())
     if raw_type is not None and not equipment_type:
         errors.append(f"Unknown equipment type '{raw_type}'")
+    elif equipment_type and not in_pm(equipment_type):
+        errors.append(_not_in_pm_text(equipment_type))
+        equipment_type = None
     if raw_type is None and not errors:
         errors.append("Equipment type is empty")
     task = str(cell.get("task") or "").strip()
@@ -1059,7 +1075,7 @@ async def import_plan(db: Annotated[Session, Depends(get_db)], user: Annotated[U
     """With follow_cycle, each row's Start date (else cycle_start) is that row's PM cycle start and the
     row's dates come from its equipment's phase (e.g. Inverter days 1-7, VCB Panel days 10-11). Rows run in
     cycle order and each plant's phase starts after the earlier phases' work there (_fit_to_cycle), so a
-    10-day inverter round moves ACCB + MCCB and everything after it. The Plant side / GSS side templates
+    10-day inverter round moves ACCB and everything after it. The Plant side / GSS side templates
     reject equipment of the other side."""
     _require(user, PLANNER_ROLES, "Only the O&M Head can import a PM plan")
     if not (file.filename or "").lower().endswith((".xlsx", ".xlsm", ".csv")):

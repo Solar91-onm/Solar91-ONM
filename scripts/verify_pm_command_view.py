@@ -47,8 +47,8 @@ def harness_html(scenario):
      "KRN01 Kerli Nadi","KHO01 Khorandi","LKT01 Lakheta 01","MNP01 Meenapada 01","MUW01 Muwana","NKD01 Nimeda Ki Dhani","NSR01 Noser 01",
      "PDA01 Padasala 01","PDA03 Padasala 03","PAL01 Palli 01","RJV01 Rajveer Nagar","RAM01 Ram Nagar 01","RRP01 Ramsagar Rampuriya",
      "RNR01 Raneri Village","TNF01 Tinwri Fanta"]
-    PHASES = [("Inverter",None,1,7),("ACCB Panel",2,8,9),("MCCB",1,8,9),("VCB Panel",1,10,11),("Transformer",1,12,13),("Aux. Transformer",1,14,15),
-     ("4 Pole",1,16,17),("Earthing",1,18,19),("Transmission line",1,23,24),("VCB - GSS side",1,25,26),("4 Pole - GSS side",1,27,28),
+    PHASES = [("Inverter",None,1,7),("ACCB Panel",1,8,9),("VCB Panel",1,10,11),("Transformer",1,12,13),("Aux. Transformer",1,14,15),("ACDB",1,14,15),
+     ("4 Pole",1,16,17),("Earthing",1,18,19),("Miscellaneous",1,20,22),("Transmission line",1,23,24),("VCB - GSS side",1,25,26),("4 Pole - GSS side",1,27,28),
      ("Transmission line - GSS side",1,29,30)]
     NAMES = {"Inverter":"Cleaning from blower and checking tightness and fixing the required damage"}
 
