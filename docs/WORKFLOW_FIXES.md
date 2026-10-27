@@ -64,6 +64,12 @@
   target counts only up to it. It is compared with the plant's target (default 85%); the Command Center washing tile
   shows the portfolio ratio for the current cycle and how many plants are below target. O&M Head and washing
   Assignees only: Site Engineers keep recording their days and never see compliance or daily targets.
+- **Washing page score (hero ring)** is the month's cycle compliance: cycles done / cycles due this month (3 per active
+  plant). It starts each month at 0% and only rises as cycles complete. Ring colour: green while no plant is past a
+  deadline, amber when some are, red when more than a quarter are. The current-cycle tables compliance above stays on
+  the *Compliance · cycle N* card, per plant, in alerts and on the Command Center tile.
+- **Cycle progress bars**: a plant's current cycle counts as *In progress* only once tables are reported or carried
+  into it; until then it is grey *Not started*.
 - **Low-compliance alert** once per cycle and plant, the day after the cycle's window ends below the target
   (`check_cycle_compliance_alerts`, event `washing_cycle_compliance_low`, looks back 3 days), to the O&M Head and
   washing Assignees only. It replaces the weekly alert.

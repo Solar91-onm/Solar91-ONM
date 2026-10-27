@@ -248,3 +248,14 @@ def test_washing_filters_are_for_the_om_team_only():
     # Site Engineers are pinned to today and get no day picker in the Cycle updates log
     assert "return isTeam()&&d&&d<=t&&d>=addDays(t,-(REP_DAYS-1))?d:t" in washing
     assert "(team?repDaySelect(\"washFilter('repDay',this.value)\"):'')" in washing
+
+
+def test_cycle_bars_count_untouched_cycles_as_not_started_and_hero_is_monthly_cycles():
+    washing = (ROOT / "frontend/static/js/26-washing-cycles.js").read_text(encoding="utf-8")
+    # a current cycle with no tables reported or carried in is grey (Not started), not blue (In progress)
+    assert 'const cyStarted=c=>c.state==="In progress"&&((c.confirmed||0)+(c.pending||0)+(c.carried_in||0))>0;' in washing
+    assert 'else if(cyStarted(cy))c.run++;else c.wait++;' in washing
+    assert 'parts[1]==="In progress"?cyStarted(c):' in washing
+    # the hero score is cycles done / cycles due this month, so it only rises as cycles complete
+    assert "G.scoreRing(cyPct,heroColor)" in washing
+    assert "<small>cycle compliance</small><span>cycles done this month</span>" in washing

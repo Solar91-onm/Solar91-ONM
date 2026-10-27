@@ -72,6 +72,9 @@
  const ccPct=p=>typeof p.cycle_compliance_percent==="number"?p.cycle_compliance_percent:null;
  const ccRatio=c=>c?Number(c.done).toLocaleString("en-IN")+" / "+Number(c.due).toLocaleString("en-IN"):"—";
  const ccTone=(v,t)=>v>=t?"ok":v>=t-15?"warn":"crit";
+ /* The server marks the plant's current cycle "In progress" even before any table is washed; the cycle bars and
+    their filter count it as started only once tables are reported or carried over into it. */
+ const cyStarted=c=>c.state==="In progress"&&((c.confirmed||0)+(c.pending||0)+(c.carried_in||0))>0;
  const ccWin=c=>c?"Cycle "+c.cycle_no+(c.start?" · "+fmt(c.start)+"–"+fmt(c.end):""):"";
 
  function plantSetupModal(){
@@ -205,7 +208,7 @@
   const hit=p=>(!q||(p.plant+" "+p.site_code).toLowerCase().includes(q))&&(!f.plant||f.plant==="all"||p.plant_id===f.plant);
   /* glance filters: state = the plant's tile colour (donut slice), cyc = "<cycle no>:<state>" (cycle progress bar) */
   const stOk=p=>!f.state||f.state==="all"||(f.state==="late"?tileState(p).indexOf("late-")===0:tileState(p)===f.state);
-  const cycOk=p=>{if(!f.cyc||f.cyc==="all")return true;const parts=String(f.cyc).split(":");return (p.cycles||[]).some(c=>String(c.cycle_no)===parts[0]&&(parts[1]==="Not started"?c.state!=="Completed"&&c.state!=="In progress":c.state===parts[1]))};
+  const cycOk=p=>{if(!f.cyc||f.cyc==="all")return true;const parts=String(f.cyc).split(":");return (p.cycles||[]).some(c=>String(c.cycle_no)===parts[0]&&(parts[1]==="Not started"?c.state!=="Completed"&&!cyStarted(c):parts[1]==="In progress"?cyStarted(c):c.state===parts[1]))};
   const configured=(data().plants||[]).filter(p=>hit(p)&&stOk(p)&&cycOk(p)&&(f.bucket==="all"||p.overdue_bucket===f.bucket)&&
    (f.show==="all"||(f.show==="review"&&p.pending_tables_cleaned>0)||(f.show==="mine"&&p.assignee_user_id===S._currentUserId)||(f.show==="done"&&p.cycles_this_month>=p.monthly_target)||(f.show==="attention"&&head&&p.active&&(p.overdue_bucket!=="on_track"||ccPct(p)<p.compliance_threshold_percent))||(f.show==="late"&&p.overdue_bucket!=="on_track")||(f.show==="below"&&p.active&&ccPct(p)<p.compliance_threshold_percent)||(f.show==="ontrack"&&p.active&&p.overdue_bucket==="on_track")||(f.show==="excused"&&p.active&&p.overdue_bucket&&p.overdue_bucket!=="on_track"&&p.delay_excused)||(f.show==="notontrack"&&p.active&&p.overdue_bucket&&p.overdue_bucket!=="on_track"&&!p.delay_excused)||(f.show==="notreported"&&notReportedOn(p,rd))||(f.show==="mine"&&p.assignee_user_id===S._currentUserId))&&
    (f.assignee==="all"||(f.assignee==="unassigned"?!p.assignee_user_id:f.assignee===p.assignee_user_id))&&
@@ -497,7 +500,9 @@
    {key:"late",label:"Behind schedule",n:lateN,color:WX_STATE_COLOR.late},
    {key:"done",label:"Month done",n:stCount.done,color:WX_STATE_COLOR.done}];
   const wkTone=wk==null?"var(--info)":wk>=thr?"var(--success)":wk>=thr-15?"var(--warning)":"var(--danger)";
-  const scoreColor=wk==null?"#7dd3fc":wk>=thr?"#4ADE80":wk>=thr-15?"#FBBF24":"#F87171";
+  /* Hero score: cycles done / cycles due this month (3 per active plant). It starts the month at 0% and only rises as
+     cycles complete. Ring colour: green while no plant is past a deadline, amber when some are, red past a quarter. */
+  const heroColor=!late?"#4ADE80":plants.length&&late/plants.length>0.25?"#F87171":"#FBBF24";
   const kt=(label,value,note,color,attr,on,pct)=>kpiTile(label,value,note,color,attr,{on:!!on,pct});
   const kpis='<div class="gx-kpis">'+
    kt("Cycles this month",done+' <em class="gx-of">/ '+target+'</em>',cyPct+"% of monthly cycles complete","var(--success)",'onclick="washGlance(\'state\',\'done\')"',f.state==="done",cyPct)+
@@ -510,10 +515,10 @@
    :'<b>'+done+' of '+target+' cycles complete</b> · '+(pf.pending_reviews||0)+' report'+((pf.pending_reviews||0)===1?'':'s')+' awaiting confirmation';
   const hero='<div class="gx-hero gx-hero-wash"><div class="gx-hero-copy"><span class="gx-eyebrow">PLANT WASHING · AT A GLANCE</span><h2>'+(f.plant!=="all"?h((plants.concat(unconfigured).find(p=>p.plant_id===f.plant)||{}).plant||"Selected plant"):"Portfolio washing")+'</h2><p>'+heroLine+'</p>'+
    (head&&late?'<button type="button" class="gx-hero-cta" onclick="washGlance(\'state\',\'late\')">Show late plants →</button>':'')+'</div>'+
-   '<div class="gx-hero-score">'+(G?G.scoreRing(head?(wk==null?0:wk):cyPct,scoreColor):'')+'<div><b>'+(head?(wk==null?"—":wk+"%"):cyPct+"%")+'</b><small>'+(head?(cc&&cc.cycle_no?"cycle "+cc.cycle_no+" compliance":"current cycle compliance"):"cycles complete")+'</small><span>'+(head?"target "+thr+"%":done+" / "+target+" cycles this month")+'</span></div></div></div>';
+   '<div class="gx-hero-score" title="'+h(done+' of '+target+' cycles done this month')+'">'+(G?G.scoreRing(cyPct,heroColor):'')+'<div><b>'+cyPct+'%</b><small>cycle compliance</small><span>cycles done this month</span></div></div></div>';
   const donutCard=G?G.donut({title:"Where the plants stand",sub:"Click a slice to list those plants",noun:"plants",attr:"data-wx-state",active:f.state,slices}):'';
   const maxCycles=Math.max(3,...plants.map(p=>p.monthly_target||3));
-  const cycRows=[];for(let n=1;n<=maxCycles;n++){const c={n,done:0,run:0,wait:0,due:""};plants.forEach(p=>{const cy=(p.cycles||[]).find(x=>Number(x.cycle_no)===n);if(!cy)return;if(cy.state==="Completed")c.done++;else if(cy.state==="In progress")c.run++;else c.wait++;if(head&&cy.due_date&&(!c.due||cy.due_date<c.due))c.due=cy.due_date});cycRows.push(c)}
+  const cycRows=[];for(let n=1;n<=maxCycles;n++){const c={n,done:0,run:0,wait:0,due:""};plants.forEach(p=>{const cy=(p.cycles||[]).find(x=>Number(x.cycle_no)===n);if(!cy)return;if(cy.state==="Completed")c.done++;else if(cyStarted(cy))c.run++;else c.wait++;if(head&&cy.due_date&&(!c.due||cy.due_date<c.due))c.due=cy.due_date});cycRows.push(c)}
   const cycSeg=(n,state,count,cls,label)=>count?'<button type="button" class="gx-seg '+cls+(f.cyc===n+":"+state?" on":"")+'" style="flex:'+count+'" data-wx-cyc="'+n+':'+state+'" title="Cycle '+n+' · '+label+': '+plural(count,"plant")+' · click to list">'+count+'</button>':'';
   const cycleCard='<article class="gx-card"><header><h3>Cycle progress this month</h3><p>Plants per cycle · click a segment to list those plants</p></header><div class="gx-cycles">'+cycRows.map(c=>{const tot=c.done+c.run+c.wait;return '<div class="gx-cycle"><div class="gx-cycle-h"><b>Cycle '+c.n+'</b><small>'+(c.due?'first deadline '+fmt(c.due)+' · ':'')+c.done+' / '+tot+' done</small></div><div class="gx-segbar">'+(tot?cycSeg(c.n,"Completed",c.done,"done","Completed")+cycSeg(c.n,"In progress",c.run,"run","In progress")+cycSeg(c.n,"Not started",c.wait,"wait","Not started"):'<span class="gx-seg-empty">No plants set up</span>')+'</div></div>'}).join("")+'</div><div class="gx-mini-legend"><span><i style="background:#16A34A"></i>Completed</span><span><i style="background:#2563EB"></i>In progress</span><span><i style="background:#CBD5E1"></i>Not started</span></div></article>';
   const lowest=plants.filter(p=>p.active!==false&&ccPct(p)!=null).sort((x,y)=>ccPct(x)-ccPct(y)||x.plant.localeCompare(y.plant)).slice(0,6);
