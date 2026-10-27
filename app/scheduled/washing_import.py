@@ -28,7 +28,7 @@ IMPORT_HEADERS = (
     "Plant name",
     "Number of tables",
     "Washing assignee email",
-    "Weekly target %",
+    "Compliance target %",  # per washing cycle; older files call it "Weekly target %"
     "Active",
     "Remarks",
 )
@@ -80,7 +80,7 @@ def _workbook_bytes(db: Session, plants: list[Plant], *, include_setup: bool) ->
         "Use one row for each plant.",
         "Site code must match an existing plant in Solar91.",
         "For a new setup, enter the number of tables. Assignee and other settings can be added later.",
-        "Weekly target is optional and must be from 1 to 100; the default is 85.",
+        "Compliance target % is optional and must be from 1 to 100; the default is 85. Each washing cycle (days 1-10, 11-20, 21-month end) is compared with it.",
         "When updating a setup, blank cells mean leave the saved value as it is.",
         "Remarks: the current situation at the plant (e.g. water tanker every 3 days, south gate locked on Sundays).",
     ):
@@ -251,7 +251,7 @@ def import_setup(db: Session, user: User, filename: str, content: bytes, *, dry_
         config, current_count, current_email = configs.get(plant.id, (None, 0, None)) if plant else (None, 0, None)
         count_text = _cell(row, "Number of tables")
         email = _cell(row, "Washing assignee email")
-        target_text = _cell(row, "Weekly target %")
+        target_text = _cell(row, "Compliance target %") or _cell(row, "Weekly target %")
         active_text = _cell(row, "Active")
         notes = _cell(row, "Remarks") or _cell(row, "Notes")  # older files call the column "Notes"
         is_new = config is None or current_count == 0
@@ -288,7 +288,7 @@ def import_setup(db: Session, user: User, filename: str, content: bytes, *, dry_
                     raise ValueError
                 threshold = int(numeric)
             except ValueError:
-                errors.append("Weekly target must be a whole number from 1 to 100")
+                errors.append("Compliance target must be a whole number from 1 to 100")
         if active_text:
             if active_text.casefold() not in {"yes", "no"}:
                 errors.append("Active must be Yes or No")

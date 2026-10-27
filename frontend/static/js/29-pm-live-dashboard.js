@@ -455,7 +455,8 @@
  const TYPE_ORDER=["Inverter","ACCB Panel","VCB Panel","Transformer","Aux. Transformer","ACDB","4 Pole","Earthing","Miscellaneous","Transmission line","VCB - GSS side","4 Pole - GSS side","Transmission line - GSS side"];
  const typeRank=t=>{const i=TYPE_ORDER.indexOf(t);return i<0?TYPE_ORDER.length:i};
  function matrixHtml(tasks){
-  const f=state(),types=[...new Set(tasks.map(t=>t.type).filter(t=>t&&!notInPm(t)))].sort((a,b)=>typeRank(a)-typeRank(b)||a.localeCompare(b));
+  /* every Plant side / GSS side type of the PM cycle is a column even before any job exists (ACDB, Miscellaneous …), then other types with jobs */
+  const f=state(),canAdd=["O&M Head","Assignee","Administration"].includes(S._roleLabel||S.currentRole||""),types=[...new Set(standardTypes().concat(tasks.map(t=>t.type)).filter(t=>t&&!notInPm(t)))].sort((a,b)=>typeRank(a)-typeRank(b)||a.localeCompare(b));
   const rows=new Map(scopedPlants().map(p=>[p.name,{plant:p,cells:new Map(),late:0,soon:0,open:0,done:0,oldest:0}]));
   tasks.forEach(t=>{
    const row=rows.get(t.plant);if(!row||!t.type)return;
@@ -475,7 +476,7 @@
   list.sort(f.mxSort==="name"?(a,b)=>code(a).localeCompare(code(b)):f.mxSort==="open"?(a,b)=>b.open-a.open||code(a).localeCompare(code(b)):(a,b)=>b.late-a.late||b.oldest-a.oldest||b.soon-a.soon||code(a).localeCompare(code(b)));
   const LIMIT=30,shown=f.mxAll?list:list.slice(0,LIMIT);
   const cell=(r,type)=>{const c=r.cells.get(type);
-   if(!c)return'<td class="pmm-c none"><span title="'+escape(r.plant.name+' · '+type+': no PM job')+'"></span></td>';
+   if(!c)return'<td class="pmm-c none">'+(canAdd?'<button type="button" class="pmm-add" data-pmm-add="'+escape(r.plant.name)+'|'+escape(type)+'" title="'+escape(r.plant.name+' · '+type+': no PM job yet — add one')+'" aria-label="'+escape('Add a '+type+' PM job at '+r.plant.name)+'">+</button>':'<span title="'+escape(r.plant.name+' · '+type+': no PM job')+'"></span>')+'</td>';
    const cls=c.late?"late":c.soon?"soon":c.open?"open":"done",label=c.late?c.late:c.soon?c.soon:c.open?c.open:"✓";
    return'<td class="pmm-c '+cls+'"><button type="button" data-pmm-cell="'+escape(r.plant.name)+'|'+escape(type)+'" title="'+escape(r.plant.name+' · '+type+': '+c.late+' overdue'+(c.oldest?' (oldest '+c.oldest+' d)':'')+' · '+c.soon+' due this week · '+c.open+' open · '+c.done+' done — open in the register')+'">'+label+'</button></td>'};
   const chip=(key,label,n,tone)=>'<button type="button" class="pmm-chip '+tone+(f.mxShow===key?' on':'')+'" data-pmm-show="'+key+'" aria-pressed="'+(f.mxShow===key)+'"><b>'+n+'</b>'+label+'</button>';
@@ -483,7 +484,7 @@
    return'<tr class="'+(r.late?'late':'')+'"><th scope="row"><button type="button" class="pml-link" data-pmm-plant="'+escape(r.plant.name)+'" title="Focus this plant"><b>'+escape(r.plant.id||"")+'</b><small>'+escape(r.plant.name)+'</small></button></th>'+
     types.map(type=>cell(r,type)).join('')+
     '<td class="pmm-sum">'+(total?'<span class="pmm-bar"><i style="width:'+pct+'%"></i></span><small>'+(r.late?'<b class="late">'+r.late+' late</b> · '+r.oldest+' d':r.soon?'<b class="soon">'+r.soon+' this week</b>':pct+'% done')+'</small>':'<small class="pmx-muted">No PM jobs</small>')+'</td></tr>'}).join('');
-  return'<article class="pml-card pmm" id="pm-matrix"><div class="pmm-head"><div><h3>Plants × equipment</h3><p>Every plant against every equipment type. The number is the work orders in that state; click a cell to open those jobs in the register.</p></div></div>'+
+  return'<article class="pml-card pmm" id="pm-matrix"><div class="pmm-head"><div><h3>Plants × equipment</h3><p>Every plant against the PM cycle equipment (Plant side, then GSS side). The number is the work orders in that state; click a cell to open them, or + to add a job.</p></div></div>'+
    '<div class="pmm-chips" role="group" aria-label="Filter plants">'+chip("late","with overdue work",tally.late,"late")+chip("soon","due this week",tally.soon,"soon")+chip("ok","on track",tally.ok,"ok")+chip("none","without PM jobs",tally.none,"none")+'</div>'+
    '<div class="pmm-tools"><input type="search" class="pmm-search" placeholder="Find plant name or code…" value="'+escape(f.mxQuery||"")+'" data-pml-input="mx-query" aria-label="Find a plant">'+
    '<select aria-label="Sort plants" data-pml-select="mxSort">'+[["late","Sort: most overdue"],["name","Sort: plant code"],["open","Sort: most open work"]].map(([k,l])=>'<option value="'+k+'"'+(f.mxSort===k?' selected':'')+'>'+l+'</option>').join('')+'</select>'+
@@ -491,7 +492,26 @@
    (types.length&&list.length?'<div class="pmm-scroll"><table class="pmm-table"><thead><tr><th scope="col" class="pmm-ph">Plant</th>'+types.map(type=>'<th scope="col" class="pmm-th"><span title="'+escape(type)+'">'+escape(type)+'</span></th>').join('')+'<th scope="col" class="pmm-ph">Progress</th></tr></thead><tbody>'+body+'</tbody></table></div>'+
     (list.length>LIMIT?'<div class="pmd-more"><span>Showing '+shown.length+' of '+list.length+' plants</span><button type="button" class="btn o sm" data-pmm-all>'+(f.mxAll?'Show fewer':'Show all '+list.length)+'</button></div>':'')
     :'<div class="pml-empty">'+(types.length?'No plant matches this search or filter.':'No PM work orders in this scope yet. Use + Add job or Upload plan.')+'</div>')+
-   '<div class="pmcal-legend"><span><i class="late"></i>Overdue</span><span><i class="soon"></i>Due this week</span><span><i class="open"></i>Planned</span><span><i class="done"></i>All done</span><span><i class="none"></i>No PM job</span></div></article>';
+   '<div class="pmcal-legend"><span><i class="late"></i>Overdue</span><span><i class="soon"></i>Due this week</span><span><i class="open"></i>Planned</span><span><i class="done"></i>All done</span><span><i class="none"></i>No PM job (+ adds one)</span></div></article>';
+ }
+ /* The 30-day PM cycle (GET /api/pm-plan/cycle): the order of work at every plant, with how many jobs each equipment
+    has in this scope. Equipment with no job yet (e.g. ACDB, Miscellaneous after they were added) is marked so it can
+    be planned; it appears in the calendar once it has a job. */
+ function cycleStripHtml(tasks,canCreate){
+  const cyc=S._pmCycle;
+  if(!cyc){if(!S._pmCycleLoading&&canCreate&&(S._roleLabel||S.currentRole)!=="Administration")S._pmCycleLoading=apiFetch("/api/pm-plan/cycle").then(c=>{S._pmCycle=c;repaint()}).catch(()=>{}).finally(()=>{S._pmCycleLoading=null});return''}
+  if(!Array.isArray(cyc.phases)||!cyc.phases.length)return'';
+  const byType=new Map();tasks.forEach(t=>{if(t.type)byType.set(t.type,(byType.get(t.type)||0)+1)});
+  const missing=[];
+  const area=name=>{const ph=(cyc.phases||[]).filter(p=>p.area===name);if(!ph.length)return'';
+   return'<div class="pmcy-area"><span class="pmcy-label">'+escape(name)+'</span><div class="pmcy-steps">'+ph.map(p=>{
+    const types=(p.equipment_types||[]).filter(t=>!notInPm(t)&&(typeof pmTypeVisible!=="function"||pmTypeVisible(t)));
+    return'<div class="pmcy-step"><small>'+(p.days>1?'Days '+p.start_day+'–'+p.end_day:'Day '+p.start_day)+'</small><b>'+escape(p.phase)+'</b><div class="pmcy-eq">'+types.map(t=>{const n=byType.get(t)||0;if(!n)missing.push(t);
+     return n?'<button type="button" class="pmcy-chip" data-pml-equipment="'+escape(t)+'" title="Open '+escape(t)+' work in the register">'+escape(t)+' <em>'+n+'</em></button>'
+      :(canCreate?'<button type="button" class="pmcy-chip none" data-pmx-add="'+escape(t)+'" title="No PM job yet — add one">'+escape(t)+' <em>+ Add job</em></button>':'<span class="pmcy-chip none">'+escape(t)+' <em>no job</em></span>')}).join('')+'</div></div>'}).join('')+'</div></div>'};
+  const body=area("Plant side")+area("GSS side");
+  return'<article class="pml-card pmcy"><div class="pmcy-head"><div><h3>30-day PM cycle</h3><p>Order of work at every plant (day 1 = the cycle start chosen when planning). Each equipment shows its PM jobs here; it appears in the calendar once it has one.</p></div>'+
+   (missing.length?'<span class="pmcy-miss">'+missing.length+' equipment type'+(missing.length===1?'':'s')+' without a PM job</span>':'<span class="pmcy-ok">Every cycle equipment has PM jobs</span>')+'</div>'+body+'</article>';
  }
 
  function render(){
@@ -621,11 +641,11 @@
   const lateTodayPlants=plantRows.filter(row=>row.overdue).length;
   const badges={schedule:todayOpen.length?{n:todayOpen.length,tone:"",label:"today"}:null,plants:lateTodayPlants?{n:lateTodayPlants,tone:"hot",label:"late"}:null,register:{n:visibleGroups.length,tone:"",label:"rows"}};
   let body;
-  if(view==="schedule")body=calendarHtml(tasks,canCreate)+dayPlannerHtml();
+  if(view==="schedule")body=cycleStripHtml(tasks,canCreate)+calendarHtml(tasks,canCreate)+dayPlannerHtml();
   else if(view==="plants")body=matrixHtml(tasks);
   else if(view==="coverage")body=coverageHtml(true);
   else if(view==="register")body=registerHtml;
-  else body=plantDetailsHtml()+'<div class="gx-glance pmv-charts"><div class="gx-grid gx-grid-3">'+donutHtml+weeksHtml+ageHtml+'</div>'+
+  else body=plantDetailsHtml()+cycleStripHtml(tasks,canCreate)+'<div class="gx-glance pmv-charts"><div class="gx-grid gx-grid-3">'+donutHtml+weeksHtml+ageHtml+'</div>'+
    '<div class="gx-grid gx-grid-2">'+upcomingHtml(tasks,canCreate)+(leaderHtml||eqHtml)+'</div>'+(leaderHtml?'<div class="gx-grid gx-grid-1">'+eqHtml+'</div>':'')+'</div>';
   /* the large hero is the Overview's headline; the other views keep the clickable KPI row so work stays above the fold */
   return'<section class="pml pmv">'+toolbarHtml+(view==="overview"?glanceHtml:'<div class="gx-glance pmv-compact">'+kpiHtml+'</div>')+tabsHtml(view,badges)+'<div class="pmv-body" role="tabpanel" aria-label="'+escape((VIEWS.find(v=>v[0]===view)||VIEWS[0])[1])+'">'+body+'</div></section>';
@@ -752,7 +772,7 @@
   });
   document.addEventListener("change",event=>{if(event.target.matches&&event.target.matches("[data-pmx-show]")){state().covShow=event.target.value;repaint()}});
   document.addEventListener("click",event=>{
-   const t=event.target.closest("[data-pmv-view],[data-pmcal-day],[data-pmcal-shift],[data-pmcal-today],[data-pmup-day],[data-pmm-cell],[data-pmm-plant],[data-pmm-all],[data-pmm-show],[data-pm-addon],[data-pmx-add]");
+   const t=event.target.closest("[data-pmv-view],[data-pmcal-day],[data-pmcal-shift],[data-pmcal-today],[data-pmup-day],[data-pmm-cell],[data-pmm-plant],[data-pmm-all],[data-pmm-show],[data-pm-addon],[data-pmx-add],[data-pmm-add]");
    if(!t)return;
    const f=state();
    const pickDay=d=>{f.day=d;f.dayEquip="all";f.dayAll=false;if(d<f.dayFrom||d>addDays(f.dayFrom,13))f.dayFrom=addDays(d,-2)};
@@ -767,6 +787,7 @@
    else if(t.dataset.pmmShow!==undefined){f.mxShow=f.mxShow===t.dataset.pmmShow?"all":t.dataset.pmmShow;f.mxAll=false}
    else if(t.dataset.pmAddon!==undefined){addJobOn(t.dataset.pmAddon);return}
    else if(t.dataset.pmxAdd!==undefined){if(typeof openProblemScheduledTask==="function")openProblemScheduledTask(t.dataset.pmxAdd);return}
+   else if(t.dataset.pmmAdd!==undefined){const [plant,type]=t.dataset.pmmAdd.split("|");if(typeof openProblemScheduledTask==="function")openProblemScheduledTask(type,plant);return}
    repaint();
   });
   /* "Today's PM plan" notification opens the day planner on that date. */

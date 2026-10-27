@@ -112,6 +112,30 @@
 .pmm-bar{display:block;height:6px;border-radius:999px;background:var(--gx-sub,#f3f7f4);overflow:hidden}
 .pmm-bar i{display:block;height:100%;background:var(--pmv-done)}
 
+/* ---------- 4b · empty matrix cell (+ adds a job) and the 30-day PM cycle panel ---------- */
+.pmm-c button.pmm-add{background:var(--pmv-none-bg);color:var(--gx-mut,#5c6f65);font-size:15px;font-weight:700;border:1px dashed var(--gx-line,#d3ddd7)}
+.pmm-c button.pmm-add:hover,.pmm-c button.pmm-add:focus-visible{color:var(--gx-brand,#0c5e2a);border-color:var(--gx-brand,#0c5e2a)}
+.pmcy{display:grid;gap:10px}
+.pmcy-head{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap}
+.pmcy-head h3{margin:0;font-size:15px}
+.pmcy-head p{margin:2px 0 0;font-size:12px;color:var(--gx-mut,#5c6f65);max-width:70ch}
+.pmcy-miss,.pmcy-ok{padding:4px 10px;border-radius:999px;font-size:12px;font-weight:750;white-space:nowrap}
+.pmcy-miss{background:var(--pmv-soon-bg);color:var(--pmv-soon)}
+.pmcy-ok{background:var(--pmv-done-bg);color:var(--pmv-done)}
+.pmcy-area{display:grid;grid-template-columns:86px minmax(0,1fr);gap:10px;align-items:start}
+.pmcy-label{padding-top:6px;font-size:11.5px;font-weight:800;letter-spacing:.3px;text-transform:uppercase;color:var(--gx-mut,#5c6f65)}
+.pmcy-steps{display:flex;flex-wrap:wrap;gap:6px}
+.pmcy-step{flex:0 0 auto;min-width:118px;display:flex;flex-direction:column;gap:4px;padding:8px 9px;border:1px solid var(--gx-line,#e1e9e4);border-radius:11px;background:var(--gx-card,#fff)}
+.pmcy-step small{font-size:11px;color:var(--gx-mut,#5c6f65);font-weight:650}
+.pmcy-step b{font-size:12.5px;color:var(--gx-ink,#10231a)}
+.pmcy-eq{display:flex;flex-direction:column;gap:4px}
+.pmcy-chip{display:flex;justify-content:space-between;align-items:center;gap:6px;padding:3px 7px;border-radius:7px;border:0;background:var(--pmv-open-bg);color:var(--gx-ink,#10231a);font:inherit;font-size:11.5px;font-weight:650;text-align:left;cursor:pointer}
+.pmcy-chip em{font-style:normal;font-weight:800;color:var(--pmv-open)}
+.pmcy-chip.none{background:var(--pmv-none-bg);border:1px dashed var(--gx-line,#d3ddd7)}
+.pmcy-chip.none em{color:var(--pmv-soon)}
+span.pmcy-chip{cursor:default}
+button.pmcy-chip:hover,button.pmcy-chip:focus-visible{outline:2px solid var(--gx-brand,#0c5e2a);outline-offset:1px}
+
 /* ---------- 5 · small screens ---------- */
 @media (max-width:820px){
  .pmv-tabs{position:static}
@@ -125,6 +149,8 @@
  .pmcal-cell em{top:auto;bottom:6px;right:3px;padding:0 4px;font-size:9.5px}
  .pmcal-wd{padding:2px;text-align:center}
  .pmm-count{margin-left:0}
+ .pmcy-area{grid-template-columns:1fr;gap:4px}
+ .pmcy-label{padding-top:0}
 }
 @media (prefers-reduced-motion:reduce){.pmv-tab,.pmcal-cell{transition:none}}
 @media print{.pmv-tabs{display:none}}

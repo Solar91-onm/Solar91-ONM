@@ -179,7 +179,7 @@ function allNotifs(){const out=(S.events||[]).map(eventNotif);
 function washAlert(){
  const cyc=S._washCycles&&Array.isArray(S._washCycles.plants)?S._washCycles.plants:null;
  if(cyc){let low=null;cyc.forEach(p=>{const v=p.cycle_compliance_percent,t=p.compliance_threshold_percent||WASH_TH,c=p.cycle_compliance;if(typeof v==="number"&&c&&v<t&&(!low||v<low.pct))low={plant:p.plant,pct:v,t,c}});
-  return low?{title:"Washing compliance "+low.c.done+" / "+low.c.due+" tables — "+low.plant,meta:"Cycle "+low.c.cycle_no+" · below the "+low.t+"% target"}:null}
+  return low?{title:"Washing compliance "+low.pct+"% — "+low.plant,meta:"Cycle "+low.c.cycle_no+" · below the "+low.t+"% target"}:null}
  let worst=null;Object.keys(S.washMeta).forEach(p=>{
  const rows=S.washing.filter(t=>t.plant===p);if(!rows.length)return;
  const pct=Math.round(100-(rows.filter(t=>wColor(t)==="red").length/rows.length)*100);

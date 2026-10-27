@@ -183,7 +183,7 @@
     '<div class="pp-batt-row"><svg class="pp-battery" viewBox="0 0 90 170" aria-hidden="true"><rect x="30" y="6" width="30" height="14" rx="4" class="pp-batt-cap"/><rect x="8" y="18" width="74" height="148" rx="14" class="pp-batt-body"/>'+
     '<clipPath id="ppBattClip"><rect x="14" y="24" width="62" height="136" rx="9"/></clipPath><g clip-path="url(#ppBattClip)"><rect x="14" y="24" width="62" height="136" class="pp-batt-empty"/><rect x="14" y="'+(160-fillH).toFixed(1)+'" width="62" height="'+fillH.toFixed(1)+'" fill="'+tone+'" class="pp-batt-fill"/></g>'+
     '<line x1="14" x2="76" y1="'+warnY.toFixed(1)+'" y2="'+warnY.toFixed(1)+'" class="pp-batt-warn"/><path d="M49 52 L33 98 L45 98 L40 132 L58 82 L46 82 L52 52 Z" class="pp-bolt"/></svg>'+
-    '<div class="pp-batt-val"><b style="color:'+tone+'">'+(typeof d.washPct==="number"?d.washPct+"%":"—")+'</b><small>current-cycle washing compliance</small><span>'+(d.washDue?d.washDone.toLocaleString("en-IN")+' / '+d.washDue.toLocaleString("en-IN")+' tables due · ':'')+d.tablesToday+' tables cleaned today</span></div></div>';
+    '<div class="pp-batt-val"><b style="color:'+tone+'">'+(typeof d.washPct==="number"?d.washPct+"%":"—")+'</b><small>current-cycle washing compliance</small><span>'+d.tablesToday+' tables cleaned today</span></div></div>';
   }
   return '<article class="pp-card pp-batt" role="button" tabindex="0" onclick="s91PulseGo(\'wash\')"><header class="pp-head"><div><h3>Washing level</h3><p>Current-cycle compliance vs target · click to open Washing</p></div></header>'+body+'</article>';
  }

@@ -14,7 +14,7 @@ HEADERS = [
     "Plant name",
     "Number of tables",
     "Washing assignee email",
-    "Weekly target %",
+    "Compliance target %",
     "Active",
     "Remarks",
 ]
@@ -28,7 +28,7 @@ def build_template(output: Path = OUTPUT) -> None:
         "Use one row for each plant.",
         "Site code must match a plant already in Solar91.",
         "For a new setup, enter the number of tables. Assignee and other settings can be added later.",
-        "Weekly target is optional and must be from 1 to 100; the default is 85.",
+        "Compliance target % is optional and must be from 1 to 100; the default is 85. Each washing cycle (days 1-10, 11-20, 21-month end) is compared with it.",
         "For updates, blank cells mean leave the saved value as it is.",
         "Remarks: the current situation at the plant (e.g. water tanker every 3 days, south gate locked on Sundays).",
     ):

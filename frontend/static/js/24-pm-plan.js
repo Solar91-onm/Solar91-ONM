@@ -138,9 +138,10 @@
     set("pq-freq",t.frequency);set("pq-safety",t.safety);set("pq-hours",t.est_hours);
     window.pmUnitHint("pq");
   };
-  window.openProblemScheduledTask=async function(type){
+  window.openProblemScheduledTask=async function(type,plant){
     if(!canCreate()){toast("Site Engineer can execute assigned Preventive Maintenance work, but cannot create it.");return}
-    S._pmAddType=typeof type==="string"?type:null;   /* "+ Add job" on an equipment coverage row */
+    S._pmAddType=typeof type==="string"?type:null;   /* "+ Add job" on an equipment coverage row / cycle panel */
+    S._pmAddPlant=typeof plant==="string"?plant:null; /* "+" in an empty Plants × equipment cell */
     S.modal="pmQuickTask";S.modalCtx={};render();
     setTimeout(()=>{try{window.pmQuickCfg()}catch(e){}},0);
     Promise.all([loadTemplates(),loadUnitCfg(),loadCycle()]).then(()=>{
@@ -154,7 +155,7 @@
     const types=typeNames(),filteredType=S._pmAddType||(S.pmLive&&S.pmLive.equipment&&S.pmLive.equipment!=="all"?S.pmLive.equipment:null);
     const type=filteredType&&types.includes(filteredType)?filteredType:(types.indexOf("Inverter")>=0?"Inverter":(types[0]||"Other"));
     const activePmPlant=S.pmLive&&S.pmLive.plant&&S.pmLive.plant!=="all"?S.pmLive.plant:null;
-    const first=activePmPlant||(S.schedScope&&S.schedScope!=="all"?S.schedScope:"__all");
+    const first=S._pmAddPlant||activePmPlant||(S.schedScope&&S.schedScope!=="all"?S.schedScope:"__all");
     const body='<div class="pm-form">'+
       '<div class="kgrid" style="grid-template-columns:1fr 1fr;gap:12px">'+
        '<div class="field"><span class="lbl">Equipment type</span><select id="pq-type" class="inp" onchange="pmQuickType()">'+typeOpts(type)+'</select></div>'+

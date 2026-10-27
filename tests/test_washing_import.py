@@ -178,3 +178,13 @@ def test_inactive_setup_is_kept_but_does_not_raise_overdue_alert(client, db):
     assert row["active"] is False and row["overdue_bucket"] == "on_track"
     assert overview["overdue_matrix"] == {"on_track": 0, "1d": 0, "3d": 0, "7d": 0}
     assert check_washing_overdue(db, date(2026, 10, 11)) == 0
+
+def test_compliance_target_column_and_older_weekly_target_column_both_import(client, db):
+    plant = _plant(db)
+    _head(client, db)
+    body = "Site code,Plant name,Number of tables,Compliance target %\nIMP01,ignored,12,80\n"
+    saved = client.post(f"{BASE}/import?dry_run=false", files=_csv(body))
+    assert saved.status_code == 200, saved.text
+    assert db.get(WashingConfig, plant.id).compliance_threshold_percent == 80
+    bad = client.post(f"{BASE}/import?dry_run=true", files=_csv("Site code,Compliance target %\nIMP01,150\n"))
+    assert "Compliance target must be a whole number from 1 to 100" in bad.text

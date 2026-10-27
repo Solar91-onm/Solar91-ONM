@@ -84,3 +84,9 @@ Presentation only (`29-pm-live-dashboard.js`, `47-pm-views.css`); no API, schema
 
 Scale: one render reuses its coverage, plant lookups and grouping instead of recomputing them per row, and search boxes redraw 150 ms after typing stops. Measured in local headless Chromium with mock data (100 plants, 2,208 work orders): about 250–380 ms per render before, 35–105 ms per view after. Not measured against live data or on a phone CPU. `/api/scheduled/tasks` and the bootstrap still send every PM record the user may see (see `docs/SCALABILITY_AUDIT.md`).
 Browser checks: `python scripts/verify_pm_command_view.py`, `python scripts/verify_pm_consolidation.py`.
+
+## ACDB, Miscellaneous and MCCB in the page and the templates (October 2026)
+- **Plants × equipment** always has a column for every Plant side and GSS side equipment of the cycle (in cycle order, ACDB and Miscellaneous included), even before any job exists; an empty cell's **+** opens Add job for that plant and equipment. MCCB is not shown.
+- **30-day PM cycle panel** (Overview and Calendar): the order of work with each equipment's job count in the current scope; equipment without a PM job is marked with **+ Add job**. The calendar shows work orders only, so an equipment appears there once it has a job.
+- **Excel templates**: the general `PM_Task_Plan_Template.xlsx` lists ACDB and Miscellaneous (MCCB removed) in the equipment dropdown and Task ideas, and its notes give the new cycle order, the one-job-per-plant rule (ACCB Panel, Aux. Transformer, ACDB, Miscellaneous) and Remarks for the Miscellaneous items. The Plant side / GSS side templates are rebuilt from it with `python scripts/build_pm_side_templates.py`.
+- No database (Supabase) change is needed for the new types: equipment types are not constrained in the schema.
