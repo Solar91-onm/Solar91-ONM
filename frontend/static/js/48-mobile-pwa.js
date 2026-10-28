@@ -20,12 +20,36 @@
  let canPrompt=false;
  addEventListener("beforeinstallprompt",()=>{canPrompt=true;bars()}); /* pwa.js keeps the event and shows the prompt */
  addEventListener("appinstalled",()=>{canPrompt=false;root.classList.add("s91-standalone");store.set("s91-install-bar","installed");bars();toast("Solar91 is installed. Open it from your home screen.")});
+ /* iPhone / iPad: Apple lets no web page install itself, so the person adds it from Safari's Share menu.
+    This sheet walks them through it; it lives on <body>, so it also works on the sign-in screen. */
+ const inAppOrOther=/CriOS|FxiOS|EdgiOS|OPiOS|GSA\/|FBAN|FBAV|Instagram|WhatsApp|Line\//.test(ua); /* not Safari: Add to Home Screen may be missing */
+ const isIPad=/iPad/.test(ua)||(navigator.platform==="MacIntel"&&navigator.maxTouchPoints>1);
+ const SHARE='<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="M8 7l4-4 4 4"/><path d="M6 11H5a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-8a1 1 0 0 0-1-1h-1"/></svg>';
+ const ADD='<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="4"/><path d="M12 8v8M8 12h8"/></svg>';
  function iosSteps(){
-  const d=document.getElementById("installHelp"),m=document.getElementById("installHelpMessage");
-  if(!d||!m){toast("In Safari, tap Share, then Add to Home Screen.");return}
-  m.textContent="On iPhone or iPad: open this page in Safari, tap the Share button (square with an arrow), then choose Add to Home Screen.";
-  if(!d.open)d.showModal();
+  let el=document.getElementById("s91-ios-guide");if(el)el.remove();
+  el=document.createElement("div");el.id="s91-ios-guide";el.setAttribute("role","dialog");el.setAttribute("aria-modal","true");el.setAttribute("aria-labelledby","s91-ios-title");
+  el.className=isIPad?"ipad":"";
+  el.innerHTML='<div class="s91-ios-sheet"><h2 id="s91-ios-title">Install Solar91 on your '+(isIPad?"iPad":"iPhone")+'</h2>'+
+   (inAppOrOther?'<div class="s91-ios-warn"><b>First, open this page in Safari.</b> Other browsers and in-app browsers (WhatsApp, Gmail…) may not offer Add to Home Screen. Copy the link, open Safari and paste it.<button type="button" class="btn o sm" data-ios="copy">Copy link</button></div>':'')+
+   '<ol class="s91-ios-steps">'+
+    '<li><i>'+SHARE+'</i><span>Tap <b>Share</b> in Safari\'s toolbar '+(isIPad?'at the <b>top</b> of the screen':'at the <b>bottom</b> of the screen')+'. On newer iPhones it may be inside the <b>•••</b> menu.</span></li>'+
+    '<li><i>'+ADD+'</i><span>Scroll down and tap <b>Add to Home Screen</b>.</span></li>'+
+    '<li><i><img src="/static/pwa/apple-touch-icon.png" alt="" width="22" height="22"/></i><span>Tap <b>Add</b>. Solar91 then opens from your home screen, full screen like an app.</span></li></ol>'+
+   '<p class="s91-ios-note">Apple does not allow websites to install themselves, so this takes three taps in Safari.</p>'+
+   '<button type="button" class="btn p" data-ios="close">Got it</button></div>'+
+   (isIPad?'':'<div class="s91-ios-arrow" aria-hidden="true">↓</div>');
+  el.addEventListener("click",e=>{
+   const a=e.target.closest("[data-ios]");if(!a&&e.target!==el)return;
+   if(a&&a.dataset.ios==="copy"){const done=()=>{a.textContent="Link copied";};try{navigator.clipboard.writeText(location.origin+"/").then(done,()=>prompt("Copy this link:",location.origin+"/"))}catch(err){prompt("Copy this link:",location.origin+"/")}return}
+   el.remove();
+  });
+  document.addEventListener("keydown",function esc(e){if(e.key==="Escape"){el.remove();document.removeEventListener("keydown",esc)}});
+  document.body.appendChild(el);
+  const btn=el.querySelector('[data-ios="close"]');if(btn)btn.focus();
  }
+ /* the sign-in screen's "Install app" button (pwa.js) shows this guide on iPhone / iPad instead of the generic help */
+ document.addEventListener("click",e=>{if(isIOS&&!standalone()&&e.target.closest&&e.target.closest("#installApp")){e.preventDefault();e.stopImmediatePropagation();iosSteps()}},true);
  window.s91Install=function(){
   if(standalone()){toast("Solar91 is already installed on this device.");return}
   if(isIOS){iosSteps();return}

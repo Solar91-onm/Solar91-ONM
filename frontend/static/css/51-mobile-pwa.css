@@ -37,6 +37,27 @@ html.s91-standalone body{background:var(--background,#f4f6f5)}
 #s91-pwa-bar .btn.p{background:#22a35a;border-color:#22a35a}
 @media (max-width:900px){#s91-pwa-bar{bottom:calc(76px + env(safe-area-inset-bottom))}}
 
+/* iPhone / iPad install guide (Share → Add to Home Screen) */
+#s91-ios-guide{position:fixed;inset:0;z-index:10050;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;background:rgba(8,18,12,.55);
+ padding:0 env(safe-area-inset-right) 0 env(safe-area-inset-left)}
+#s91-ios-guide.ipad{justify-content:flex-start;padding-top:calc(70px + env(safe-area-inset-top))}
+.s91-ios-sheet{width:min(460px,100%);background:#fff;color:#111814;border-radius:20px 20px 0 0;padding:20px 18px calc(18px + env(safe-area-inset-bottom));box-shadow:0 -12px 40px rgba(0,0,0,.25)}
+#s91-ios-guide.ipad .s91-ios-sheet{border-radius:20px;margin:0 12px}
+.s91-ios-sheet h2{margin:0 0 12px;font-size:18px;font-weight:800}
+.s91-ios-steps{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:10px;counter-reset:step}
+.s91-ios-steps li{display:grid;grid-template-columns:40px minmax(0,1fr);align-items:center;gap:10px;font-size:14.5px;line-height:1.45}
+.s91-ios-steps i{display:grid;place-items:center;width:40px;height:40px;border-radius:12px;background:#eef6f0;color:#0a66d0;font-style:normal}
+.s91-ios-steps i img{border-radius:6px}
+.s91-ios-note{margin:12px 0;font-size:12.5px;color:#5f6c65;line-height:1.45}
+.s91-ios-sheet>.btn{width:100%;min-height:46px;font-size:15px}
+.s91-ios-warn{display:flex;flex-direction:column;align-items:flex-start;gap:8px;margin:0 0 12px;padding:10px 12px;border-radius:12px;background:#fff7ed;color:#9a3412;font-size:13px;line-height:1.45}
+.s91-ios-arrow{font-size:30px;line-height:1;color:#fff;padding:6px 0 calc(4px + env(safe-area-inset-bottom));animation:s91IosNudge 1.2s ease-in-out infinite}
+#s91-ios-guide:not(.ipad) .s91-ios-sheet{border-radius:20px;margin:0 10px}
+@keyframes s91IosNudge{0%,100%{transform:translateY(0)}50%{transform:translateY(6px)}}
+@media (prefers-reduced-motion:reduce){.s91-ios-arrow{animation:none}}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .s91-ios-sheet{background:#16201a;color:#e6eee9}:root:not([data-theme="light"]) .s91-ios-steps i{background:#1d2a23;color:#5aa9ff}:root:not([data-theme="light"]) .s91-ios-note{color:#9fb0a6}}
+:root[data-theme="dark"] .s91-ios-sheet{background:#16201a;color:#e6eee9}
+
 /* App & permissions */
 .s91-perm{padding:12px 0;border-top:1px solid var(--border)}
 .s91-perm:first-child{border-top:0;padding-top:2px}
