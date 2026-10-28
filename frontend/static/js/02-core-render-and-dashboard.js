@@ -14,10 +14,10 @@ function render(){
  const waBadge=(typeof washDueCount==="function")?washDueCount():S.washing.filter(t=>wDue(t,((S.washMeta||{})[t.plant]||{freq:14}).freq)&&!washedToday(t)&&!excToday(t)).length;
  const isBadge=openTk(S.issues).length;
  const plant=S.plants.find(p=>p.id===S.plantId);
- const CRUMB={dashboard:["Command Center","Portfolio operations"],plants:["Plants",S.plantsTab==="dashboard"?"Plants dashboard":"Plants table"],plant:["Plants",plant?plant.name:"Plant detail"],work:["Command Center","Work / Assignments"],performance:["Command Center","Performance"],reports:["Command Center","Reports"],data:["Command Center","Data / Imports"],settings:["Command Center","Settings"],handover:["Operations","Project Handover"],scheduled:["Planned Maintenance","Preventive Maintenance"],washing:["Planned Maintenance","Washing"],issues:["Command Center","Site Issues"],services:["Operations","Extra Services"],analytics:["Command Center","Analytics"]};
- const crumb=S.view==="dashboard"?((S._roleLabel||S.currentRole)==="Site Engineer"?["Field operations","My plant"]:CRUMB.dashboard):S.view==="plants"?CRUMB.plants:S.view==="plant"?CRUMB.plant:S.view==="work"?CRUMB.work:S.view==="performance"?CRUMB.performance:S.view==="reports"?CRUMB.reports:S.view==="data"?CRUMB.data:S.view==="settings"?CRUMB.settings:(CRUMB[S.omTab]||CRUMB.services);
+ const CRUMB={dashboard:["Command Center","Portfolio operations"],plants:["Plants",S.plantsTab==="dashboard"?"Plants dashboard":"Plants table"],plant:["Plants",plant?plant.name:"Plant detail"],work:["Command Center","Work / Assignments"],performance:["Command Center","Performance"],reports:["Command Center","Reports"],data:["Command Center","Data / Imports"],settings:["Command Center","Settings"],handover:["Operations","Project Handover"],scheduled:["Planned Maintenance","Preventive Maintenance"],washing:["Planned Maintenance","Washing"],issues:["Command Center","Site Issues"],services:["Operations","Extra Services"],analytics:["Command Center","Analytics"],photos:["Operations","Photo Intelligence"]};
+ const crumb=S.view==="dashboard"?((S._roleLabel||S.currentRole)==="Site Engineer"?["Field operations","My plant"]:CRUMB.dashboard):S.view==="plants"?CRUMB.plants:S.view==="plant"?CRUMB.plant:S.view==="work"?CRUMB.work:S.view==="performance"?CRUMB.performance:S.view==="reports"?CRUMB.reports:S.view==="data"?CRUMB.data:S.view==="settings"?CRUMB.settings:S.view==="photos"?CRUMB.photos:(CRUMB[S.omTab]||CRUMB.services);
  let body;
- try{body=S.view==="dashboard"?renderDashboard():S.view==="plants"?renderPlants():S.view==="plant"?renderPlantPage():S.view==="work"?renderWork():S.view==="performance"?renderPerformance():S.view==="reports"?renderReportsHub():S.view==="data"?renderDataHub():S.view==="settings"?renderSettings():S.omTab==="handover"?renderHandover():(S.omTab==="scheduled"||S.omTab==="washing")?renderScheduledHub():S.omTab==="issues"?renderIssues():S.omTab==="analytics"?renderAnalytics():renderServices()}catch(renderErr){
+ try{body=S.view==="dashboard"?renderDashboard():S.view==="plants"?renderPlants():S.view==="plant"?renderPlantPage():S.view==="work"?renderWork():S.view==="performance"?renderPerformance():S.view==="reports"?renderReportsHub():S.view==="data"?renderDataHub():S.view==="settings"?renderSettings():S.view==="photos"?(typeof renderPhotoIntelligence==="function"?renderPhotoIntelligence():'<div class="panel">Loading Photo Intelligence…</div>'):S.omTab==="handover"?renderHandover():(S.omTab==="scheduled"||S.omTab==="washing")?renderScheduledHub():S.omTab==="issues"?renderIssues():S.omTab==="analytics"?renderAnalytics():renderServices()}catch(renderErr){
   console.error("Solar91 module render failed",S.view,S.omTab,renderErr);
   body='<div class="panel" style="padding:24px;border:1px solid #F5C2C0;background:#FFF7F6;border-radius:14px"><h2 style="margin:0 0 8px">This section could not be displayed</h2><p style="color:#4F5B55;margin:0 0 12px">One of the saved records has missing or unexpected data. You can still use the menu to open other sections.</p><pre style="white-space:pre-wrap;font-size:12px;margin:0 0 12px">'+esc(String(renderErr&&renderErr.message||renderErr))+'</pre><button class="btn o" onclick="render()">Try again</button></div>';
  };
@@ -37,7 +37,7 @@ function mobileNav(b){const raw=S.view==="dashboard"?"dashboard":(S.view==="plan
  if(isSE){return '<nav class="mnav">'+it("dashboard","My Plant",I.dash(18),"goView('dashboard')")+it("issues","Issues",I.alert(18),"goTab('issues')",b.isBadge)+it("scheduled","Preventive",I.clipc(18),"goScheduledOM('maintenance')",(b.scBadge||0)+(b.waBadge||0))+it("washing","Washing",I.clipc(18),"goScheduledOM('washing')",b.waBadge)+'</nav>';}
  return '<nav class="mnav">'+it("dashboard","Home",I.dash(18),"goView('dashboard')")+it("plants","Plants",I.sun(18),"goView('plants')")+it("issues","Issues",I.alert(18),"goTab('issues')",b.isBadge)+it("scheduled","Preventive",I.clipc(18),"goScheduledOM('maintenance')",(b.scBadge||0)+(b.waBadge||0))+it("work","Work",I.clipc(18),"goView('work')")+it("reports","Reports",I.gauge(18),"goView('reports')")+'</nav>'}
 function sidebar(b){
- let act=S.view==="dashboard"?"dashboard":S.view==="plants"||S.view==="plant"?"plants":["work","performance","reports","data","settings"].includes(S.view)?S.view:((S.omTab==="scheduled"||S.omTab==="washing")?"scheduled":S.omTab);
+ let act=S.view==="dashboard"?"dashboard":S.view==="plants"||S.view==="plant"?"plants":["work","performance","reports","data","settings","photos"].includes(S.view)?S.view:((S.omTab==="scheduled"||S.omTab==="washing")?"scheduled":S.omTab);
  const link=(id,label,icon,fn,badgeN)=>'<div class="side-link '+(act===id?"active":"")+'" onclick="'+fn+'">'+icon+'<span>'+label+'</span>'+(badgeN?'<span class="side-badge">'+Math.min(badgeN,99)+'</span>':'')+'</div>';
  const isSE=(S._roleLabel||S.currentRole)==="Site Engineer";
  let links='';
@@ -46,7 +46,8 @@ function sidebar(b){
    link("dashboard","My Plant",I.dash(16),"goView('dashboard')")+
    link("issues","Site Issues",I.alert(16),"goTab('issues')",b.isBadge)+
    link("scheduled","Preventive Maintenance",I.clipc(16),"goScheduledOM('maintenance')",(b.scBadge||0)+(b.waBadge||0))+
-   link("washing","Washing",I.clipc(16),"goScheduledOM('washing')",b.waBadge);
+   link("washing","Washing",I.clipc(16),"goScheduledOM('washing')",b.waBadge)+
+   link("photos","Photo Intelligence",I.ftext(16),"goView('photos')");
  }else{
   links='<div class="side-label">Command Center</div>'+
    link("dashboard","Command Center",I.dash(16),"goView('dashboard')")+
@@ -59,6 +60,7 @@ function sidebar(b){
    link("data","Data / Imports",I.boxes(16),"goView('data')")+
    link("settings","Settings",I.gear(16),"goView('settings')")+
    '<div class="side-label">Operations</div>'+
+   link("photos","Photo Intelligence",I.ftext(16),"goView('photos')")+
    link("handover","Project Handover",I.fcheck(16),"goTab('handover')",b.hoBadge)+
    link("services","Extra Services",I.boxes(16),"goTab('services')");
  }
@@ -115,7 +117,7 @@ function topbar(crumb,notifs){
   '</div>'+
   /* Account menu: clicking the name opens a small menu; signing out is an explicit "Log out" choice. */
   '<div class="row tb-user" style="gap:8px;margin-left:2px;position:relative"><button type="button" class="tb-user-btn" aria-haspopup="menu" aria-expanded="'+(!!S.userMenuOpen)+'" title="Account" onclick="s91ToggleUserMenu(event)" style="display:flex;align-items:center;gap:8px;background:none;border:0;padding:0;cursor:pointer;font:inherit;color:inherit;text-align:left"><div class="tb-av">'+esc(authInitials)+'</div><div style="line-height:1.2"><div style="font-size:12px;font-weight:600;white-space:nowrap">'+esc(authName)+'</div><div style="font-size:12px;color:var(--muted-foreground)">'+esc(authRole)+' ▾</div></div></button>'+
-  (S.userMenuOpen?'<div class="tb-user-menu" role="menu" style="position:absolute;right:0;top:calc(100% + 8px);min-width:220px;background:var(--card,#fff);border:1px solid var(--border);border-radius:12px;box-shadow:0 12px 32px rgba(15,23,42,.16);padding:6px;z-index:1000"><div style="padding:8px 10px 10px;border-bottom:1px solid var(--border);margin-bottom:6px"><div style="font-size:13px;font-weight:700">'+esc(authName)+'</div><div style="font-size:12px;color:var(--muted-foreground)">'+esc(authRole)+(AUTH_IDENTITY.email?' · '+esc(AUTH_IDENTITY.email):'')+'</div></div><button type="button" role="menuitem" onclick="clerkSignOut()" style="display:block;width:100%;text-align:left;background:none;border:0;border-radius:8px;padding:9px 10px;font:inherit;font-size:13px;font-weight:600;color:var(--danger,#b91c1c);cursor:pointer">Log out</button></div>':'')+'</div>'+
+  (S.userMenuOpen?'<div class="tb-user-menu" role="menu" style="position:absolute;right:0;top:calc(100% + 8px);min-width:220px;background:var(--card,#fff);border:1px solid var(--border);border-radius:12px;box-shadow:0 12px 32px rgba(15,23,42,.16);padding:6px;z-index:1000"><div style="padding:8px 10px 10px;border-bottom:1px solid var(--border);margin-bottom:6px"><div style="font-size:13px;font-weight:700">'+esc(authName)+'</div><div style="font-size:12px;color:var(--muted-foreground)">'+esc(authRole)+(AUTH_IDENTITY.email?' · '+esc(AUTH_IDENTITY.email):'')+'</div></div><button type="button" role="menuitem" onclick="window.s91AppSettings&&s91AppSettings()" style="display:block;width:100%;text-align:left;background:none;border:0;border-radius:8px;padding:9px 10px;font:inherit;font-size:13px;font-weight:600;color:inherit;cursor:pointer">App &amp; permissions</button><button type="button" role="menuitem" onclick="clerkSignOut()" style="display:block;width:100%;text-align:left;background:none;border:0;border-radius:8px;padding:9px 10px;font:inherit;font-size:13px;font-weight:600;color:var(--danger,#b91c1c);cursor:pointer">Log out</button></div>':'')+'</div>'+
   '</div></div>';
 }
 function setPlantScope(v){

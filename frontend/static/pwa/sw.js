@@ -6,6 +6,14 @@ const OFFLINE = '<!doctype html><meta name="viewport" content="width=device-widt
   '<button onclick="location.reload()" style="padding:10px 22px;border:0;border-radius:8px;font-size:16px">Try again</button></div>';
 self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', e => e.waitUntil(self.clients.claim()));
+// Tapping a Solar91 notification brings the open portal to the front, or opens it.
+self.addEventListener('notificationclick', e => {
+  e.notification.close();
+  e.waitUntil(self.clients.matchAll({type: 'window', includeUncontrolled: true}).then(list => {
+    const open = list.find(c => new URL(c.url).origin === self.location.origin);
+    return open ? open.focus() : self.clients.openWindow('/');
+  }));
+});
 self.addEventListener('fetch', e => {
   if (e.request.mode === 'navigate') {
     e.respondWith(fetch(e.request).catch(() => new Response(OFFLINE, {headers: {'Content-Type': 'text/html; charset=utf-8'}})));

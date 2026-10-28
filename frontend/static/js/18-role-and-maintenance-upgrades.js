@@ -22,7 +22,7 @@
 
   function enforceSiteEngineerModules(){
     if(rev05Role()!=="Site Engineer")return;
-    var allowed=["Command Center","My Plant","Site Issues","Preventive Maintenance","Washing"];
+    var allowed=["Command Center","My Plant","Site Issues","Preventive Maintenance","Washing","Photo Intelligence"];
     document.querySelectorAll(".side-link").forEach(function(a){
       var sp=a.querySelector("span"),txt=(sp?sp.textContent:a.textContent||"").trim();
       a.style.display=allowed.some(function(x){return txt===x||txt.indexOf(x)===0})?"":"none";
@@ -30,7 +30,7 @@
     document.querySelectorAll(".mnav > div").forEach(function(d){
       var txt=(d.textContent||"").replace(/\d+/g,"").trim();
       if(txt==="More"){d.style.display="";return}
-      var map={Home:"Command Center","My Plant":"Command Center",Plants:"Plants",Issues:"Site Issues",Preventive:"Preventive Maintenance",Planned:"Preventive Maintenance",Work:"Work / Assignments",Reports:"Reports"};
+      var map={Home:"Command Center","My Plant":"Command Center",Plants:"Plants",Issues:"Site Issues",Preventive:"Preventive Maintenance",Planned:"Preventive Maintenance",Work:"Work / Assignments",Reports:"Reports",Photos:"Photo Intelligence"};
       var lab=map[txt]||txt;
       d.style.display=allowed.some(function(x){return lab===x||lab.indexOf(x)===0})?"":"none";
     });
@@ -331,11 +331,11 @@
     S.issF=S.issF||{};S.issF.plant=p;S.issF.site="all";S.issF.project="all";
 
     /* exact route whitelist */
-    if(S.view!=="dashboard"&&S.view!=="om-module")S.view="dashboard";
+    if(S.view!=="dashboard"&&S.view!=="om-module"&&S.view!=="photos")S.view="dashboard";
     if(S.view==="om-module"&&["issues","scheduled","washing"].indexOf(S.omTab)<0)S.omTab="issues";
 
     /* exact desktop module whitelist */
-    var allowed=["Command Center","My Plant","Site Issues","Preventive Maintenance","Washing"];
+    var allowed=["Command Center","My Plant","Site Issues","Preventive Maintenance","Washing","Photo Intelligence"];
     document.querySelectorAll(".side-link").forEach(function(a){
       var sp=a.querySelector("span"),txt=(sp?sp.textContent:a.textContent||"").trim();
       a.style.display=allowed.indexOf(txt)>=0?"":"none";
@@ -347,7 +347,7 @@
     /* exact mobile module whitelist */
     document.querySelectorAll(".mnav > div").forEach(function(d){
       var txt=(d.textContent||"").replace(/\d+/g,"").trim();
-      d.style.display=(txt==="Home"||txt==="My Plant"||txt==="Issues"||txt==="Preventive"||txt==="More")?"":"none";
+      d.style.display=(txt==="Home"||txt==="My Plant"||txt==="Issues"||txt==="Preventive"||txt==="Photos"||txt==="More")?"":"none";
     });
 
     /* plant control must show only own plant */
@@ -366,7 +366,7 @@
   /* Direct navigation cannot bypass the module boundary. */
   var prevGoView=window.goView;
   window.goView=function(v){
-    if(seRole()&&v!=="dashboard"){
+    if(seRole()&&v!=="dashboard"&&v!=="photos"){ /* Photo Intelligence is plant-scoped for Site Engineers */
       toast("Site Engineer can access only Command Center, Site Issues and Preventive Maintenance for "+sePlant()+".");
       S.view="dashboard";saveSE();render();return;
     }

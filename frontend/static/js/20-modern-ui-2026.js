@@ -669,16 +669,16 @@ if(typeof renderModal==="function"){const m26OrigModal2=renderModal;renderModal=
    modules (including Equipment Register) behind More. Site Engineer navigation
    is deliberately unchanged because that role is plant-scoped and locked. */
 function m26MobileMoreOpen(){S.modal="m26MobileMore";S.modalCtx={};render()}
-function m26MobileMoreGo(kind){S.modal=null;S.modalCtx=null;if(kind==="equipment")return m26GoEq();if(kind==="issues"||kind==="scheduled"||kind==="washing"||kind==="handover"||kind==="services")return goTab(kind);return goView(kind)}
+function m26MobileMoreGo(kind){S.modal=null;S.modalCtx=null;if(kind==="app")return window.s91AppSettings&&s91AppSettings();if(kind==="equipment")return m26GoEq();if(kind==="photos")return goView("photos");if(kind==="issues"||kind==="scheduled"||kind==="washing"||kind==="handover"||kind==="services")return goTab(kind);return goView(kind)}
 function m26MobileMoreModal(){
  const role=S._roleLabel||S.currentRole||"O&M Head";
  const byRole={
-  "O&M Head":[["work","Work / Assignments","Your operational work"],["reports","Reports","Operational reporting and exports"],["performance","Performance","Portfolio performance views"],["handover","Project Handover","Handover and commissioning workflows"],["services","Extra Services","Additional operations services"],["data","Data / Imports","Imports and operational data"],["settings","Settings","Application settings"]],
-  "Assignee":[["work","Work / Assignments","Your assigned operational work"],["handover","Project Handover","Handover and commissioning workflows"],["services","Extra Services","Additional operations services"]],
-  "Administration":[["reports","Reports","Operational reporting and exports"]],
+  "O&M Head":[["work","Work / Assignments","Your operational work"],["reports","Reports","Operational reporting and exports"],["performance","Performance","Portfolio performance views"],["photos","Photo Intelligence","Site photos from every plant"],["handover","Project Handover","Handover and commissioning workflows"],["services","Extra Services","Additional operations services"],["data","Data / Imports","Imports and operational data"],["settings","Settings","Application settings"]],
+  "Assignee":[["work","Work / Assignments","Your assigned operational work"],["photos","Photo Intelligence","Site photos from every plant"],["handover","Project Handover","Handover and commissioning workflows"],["services","Extra Services","Additional operations services"]],
+  "Administration":[["reports","Reports","Operational reporting and exports"],["photos","Photo Intelligence","Site photos (view only)"]],
   "Site Engineer":[["washing","Washing","Plant-scoped washing work"]]
  };
- const items=byRole[role]||[];
+ const items=(byRole[role]||[]).concat([["app","App & permissions","Install, camera and notifications on this device"]]);
  return modal("More","All available modules",'<div class="m26-mobile-more">'+items.map(x=>'<button class="panel" type="button" onclick="m26MobileMoreGo('+m26Js(x[0])+')"><b>'+esc(x[1])+'</b><span>'+esc(x[2])+'</span></button>').join("")+'</div>','<button class="btn o" onclick="closeModal()">Close</button>',true)
 }
 if(typeof mobileNav==="function"){
@@ -687,9 +687,9 @@ if(typeof mobileNav==="function"){
   const role=(S._roleLabel||S.currentRole||"O&M Head");
   if(role==="Site Engineer"){
    const it=(id,l,ic,fn,n)=>'<div class="'+(id==="more"&&S.modal==="m26MobileMore"?"active":"")+'" role="button" tabindex="0" aria-label="'+esc(l)+'" onclick="'+fn+'">'+ic+'<span>'+l+'</span>'+(n?'<span class="side-badge">'+Math.min(n,99)+'</span>':'')+'</div>';
-   return '<nav class="mnav" aria-label="Mobile navigation">'+it("dashboard","My Plant",I.dash(18),"goView(\'dashboard\')")+it("issues","Issues",I.alert(18),"goTab(\'issues\')",b.isBadge)+it("scheduled","Preventive",I.clipc(18),"goScheduledOM(\'maintenance\')",(b.scBadge||0)+(b.waBadge||0))+it("more","More",I.boxes(18),"m26MobileMoreOpen()")+'</nav>';
+   return '<nav class="mnav" aria-label="Mobile navigation">'+it("dashboard","My Plant",I.dash(18),"goView(\'dashboard\')")+it("issues","Issues",I.alert(18),"goTab(\'issues\')",b.isBadge)+it("scheduled","Preventive",I.clipc(18),"goScheduledOM(\'maintenance\')",(b.scBadge||0)+(b.waBadge||0))+it("photos","Photos",I.ftext(18),"goView(\'photos\')")+it("more","More",I.boxes(18),"m26MobileMoreOpen()")+'</nav>';
   }
-  const raw=S.view==="dashboard"?"dashboard":(S.view==="plants"||S.view==="plant")?"plants":S.view==="equipment"?"more":S.omTab;
+  const raw=S.view==="dashboard"?"dashboard":(S.view==="plants"||S.view==="plant")?"plants":(S.view==="equipment"||S.view==="photos")?"more":S.omTab;
   const act=(raw==="scheduled"||raw==="washing")?"scheduled":(["work","reports","performance","data","settings"].includes(S.view)?"more":raw);
   const it=(id,l,ic,fn,n)=>'<div class="'+(act===id?"active":"")+'" role="button" tabindex="0" aria-label="'+esc(l)+'" onclick="'+fn+'">'+ic+'<span>'+l+'</span>'+(n?'<span class="side-badge">'+Math.min(n,99)+'</span>':'')+'</div>';
   return '<nav class="mnav" aria-label="Mobile navigation">'+it("dashboard","Home",I.dash(18),"goView(\'dashboard\')")+it("plants","Plants",I.sun(18),"goView(\'plants\')")+it("issues","Issues",I.alert(18),"goTab(\'issues\')",b.isBadge)+it("scheduled","Preventive",I.clipc(18),"goScheduledOM(\'maintenance\')",(b.scBadge||0)+(b.waBadge||0))+it("more","More",I.boxes(18),"m26MobileMoreOpen()")+'</nav>';

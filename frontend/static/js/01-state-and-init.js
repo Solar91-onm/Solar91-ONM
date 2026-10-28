@@ -78,7 +78,7 @@ async function init(){
   Object.assign(SCADA_CONFIG,S.scadaConfig||{});
   S.plants=S.plants||[];S.handovers=S.handovers||[];S.tasks=S.tasks||[];S.washing=S.washing||[];S.washMeta=S.washMeta||{};S.issues=S.issues||[];S.inventory=S.inventory||[];S.movements=S.movements||[];S.ptw=S.ptw||[];S.incidents=S.incidents||[];S.docs=S.docs||[];S.vendors=S.vendors||[];S.rules=S.rules||[];S.sla=S.sla||[];S.audit=S.audit||[];S.offlineQueue=S.offlineQueue||[];S.serviceRequests=S.serviceRequests||[];S.events=S.events||[];S.equipment=S.equipment||[];
   S.customPlantColumns=S.customPlantColumns||[];S.plantCustomValues=S.plantCustomValues||{};S.plantEnrich=S.plantEnrich||{};
-  if(!S.view||!["dashboard","plants","plant","work","performance","reports","data","settings","equipment","om-module"].includes(S.view))S.view="dashboard";
+  if(!S.view||!["dashboard","plants","plant","work","performance","reports","data","settings","equipment","photos","om-module"].includes(S.view))S.view="dashboard";
   s91NormalizeRows();
   S.opsDate=s91ValidDate(S.opsDate)?S.opsDate:s91BusinessDate();S._opsDateOverride=false;TODAY=S.opsDate;NOW_ISO=new Date().toISOString();
   S.issF=Object.assign(blankIssF(),S.issF||{});["from","to"].forEach(k=>{const v=S.issF[k];if(v&&!s91ValidDate(v))S.issF[k]=""});S.scada={...SCADA_DEFAULT,...(S.scada||{})};

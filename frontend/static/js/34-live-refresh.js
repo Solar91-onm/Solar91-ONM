@@ -5,7 +5,7 @@
 (function(){
   "use strict";
   var POLL_MS=Number(window.S91_POLL_MS)||30000, MIN_REFRESH_GAP=Math.min(15000,POLL_MS);
-  var base=null, busy=false, lastRefresh=0, lastTick=0, asked=false;
+  var base=null, busy=false, lastRefresh=0, lastTick=0;
 
   function ready(){try{return typeof S!=="undefined"&&S&&typeof S._serverRevision==="number"&&typeof apiFetch==="function"&&Array.isArray(S.issues)}catch(e){return false}}
   function typing(){var a=document.activeElement;if(!a)return false;var t=String(a.tagName||"").toUpperCase();return t==="INPUT"||t==="TEXTAREA"||t==="SELECT"||!!a.isContentEditable}
@@ -21,7 +21,8 @@
 
   function notify(title,body){
     try{if(typeof toast==="function")toast(title+(body?" — "+body:""))}catch(e){}
-    try{if("Notification" in window&&Notification.permission==="granted"&&document.hidden)new Notification(title,{body:body||"",tag:"s91-live"})}catch(e){}
+    /* through the service worker (48-mobile-pwa.js) so Android shows it too; the person turns this on in App & permissions */
+    try{if(document.hidden){if(typeof window.s91ShowNotification==="function")window.s91ShowNotification(title,body,"s91-live");else if("Notification" in window&&Notification.permission==="granted")new Notification(title,{body:body||"",tag:"s91-live"})}}catch(e){}
   }
   function describe(before,after){
     var fixed=[],mine=[],fresh=[];
@@ -73,9 +74,6 @@
   setInterval(tick,POLL_MS);
   document.addEventListener("visibilitychange",function(){if(!document.hidden&&Date.now()-lastTick>POLL_MS/2)tick()});
   window.addEventListener("online",function(){tick()});
-  document.addEventListener("click",function ask(){
-    if(asked)return;asked=true;
-    try{if("Notification" in window&&Notification.permission==="default")Notification.requestPermission()}catch(e){}
-  },{once:true});
+  /* no automatic permission prompt: notifications are switched on from the account menu → App & permissions */
   window.s91LiveRefresh={tick:tick,state:function(){return{base:base,lastRefresh:lastRefresh}}};
 })();

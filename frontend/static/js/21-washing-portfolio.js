@@ -11,6 +11,7 @@ let _s91RouteApplying=false;
 function s91RouteParts(){const raw=String(location.hash||"").replace(/^#\/?/,"");const i=raw.indexOf("?");return{path:(i<0?raw:raw.slice(0,i)),params:new URLSearchParams(i<0?"":raw.slice(i+1))}}
 function s91RouteHash(){
  if(S.view==="equipment")return "/equipment";
+ if(S.view==="photos")return "/photos";
  if(S.view==="plant"&&S.plantId)return "/plant/"+encodeURIComponent(S.plantId);
  if(S.view==="plants")return S.plantsTab==="dashboard"?"/plants/dashboard":"/plants";
  if(S.view==="dashboard"||["plants","work","performance","reports","data","settings"].includes(S.view))return "/"+S.view;
@@ -30,6 +31,7 @@ function s91ApplyRoute(initial){
  _s91RouteApplying=true;
  try{
   if(p==="plant"&&seg[1]){S.view="plant";S.plantId=decodeURIComponent(seg.slice(1).join("/"));S.modal=null}
+  else if(p==="photos"){S.view="photos";S.modal=null}
   else if(p==="equipment"&&typeof M26R!=="undefined"){
    S.view="equipment";S.omTab="equipment";S.modal=null;
    Object.assign(M26R,{q:r.params.get("q")||"",plant:r.params.get("plant")||"",type:r.params.get("type")||"",status:r.params.get("status")||"",maker:r.params.get("maker")||"",discom:r.params.get("discom")||"",inCharge:r.params.get("incharge")||"",warranty:r.params.get("warranty")||"",noInCharge:r.params.get("no_incharge")==="1",makerMissing:r.params.get("maker_missing")==="1",serialMissing:r.params.get("serial_missing")==="1",page:Math.max(1,parseInt(r.params.get("page")||"1",10)||1),pageSize:[25,50,100].includes(parseInt(r.params.get("size")||"50",10))?parseInt(r.params.get("size")||"50",10):50});

@@ -2,7 +2,14 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8"/>
-<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"/>
+<!-- installed on a phone home screen: full screen, Solar91 name and icon -->
+<meta name="mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-status-bar-style" content="default"/>
+<meta name="apple-mobile-web-app-title" content="Solar91 O&amp;M"/>
+<meta name="application-name" content="Solar91 O&amp;M"/>
+<meta name="format-detection" content="telephone=no"/>
 <!-- Asset URLs get ?v=<content hash> automatically when the page is served (app/core/assets.py). -->
 <meta name="s91-build" content="{{ build_id }}"/>
 <title>SOLAR 91™ — O&amp;M Command Center</title>
@@ -36,6 +43,8 @@
 <link rel="stylesheet" href="/static/css/46-pm-command.css"/>
 <link rel="stylesheet" href="/static/css/47-pm-views.css"/>
 <link rel="stylesheet" href="/static/css/49-plants-pages.css"/>
+<link rel="stylesheet" href="/static/css/50-photo-intelligence.css"/>
+<link rel="stylesheet" href="/static/css/51-mobile-pwa.css"/>
 <link rel="stylesheet" href="/static/css/48-laptop-fit.css"/>
 <link rel="manifest" href="/manifest.webmanifest"/>
 <meta name="theme-color" content="#005e09"/>
@@ -112,6 +121,9 @@ window.S91_CONFIG = JSON.parse(document.getElementById("s91-config").textContent
 <script defer src="/static/js/43-issue-upload.js"></script>
 <script defer src="/static/js/44-session-nav.js"></script>
 <script defer src="/static/js/45-issue-edit-access.js"></script>
+<script defer src="/static/js/46-photo-service.js"></script>
+<script defer src="/static/js/47-photo-intelligence.js"></script>
+<script defer src="/static/js/48-mobile-pwa.js"></script>
 
 </body>
 </html>

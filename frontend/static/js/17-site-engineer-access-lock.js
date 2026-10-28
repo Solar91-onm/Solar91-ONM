@@ -299,10 +299,10 @@ function rev05Role(){return S._roleLabel||S.currentRole||"O&M Head"}
 function rev05ReadOnly(){return rev05Role()==="Administration"}
 function rev05AllowedModules(){
  const m={
-  "O&M Head":["Command Center","Plants","Site Issues","Preventive Maintenance","Washing","Work / Assignments","Performance","Reports","Data / Imports","Settings","Project Handover","Extra Services"],
-  "Assignee":["Command Center","Plants","Site Issues","Preventive Maintenance","Washing","Work / Assignments","Project Handover","Extra Services"],
-  "Administration":["Command Center","Reports"],
-  "Site Engineer":["Command Center","Site Issues","Preventive Maintenance","Washing"]
+  "O&M Head":["Command Center","Plants","Site Issues","Preventive Maintenance","Washing","Work / Assignments","Performance","Reports","Data / Imports","Settings","Project Handover","Extra Services","Photo Intelligence"],
+  "Assignee":["Command Center","Plants","Site Issues","Preventive Maintenance","Washing","Work / Assignments","Project Handover","Extra Services","Photo Intelligence"],
+  "Administration":["Command Center","Reports","Photo Intelligence"],
+  "Site Engineer":["Command Center","Site Issues","Preventive Maintenance","Washing","Photo Intelligence"]
  };
  return m[rev05Role()]||m["O&M Head"];
 }
@@ -333,7 +333,7 @@ function rev05ApplyPermissions(){
  const role=rev05Role(),allowed=rev05AllowedModules();
  document.querySelectorAll(".side-link").forEach(a=>{const sp=a.querySelector("span"),txt=(sp?sp.textContent:a.textContent||"").trim();a.style.display=allowed.some(x=>txt===x||txt.indexOf(x)===0)?"":"none"});
  /* Bottom bar: ignore badge counts in the label ("Issues76") and map the short mobile names; "More" lists only role-allowed modules. */
- document.querySelectorAll(".mnav > div").forEach(d=>{const txt=(d.textContent||"").replace(/\d+/g,"").trim(),map={Home:"Command Center","My Plant":"Command Center",Plants:"Plants",Issues:"Site Issues",Preventive:"Preventive Maintenance",Planned:"Preventive Maintenance",Work:"Work / Assignments",Reports:"Reports"};if(txt==="More"){d.style.display="";return}const lab=map[txt]||txt;d.style.display=allowed.some(x=>lab===x||lab.indexOf(x)===0)?"":"none"});
+ document.querySelectorAll(".mnav > div").forEach(d=>{const txt=(d.textContent||"").replace(/\d+/g,"").trim(),map={Home:"Command Center","My Plant":"Command Center",Plants:"Plants",Issues:"Site Issues",Preventive:"Preventive Maintenance",Planned:"Preventive Maintenance",Work:"Work / Assignments",Reports:"Reports",Photos:"Photo Intelligence"};if(txt==="More"){d.style.display="";return}const lab=map[txt]||txt;d.style.display=allowed.some(x=>lab===x||lab.indexOf(x)===0)?"":"none"});
  if(rev05ReadOnly()){
   const mutate=/create|save|delete|remove|assign|reassign|approve|reject|startTask|completeTask|convertToIssue|washTable|bulkWash|logException|import|updateWash|toggleRule|syncQueue|renewDoc|reorder|bumpESR|verifyESR|changeESR|closePTW|reportIncident|omHeadMoveTicket/i;
   document.querySelectorAll(".content button,.modal button").forEach(b=>{const oc=b.getAttribute("onclick")||"",tx=(b.textContent||"").trim();if(mutate.test(oc)||/^(Add|Build|Upload|Create|Start|Complete|Reassign|Approve|Reject|Close ticket|Log |Record renewal|Run now|Sync now|\+ Add)/i.test(tx)){b.style.display="none"}});
@@ -346,7 +346,7 @@ function rev05ApplyPermissions(){
 }
 (function(){
  const oldRender=render;
- render=function(){if(rev05Role()==="Administration"&&S.view!=="dashboard"&&S.view!=="reports")S.view="dashboard";oldRender.apply(this,arguments);try{rev05ApplyPermissions()}catch(e){console.warn("[REV07 permissions]",e)}setTimeout(()=>{try{rev05ApplyPermissions()}catch(e){}},60);setTimeout(()=>{try{rev05ApplyPermissions()}catch(e){}},180)};
+ render=function(){if(rev05Role()==="Administration"&&S.view!=="dashboard"&&S.view!=="reports"&&S.view!=="photos")S.view="dashboard";oldRender.apply(this,arguments);try{rev05ApplyPermissions()}catch(e){console.warn("[REV07 permissions]",e)}setTimeout(()=>{try{rev05ApplyPermissions()}catch(e){}},60);setTimeout(()=>{try{rev05ApplyPermissions()}catch(e){}},180)};
 })();
 (function(){
  const css=document.createElement("style");css.textContent=

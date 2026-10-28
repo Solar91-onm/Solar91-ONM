@@ -1,0 +1,62 @@
+/* Phones and the installed app, across the whole portal: safe areas (notch, home indicator, landscape edges),
+   iPhone form zoom, touch polish, the install / update bar and the App & permissions panel.
+   The viewport uses viewport-fit=cover, so every fixed or edge element keeps clear of the device's safe areas. */
+
+/* touch polish */
+html{-webkit-text-size-adjust:100%;text-size-adjust:100%}
+@media (pointer:coarse){
+ button,[role="button"],a,label,select,summary,.side-link,.mnav>div{touch-action:manipulation;-webkit-tap-highlight-color:transparent}
+}
+/* iPhone Safari zooms into any field under 16px when it is tapped; keep fields at 16px on iPhone only */
+@media (max-width:900px){
+ html.s91-ios #app input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]),
+ html.s91-ios #app select,html.s91-ios #app textarea{font-size:16px!important} /* beats the compact 12.5–13px field styles */
+}
+
+/* safe areas */
+.topbar{padding-left:max(20px,env(safe-area-inset-left));padding-right:max(20px,env(safe-area-inset-right))}
+@media (max-width:900px){
+ .topbar{padding-left:calc(10px + env(safe-area-inset-left));padding-right:calc(10px + env(safe-area-inset-right))}
+ .content{padding-left:calc(12px + env(safe-area-inset-left));padding-right:calc(12px + env(safe-area-inset-right));padding-bottom:calc(168px + env(safe-area-inset-bottom))}
+ .mnav{padding-left:env(safe-area-inset-left);padding-right:env(safe-area-inset-right)}
+ #s91-assistant-root{bottom:calc(74px + env(safe-area-inset-bottom));right:calc(12px + env(safe-area-inset-right))}
+ body>.toast,.toast{bottom:calc(80px + env(safe-area-inset-bottom))}
+ .overlay .modal{max-height:calc(100dvh - 24px - env(safe-area-inset-top) - env(safe-area-inset-bottom))}
+ .modal .modal-f{padding-bottom:calc(14px + env(safe-area-inset-bottom))}
+ /* Site Engineer: the topbar search is hidden (17-site-engineer-access-lock.js); on phones it sits on its own row, so drop the empty row */
+ .topbar>div:nth-child(2)[style*="visibility: hidden"]{display:none!important}
+}
+/* installed app: the "default" status bar style keeps the page below the status bar, so only the edges need room */
+html.s91-standalone body{background:var(--background,#f4f6f5)}
+
+/* install / update bar */
+#s91-pwa-bar{position:fixed;z-index:9000;left:50%;transform:translateX(-50%);bottom:calc(20px + env(safe-area-inset-bottom));display:flex;align-items:center;gap:8px;flex-wrap:wrap;
+ width:min(560px,calc(100vw - 24px - env(safe-area-inset-left) - env(safe-area-inset-right)));padding:10px 12px;border-radius:14px;background:#0f1d15;color:#fff;font-size:13px;line-height:1.4;box-shadow:0 14px 34px rgba(0,0,0,.3)}
+#s91-pwa-bar>span{flex:1 1 220px;min-width:0}
+#s91-pwa-bar .btn.g{color:#cfe8d6}
+#s91-pwa-bar .btn.p{background:#22a35a;border-color:#22a35a}
+@media (max-width:900px){#s91-pwa-bar{bottom:calc(76px + env(safe-area-inset-bottom))}}
+
+/* App & permissions */
+.s91-perm{padding:12px 0;border-top:1px solid var(--border)}
+.s91-perm:first-child{border-top:0;padding-top:2px}
+.s91-perm-h{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
+.s91-perm-h b{font-size:14px}
+.s91-perm p{margin:6px 0 0;font-size:12.5px;line-height:1.5;color:var(--muted-foreground)}
+.s91-perm-a{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+.s91-perm-a .btn{min-height:40px}
+.s91-perm-st{padding:2px 9px;border-radius:999px;font-size:11.5px;font-weight:700;background:var(--secondary,#eef2ef);color:var(--muted-foreground)}
+.s91-perm-st.ok{background:#dcfce7;color:#15803d}
+.s91-perm-st.warn{background:#fef3c7;color:#b45309}
+.s91-perm-st.bad{background:#fde8e8;color:#b91c1c}
+.s91-perm-note{margin:10px 0 0;padding:10px 12px;border-radius:10px;background:#fff7ed;color:#9a3412;font-size:12.5px;line-height:1.5}
+@media (prefers-color-scheme:dark){
+ :root:not([data-theme="light"]) .s91-perm-st.ok{background:rgba(74,222,128,.14);color:#4ade80}
+ :root:not([data-theme="light"]) .s91-perm-st.warn{background:rgba(251,191,36,.14);color:#fbbf24}
+ :root:not([data-theme="light"]) .s91-perm-st.bad{background:rgba(248,113,113,.14);color:#f87171}
+ :root:not([data-theme="light"]) .s91-perm-note{background:rgba(251,146,60,.12);color:#fdba74}
+}
+:root[data-theme="dark"] .s91-perm-st.ok{background:rgba(74,222,128,.14);color:#4ade80}
+:root[data-theme="dark"] .s91-perm-st.warn{background:rgba(251,191,36,.14);color:#fbbf24}
+:root[data-theme="dark"] .s91-perm-st.bad{background:rgba(248,113,113,.14);color:#f87171}
+:root[data-theme="dark"] .s91-perm-note{background:rgba(251,146,60,.12);color:#fdba74}
