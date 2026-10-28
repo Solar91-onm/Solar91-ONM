@@ -147,7 +147,10 @@ def test_page_assets_routes_and_role_navigation_are_wired():
     for name in ("46-photo-service.js", "47-photo-intelligence.js"):
         source = js(name)
         assert "service_role" not in source.lower() and "supabase" not in source.lower(), "no storage keys or direct storage calls in the page"
-        assert "localStorage" not in source and "indexedDB" not in source, "demo photos must not be stored in the browser"
+        # demo photos are never stored in the browser: the only browser storage is the Grid / List preference
+        assert "indexedDB" not in source, "demo photos must not be stored in the browser"
+        uses = re.findall(r"localStorage\.(?:get|set)Item\(([^,)]*)", source)
+        assert all(key.strip() == '"s91-photo-layout"' for key in uses), uses
         run = subprocess.run(["node", "--check", f"frontend/static/js/{name}"], cwd=ROOT, capture_output=True, text=True, timeout=10)
         assert run.returncode == 0, run.stderr
 
@@ -185,3 +188,25 @@ def test_portal_is_ready_to_install_on_phones():
     assert "safe-area-inset-bottom" in css and "html.s91-ios #app select" in css
     run = subprocess.run(["node", "--check", "frontend/static/js/48-mobile-pwa.js"], cwd=ROOT, capture_output=True, text=True, timeout=10)
     assert run.returncode == 0, run.stderr
+
+
+def test_gallery_volume_day_counts_and_attachable_files():
+    run_node(r'''
+      const names=Array.from({length:41},(_,i)=>'Plant '+i);
+      const svc=L.createDemoAdapter({getPlants:()=>names,now:()=>NOW,delay:()=>Promise.resolve()});
+      const all=await svc.listPhotos({limit:60});
+      const perDay=all.total/30;
+      assert.ok(perDay>=150&&perDay<=220,'demo volume is about 150–200 photos a day for 41 plants, got '+perDay.toFixed(0));
+      assert.strictEqual(all.items.length,60,'the gallery loads 60 at a time');
+      const days=Object.keys(all.days);
+      assert.ok(days.length>=29&&days.length<=31,'photos are counted per calendar day');
+      assert.strictEqual(Object.values(all.days).reduce((a,b)=>a+b,0),all.total,'day counts add up to the total');
+      assert.strictEqual(all.days[L.dayKey(all.items[0].uploadedAt)]>0,true);
+      const one=L.createDemoAdapter({getPlants:()=>['Only Plant'],now:()=>NOW,delay:()=>Promise.resolve()});
+      const mine=await one.listPhotos({});
+      assert.ok(mine.total>=100&&mine.total<=160,'one plant gets about 4 photos a day, not the whole fleet volume');
+      const file={name:'x.png',size:10,type:'image/png'};
+      const sub=await svc.createSubmission({files:[{name:'x.png',size:10,type:'image/png',previewUrl:'blob:x',file}],plant:'Plant 1',category:'pm'},()=>{});
+      assert.strictEqual(await svc.getPhotoFile(sub.records[0].id),file,'a photo added in this tab hands back its file for attaching');
+      assert.strictEqual(await svc.getPhotoFile(all.items.find(r=>r.source==='sample').id),null,'sample photos have no file to attach');
+    ''')

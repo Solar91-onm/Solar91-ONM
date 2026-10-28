@@ -6,7 +6,10 @@
    getCategories, getProcessingStatus); the server then enforces sign-in, role and plant access, keeps the files in
    private storage and applies the real 30-day expiry. Nothing in this file holds a secret or decides access. */
 (function(root){
- const DAY=864e5,RETENTION_DAYS=30,PAGE_SIZE=24;
+ const DAY=864e5,RETENTION_DAYS=30,PAGE_SIZE=60;
+ /* demo volume: about 4.5 photos per plant per day (≈ 150–200 a day across 40–50 plants), at most 220 a day,
+    over 35 days (the last 5 fall outside retention) */
+ const DEMO_DAYS=35,DEMO_PER_PLANT_DAY=4.5,DEMO_MAX_DAY=220;
  /* one list for categories: labels follow Solar91 module names */
  const CATEGORIES=[
   {id:"washing",label:"Washing"},
@@ -56,6 +59,9 @@
  function summarize(rows,now){
   return{inWindow:rows.length,today:rows.filter(r=>sameDay(r.uploadedAt,now)).length,awaiting:rows.filter(r=>r.status==="queued").length,unlinked:rows.filter(r=>!r.issue).length};
  }
+ /* local calendar day "YYYY-MM-DD" of an ISO time; the gallery groups by it */
+ const dayKey=iso=>{const d=new Date(iso);return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0")};
+ function countByDay(rows){const out={};rows.forEach(r=>{const k=dayKey(r.uploadedAt);out[k]=(out[k]||0)+1});return out}
  /* files: anything with name / type / size (File objects in the browser) */
  function validateFiles(files,alreadySelected){
   const accepted=[],rejected=[];let room=MAX_FILES-(alreadySelected||0);
@@ -108,10 +114,10 @@
  const WEIGHTED=["washing","washing","washing","pm","pm","equipment","equipment","issue","issue","safety","handover","other"];
  const ISSUE_STATUSES=["Open","In Progress","Resolved"];
  function makeMockPhotos(plantNames,now,count){
-  const r=rng(91),names=plantNames.length?plantNames:["Plant 01"],out=[];count=count||420;
+  const r=rng(91),names=plantNames.length?plantNames:["Plant 01"],out=[];count=count||DEMO_DAYS*Math.min(DEMO_MAX_DAY,Math.max(4,Math.round(names.length*DEMO_PER_PLANT_DAY)));
   for(let i=0;i<count;i++){
    const category=pick(r,WEIGHTED),s=SAMPLES[category];
-   const age=Math.floor(r()*40*DAY/6e4)*6e4,uploadedAt=new Date(now-age).toISOString();
+   const age=Math.floor(r()*DEMO_DAYS*DAY/6e4)*6e4,uploadedAt=new Date(now-age).toISOString();
    const linkChance=category==="issue"?.85:category==="equipment"?.35:category==="safety"?.1:.04;
    const issueNo=1000+Math.floor(r()*60);
    const status=age<6*36e5?(r()<.75?"queued":"processed"):age<2*DAY?(r()<.3?"queued":"processed"):(r()<.04?"failed":"processed");
@@ -150,10 +156,13 @@
     const rows=filterPhotos(scoped,q,now),offset=Math.max(0,q.offset|0),limit=Math.max(1,q.limit|0||PAGE_SIZE);
     const retained=scoped.filter(x=>Date.parse(x.uploadedAt)>=now-RETENTION_DAYS*DAY);
     const issues=[...new Map(retained.filter(x=>x.issue).map(x=>[x.issue.id,x.issue])).values()].sort((a,b)=>a.id.localeCompare(b.id));
-    return Promise.resolve({items:rows.slice(offset,offset+limit),total:rows.length,summary:summarize(rows,now),
+    return Promise.resolve({items:rows.slice(offset,offset+limit),total:rows.length,summary:summarize(rows,now),days:countByDay(rows),
      facets:{uploaders:[...new Set(retained.map(x=>x.uploader))].sort(),issues},sessionCount:session.length,generatedAt:now});
    },
    getPhotoDetails:id=>Promise.resolve(records().find(x=>x.id===id)||null),
+   /* the image file, for attaching a photo to a ticket or a PM work order. Demo: only photos added in this tab
+      have a real file; the storage adapter will fetch the stored image instead. */
+   getPhotoFile:id=>{const x=records().find(y=>y.id===id);return Promise.resolve(x&&x.file?x.file:null)},
    getProcessingStatus:id=>{const x=records().find(y=>y.id===id);return Promise.resolve(x?{id,status:x.status,label:statusLabel(x.status)}:null)},
    /* sub: {files:[{name,size,type,previewUrl}], plant, category, description, uploader}; onProgress(0–100) is simulated */
    async createSubmission(sub,onProgress){
@@ -167,7 +176,7 @@
     const now=ctx.now(),made=sub.files.map(f=>({
      id:"SESSION-"+(++seq),demo:true,source:"session",plant:sub.plant,category:sub.category,uploader:sub.uploader||"You",
      uploadedAt:new Date(now).toISOString(),expiresAt:new Date(now+RETENTION_DAYS*DAY).toISOString(),
-     description:desc,tags:tags.slice(),equipmentId:"",status:"queued",issue,previewUrl:f.previewUrl||null,fileName:f.name,fileSize:f.size,
+     description:desc,tags:tags.slice(),equipmentId:"",status:"queued",issue,previewUrl:f.previewUrl||null,fileName:f.name,fileSize:f.size,file:f.file||null,
      quality:f.quality&&f.quality.checked?{dark:!!f.quality.dark,blurry:!!f.quality.blurry}:null
     }));
     session=made.concat(session);
@@ -180,7 +189,7 @@
  }
 
  root.S91PhotoLogic={CATEGORIES,STATUSES,WINDOWS,DEFAULT_QUERY,RETENTION_DAYS,PAGE_SIZE,MAX_FILES,MAX_BYTES,MAX_DESCRIPTION,QUICK_TAGS,MAX_TAGS,QUALITY,
-  catLabel,statusLabel,normalizeQuery,filterPhotos,summarize,validateFiles,cleanTags,measureGray,qualityFlags,makeMockPhotos,createDemoAdapter};
+  catLabel,statusLabel,normalizeQuery,filterPhotos,summarize,dayKey,countByDay,validateFiles,cleanTags,measureGray,qualityFlags,makeMockPhotos,createDemoAdapter};
  root.S91PhotoService=createDemoAdapter({
   getPlants:()=>typeof S!=="undefined"&&S&&Array.isArray(S.plants)?S.plants.map(p=>p&&p.name):[],
   now:()=>Date.now(),

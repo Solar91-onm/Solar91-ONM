@@ -6,13 +6,19 @@
  if(window.renderPhotoIntelligence)return;
  const L=window.S91PhotoLogic,svc=()=>window.S91PhotoService;
  const P=window.S91PhotoUI={q:Object.assign({},L.DEFAULT_QUERY),limit:L.PAGE_SIZE,result:null,plants:null,loading:false,error:null,
-  key:null,seq:0,showFilters:false,fresh:new Set(),draft:null};
+  key:null,seq:0,showFilters:false,fresh:new Set(),draft:null,layout:(()=>{try{return localStorage.getItem("s91-photo-layout")==="list"?"list":"grid"}catch(e){return "grid"}})()};
  const role=()=>S._roleLabel||S.currentRole||"O&M Head";
  const sePlant=()=>role()==="Site Engineer"?(S._sePlant||""):"";
  const readOnly=()=>role()==="Administration"||(typeof rev05ReadOnly==="function"&&rev05ReadOnly());
  /* the demo narrows a Site Engineer to their plant; the real API will enforce plant access on the server */
  const viewer=()=>sePlant()?{plants:[sePlant()]}:null;
- const blankDraft=()=>({files:[],plant:"",category:"",description:"",tags:[],otherTags:"",issueId:"",errors:[],progress:null,busy:false,qualityAck:false});
+ const blankDraft=()=>({files:[],plant:"",category:"",description:"",tags:[],otherTags:"",issueId:"",attachTicket:false,errors:[],progress:null,busy:false,qualityAck:false});
+ /* a linked ticket that this person may add photos to, with its free photo slots (tickets hold 10, see uploadIssuePhotos) */
+ function ticketSlot(id){
+  const t=id&&(S.issues||[]).find(x=>x.id===id);
+  if(!t||!t.dbId||typeof uploadIssuePhotos!=="function"||!["O&M Head","Assignee","Site Engineer"].includes(role())||/^closed$/i.test(t.status||""))return null;
+  return{t,left:Math.max(0,10-(t.evidence||[]).length)};
+ }
  /* open site issues of one plant, read from the loaded register (the demo link itself is not saved) */
  const plantIssues=plant=>plant&&typeof openTk==="function"?openTk((S.issues||[]).filter(t=>t.plant===plant)).slice(0,60):[];
  P.draft=blankDraft();
@@ -30,7 +36,7 @@
   const h=HUE[cat]||120,off=variant*14,rows=[0,1,2].map(i=>{const y=118+i*34+(variant%2)*6,x=-20+off+i*18;
    return '<polygon points="'+x+','+(y+26)+' '+(x+38)+','+y+' '+(x+330)+','+y+' '+(x+300)+','+(y+26)+'" fill="#24405f" stroke="#9fb4c9" stroke-width="1.2"/>'}).join("");
   const svg='<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 240"><rect width="320" height="240" fill="hsl('+h+',38%,90%)"/><rect y="104" width="320" height="136" fill="hsl('+h+',22%,80%)"/>'+rows+
-   '<circle cx="'+(250-off)+'" cy="52" r="20" fill="hsl(44,90%,72%)"/><rect x="204" y="204" width="104" height="24" rx="12" fill="rgba(255,255,255,.85)"/><text x="256" y="220" text-anchor="middle" font-family="system-ui,sans-serif" font-size="12" font-weight="700" fill="#33443c">SAMPLE PHOTO</text></svg>';
+   '<circle cx="'+(250-off)+'" cy="52" r="20" fill="hsl(44,90%,72%)"/></svg>'; /* samples are labelled by the page and the detail view */
   const url="data:image/svg+xml;charset=utf-8,"+encodeURIComponent(svg);thumbs.set(k,url);return url;
  }
  const imgOf=r=>r.previewUrl||placeholder(r.category,r.variant||0);
@@ -45,6 +51,7 @@
   const seq=++P.seq,q=Object.assign({},P.q,{offset:0,limit:P.limit});P.loading=true;P.error=null;
   Promise.all([svc().listPhotos(q,viewer()),P.plants&&!force?Promise.resolve(P.plants):svc().getPlants(viewer())]).then(([res,plants])=>{
    if(seq!==P.seq)return;P.result=res;P.plants=plants;P.loading=false;if(S.view==="photos")render();
+   if(P.afterLoad){const f=P.afterLoad;P.afterLoad=null;f()}
   }).catch(err=>{if(seq!==P.seq)return;P.loading=false;P.error=(err&&err.message)||"Photos could not load.";if(S.view==="photos")render()});
  }
  window.s91PhotoRetry=function(){P.key=null;refresh(true)};
@@ -76,16 +83,48 @@
    card("Awaiting processing",v(s&&s.awaiting),P.q.status==="queued"?"showing these · tap to clear":"tap to show","s91PhotoSet('status','"+(P.q.status==="queued"?"all":"queued")+"')",P.q.status==="queued")+
    card("Not linked to an issue",v(s&&s.unlinked),P.q.issue==="unlinked"?"showing these · tap to clear":"tap to show","s91PhotoSet('issue','"+(P.q.issue==="unlinked"?"all":"unlinked")+"')",P.q.issue==="unlinked")+'</div>';
  }
- function cardHtml(r){
-  const st='<em class="phx-st st-'+r.status+'">'+esc(L.statusLabel(r.status))+'</em>';
-  return '<article class="phx-card'+(P.fresh.has(r.id)?" fresh":"")+'" role="button" tabindex="0" aria-label="'+esc(L.catLabel(r.category)+" photo at "+r.plant+", "+ago(r.uploadedAt))+'" onclick="s91PhotoOpen(\''+esc(r.id)+'\')" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();s91PhotoOpen(\''+esc(r.id)+'\')}">'+
-   '<div class="phx-thumb"><img src="'+esc(imgOf(r))+'" alt="'+esc(altOf(r))+'" loading="lazy" decoding="async" onerror="this.parentNode.classList.add(\'noimg\')"/>'+st+(r.source==="session"?'<i class="phx-mine">Added in this tab</i>':'')+'</div>'+
-   '<div class="phx-body"><div class="phx-row"><b title="'+esc(r.plant)+'">'+esc(r.plant)+'</b><span class="phx-cat c-'+r.category+'">'+esc(L.catLabel(r.category))+'</span></div>'+
-   '<small>'+esc(fmtDT(r.uploadedAt))+' · '+esc(r.uploader)+'</small>'+
-   '<p>'+(r.description?esc(r.description):'<span class="phx-muted">No description · AI caption arrives in a later phase</span>')+'</p>'+
-   ((r.tags||[]).length?'<div class="phx-tags">'+r.tags.map(t=>'<span>#'+esc(t)+'</span>').join("")+'</div>':'')+
-   (r.issue?'<div class="phx-issue">'+esc(r.issue.id)+' · '+esc(r.issue.status)+'</div>':'')+'</div></article>';
+ /* ---------- gallery: photos grouped by day, compact tiles (or one-line rows) for 150–200 photos a day ---------- */
+ let codes=null,codesN=-1;
+ function codeOf(name){const n=(S.plants||[]).length;if(!codes||codesN!==n){codes=new Map((S.plants||[]).map(p=>[p.name,p.id?(typeof displayCode==="function"?displayCode(p.id):p.id):""]));codesN=n}return codes.get(name)||""}
+ const timeOf=iso=>new Date(iso).toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"});
+ function dayLabel(k){
+  const today=L.dayKey(new Date().toISOString()),yest=L.dayKey(new Date(Date.now()-864e5).toISOString());
+  return k===today?"Today":k===yest?"Yesterday":new Date(k+"T00:00:00").toLocaleDateString("en-GB",{weekday:"short",day:"numeric",month:"short"});
  }
+ /* a dot only when a photo still needs attention: awaiting processing or failed */
+ const dot=r=>r.status==="processed"?"":'<i class="phx-dot st-'+r.status+'" title="'+esc(L.statusLabel(r.status))+'"></i>';
+ const label=r=>L.catLabel(r.category)+" photo at "+r.plant+", "+timeOf(r.uploadedAt)+(r.status!=="processed"?", "+L.statusLabel(r.status):"");
+ function tileHtml(r){
+  const code=codeOf(r.plant);
+  return '<button type="button" class="phx-tile'+(P.fresh.has(r.id)?" fresh":"")+'" onclick="s91PhotoOpen(\''+esc(r.id)+'\')" aria-label="'+esc(label(r))+'">'+
+   '<img src="'+esc(imgOf(r))+'" alt="" loading="lazy" decoding="async" onerror="this.classList.add(\'noimg\')"/>'+dot(r)+(r.source==="session"?'<i class="phx-you">You</i>':'')+
+   '<span class="phx-tile-meta"><b>'+esc(code||r.plant)+'</b><small>'+timeOf(r.uploadedAt)+'</small></span></button>';
+ }
+ function rowHtml(r){
+  const code=codeOf(r.plant);
+  return '<button type="button" class="phx-li'+(P.fresh.has(r.id)?" fresh":"")+'" onclick="s91PhotoOpen(\''+esc(r.id)+'\')" aria-label="'+esc(label(r))+'">'+
+   '<img src="'+esc(imgOf(r))+'" alt="" loading="lazy" decoding="async" onerror="this.classList.add(\'noimg\')"/>'+
+   '<span class="phx-li-main"><b>'+esc(code?code+" · "+r.plant:r.plant)+(r.source==="session"?' <i class="phx-you in">You</i>':'')+'</b>'+
+   '<small>'+esc(L.catLabel(r.category))+' · '+timeOf(r.uploadedAt)+' · '+esc(r.uploader)+'</small>'+(r.description?'<small class="phx-li-desc">'+esc(r.description)+'</small>':'')+'</span>'+
+   (r.issue?'<span class="phx-issue">'+esc(r.issue.id)+'</span>':'<span></span>')+dot(r)+'</button>';
+ }
+ function galleryHtml(res){
+  const groups=[];let cur=null;
+  res.items.forEach(r=>{const k=L.dayKey(r.uploadedAt);if(!cur||cur.k!==k){cur={k,rows:[]};groups.push(cur)}cur.rows.push(r)});
+  const list=P.layout==="list";
+  return groups.map(g=>{const n=(res.days||{})[g.k]||g.rows.length;
+   return '<section class="phx-day" aria-label="'+esc(dayLabel(g.k))+'"><h3><span>'+esc(dayLabel(g.k))+'</span><small>'+n+' photo'+(n===1?"":"s")+'</small></h3><div class="'+(list?"phx-list":"phx-tiles")+'">'+g.rows.map(list?rowHtml:tileHtml).join("")+'</div></section>'}).join("")+
+   (res.total>res.items.length?'<div class="phx-more" id="phx-sentinel"><button type="button" class="btn o" onclick="s91PhotoMore()">Load more <span>('+(res.total-res.items.length)+' more)</span></button></div>'
+    :'<p class="phx-end">All '+res.total+' photo'+(res.total===1?"":"s")+' shown</p>');
+ }
+ /* the next page loads by itself when the end of the list comes into view (the button stays as a fallback) */
+ let io=null;
+ function watchEnd(){
+  if(io){io.disconnect();io=null}
+  const s=S.view==="photos"&&document.getElementById("phx-sentinel");if(!s||!("IntersectionObserver" in window))return;
+  io=new IntersectionObserver(es=>{if(es.some(e=>e.isIntersecting)&&!P.loading){io.disconnect();io=null;s91PhotoMore()}},{rootMargin:"500px 0px"});io.observe(s);
+ }
+ window.s91PhotoLayout=function(v){P.layout=v==="list"?"list":"grid";try{localStorage.setItem("s91-photo-layout",P.layout)}catch(e){}render()};
  window.renderPhotoIntelligence=function(){
   refresh(false);
   const res=P.result,ro=readOnly(),items=res?res.items:[];
@@ -94,16 +133,17 @@
    '<label class="btn o phx-pick">'+ic.img+' Choose photos<input class="phx-file" type="file" accept="image/*" multiple onchange="s91PhotoPick(this)"/></label></div>';
   let grid;
   if(P.error&&!res)grid='<div class="phx-state err" role="alert"><b>Photos could not load</b><span>'+esc(P.error)+'</span><button type="button" class="btn o sm" onclick="s91PhotoRetry()">Try again</button></div>';
-  else if(!res)grid='<div class="phx-grid" aria-busy="true">'+'<div class="phx-card sk"><div class="phx-thumb"></div><div class="phx-body"><i></i><i></i><i></i></div></div>'.repeat(8)+'</div>';
+  else if(!res)grid='<div class="phx-day"><div class="phx-tiles" aria-busy="true">'+'<span class="phx-tile sk"></span>'.repeat(18)+'</div></div>';
   else if(!items.length)grid='<div class="phx-state"><b>No photos match these filters</b><span>Try a longer time window or clear a filter.</span><button type="button" class="btn o sm" onclick="s91PhotoReset()">Reset filters</button></div>';
-  else grid='<div class="phx-grid">'+items.map(cardHtml).join("")+'</div>'+(res.total>items.length?'<div class="phx-more"><button type="button" class="btn o" onclick="s91PhotoMore()">Load more <span>('+(res.total-items.length)+' more)</span></button></div>':'');
+  else grid=galleryHtml(res);
   return '<section class="phx" aria-labelledby="phx-title">'+
    '<header class="phx-head"><div><h1 id="phx-title">O&amp;M Photo Intelligence</h1><p>'+(sePlant()?esc(sePlant())+' · ':'All authorised plants · ')+'photos are kept for '+L.RETENTION_DAYS+' days · <button type="button" class="phx-link" onclick="window.s91AppSettings&&s91AppSettings()">Camera &amp; notifications</button></p></div>'+pick+'</header>'+
    '<div class="phx-demo" role="note"><b>Demo mode</b><span>Sample photos and numbers. Photos you add stay in this browser tab only: they are <strong>not uploaded or saved</strong> and disappear when the page reloads.</span>'+
     (res&&res.sessionCount?'<button type="button" class="btn g sm" onclick="s91PhotoClearSession()">Remove my '+res.sessionCount+' demo photo'+(res.sessionCount===1?"":"s")+'</button>':'')+'</div>'+
    cardsHtml(res)+
    '<div class="phx-panel">'+filtersHtml(res)+
-    '<div class="phx-meta" aria-live="polite">'+(res?'<span><b>'+res.total+'</b> photo'+(res.total===1?"":"s")+' match'+(res.total===1?"es":"")+(res.total>items.length?' · showing '+items.length:'')+'</span>':'<span>Loading photos…</span>')+(P.loading&&res?'<span class="phx-muted">Updating…</span>':'')+'</div>'+
+    '<div class="phx-meta"><span aria-live="polite">'+(res?'<b>'+res.total+'</b> photo'+(res.total===1?"":"s")+' match'+(res.total===1?"es":"")+(res.total>items.length?' · showing '+items.length:''):'Loading photos…')+(P.loading&&res?' <span class="phx-muted">· updating…</span>':'')+'</span>'+
+     '<div class="phx-seg sm" role="group" aria-label="Layout">'+[["grid","Grid"],["list","List"]].map(([v,l])=>'<button type="button" class="'+(P.layout===v?"on":"")+'" aria-pressed="'+(P.layout===v)+'" onclick="s91PhotoLayout(\''+v+'\')">'+l+'</button>').join("")+'</div></div>'+
     grid+'</div></section>';
  };
 
@@ -130,8 +170,24 @@
     row("Processing",'<em class="phx-st inline st-'+r.status+'">'+esc(L.statusLabel(r.status))+'</em>')+row("Expires",esc(fmtDT(r.expiresAt))+' <span class="phx-muted">(in '+expires+' day'+(expires===1?"":"s")+')</span>')+
     (r.fileName?row("File",esc(r.fileName)+' · '+fmtSize(r.fileSize||0)):'')+
     (r.quality?row("Photo check",r.quality.dark?'<span class="phx-warnword">Too dark</span>':r.quality.blurry?'<span class="phx-warnword">May be blurry</span>':'Clear'):'')+row("Record",esc(r.id))+'</dl></div></div>';
-  return modal(esc(L.catLabel(r.category))+' photo',esc(r.plant),body,'<button class="btn o" onclick="closeModal()">Close</button>',true);
+  const items=(P.result&&P.result.items)||[],i=items.findIndex(x=>x.id===r.id),more=P.result&&P.result.total>items.length;
+  const nav='<button class="btn o" onclick="s91PhotoStep(-1)"'+(i>0?"":" disabled")+' aria-label="Previous photo">‹ Previous</button>'+
+   '<span class="phx-pos">'+(i>=0?(i+1)+' of '+(P.result?P.result.total:items.length):'')+'</span>'+
+   '<button class="btn o" onclick="s91PhotoStep(1)"'+(i>=0&&(i<items.length-1||more)?"":" disabled")+' aria-label="Next photo">Next ›</button>';
+  return modal(esc(L.catLabel(r.category))+' photo',esc(r.plant),body,'<div class="phx-nav">'+nav+'</div><button class="btn p" onclick="closeModal()">Close</button>',true);
  }
+ /* step through the gallery from the detail view (← → keys too); past the loaded page, the next page loads first */
+ window.s91PhotoStep=function(d){
+  const r=(S.modalCtx||{}).record,items=(P.result&&P.result.items)||[],i=r?items.findIndex(x=>x.id===r.id):-1;if(i<0)return;
+  const j=i+d;
+  if(j>=0&&j<items.length){S.modalCtx={record:items[j]};render();return}
+  if(j>=items.length&&P.result.total>items.length){P.limit+=L.PAGE_SIZE;P.afterLoad=()=>{const n=P.result.items[j];if(n&&S.modal==="photoDetail"){S.modalCtx={record:n};render()}};render()}
+ };
+ document.addEventListener("keydown",e=>{
+  if(S.modal!=="photoDetail"||e.altKey||e.ctrlKey||e.metaKey)return;
+  const t=e.target;if(t&&(t.isContentEditable||/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName)))return;
+  if(e.key==="ArrowRight"){e.preventDefault();s91PhotoStep(1)}else if(e.key==="ArrowLeft"){e.preventDefault();s91PhotoStep(-1)}
+ });
 
  /* ---------- composer (phone camera / gallery) ---------- */
  const revoke=u=>{try{if(u)URL.revokeObjectURL(u)}catch(e){}};
@@ -163,7 +219,8 @@
  window.s91PhotoDraft=function(k,v){
   P.draft[k]=v;
   if(k==="description"){const c=document.getElementById("phx-desc-count");if(c)c.textContent=String(v.length)+" / "+L.MAX_DESCRIPTION}
-  if(k==="plant"){P.draft.issueId="";render()} /* the issue list belongs to the plant */
+  if(k==="plant"){P.draft.issueId="";P.draft.attachTicket=false;render()} /* the issue list belongs to the plant */
+  if(k==="issueId"){P.draft.attachTicket=false;render()} /* shows or hides "Also attach to ticket" */
  };
  window.s91PhotoTag=function(t){const d=P.draft,i=d.tags.indexOf(t);if(i>=0)d.tags.splice(i,1);else d.tags.push(t);render()};
  window.s91PhotoDiscard=function(){if(P.draft.busy)return;discardDraft();S.modal=null;S.modalCtx=null;render()};
@@ -182,14 +239,23 @@
   d.busy=true;d.progress=0;render();
   try{
    const linked=d.issueId?plantIssues(plant).find(t=>t.id===d.issueId):null;
-   const res=await svc().createSubmission({files:d.files.map(f=>({name:f.name,size:f.size,type:f.type,previewUrl:f.url,quality:f.quality})),plant,category:d.category,description:d.description,
+   const slot=linked&&d.attachTicket?ticketSlot(linked.id):null,files=d.files.map(f=>f.file);
+   const res=await svc().createSubmission({files:d.files.map(f=>({name:f.name,size:f.size,type:f.type,previewUrl:f.url,quality:f.quality,file:f.file})),plant,category:d.category,description:d.description,
     tags:d.tags.concat(String(d.otherTags||"").split(",")),issue:linked?{id:linked.id,status:linked.status}:null,uploader:(S.currentUser||"You")+" (you)"},setProgress);
    P.fresh=new Set(res.records.map(r=>r.id));
    P.draft=blankDraft(); /* the preview URLs now belong to the demo gallery records */
    S.modal=null;S.modalCtx=null;
    P.q=Object.assign({},L.DEFAULT_QUERY);P.limit=L.PAGE_SIZE;P.key=null;
    render();
-   toast(res.records.length+" photo"+(res.records.length===1?"":"s")+" added to the demo gallery · not uploaded or saved");
+   const n=res.records.length,word=n+" photo"+(n===1?"":"s");
+   if(!slot){toast(word+" added to the demo gallery · not uploaded or saved");return}
+   /* the person chose "Also attach to ticket": a real upload through the ticket's own photo upload */
+   toast(word+" added to the gallery · attaching to "+slot.t.id+"…");
+   try{
+    const saved=await uploadIssuePhotos(slot.t,{files:files.slice(0,slot.left)});
+    slot.t.evidence=(slot.t.evidence||[]).concat(saved);slot.t.photos=slot.t.evidence.length;render();
+    toast(saved.length+" photo"+(saved.length===1?"":"s")+" saved on ticket "+slot.t.id);
+   }catch(e){toast("Added to the demo gallery, but attaching to "+slot.t.id+" failed: "+((e&&e.message)||"server error")+". Nothing was saved on the ticket.")}
   }catch(err){d.busy=false;d.progress=null;render();toast((err&&err.message)||"The demo submission failed.")}
  };
  window.s91PhotoClearSession=function(){svc().clearSession().forEach(revoke);P.fresh=new Set();P.key=null;render();toast("Your demo photos were removed from this tab.")};
@@ -214,6 +280,11 @@
     '<label class="phx-field"><span>Category <i>required</i></span><select class="inp" id="phx-c-cat" onchange="s91PhotoDraft(\'category\',this.value)"'+(d.busy?" disabled":"")+'>'+opts(L.CATEGORIES.map(c=>[c.id,c.label]),d.category,"Choose category…")+'</select></label>'+
     '<label class="phx-field wide"><span>Link to site issue <i>optional</i></span><select class="inp" id="phx-c-issue" onchange="s91PhotoDraft(\'issueId\',this.value)"'+(d.busy||!(se||d.plant)?" disabled":"")+'>'+
       opts(plantIssues(se||d.plant).map(t=>[t.id,t.id+" · "+(t.equip&&t.equip!=="—"?t.equip:t.vertical||"Issue")+" · "+t.status]),d.issueId,(se||d.plant)?(plantIssues(se||d.plant).length?"Not linked":"No open issues at this plant"):"Choose the plant first")+'</select></label>'+
+    (()=>{const s=d.issueId?ticketSlot(d.issueId):null;if(!d.issueId)return "";
+      if(!s)return '<p class="phx-attach-note wide">Ticket '+esc(d.issueId)+' cannot take photos from here (closed, not synchronised yet, or your role cannot post on it).</p>';
+      const fits=n<=s.left;
+      return '<label class="phx-check wide'+(fits?"":" off")+'"><input type="checkbox" id="phx-c-attach"'+(d.attachTicket&&fits?" checked":"")+(fits&&!d.busy?"":" disabled")+' onchange="s91PhotoDraft(\'attachTicket\',this.checked)"/>'+
+       '<span><b>Also attach to ticket '+esc(s.t.id)+'</b><small>'+(fits?'Saved on the ticket for real, like its 📎 button · '+s.left+' of 10 photo slots left':'The ticket has only '+s.left+' photo slot'+(s.left===1?"":"s")+' left; remove some photos to attach them')+'</small></span></label>'})()+
     '<label class="phx-field wide"><span>Remark <i>optional</i></span><textarea class="inp" id="phx-c-desc" rows="3" maxlength="'+L.MAX_DESCRIPTION+'" placeholder="What does the photo show? e.g. INV-03 filter after cleaning" oninput="s91PhotoDraft(\'description\',this.value)"'+(d.busy?" disabled":"")+'>'+esc(d.description)+'</textarea><small id="phx-desc-count">'+d.description.length+' / '+L.MAX_DESCRIPTION+'</small></label>'+
     '<div class="phx-field wide"><span id="phx-tags-lab">Tags <i>optional</i></span><div class="phx-chips" role="group" aria-labelledby="phx-tags-lab">'+
       L.QUICK_TAGS.map(t=>'<button type="button" class="phx-chip'+(d.tags.includes(t)?" on":"")+'" aria-pressed="'+d.tags.includes(t)+'" onclick="s91PhotoTag(\''+t+'\')"'+(d.busy?" disabled":"")+'>#'+t+'</button>').join("")+'</div>'+
@@ -237,7 +308,65 @@
   sec.appendChild(row);
   svc().listPhotos(Object.assign({},L.DEFAULT_QUERY,{issue:t.id,limit:1}),viewer()).then(res=>{const n=row.querySelector("[data-phx-n]");if(n)n.textContent=res.total+" photo"+(res.total===1?"":"s")+" in Photo Intelligence"}).catch(()=>{});
  }
- if(typeof render==="function"){const prev=render;render=function(){prev.apply(this,arguments);try{ticketHook()}catch(e){console.warn("[Photo Intelligence] ticket hook",e)}}}
+ /* ---------- "From photos": pick Photo Intelligence photos for a ticket message or a PM Before / After slot ----------
+    o: {plant, issueId?, max, title, onPick(files)}. Demo: only photos added in this tab have a real file to attach. */
+ window.s91PhotoPicker=async function(o){
+  const old=document.getElementById("phx-picker");if(old)old.remove();
+  if(!(o.max>0)){toast("No photo slots left here.");return}
+  let res;try{res=await svc().listPhotos(Object.assign({},L.DEFAULT_QUERY,{plant:o.plant||"all",limit:2000}),viewer())}catch(e){toast("Photos could not load.");return}
+  const mine=res.items.filter(r=>r.source==="session"&&r.file).sort((a,b)=>((b.issue&&b.issue.id===o.issueId)?1:0)-((a.issue&&a.issue.id===o.issueId)?1:0));
+  const picked=new Set(),el=document.createElement("div");el.id="phx-picker";el.setAttribute("role","dialog");el.setAttribute("aria-modal","true");el.setAttribute("aria-labelledby","phx-pk-title");
+  const paint=()=>{
+   el.innerHTML='<div class="phx-pk"><header><div><h2 id="phx-pk-title">'+esc(o.title||"Choose photos")+'</h2><small>'+esc(o.plant||"All plants")+' · from Photo Intelligence · up to '+o.max+'</small></div><button type="button" class="btn g sm" data-pk="close" aria-label="Close">'+I.x(16)+'</button></header>'+
+    (mine.length?'<div class="phx-pk-grid">'+mine.map(r=>'<button type="button" class="phx-tile'+(picked.has(r.id)?" on":"")+'" data-pk-id="'+esc(r.id)+'" aria-pressed="'+picked.has(r.id)+'" aria-label="'+esc(label(r))+'"><img src="'+esc(imgOf(r))+'" alt=""/>'+(picked.has(r.id)?'<i class="phx-pk-check">✓</i>':'')+
+      '<span class="phx-tile-meta"><b>'+esc(r.issue&&r.issue.id===o.issueId?"This issue":L.catLabel(r.category))+'</b><small>'+timeOf(r.uploadedAt)+'</small></span></button>').join("")+'</div>'
+     :'<div class="phx-state sm"><b>No photos of yours here yet</b><span>Take photos in Photo Intelligence first. In this demo, only photos added in this browser tab can be attached.</span><button type="button" class="btn o sm" data-pk="open">Open Photo Intelligence</button></div>')+
+    '<p class="phx-pk-note">'+(res.total-mine.length)+' sample photos are demo placeholders and cannot be attached.</p>'+
+    '<footer><button type="button" class="btn o" data-pk="close">Cancel</button><button type="button" class="btn p" data-pk="use"'+(picked.size?"":" disabled")+'>Attach '+(picked.size||"")+' photo'+(picked.size===1?"":"s")+'</button></footer></div>';
+  };
+  el.addEventListener("click",async e=>{
+   const b=e.target.closest("[data-pk],[data-pk-id]");if(!b){if(e.target===el)el.remove();return}
+   if(b.dataset.pkId){const id=b.dataset.pkId;if(picked.has(id))picked.delete(id);else if(picked.size<o.max)picked.add(id);else toast("Up to "+o.max+" photo"+(o.max===1?"":"s")+" here.");paint();return}
+   if(b.dataset.pk==="close"){el.remove();return}
+   if(b.dataset.pk==="open"){el.remove();S.modal=null;S.modalCtx=null;goView("photos");return}
+   if(b.dataset.pk==="use"){const files=(await Promise.all([...picked].map(id=>svc().getPhotoFile(id)))).filter(Boolean);el.remove();if(files.length)o.onPick(files)}
+  });
+  document.addEventListener("keydown",function k(e){if(e.key==="Escape"&&document.body.contains(el)){el.remove();document.removeEventListener("keydown",k)}});
+  paint();document.body.appendChild(el);
+ };
+ /* Issue Desk: "From photos" beside the 📎 attach; picked photos join the message and save on Send, like attached files */
+ function ticketPickHook(){
+  if(S.modal!=="ticket")return;
+  const t=(S.issues||[]).find(x=>x.id===(S.modalCtx||{}).id),att=document.querySelector(".idk .idk-in .idk-att");
+  if(!t||!att||att.parentNode.querySelector(".phx-from"))return;
+  const btn=document.createElement("button");btn.type="button";btn.className="idk-att phx-from";btn.title="Attach from Photo Intelligence";btn.setAttribute("aria-label","Attach photos from Photo Intelligence");btn.innerHTML=ic.img;
+  btn.onclick=()=>{
+   const inp=document.getElementById("idk-photos"),have=inp&&inp.files?inp.files.length:0,left=Math.max(0,10-(t.evidence||[]).length-have);
+   s91PhotoPicker({plant:t.plant,issueId:t.id,max:left,title:"Attach photos to "+t.id,onPick:files=>{
+    const input=document.getElementById("idk-photos");
+    try{const dt=new DataTransfer();Array.from((input&&input.files)||[]).concat(files).forEach(f=>dt.items.add(f));input.files=dt.files;if(typeof idkPhotos==="function")idkPhotos(input);toast(files.length+" photo"+(files.length===1?"":"s")+" attached · press Send")}
+    catch(e){toast("This browser cannot add photos to the message. Use the 📎 button instead.")}
+   }});
+  };
+  att.insertAdjacentElement("afterend",btn);
+ }
+ /* PM work order: "From photos" beside each Before / After upload, saved through the PM evidence upload */
+ function pmPickHook(){
+  document.querySelectorAll(".sched-photo-actions").forEach(box=>{
+   if(box.querySelector(".phx-from"))return;
+   box.querySelectorAll('input[type="file"][onchange*="scheduledUploadEvidence"]').forEach(inp=>{
+    const m=/scheduledUploadEvidence\(this,'(.*)','(before|after)'\)/.exec(inp.getAttribute("onchange")||"");if(!m)return;
+    const taskId=m[1],kind=m[2],t=(S.tasks||[]).find(x=>x.id===taskId);if(!t)return;
+    const btn=document.createElement("button");btn.type="button";btn.className="btn g sm phx-from";btn.innerHTML=ic.img+" "+(kind==="before"?"Before":"After")+" from photos";
+    btn.onclick=()=>s91PhotoPicker({plant:t.plant,max:1,title:"Choose the "+kind+" photo",onPick:files=>{if(typeof scheduledUploadEvidence==="function")scheduledUploadEvidence({files:files.slice(0,1),value:""},taskId,kind)}});
+    box.appendChild(btn);
+   });
+  });
+ }
+ if(typeof render==="function"){const prev=render;render=function(){prev.apply(this,arguments);
+  try{ticketHook();ticketPickHook()}catch(e){console.warn("[Photo Intelligence] ticket hook",e)}
+  try{pmPickHook()}catch(e){console.warn("[Photo Intelligence] PM hook",e)}
+  try{watchEnd()}catch(e){}}}
 
  /* ---------- wiring: modals, closing, page unload ---------- */
  if(typeof renderModal==="function"){const prev=renderModal;renderModal=function(){if(S.modal==="photoCompose")return composeModal();if(S.modal==="photoDetail")return detailModal();return prev.apply(this,arguments)}}
