@@ -2,10 +2,12 @@
 /* ================================================================
    ACTIONS
    ================================================================ */
-function goView(v){
+function goView(v,sub){
  if(S.modal){S.modal=null;S.modalCtx=null;}
  const role=S._roleLabel||S.currentRole||"O&M Head";
  if(role==="Site Engineer"&&["performance","reports","settings","data","plants","work"].includes(v)){toast("This module is not available in Site Engineer view.");S.view="dashboard";persistView();render();return}
+ /* Plants: the sidebar names the page; every other link (filters, search, drill-downs) lands on the table */
+ if(v==="plants"){S.plantsTab=sub==="dashboard"?"dashboard":"table";S._plantsNavOpen=true}
  S.view=v;persistView();render()
 }
 function goTab(t){

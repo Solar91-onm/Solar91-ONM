@@ -1067,23 +1067,45 @@ function locationPreviewHtml(plant){
   '</div>';
 }
 
+/* Plant table display helpers. "Alaniyawas 01" → "Alaniyawas" (the plant code already carries the number);
+   "Solar91 Project Thirty Five pvt. Ltd." → "35". A project with no readable number keeps its full name. */
+function plantShortName(name){const t=plantDisplayName(name||"").trim();return t.replace(/[\s_-]*\d+$/,"").trim()||t}
+const PROJECT_NUMBER_WORDS={zero:0,one:1,two:2,three:3,four:4,five:5,six:6,seven:7,eight:8,nine:9,ten:10,eleven:11,twelve:12,thirteen:13,fourteen:14,fifteen:15,sixteen:16,seventeen:17,eighteen:18,nineteen:19,twenty:20,thirty:30,forty:40,fourty:40,fifty:50,sixty:60,seventy:70,eighty:80,ninety:90};
+function plantProjectNo(proj){
+ const s=String(proj||""),m=s.match(/project\s*(.*)$/i),tail=(m?m[1]:s).toLowerCase(),digits=tail.match(/^\s*#?\s*(\d+)/);
+ if(digits)return digits[1];
+ let n=null;
+ for(const w of tail.split(/[^a-z0-9]+/).filter(Boolean)){
+  if(Object.prototype.hasOwnProperty.call(PROJECT_NUMBER_WORDS,w)){n=(n||0)+PROJECT_NUMBER_WORDS[w];continue}
+  if(w==="hundred"&&n){n*=100;continue}
+  if(w==="and"&&n!=null)continue;
+  break;
+ }
+ return n==null?"":String(n);
+}
+/* project filter key: "29" for both "… Twenty Nine Pvt. Ltd." and "… Twenty Nine pvt. Ltd." */
+function plantProjectKey(proj){return plantProjectNo(proj)||String(proj||"")}
+/* Status: a light (green / amber / red) above the health word, open-issue count below. Critical reads "Unhealthy". */
+function plantStatusCell(p){
+ const oi=openTk(S.issues||[]).filter(t=>t.plant===p.name),crit=oi.filter(t=>t.severity==="Critical").length,h=plantHealth(p);
+ const tone=h==="Healthy"?"ok":h==="Critical"?"bad":"warn",label=h==="Critical"?"Unhealthy":h;
+ const note=oi.length?oi.length+" open"+(crit?" · "+crit+" critical":""):"No open issues";
+ return '<div class="plt-status '+tone+'" title="'+esc(label+" · "+note)+'"><i class="plt-light" aria-hidden="true"></i><b>'+esc(label)+'</b><small>'+esc(note)+'</small></div>';
+}
 const PLANT_TABLE_COLUMNS=[
- {key:"plantName",label:"Plant",visible:true,render:p=>'<div style="font-weight:600;white-space:normal;overflow-wrap:break-word;word-break:break-word;max-width:220px">'+(p.name?esc(plantDisplayName(p.name)):'<span style="color:var(--danger)">Name missing</span>')+'</div>'},
+ {key:"siteCode",label:"Plant code",visible:true,cls:"plt-code-col",render:p=>'<div class="plt-code"><b>'+esc(displayCode(p.id))+'</b>'+(p.name?'<small>'+esc(plantShortName(p.name))+'</small>':'<small class="plt-missing">Name missing</small>')+'</div>'},
+ {key:"project",label:"SPV / Project",visible:true,cls:"plt-num",render:p=>{const proj=plantProject(p),no=plantProjectNo(proj);return proj?'<span class="plt-proj" title="'+esc(proj)+'">'+esc(no||proj)+'</span>':"—"}},
+ {key:"acCapacity",label:"AC (kW)",visible:true,cls:"plt-num",render:p=>plantAcKw(p)!=null?kWStrPlain(plantAcKw(p)):"—"},
+ {key:"dcCapacity",label:"DC (kWp)",visible:true,cls:"plt-num",render:p=>plantDcKw(p)!=null?kWStrPlain(plantDcKw(p)):capStr(p.capacity)},
  {key:"cod",label:"COD",visible:true,render:p=>p.cod?esc(p.cod):"—"},
- {key:"siteCode",label:"Plant Code",visible:true,render:p=>esc(displayCode(p.id))},
- {key:"project",label:"SPV / Project",visible:true,render:p=>esc(plantProject(p)||"—")},
- {key:"acCapacity",label:"AC CAPACITY (kW)",visible:true,render:p=>plantAcKw(p)!=null?kWStrPlain(plantAcKw(p)):"—"},
- {key:"dcCapacity",label:"DC CAPACITY (kWp) ",visible:true,render:p=>plantDcKw(p)!=null?kWStrPlain(plantDcKw(p)):capStr(p.capacity)},
- {key:"location",label:"Location",visible:true,render:p=>p.geo?'<button type="button" class="btn o sm" data-act="plantLocation" data-id="'+esc(p.id)+'">📍 View Location</button>':'<span style="font-size:12.5px;color:var(--muted-foreground)">— Not registered —</span>'},
+ {key:"location",label:"Location",visible:true,render:p=>p.geo?'<button type="button" class="btn o sm" data-act="plantLocation" data-id="'+esc(p.id)+'">📍 View Location</button>':'<span class="plt-muted">Not registered</span>'},
  {key:"district",label:"District",visible:true,render:p=>esc(p.district||(p.geo&&p.geo.city)||p.location||"—")},
  {key:"discom",label:"DISCOM",visible:true,render:p=>esc(p.discom||"—")},
- {key:"jenAenOffice",label:"JEN/AEN Office",visible:true,render:p=>'<span style="color:var(--muted-foreground)">—</span>'}, /* not in any import file yet — always blank */
- {key:"status",label:"Status",visible:true,render:p=>badge(plantHealth(p))},
- {key:"open",label:"Open",visible:true,render:p=>{const oi=openTk(S.issues).filter(t=>t.plant===p.name),crit=oi.filter(t=>t.severity==="Critical").length;return oi.length?("<b>"+oi.length+"</b>"+(crit?'<div style="font-size:12.5px;color:var(--muted-foreground)">'+crit+' critical</div>':"")):"0"}},
- {key:"critical",label:"Critical",visible:true,render:p=>{const oi=openTk(S.issues).filter(t=>t.plant===p.name);return oi.filter(t=>t.severity==="Critical").length||"—"}},
+ {key:"jenAenOffice",label:"JEN/AEN Office",visible:false,render:p=>'<span style="color:var(--muted-foreground)">—</span>'}, /* not in any import file yet — always blank, so hidden; still exported */
+ {key:"status",label:"Status",visible:true,cls:"plt-st-col",render:plantStatusCell},
  {key:"engineer",label:"Engineer",visible:true,render:p=>{const eng=plantEngineer(p);return eng?'<span data-act="workWho" data-id="'+esc(eng)+'">'+esc(eng)+'</span>':"—"}},
  {key:"lastActivity",label:"Last activity",visible:true,render:p=>{const last=plantLastActivity(p);return last?fmtDT(last):"—"}},
- {key:"actions",label:"Actions",visible:true,render:p=>'<button type="button" class="btn o sm" data-act="editPlant" data-id="'+esc(p.id)+'">'+I.wrench(12)+' Edit</button>'}
+ {key:"actions",label:"",visible:true,render:p=>'<button type="button" class="btn o sm" data-act="editPlant" data-id="'+esc(p.id)+'">'+I.wrench(12)+' Edit</button>'}
 ];
 
 
@@ -1283,19 +1305,22 @@ function listCtl(key,rows,o){S.lf=S.lf||{};const st=S.lf[key]=S.lf[key]||{q:"",f
   (o.facet?'<div class="field" style="min-width:150px;flex:1"><span class="lbl">'+esc(o.facetLabel||"Filter")+'</span><select class="inp" onchange="S.lf[\''+key+'\'].f=this.value;S.tablePages[\''+key+'\']=1;render()"><option value="all">All</option>'+facets.map(f=>'<option value="'+esc(f)+'"'+(st.f===f?" selected":"")+'>'+esc(f)+'</option>').join("")+'</select></div>':'')+
   '<button class="btn o sm" onclick="S.lf[\''+key+'\']={q:\'\',f:\'all\'};S.tablePages[\''+key+'\']=1;render()">Clear</button></div>';
  return{rows:fl.slice((page-1)*size,page*size),all:fl,n:fl.length,bar,pager:tablePager(key,fl.length,size)}}
-/* dashboard plant list: search + filters + sort, 6 per page */
-function plantListRows(sp){const f=S.plF=Object.assign({q:"",rep:"all",tgt:"all",cap:"all",ach:"all",sort:"name",health:"all",site:"all",project:"all",assignee:"all",maker:"all",district:"all",loc:"all"},S.plF||{}),q=f.q.trim().toLowerCase();
+/* plant table: search + filters + sort */
+function plantListRows(sp){const f=S.plF=Object.assign({q:"",rep:"all",tgt:"all",cap:"all",ach:"all",sort:"name",health:"all",site:"all",project:"all",assignee:"all",maker:"all",district:"all",loc:"all",discom:"all",open:"all",crit:"all"},S.plF||{}),q=f.q.trim().toLowerCase();
  const issueStats=new Map();
  (S.issues||[]).forEach(t=>{
   if(!t.plant)return;
   let stats=issueStats.get(t.plant);
-  if(!stats){stats={makers:new Set(),open:0};issueStats.set(t.plant,stats)}
+  if(!stats){stats={makers:new Set(),open:0,crit:0};issueStats.set(t.plant,stats)}
   if(t.maker)stats.makers.add(t.maker);
-  if(t.status!=="Closed"&&t.status!=="Resolved")stats.open++;
+  if(t.status!=="Closed"&&t.status!=="Resolved"){stats.open++;if(t.severity==="Critical")stats.crit++}
  });
- const r=sp.filter(p=>{const x=XL_BY[p.id],m=xlPlantMtd(p.id),has=!!(x&&x.pvSystMonthlykWh),eng=plantEngineer(p),proj=plantProject(p);
-  if(q&&!(p.name+" "+p.id+" "+proj+" "+eng+" "+(p.district||"")+" "+(p.geo&&p.geo.city||"")).toLowerCase().includes(q))return false;
+ const r=sp.filter(p=>{const x=XL_BY[p.id],m=xlPlantMtd(p.id),has=!!(x&&x.pvSystMonthlykWh),eng=plantEngineer(p),proj=plantProject(p),is=issueStats.get(p.name)||{open:0,crit:0};
+  if(q&&!(p.name+" "+p.id+" "+String(p.id||"").replace(/_/g,"")+" "+proj+" "+eng+" "+(p.district||"")+" "+(p.discom||"")+" "+(p.geo&&p.geo.city||"")).toLowerCase().includes(q))return false;
   if(f.district&&f.district!=="all"&&(p.district||"—")!==f.district)return false;
+  if(f.discom&&f.discom!=="all"&&(p.discom||"—")!==f.discom)return false;
+  if(f.open==="yes"&&!is.open)return false;if(f.open==="no"&&is.open)return false;
+  if(f.crit==="yes"&&!is.crit)return false;if(f.crit==="no"&&is.crit)return false;
   if(f.loc==="yes"&&!p.geo)return false;if(f.loc==="no"&&p.geo)return false;
   if(f.rep==="rep"&&p.genDate!==XL_LAST)return false;if(f.rep==="not"&&p.genDate===XL_LAST)return false;
   if(f.tgt==="yes"&&!has)return false;if(f.tgt==="no"&&has)return false;
@@ -1304,26 +1329,39 @@ function plantListRows(sp){const f=S.plF=Object.assign({q:"",rep:"all",tgt:"all"
   if(f.ach==="hi"&&!(a!=null&&a>=100))return false;if(f.ach==="mid"&&!(a!=null&&a>=90&&a<100))return false;if(f.ach==="lo"&&!(a!=null&&a<90))return false;
   if(f.health&&f.health!=="all"&&plantHealth(p)!==f.health)return false;
   if(f.site&&f.site!=="all"&&p.id!==f.site)return false;
-  if(f.project&&f.project!=="all"&&proj!==f.project)return false;
+  /* accepts the project number ("35") or, from older saved filters, the full project name */
+  if(f.project&&f.project!=="all"&&proj!==f.project&&plantProjectKey(proj)!==f.project)return false;
   if(f.assignee&&f.assignee!=="all"&&eng!==f.assignee)return false;
   if(f.maker&&f.maker!=="all"&&!(issueStats.get(p.name)&&issueStats.get(p.name).makers.has(f.maker)))return false;
   return true});
- const val={name:p=>p.name.toLowerCase(),cap:p=>plantCapMw(p)!=null?-plantCapMw(p):1,gen:p=>-(p.generation||0),ach:p=>{const m=xlPlantMtd(p.id);return -(m&&m.pct!=null?m.pct:-1)},issues:p=>-((issueStats.get(p.name)||{}).open||0)}[f.sort]||(p=>p.name.toLowerCase());
+ const val={name:p=>p.name.toLowerCase(),code:p=>String(p.id||"").toLowerCase(),cap:p=>plantCapMw(p)!=null?-plantCapMw(p):1,gen:p=>-(p.generation||0),ach:p=>{const m=xlPlantMtd(p.id);return -(m&&m.pct!=null?m.pct:-1)},issues:p=>-((issueStats.get(p.name)||{}).open||0),crit:p=>-((issueStats.get(p.name)||{}).crit||0)}[f.sort]||(p=>p.name.toLowerCase());
  return r.slice().sort((a,b)=>{const x=val(a),y=val(b);return x<y?-1:x>y?1:0})}
-function plantListBar(){const f=S.plF,sel=(k,opts)=>'<select class="inp" onchange="S.plF.'+k+'=this.value;S.tablePages.plants=1;render()">'+opts.map(([v,l])=>'<option value="'+v+'"'+(f[k]===v?" selected":"")+'>'+l+'</option>').join("")+'</select>',fld=(l,c,w)=>'<div class="field" style="min-width:'+w+'px;flex:1"><span class="lbl">'+l+'</span>'+c+'</div>';
- const sites=[...new Set((S.plants||[]).map(p=>p.id))].sort(),projs=[...new Set((S.plants||[]).map(plantProject).filter(Boolean))].sort();
- const engs=[...new Set((S.plants||[]).map(plantEngineer).filter(Boolean))].sort(),makers=[...new Set((S.issues||[]).map(t=>t.maker).filter(Boolean))].sort();
- const districts=[...new Set((S.plants||[]).map(p=>p.district).filter(Boolean))].sort();
- return '<div class="row wrap" style="gap:8px;padding:0 20px 12px;align-items:flex-end"><div class="field" style="min-width:210px;flex:2"><span class="lbl">Search plant, site, project, location</span><input class="inp" value="'+esc(f.q)+'" placeholder="e.g. Kerli, PDA_01, KUSUM, Nagaur" oninput="S.plF.q=this.value;S.tablePages.plants=1;renderSoon()"/></div>'+
-  fld("Health",sel("health",[["all","All health"],["Healthy","Healthy"],["Warning","Warning"],["Critical","Critical"]]),120)+
-  fld("Site code",sel("site",[["all","All sites"]].concat(sites.map(s=>[s,s]))),130)+
-  fld("Project",sel("project",[["all","All projects"]].concat(projs.map(s=>[s,s]))),150)+
-  (districts.length?fld("District",sel("district",[["all","All districts"]].concat(districts.map(s=>[s,s]))),140):"")+
-  fld("Location",sel("loc",[["all","All plants"],["yes","📍 Registered"],["no","Not registered"]]),140)+
-  fld("Engineer",sel("assignee",[["all","All engineers"]].concat(engs.map(s=>[s,s]))),140)+
-  (makers.length?fld("Maker",sel("maker",[["all","All makers"]].concat(makers.map(s=>[s,s]))),130):"")+
-  fld("Sort by",sel("sort",[["name","Name"],["issues","Open issues"],["cap","Capacity"]]),130)+
-  '<button class="btn o sm" onclick="S.plF={q:\'\',rep:\'all\',tgt:\'all\',cap:\'all\',ach:\'all\',sort:\'name\',health:\'all\',site:\'all\',project:\'all\',assignee:\'all\',maker:\'all\',district:\'all\',loc:\'all\'};S.tablePages.plants=1;render()">Clear</button></div>'}
+function plantFiltersClear(){S.plF=null;plantListRows([]);S.tablePages.plants=1;render()} /* plantListRows refills the defaults */
+/* filters secondary to search / status / project / district sit behind "More filters" and open by themselves when set */
+const PLANT_MORE_FILTERS=["site","discom","loc","open","crit","cap","assignee","maker"];
+function plantListBar(){const f=S.plF,sel=(k,label,opts)=>'<select class="inp'+(k!=="sort"&&f[k]&&f[k]!=="all"?" on":"")+'" aria-label="'+esc(label)+'" title="'+esc(label)+'" onchange="S.plF.'+k+'=this.value;S.tablePages.plants=1;render()">'+opts.map(([v,l])=>'<option value="'+esc(v)+'"'+(String(f[k])===String(v)?" selected":"")+'>'+esc(l)+'</option>').join("")+'</select>';
+ const uniq=a=>[...new Set(a.filter(Boolean))].sort((x,y)=>String(x).localeCompare(String(y),undefined,{numeric:true}));
+ const sites=uniq((S.plants||[]).map(p=>p.id)),projs=uniq((S.plants||[]).map(p=>plantProjectKey(plantProject(p))));
+ const engs=uniq((S.plants||[]).map(plantEngineer)),makers=uniq((S.issues||[]).map(t=>t.maker));
+ const districts=uniq((S.plants||[]).map(p=>p.district)),discoms=uniq((S.plants||[]).map(p=>p.discom));
+ const active=Object.keys(f).filter(k=>k!=="sort"&&k!=="q"&&f[k]&&f[k]!=="all").length+(String(f.q||"").trim()?1:0);
+ const moreOn=PLANT_MORE_FILTERS.filter(k=>f[k]&&f[k]!=="all").length,showMore=!!S._plMoreFilters||moreOn>0;
+ return '<div class="plt-bar"><label class="plt-search">'+I.search(14)+'<input class="inp" value="'+esc(f.q)+'" aria-label="Search plants" placeholder="Search plant code, name, project, district…" oninput="S.plF.q=this.value;S.tablePages.plants=1;renderSoon()"/></label>'+
+  sel("health","Status",[["all","All status"],["Healthy","Healthy"],["Warning","Warning"],["Critical","Unhealthy"]])+
+  sel("project","SPV / Project",[["all","All SPV / projects"]].concat(projs.map(s=>[s,/^\d+$/.test(s)?"Project "+s:s])))+
+  (districts.length?sel("district","District",[["all","All districts"]].concat(districts.map(s=>[s,s]))):"")+
+  sel("sort","Sort by",[["name","Sort: name"],["code","Sort: plant code"],["issues","Sort: open issues"],["crit","Sort: critical issues"],["cap","Sort: capacity"]])+
+  '<button type="button" class="btn g sm plt-more'+(showMore?" on":"")+'" aria-expanded="'+showMore+'" onclick="S._plMoreFilters=!('+showMore+');render()">More filters'+(moreOn?' <b>'+moreOn+'</b>':'')+'</button>'+
+  (active?'<button type="button" class="btn o sm" onclick="plantFiltersClear()">Clear ('+active+')</button>':'')+'</div>'+
+  (showMore?'<div class="plt-bar plt-bar2">'+
+   sel("site","Plant code",[["all","All plant codes"]].concat(sites.map(s=>[s,displayCode(s)])))+
+   (discoms.length?sel("discom","DISCOM",[["all","All DISCOMs"]].concat(discoms.map(s=>[s,s]))):"")+
+   sel("loc","Location",[["all","Any location"],["yes","📍 Location registered"],["no","Location not registered"]])+
+   sel("open","Open issues",[["all","Any open issues"],["yes","Has open issues"],["no","No open issues"]])+
+   sel("crit","Critical issues",[["all","Any critical issues"],["yes","Has critical issues"],["no","No critical issues"]])+
+   sel("cap","DC capacity",[["all","Any DC capacity"],["s","Under 2.5 MWp"],["m","2.5 – 3.5 MWp"],["l","3.5 MWp and above"]])+
+   (engs.length?sel("assignee","Engineer",[["all","All engineers"]].concat(engs.map(s=>[s,s]))):"")+
+   (makers.length?sel("maker","Maker (from issues)",[["all","All makers"]].concat(makers.map(s=>[s,s]))):"")+'</div>':'')}
   /* ---- Analytics: section reports (Generation from Excel + Handover / Preventive Maintenance / Washing / Issues) ---- */
 const REP_TABS=[["generation","Generation"],["handover","Handover"],["scheduled","Preventive Maintenance"],["washing","Washing"],["issues","Issues"]];
 function xlMonthsList(){const s=new Set(EXCEL_MONTHLY_DATA.map(r=>r.month));return [...s].sort().reverse()}

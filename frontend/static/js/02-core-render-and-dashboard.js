@@ -14,7 +14,7 @@ function render(){
  const waBadge=(typeof washDueCount==="function")?washDueCount():S.washing.filter(t=>wDue(t,((S.washMeta||{})[t.plant]||{freq:14}).freq)&&!washedToday(t)&&!excToday(t)).length;
  const isBadge=openTk(S.issues).length;
  const plant=S.plants.find(p=>p.id===S.plantId);
- const CRUMB={dashboard:["Command Center","Portfolio operations"],plants:["Command Center","Plants"],plant:["Plants",plant?plant.name:"Plant detail"],work:["Command Center","Work / Assignments"],performance:["Command Center","Performance"],reports:["Command Center","Reports"],data:["Command Center","Data / Imports"],settings:["Command Center","Settings"],handover:["Operations","Project Handover"],scheduled:["Planned Maintenance","Preventive Maintenance"],washing:["Planned Maintenance","Washing"],issues:["Command Center","Site Issues"],services:["Operations","Extra Services"],analytics:["Command Center","Analytics"]};
+ const CRUMB={dashboard:["Command Center","Portfolio operations"],plants:["Plants",S.plantsTab==="dashboard"?"Plants dashboard":"Plants table"],plant:["Plants",plant?plant.name:"Plant detail"],work:["Command Center","Work / Assignments"],performance:["Command Center","Performance"],reports:["Command Center","Reports"],data:["Command Center","Data / Imports"],settings:["Command Center","Settings"],handover:["Operations","Project Handover"],scheduled:["Planned Maintenance","Preventive Maintenance"],washing:["Planned Maintenance","Washing"],issues:["Command Center","Site Issues"],services:["Operations","Extra Services"],analytics:["Command Center","Analytics"]};
  const crumb=S.view==="dashboard"?((S._roleLabel||S.currentRole)==="Site Engineer"?["Field operations","My plant"]:CRUMB.dashboard):S.view==="plants"?CRUMB.plants:S.view==="plant"?CRUMB.plant:S.view==="work"?CRUMB.work:S.view==="performance"?CRUMB.performance:S.view==="reports"?CRUMB.reports:S.view==="data"?CRUMB.data:S.view==="settings"?CRUMB.settings:(CRUMB[S.omTab]||CRUMB.services);
  let body;
  try{body=S.view==="dashboard"?renderDashboard():S.view==="plants"?renderPlants():S.view==="plant"?renderPlantPage():S.view==="work"?renderWork():S.view==="performance"?renderPerformance():S.view==="reports"?renderReportsHub():S.view==="data"?renderDataHub():S.view==="settings"?renderSettings():S.omTab==="handover"?renderHandover():(S.omTab==="scheduled"||S.omTab==="washing")?renderScheduledHub():S.omTab==="issues"?renderIssues():S.omTab==="analytics"?renderAnalytics():renderServices()}catch(renderErr){
@@ -50,7 +50,7 @@ function sidebar(b){
  }else{
   links='<div class="side-label">Command Center</div>'+
    link("dashboard","Command Center",I.dash(16),"goView('dashboard')")+
-   link("plants","Plants",I.sun(16),"goView('plants')")+
+   plantsNavGroup(act==="plants")+
    link("issues","Site Issues",I.alert(16),"goTab('issues')",b.isBadge)+
    link("scheduled","Preventive Maintenance",I.clipc(16),"goScheduledOM('maintenance')",(b.scBadge||0)+(b.waBadge||0))+
    link("work","Work / Assignments",I.clipc(16),"goView('work')")+
@@ -71,6 +71,15 @@ function sidebar(b){
   '<div class="side-scroll">'+links+'</div>'+
   '<div class="side-user"><div class="av">'+esc(initials)+'</div><div><div class="nm">'+esc(displayName)+'</div><div class="rl">'+esc(displayRole)+'</div></div></div></aside>';
 }
+/* "Plants" opens a small dropdown with its two pages. The sub-items are not .side-link on purpose:
+   role scripts hide every .side-link whose label is not a module name; the group hides with its parent. */
+function plantsNavGroup(on){
+ const open=S._plantsNavOpen!=null?S._plantsNavOpen:on,tab=S.view==="plants"?(S.plantsTab==="dashboard"?"dashboard":"table"):"";
+ const sub=(id,label)=>'<div class="side-sublink'+(tab===id?" active":"")+'" onclick="goView(\'plants\',\''+id+'\')">'+label+'</div>';
+ return '<div class="side-link side-parent'+(on?" on":"")+'" aria-expanded="'+open+'" onclick="s91TogglePlantsNav()">'+I.sun(16)+'<span>Plants</span><i class="side-caret'+(open?" open":"")+'" aria-hidden="true"></i></div>'+
+  (open?'<div class="side-sub">'+sub("dashboard","Plants dashboard")+sub("table","Plants table")+'</div>':'');
+}
+function s91TogglePlantsNav(){const on=S.view==="plants"||S.view==="plant";S._plantsNavOpen=!(S._plantsNavOpen!=null?S._plantsNavOpen:on);render()}
 function topbar(crumb,notifs){
  const sc=scadaUiState(),allResults=quickSearchResults();
  const authName=S.currentUser||OM_HEAD,authRole=S.currentRole||"Viewer";
@@ -170,11 +179,12 @@ function visiblePlantColumns(){
  const ai=base.findIndex(c=>c.key==="actions");
  return ai<0?base.concat(custom):base.slice(0,ai).concat(custom,base.slice(ai));
 }
-function plantTableHead(){return '<tr>'+visiblePlantColumns().map(c=>'<th>'+esc(c.label)+'</th>').join("")+'</tr>'}
+const plantColClass=c=>c.cls?' class="'+c.cls+'"':'';
+function plantTableHead(){return '<tr>'+visiblePlantColumns().map(c=>'<th'+plantColClass(c)+'>'+esc(c.label)+'</th>').join("")+'</tr>'}
 function plantTableBody(rows){
  const cols=visiblePlantColumns();
  return rows.map(p=>'<tr class="click" data-act="plant" data-id="'+esc(p.id)+'">'+
-   cols.map(c=>'<td>'+c.render(p)+'</td>').join("")+'</tr>').join("");
+   cols.map(c=>'<td'+plantColClass(c)+'>'+c.render(p)+'</td>').join("")+'</tr>').join("");
 }
 
 function exportPlantRegistryRows(){
@@ -243,16 +253,29 @@ function dbStatusBanner(){
  const n=(S.plants||[]).length;
  return '<div class="bn-info banner" style="margin-bottom:12px;border-color:var(--success)">🗄️ <b>Database:</b> FastAPI → Supabase PostgreSQL is the source of truth ('+n+' plant'+(n===1?"":"s")+' loaded).</div>';
 }
-function renderPlants(){
+/* Plants has two pages (sidebar dropdown, #/plants/dashboard and #/plants):
+   the dashboard holds the operations pulse; the table holds the plant register and its tools. */
+function renderPlants(){return S.plantsTab==="dashboard"?renderPlantsDashboard():renderPlantsTable()}
+/* page switch for phones, where the sidebar dropdown is not shown */
+function plantsPageSwitch(tab){
+ return '<div class="plp-switch" role="group" aria-label="Plants pages">'+[["dashboard","Dashboard"],["table","Plants table"]].map(x=>'<button type="button" class="'+(tab===x[0]?"on":"")+'" aria-pressed="'+(tab===x[0])+'" onclick="goView(\'plants\',\''+x[0]+'\')">'+x[1]+'</button>').join("")+'</div>';
+}
+function renderPlantsDashboard(){
+ const sp=dashScope();
+ return plantsPageSwitch("dashboard")+
+  (typeof s91PlantPulse==="function"?s91PlantPulse(sp):'<div class="panel">'+emptyState("Plants dashboard is unavailable","Reload the portal, or open the plants table.")+'</div>');
+}
+function renderPlantsTable(){
  const sp=dashScope();
  const pl=plantListRows(sp),size=12,plPage=Math.min(S.tablePages.plants||1,Math.max(1,Math.ceil(pl.length/size)));S.tablePages.plants=plPage;const plRows=pl.slice((plPage-1)*size,plPage*size);
  const unspecifiedN=sp.filter(p=>plantDcKw(p)==null).length;
- return '<div class="row between wrap" style="align-items:flex-end;gap:10px"><div><h1 style="font-size:20px;font-weight:800">Plants</h1><p style="font-size:12.5px;color:var(--muted-foreground);margin:4px 0 0">'+sp.length+' plant'+(sp.length===1?"":"s")+' · health from live issues · click a row for plant detail</p></div><div class="row wrap" style="gap:8px">'+(unspecifiedN?'<span class="pill pillsm" style="background:var(--warning-soft);color:var(--warning-strong)">'+unspecifiedN+' capacity not specified</span>':'')+'<button class="btn p sm" onclick="openModal(\'addPlant\')">'+I.plus(13)+' Add Plant</button><button class="btn o sm" onclick="openModal(\'commission\')">'+I.plus(13)+' New plant (commissioning)</button><button class="btn o sm" onclick="openModal(\'addPlantColumn\')">'+I.plus(13)+' Add Column</button></div></div>'+
-  (typeof s91PlantPulse==="function"?s91PlantPulse(sp):"")+
-  plantImportPanel()+
-  '<div id="plant-register-anchor" class="panel no-stick" style="padding:0"><div class="row between wrap" style="padding:16px 20px 0;align-items:flex-end;gap:10px"><div><h2 style="font-size:15px;font-weight:600">Plant register</h2><p style="font-size:12px;color:var(--muted-foreground);margin:3px 0 12px">Search, filter and page. Blank capacity stays Not specified.</p></div><div class="row wrap" style="gap:8px"><button class="btn o sm" onclick="exportPlantRegistryCSV()">'+I.dl(13)+' Export CSV ('+pl.length+')</button><button class="btn o sm" onclick="exportPlantRegistryExcel()">'+I.dl(13)+' Export Excel ('+pl.length+')</button></div></div>'+
-  plantListBar()+'<div style="overflow-x:auto"><table class="dense"><thead>'+plantTableHead()+'</thead><tbody>'+
-  (plRows.length?plantTableBody(plRows):'<tr><td colspan="'+visiblePlantColumns().length+'">'+emptyState("No plants match your filters","Clear filters or search a different site / project.")+'</td></tr>')+'</tbody></table></div>'+tablePager("plants",pl.length,size)+'</div>';
+ return plantsPageSwitch("table")+
+  '<div class="plp-head"><div><h1>Plants table</h1><p>'+sp.length+' plant'+(sp.length===1?"":"s")+' · status from live site issues · click a row to open the plant</p></div><div class="plp-actions">'+(unspecifiedN?'<span class="pill pillsm" style="background:var(--warning-soft);color:var(--warning-strong)">'+unspecifiedN+' capacity not specified</span>':'')+'<button class="btn p sm" onclick="openModal(\'addPlant\')">'+I.plus(13)+' Add Plant</button><button class="btn o sm" onclick="openModal(\'commission\')">'+I.plus(13)+' New plant (commissioning)</button><button class="btn o sm" onclick="openModal(\'addPlantColumn\')">'+I.plus(13)+' Add Column</button></div></div>'+
+  '<div id="plant-register-anchor" class="panel no-stick plt-panel">'+plantListBar()+
+  '<div class="plt-meta"><span>'+(pl.length===sp.length?'All '+sp.length+' plants':'<b>'+pl.length+'</b> of '+sp.length+' plants match')+'</span><span class="plt-export"><button type="button" class="btn g sm" onclick="exportPlantRegistryCSV()">'+I.dl(13)+' CSV</button><button type="button" class="btn g sm" onclick="exportPlantRegistryExcel()">'+I.dl(13)+' Excel</button></span></div>'+
+  '<div class="plt-scroll"><table class="plt"><thead>'+plantTableHead()+'</thead><tbody>'+
+  (plRows.length?plantTableBody(plRows):'<tr><td colspan="'+visiblePlantColumns().length+'">'+emptyState("No plants match your filters","Clear filters or search a different plant code / project.")+'</td></tr>')+'</tbody></table></div>'+tablePager("plants",pl.length,size)+'</div>'+
+  '<details class="plt-import"'+(S._plImportOpen?' open':'')+' ontoggle="S._plImportOpen=this.open"><summary>Import plant data <small>Plant Information workbook and coordinates file</small></summary>'+plantImportPanel()+'</details>';
 }
 function renderPlantPage(){
  const p=S.plants.find(z=>z.id===S.plantId)||S.plants[0];

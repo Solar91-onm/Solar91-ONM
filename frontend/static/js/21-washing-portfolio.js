@@ -4,7 +4,7 @@
 /* moving to a different module/tab starts at the top (render() otherwise keeps the old scroll position) */
 let _navKey="";
 function s91NavTop(){
- const k=S.view+"|"+(S.view==="om-module"?S.omTab:"")+"|"+(S.view==="plant"?S.plantId:"");
+ const k=S.view+"|"+(S.view==="om-module"?S.omTab:"")+"|"+(S.view==="plant"?S.plantId:"")+"|"+(S.view==="plants"?S.plantsTab:"");
  if(k!==_navKey){const first=!_navKey;_navKey=k;if(!first){try{window.scrollTo(0,0);const c=document.querySelector(".content");if(c)c.scrollTop=0}catch(e){}}}
 }
 let _s91RouteApplying=false;
@@ -12,6 +12,7 @@ function s91RouteParts(){const raw=String(location.hash||"").replace(/^#\/?/,"")
 function s91RouteHash(){
  if(S.view==="equipment")return "/equipment";
  if(S.view==="plant"&&S.plantId)return "/plant/"+encodeURIComponent(S.plantId);
+ if(S.view==="plants")return S.plantsTab==="dashboard"?"/plants/dashboard":"/plants";
  if(S.view==="dashboard"||["plants","work","performance","reports","data","settings"].includes(S.view))return "/"+S.view;
  if(S.view==="om-module")return S.omTab==="scheduled"?"/preventive":S.omTab==="washing"?"/washing":"/"+(S.omTab||"issues");
  return "/dashboard";
@@ -36,6 +37,7 @@ function s91ApplyRoute(initial){
    if(role==="Site Engineer"&&["handover","services","analytics"].includes(p)){S.view="dashboard"}else{S.view="om-module";S.omTab=p==="preventive"?"scheduled":p}
   }else if(["dashboard","plants","work","performance","reports","data","settings"].includes(p)){
    if(role==="Site Engineer"&&["plants","work","performance","reports","data","settings"].includes(p))S.view="dashboard";else S.view=p;
+   if(S.view==="plants")S.plantsTab=seg[1]==="dashboard"?"dashboard":"table";
   }
   if(!initial){persist();render();if(S.view==="equipment"&&typeof m26EqLoadPage==="function")m26EqLoadPage(false)}
   return true;
