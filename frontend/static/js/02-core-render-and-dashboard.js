@@ -180,7 +180,8 @@ function visiblePlantColumns(){
  return ai<0?base.concat(custom):base.slice(0,ai).concat(custom,base.slice(ai));
 }
 const plantColClass=c=>c.cls?' class="'+c.cls+'"':'';
-function plantTableHead(){return '<tr>'+visiblePlantColumns().map(c=>'<th'+plantColClass(c)+'>'+esc(c.label)+'</th>').join("")+'</tr>'}
+/* c.head is fixed markup (e.g. a line break) for built-in columns; custom column labels are always escaped */
+function plantTableHead(){return '<tr>'+visiblePlantColumns().map(c=>'<th'+plantColClass(c)+'>'+(c.head||esc(c.label))+'</th>').join("")+'</tr>'}
 function plantTableBody(rows){
  const cols=visiblePlantColumns();
  return rows.map(p=>'<tr class="click" data-act="plant" data-id="'+esc(p.id)+'">'+

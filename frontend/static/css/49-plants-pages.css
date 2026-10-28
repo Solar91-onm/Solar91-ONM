@@ -41,15 +41,16 @@
 
 /* ---------- table ---------- */
 #app table.plt{width:100%;border-collapse:separate;border-spacing:0}
-#app table.plt th{position:sticky;top:0;z-index:1;padding:9px 12px;background:var(--plt-sub);border-bottom:1px solid var(--plt-line);color:var(--plt-mut);font-size:11px;font-weight:700;letter-spacing:.045em;text-transform:uppercase;text-align:left;white-space:nowrap}
-#app table.plt td{padding:10px 12px;border-bottom:1px solid var(--plt-line);color:var(--plt-ink);font-size:12.5px;vertical-align:middle;white-space:nowrap}
+/* every heading and cell is centred on its column */
+#app table.plt th{position:sticky;top:0;z-index:1;padding:9px 12px;background:var(--plt-sub);border-bottom:1px solid var(--plt-line);color:var(--plt-mut);font-size:11px;font-weight:700;letter-spacing:.045em;line-height:1.3;text-transform:uppercase;text-align:center;white-space:nowrap}
+#app table.plt td{padding:10px 12px;border-bottom:1px solid var(--plt-line);color:var(--plt-ink);font-size:12.5px;text-align:center;vertical-align:middle;white-space:nowrap}
 #app table.plt tbody tr:last-child td{border-bottom:0}
 #app table.plt tbody tr.click:hover td{background:var(--plt-hover)}
-#app table.plt .plt-num{text-align:right;font-variant-numeric:tabular-nums}
-#app table.plt .plt-st-col{text-align:center}
+#app table.plt .plt-num{font-variant-numeric:tabular-nums}
+#app table.plt .plt-narrow{width:1%;padding-left:8px;padding-right:8px}
 #app table.plt .btn.sm{padding:4px 9px;font-size:12px}
 /* plant code column: code over name, centred; long names wrap instead of widening the column */
-#app table.plt .plt-code-col{text-align:center;width:1%}
+#app table.plt .plt-code-col{width:1%}
 .plt-code b{display:block;font-size:13px;font-weight:700;letter-spacing:.02em}
 .plt-code small{display:block;max-width:110px;margin:1px auto 0;white-space:normal;overflow-wrap:anywhere;line-height:1.25;font-size:11.5px;color:var(--plt-mut)}
 .plt-code .plt-missing{color:var(--plt-bad-ink)}
@@ -57,7 +58,7 @@
 .plt-muted{font-size:12px;color:var(--plt-mut)}
 
 /* status: light above the word, open-issue count below */
-.plt-status{display:inline-flex;flex-direction:column;align-items:center;gap:3px;min-width:86px;line-height:1.15}
+.plt-status{display:inline-flex;flex-direction:column;align-items:center;gap:3px;min-width:76px;line-height:1.15}
 .plt-light{width:10px;height:10px;border-radius:50%;background:var(--c);box-shadow:0 0 0 3px var(--halo),0 0 8px var(--c)}
 .plt-status b{font-size:12px;font-weight:700;color:var(--ink)}
 .plt-status small{font-size:11px;color:var(--plt-mut)}

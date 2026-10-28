@@ -1085,16 +1085,16 @@ function plantProjectNo(proj){
 }
 /* project filter key: "29" for both "… Twenty Nine Pvt. Ltd." and "… Twenty Nine pvt. Ltd." */
 function plantProjectKey(proj){return plantProjectNo(proj)||String(proj||"")}
-/* Status: a light (green / amber / red) above the health word, open-issue count below. Critical reads "Unhealthy". */
+/* Status: Healthy or Unhealthy (any open issue). The light stays amber / red by severity; the line below is the open count. */
 function plantStatusCell(p){
- const oi=openTk(S.issues||[]).filter(t=>t.plant===p.name),crit=oi.filter(t=>t.severity==="Critical").length,h=plantHealth(p);
- const tone=h==="Healthy"?"ok":h==="Critical"?"bad":"warn",label=h==="Critical"?"Unhealthy":h;
- const note=oi.length?oi.length+" open"+(crit?" · "+crit+" critical":""):"No open issues";
+ const n=openTk(S.issues||[]).filter(t=>t.plant===p.name).length,h=plantHealth(p);
+ const tone=h==="Healthy"?"ok":h==="Critical"?"bad":"warn",label=h==="Healthy"?"Healthy":"Unhealthy";
+ const note=n?n+" open":"No open issues";
  return '<div class="plt-status '+tone+'" title="'+esc(label+" · "+note)+'"><i class="plt-light" aria-hidden="true"></i><b>'+esc(label)+'</b><small>'+esc(note)+'</small></div>';
 }
 const PLANT_TABLE_COLUMNS=[
  {key:"siteCode",label:"Plant code",visible:true,cls:"plt-code-col",render:p=>'<div class="plt-code"><b>'+esc(displayCode(p.id))+'</b>'+(p.name?'<small>'+esc(plantShortName(p.name))+'</small>':'<small class="plt-missing">Name missing</small>')+'</div>'},
- {key:"project",label:"SPV / Project",visible:true,cls:"plt-num",render:p=>{const proj=plantProject(p),no=plantProjectNo(proj);return proj?'<span class="plt-proj" title="'+esc(proj)+'">'+esc(no||proj)+'</span>':"—"}},
+ {key:"project",label:"SPV / Project",head:"SPV /<br>Project",visible:true,cls:"plt-num plt-narrow",render:p=>{const proj=plantProject(p),no=plantProjectNo(proj);return proj?'<span class="plt-proj" title="'+esc(proj)+'">'+esc(no||proj)+'</span>':"—"}},
  {key:"acCapacity",label:"AC (kW)",visible:true,cls:"plt-num",render:p=>plantAcKw(p)!=null?kWStrPlain(plantAcKw(p)):"—"},
  {key:"dcCapacity",label:"DC (kWp)",visible:true,cls:"plt-num",render:p=>plantDcKw(p)!=null?kWStrPlain(plantDcKw(p)):capStr(p.capacity)},
  {key:"cod",label:"COD",visible:true,render:p=>p.cod?esc(p.cod):"—"},
@@ -1317,7 +1317,7 @@ function plantListRows(sp){const f=S.plF=Object.assign({q:"",rep:"all",tgt:"all"
  });
  const r=sp.filter(p=>{const x=XL_BY[p.id],m=xlPlantMtd(p.id),has=!!(x&&x.pvSystMonthlykWh),eng=plantEngineer(p),proj=plantProject(p),is=issueStats.get(p.name)||{open:0,crit:0};
   if(q&&!(p.name+" "+p.id+" "+String(p.id||"").replace(/_/g,"")+" "+proj+" "+eng+" "+(p.district||"")+" "+(p.discom||"")+" "+(p.geo&&p.geo.city||"")).toLowerCase().includes(q))return false;
-  if(f.district&&f.district!=="all"&&(p.district||"—")!==f.district)return false;
+  if(f.district&&f.district!=="all"&&(p.district||(p.geo&&p.geo.city)||p.location||"—")!==f.district)return false;
   if(f.discom&&f.discom!=="all"&&(p.discom||"—")!==f.discom)return false;
   if(f.open==="yes"&&!is.open)return false;if(f.open==="no"&&is.open)return false;
   if(f.crit==="yes"&&!is.crit)return false;if(f.crit==="no"&&is.crit)return false;
@@ -1327,7 +1327,8 @@ function plantListRows(sp){const f=S.plF=Object.assign({q:"",rep:"all",tgt:"all"
   if(f.cap==="s"&&!((plantCapMw(p)!=null)&&plantCapMw(p)<2.5))return false;if(f.cap==="m"&&!((plantCapMw(p)!=null)&&plantCapMw(p)>=2.5&&plantCapMw(p)<3.5))return false;if(f.cap==="l"&&!((plantCapMw(p)!=null)&&plantCapMw(p)>=3.5))return false;
   const a=m&&m.pct!=null?m.pct:null;
   if(f.ach==="hi"&&!(a!=null&&a>=100))return false;if(f.ach==="mid"&&!(a!=null&&a>=90&&a<100))return false;if(f.ach==="lo"&&!(a!=null&&a<90))return false;
-  if(f.health&&f.health!=="all"&&plantHealth(p)!==f.health)return false;
+  /* "Unhealthy" = Warning or Critical; the exact values still arrive from dashboard drill-ins */
+  if(f.health&&f.health!=="all"&&(f.health==="Unhealthy"?plantHealth(p)==="Healthy":plantHealth(p)!==f.health))return false;
   if(f.site&&f.site!=="all"&&p.id!==f.site)return false;
   /* accepts the project number ("35") or, from older saved filters, the full project name */
   if(f.project&&f.project!=="all"&&proj!==f.project&&plantProjectKey(proj)!==f.project)return false;
@@ -1338,16 +1339,19 @@ function plantListRows(sp){const f=S.plF=Object.assign({q:"",rep:"all",tgt:"all"
  return r.slice().sort((a,b)=>{const x=val(a),y=val(b);return x<y?-1:x>y?1:0})}
 function plantFiltersClear(){S.plF=null;plantListRows([]);S.tablePages.plants=1;render()} /* plantListRows refills the defaults */
 /* filters secondary to search / status / project / district sit behind "More filters" and open by themselves when set */
-const PLANT_MORE_FILTERS=["site","discom","loc","open","crit","cap","assignee","maker"];
+const PLANT_MORE_FILTERS=["site","discom","open","crit","cap","assignee","maker"];
 function plantListBar(){const f=S.plF,sel=(k,label,opts)=>'<select class="inp'+(k!=="sort"&&f[k]&&f[k]!=="all"?" on":"")+'" aria-label="'+esc(label)+'" title="'+esc(label)+'" onchange="S.plF.'+k+'=this.value;S.tablePages.plants=1;render()">'+opts.map(([v,l])=>'<option value="'+esc(v)+'"'+(String(f[k])===String(v)?" selected":"")+'>'+esc(l)+'</option>').join("")+'</select>';
  const uniq=a=>[...new Set(a.filter(Boolean))].sort((x,y)=>String(x).localeCompare(String(y),undefined,{numeric:true}));
  const sites=uniq((S.plants||[]).map(p=>p.id)),projs=uniq((S.plants||[]).map(p=>plantProjectKey(plantProject(p))));
  const engs=uniq((S.plants||[]).map(plantEngineer)),makers=uniq((S.issues||[]).map(t=>t.maker));
- const districts=uniq((S.plants||[]).map(p=>p.district)),discoms=uniq((S.plants||[]).map(p=>p.discom));
+ const districts=uniq((S.plants||[]).map(p=>p.district||(p.geo&&p.geo.city)||p.location)),discoms=uniq((S.plants||[]).map(p=>p.discom));
+ if(f.loc&&f.loc!=="all")f.loc="all"; /* the location filter was removed; drop it from older saved filters */
+ const health=[["all","All status"],["Healthy","Healthy"],["Unhealthy","Unhealthy"]];
+ if(f.health==="Warning"||f.health==="Critical")health.push([f.health,f.health==="Critical"?"Unhealthy (critical)":"Unhealthy (warning)"]);
  const active=Object.keys(f).filter(k=>k!=="sort"&&k!=="q"&&f[k]&&f[k]!=="all").length+(String(f.q||"").trim()?1:0);
  const moreOn=PLANT_MORE_FILTERS.filter(k=>f[k]&&f[k]!=="all").length,showMore=!!S._plMoreFilters||moreOn>0;
  return '<div class="plt-bar"><label class="plt-search">'+I.search(14)+'<input class="inp" value="'+esc(f.q)+'" aria-label="Search plants" placeholder="Search plant code, name, project, district…" oninput="S.plF.q=this.value;S.tablePages.plants=1;renderSoon()"/></label>'+
-  sel("health","Status",[["all","All status"],["Healthy","Healthy"],["Warning","Warning"],["Critical","Unhealthy"]])+
+  sel("health","Status",health)+
   sel("project","SPV / Project",[["all","All SPV / projects"]].concat(projs.map(s=>[s,/^\d+$/.test(s)?"Project "+s:s])))+
   (districts.length?sel("district","District",[["all","All districts"]].concat(districts.map(s=>[s,s]))):"")+
   sel("sort","Sort by",[["name","Sort: name"],["code","Sort: plant code"],["issues","Sort: open issues"],["crit","Sort: critical issues"],["cap","Sort: capacity"]])+
@@ -1356,7 +1360,6 @@ function plantListBar(){const f=S.plF,sel=(k,label,opts)=>'<select class="inp'+(
   (showMore?'<div class="plt-bar plt-bar2">'+
    sel("site","Plant code",[["all","All plant codes"]].concat(sites.map(s=>[s,displayCode(s)])))+
    (discoms.length?sel("discom","DISCOM",[["all","All DISCOMs"]].concat(discoms.map(s=>[s,s]))):"")+
-   sel("loc","Location",[["all","Any location"],["yes","📍 Location registered"],["no","Location not registered"]])+
    sel("open","Open issues",[["all","Any open issues"],["yes","Has open issues"],["no","No open issues"]])+
    sel("crit","Critical issues",[["all","Any critical issues"],["yes","Has critical issues"],["no","No critical issues"]])+
    sel("cap","DC capacity",[["all","Any DC capacity"],["s","Under 2.5 MWp"],["m","2.5 – 3.5 MWp"],["l","3.5 MWp and above"]])+
