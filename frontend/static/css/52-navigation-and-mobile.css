@@ -16,7 +16,7 @@
 .pp-card button{max-width:100%}
 #app :is(.panel,.pp-card,.wc-card,.wx-results,.plp-head){scroll-margin-top:95px}
 #app :is(button,select,input,textarea){max-width:100%}
-#app :is(.pp-gauge,.pp-today,.plp-head,.plt-meta){overflow-wrap:anywhere}
+#app :is(.pp-gauge,.plp-head,.plt-meta){overflow-wrap:anywhere}
 #app .plt-scroll,.ops-table-scroll{max-width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}
 #app .pp-plot svg{max-width:100%}
 @media(max-width:1100px){
@@ -42,11 +42,11 @@
  .pp-pill select{min-width:0;flex:1;max-width:100%}
  .pp-row{gap:12px}
  .pp-row-1{grid-template-columns:repeat(2,minmax(0,1fr))}
+ .pp-row-1>:last-child:nth-child(odd){grid-column:1/-1}
  .pp-card{border-radius:14px;padding:12px;box-shadow:0 2px 12px rgba(12,32,21,.06)}
  .pp-gauge-body{grid-template-columns:minmax(0,1fr) minmax(64px,96px)}
  .pp-dial{width:min(100%,96px)}
  .pp-gauge-copy>strong{font-size:26px}
- .pp-today button{min-height:42px;padding:8px 9px}
  .pp-row-2{grid-template-columns:minmax(0,1fr)}
  .plp-head{align-items:stretch}
  .plp-actions{width:100%;gap:8px}
@@ -63,7 +63,6 @@
  .pp-pill{flex:1 1 calc(50% - 6px)}
  .pp-card{padding:14px}
  .pp-plot{min-height:155px}
- .pp-today button{min-height:44px}
  .plp-actions>.btn{flex:1 1 auto}
 }
 @media(max-width:365px){
@@ -73,7 +72,7 @@
  #app .topbar>div:last-child>select{max-width:38vw}
 }
 @media(pointer:coarse){
- .side-link,.side-sublink,.pp-seg button,.pp-switch,.pp-pill select,.pp-pie-legend button,.plt-bar button{min-height:40px}
+ .side-link,.side-sublink,.pp-seg button,.pp-pill select,.pp-pie-legend button,.plt-bar button{min-height:40px}
  .pp-gauge,.pp-line[role="button"],.pp-pie-legend button{touch-action:manipulation}
 }
 @media(prefers-reduced-motion:reduce){.pp-card,.side-sublink,.mnav>div{transition:none!important}}

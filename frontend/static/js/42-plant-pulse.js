@@ -9,13 +9,10 @@
  if(window.s91PlantPulse)return;
  const h=v=>typeof esc==="function"?esc(v==null?"":String(v)):String(v==null?"":v);
  const pct=(n,t)=>t?Math.round(100*n/t):0;
- const COLORS={raised:"#C93BE6",resolved:"#5B84F5",pm:"#EBCB1C"};
- const LABELS={raised:"Raised",resolved:"Resolved",pm:"PM done"};
  const st=()=>{
   const f=S.plPulse=S.plPulse||{};
-  const d={plant:S.dashPlant||"all",eq:"all",area:"all",eng:"all",bars:"day",issues:"day",pm:"day"};
+  const d={plant:S.dashPlant||"all",eq:"all",area:"all",eng:"all",issues:"day",pm:"day"};
   Object.keys(d).forEach(k=>{if(f[k]===undefined)f[k]=d[k]});
-  if(!f.show)f.show={raised:true,resolved:true,pm:true};
   return f;
  };
 
@@ -37,10 +34,8 @@
   }
   return out;
  }
- const RANGE_NOTE={day:"days",week:"weeks",month:"months"};
  /* axis top that splits into 4 whole-number steps (counts never show 2.5 or 7.5) */
  const niceMax=v=>{if(v<=4)return 4;const raw=Math.ceil(v/4),p=Math.pow(10,Math.floor(Math.log10(raw)));const step=[1,1.5,2,2.5,3,4,5,6,8,10].map(m=>m*p).filter(Number.isInteger).find(s=>s>=raw)||10*p;return step*4};
- const narrow=()=>typeof window.matchMedia==="function"&&window.matchMedia("(max-width:720px)").matches;
  /* one screen on a laptop or desktop; below this the cards stack and the page scrolls */
  const fitMode=()=>innerWidth>1100&&innerHeight>620;
  const doneDay=t=>{const c=t.completion&&t.completion.date;const v=c||t.actualCompleted||"";return /^\d{4}-\d{2}-\d{2}/.test(v)?String(v).slice(0,10):null};
@@ -107,32 +102,6 @@
    '<svg class="pp-dial" viewBox="0 0 120 104" aria-hidden="true"><circle cx="'+cx+'" cy="'+cy+'" r="'+(r-6)+'" class="pp-dial-face"/>'+track+fill+ticks+'<text x="'+cx+'" y="'+(cy+19)+'" text-anchor="middle" class="pp-dial-unit">(0-100%)</text>'+needle+'</svg></div></button>';
  }
 
- /* ---------- grouped capsule bars (activity) ---------- */
- function barsCard(d){
-  const f=st(),small=narrow(),bs=buckets(f.bars,small?7:14),keys=["raised","resolved","pm"].filter(k=>f.show[k]);
-  const rows=bs.map(b=>{
-   const inB=day=>day&&day>=b.start&&day<=b.end;
-   return{b,raised:d.issues.filter(t=>inB(issueCreatedDay(t))).length,resolved:d.issues.filter(t=>inB(issueClosedDay(t))).length,pm:d.tasks.filter(t=>inB(doneDay(t))).length};
-  });
-  const [W,H]=dims("bars",small?360:640,small?220:250),L=30,R=8,T=10,B=24,pw=W-L-R,ph=H-T-B;
-  const max=niceMax(Math.max(1,...rows.map(r=>keys.reduce((a,k)=>a+r[k],0))));
-  const step=pw/rows.length,cap=Math.max(4,Math.min(12,step*.42)),gap=3;
-  let g="";
-  for(let i=0;i<=4;i++){const v=max*i/4,y=T+ph-ph*i/4;g+='<line x1="'+L+'" x2="'+(W-R)+'" y1="'+y+'" y2="'+y+'" class="pp-grid"/><text x="'+(L-6)+'" y="'+(y+3.5)+'" text-anchor="end" class="pp-axis">'+(Number.isInteger(v)?v:v.toFixed(1))+'</text>'}
-  const bars=rows.map((r,i)=>{
-   const x=L+step*i+step/2-cap/2;let y=T+ph,segs="";
-   keys.forEach(k=>{if(!r[k])return;const hgt=Math.max(cap,r[k]/max*ph-gap);y-=hgt;segs+='<rect x="'+x.toFixed(1)+'" y="'+y.toFixed(1)+'" width="'+cap.toFixed(1)+'" height="'+hgt.toFixed(1)+'" rx="'+(cap/2).toFixed(1)+'" fill="'+COLORS[k]+'"/>';y-=gap});
-   const tip=r.b.start===r.b.end?fmtD(r.b.start):fmtD(r.b.start)+" – "+fmtD(r.b.end);
-   return '<g class="pp-bar" data-pp-from="'+r.b.start+'" data-pp-to="'+r.b.end+'"><title>'+h(tip)+' · '+r.raised+' raised · '+r.resolved+' resolved · '+r.pm+' PM completed · click to open these issues</title><rect x="'+(L+step*i+2).toFixed(1)+'" y="'+T+'" width="'+Math.max(1,step-4).toFixed(1)+'" height="'+ph+'" class="pp-hit"/>'+segs+'<text x="'+(L+step*i+step/2).toFixed(1)+'" y="'+(H-7)+'" text-anchor="middle" class="pp-axis">'+h(r.b.label)+'</text></g>';
-  }).join("");
-  const toggles=["raised","resolved","pm"].map(k=>'<button type="button" class="pp-switch'+(f.show[k]?" on":"")+'" style="--c:'+COLORS[k]+'" onclick="s91PulseSeries(\''+k+'\')" aria-pressed="'+!!f.show[k]+'">'+LABELS[k]+'<i><b></b></i></button>').join("");
-  const TOTAL_LABEL={raised:"raised",resolved:"resolved",pm:"PM completed"};
-  const totals=keys.map(k=>'<span><i style="background:'+COLORS[k]+'"></i>'+rows.reduce((a,r)=>a+r[k],0)+' '+TOTAL_LABEL[k]+'</span>').join("");
-  return '<article class="pp-card pp-wide"><header class="pp-head"><div><h3>Work activity</h3><p>Records per '+(f.bars==="day"?"day":f.bars==="week"?"week":"month")+', last '+bs.length+' '+RANGE_NOTE[f.bars]+' · click a bar to open those issues</p></div>'+seg("bars",f.bars)+'</header>'+
-   '<div class="pp-toggles">'+toggles+'</div>'+
-   (keys.length?'<div class="pp-plot" data-pp-dim="bars"><svg class="pp-chart" viewBox="0 0 '+W+' '+H+'" role="img" aria-label="Work activity bar chart">'+g+bars+'</svg></div>':'<div class="pp-empty">Turn on a series above to draw the chart.</div>')+
-   '<div class="pp-totals">'+totals+'</div></article>';
- }
  /* short = D / W / M on the small trend cards (full names stay for screen readers and on hover) */
  function seg(key,val,short){return '<div class="pp-seg" role="group" aria-label="Period">'+[["day","Day"],["week","Week"],["month","Month"]].map(x=>'<button type="button" class="'+(val===x[0]?"on":"")+'" aria-pressed="'+(val===x[0])+'" aria-label="'+x[1]+'" title="'+x[1]+'" onclick="s91PulseRange(\''+key+'\',\''+x[0]+'\')">'+(short?x[1][0]:x[1])+'</button>').join("")+'</div>'}
 
@@ -190,9 +159,8 @@
    '<path d="'+area+'" fill="url(#'+id+')"/><path d="'+path+'" fill="none" stroke="'+o.color+'" stroke-width="2.4" stroke-linecap="round"/>'+dots+xl+'</svg></div></article>';
  }
 
- /* ---------- washing battery ---------- */
+ /* ---------- washing level: cycles done this month, shown as a tank that fills (top row, beside the gauges) ---------- */
  function batteryCard(d){
-  const f=st();
   let body;
   if(S._washCycleError&&!d.wc)body='<div class="pp-empty">Washing data is not available for your role right now.</div>';
   else if(!d.wc)body='<div class="pp-empty">Loading washing status…</div>';
@@ -200,24 +168,15 @@
   else{
    const v=typeof d.washPct==="number"?d.washPct:0,tone=v>=d.washDuePct?"#22C55E":v>=d.washDuePct-15?"#F59E0B":"#EF4444";
    const fillH=Math.max(0,Math.min(100,v))*1.36,warnY=24+136-136*d.washDuePct/100;
-   body='<div class="pp-batt-meta"><span>Cycles this month: <b>'+d.cyclesDone+' / '+d.cyclesTarget+'</b></span><span class="warn">Due by today: '+d.washDue+' ('+d.washDuePct+'%)</span>'+(d.washLate?'<span class="late">'+d.washLate+' plant'+(d.washLate===1?"":"s")+' behind a deadline</span>':'')+'</div>'+
-    '<div class="pp-batt-row"><svg class="pp-battery" viewBox="0 0 90 170" aria-hidden="true"><rect x="30" y="6" width="30" height="14" rx="4" class="pp-batt-cap"/><rect x="8" y="18" width="74" height="148" rx="14" class="pp-batt-body"/>'+
+   body='<div class="pp-batt-row"><svg class="pp-battery" viewBox="0 0 90 170" aria-hidden="true"><rect x="30" y="6" width="30" height="14" rx="4" class="pp-batt-cap"/><rect x="8" y="18" width="74" height="148" rx="14" class="pp-batt-body"/>'+
     '<clipPath id="ppBattClip"><rect x="14" y="24" width="62" height="136" rx="9"/></clipPath><g clip-path="url(#ppBattClip)"><rect x="14" y="24" width="62" height="136" class="pp-batt-empty"/><rect x="14" y="'+(160-fillH).toFixed(1)+'" width="62" height="'+fillH.toFixed(1)+'" fill="'+tone+'" class="pp-batt-fill"/></g>'+
-    '<line x1="14" x2="76" y1="'+warnY.toFixed(1)+'" y2="'+warnY.toFixed(1)+'" class="pp-batt-warn"/><path d="M49 52 L33 98 L45 98 L40 132 L58 82 L46 82 L52 52 Z" class="pp-bolt"/></svg>'+
-    '<div class="pp-batt-val"><b style="color:'+tone+'">'+(typeof d.washPct==="number"?d.washPct+"%":"—")+'</b><small>cycles done this month</small><span>'+d.tablesToday+' tables cleaned today</span></div></div>';
+    '<line x1="14" x2="76" y1="'+warnY.toFixed(1)+'" y2="'+warnY.toFixed(1)+'" class="pp-batt-warn"/><path d="M45 64 C45 64 29 86 29 100 A16 16 0 0 0 61 100 C61 86 45 64 45 64 Z" class="pp-drop"/><path d="M38 99 A8 8 0 0 0 44 108" class="pp-drop-shine"/></svg>'+
+    '<div class="pp-batt-val"><b style="color:'+tone+'">'+(typeof d.washPct==="number"?d.washPct+"%":"—")+'</b><small>'+d.cyclesDone+' / '+d.cyclesTarget+' cycles done this month</small>'+
+    '<span class="due">'+d.washDue+' due by today</span>'+(d.washLate?'<span class="late">'+d.washLate+' plant'+(d.washLate===1?"":"s")+' behind a deadline</span>':'')+'<span>'+d.tablesToday+' tables cleaned today</span></div></div>';
   }
-  return '<article class="pp-card pp-batt" role="button" tabindex="0" onclick="s91PulseGo(\'wash\')"><header class="pp-head"><div><h3>Washing level</h3><p>'+(d.washAll?"All equipment and people · plant filters only":"Cycles done this month · click to open")+'</p></div></header>'+body+'</article>';
+  return '<article class="pp-card pp-batt" role="button" tabindex="0" title="Washing cycles completed this month out of the month&#39;s cycles; the dashed line marks the cycles due by today · click to open Washing" onclick="s91PulseGo(\'wash\')"><header class="pp-head"><div><h3>Washing level</h3></div></header>'+body+'</article>';
  }
 
- /* ---------- "Today" card ---------- */
- function todayCard(d){
-  const dt=new Date(TODAY+"T00:00:00");
-  const due=d.tasks.filter(t=>t.status!=="Completed"&&t.due===TODAY).length,raised=d.issues.filter(t=>issueCreatedDay(t)===TODAY).length;
-  return '<article class="pp-card pp-today"><div class="pp-today-h"><b>Today</b><span>'+h(dt.toLocaleDateString("en-GB",{weekday:"short",day:"numeric",month:"short",year:"numeric"}))+'</span></div>'+
-   '<button type="button" onclick="s91PulseGo(\'pmToday\')"><span>PM due today</span><b>'+due+'</b></button>'+
-   '<button type="button" onclick="s91PulseGo(\'issToday\')"><span>Issues raised today</span><b>'+raised+'</b></button>'+
-   '<button type="button" onclick="s91PulseGo(\'wash\')"><span>Tables cleaned today</span><b>'+(d.wc?d.tablesToday:"—")+'</b></button></article>';
- }
 
  /* ---------- filter pills (top right) ---------- */
  function filtersHtml(sp){
@@ -276,14 +235,13 @@
     '<div class="pp-top"><div class="pp-title"><div class="pp-eyeline"><span class="pp-eyebrow">OPERATIONS PULSE · '+h(scope.toUpperCase())+'</span>'+caps+'</div><h2>Site Issues, Preventive Maintenance &amp; Washing at a glance</h2></div>'+filtersHtml(sp||[])+'</div>'+
     '<div class="pp-row pp-row-1">'+
      gauge({title:"PM on schedule",value:pmPct,low:70,high:90,go:"pm",sub:d.tasks.length?d.pmOverdue.length+" overdue of "+d.tasks.length+" work orders":"No PM work orders",tip:"Preventive Maintenance work orders not past their due date · click to open"})+
-     gauge({title:"Washing compliance",value:typeof d.washPct==="number"?d.washPct:null,low:Math.max(0,d.washDuePct-15),high:d.washDuePct,go:"wash",sub:d.washRows.length?d.cyclesDone+" / "+d.cyclesTarget+" cycles done this month · "+d.washDue+" due by today":d.wc?"Washing not set up":"Loading washing status…",tip:"Washing cycles completed this month out of the month's cycles"+(d.f.plant!=="all"?" for this plant":" for all plants in scope")+"; green when every cycle due by today is done"+(d.washAll?" (washing follows the plant filters only)":"")+" · click to open Washing"})+
+     batteryCard(d)+
      gauge({title:"Site issues resolved",value:issPct,low:50,high:80,go:"issues",sub:d.issues.length?d.open.length+" open · "+d.overdueIssues.length+" past ETC":"No site issues recorded",tip:"Share of Site Issues resolved or closed · click to open Site Issues"})+
-     todayCard(d)+'</div>'+
-    '<div class="pp-row pp-row-2">'+barsCard(d)+pieCard(d)+
-     '<div class="pp-stack">'+
+     '</div>'+
+    '<div class="pp-row pp-row-2">'+pieCard(d)+
       lineCard({key:"issues",range:f.issues,title:"Open site issues",sub:"Backlog at the end of each period",nowLabel:"open now",color:"#1F5FA8",points:issuePts,go:"issues",upIsBad:true,avg:false})+
       lineCard({key:"pm",range:f.pm,title:"Overdue PM",sub:"Preventive Maintenance work orders past due at the end of each period",nowLabel:"overdue now",color:"#E0403A",points:pmPts,go:"pm",upIsBad:true,avg:true})+
-     '</div>'+batteryCard(d)+'</div></section>';
+     '</div></section>';
   }catch(error){
    console.error("[Plant pulse]",error);
    return '<div class="bn-warn banner">The operations pulse could not be drawn: '+h(error.message)+'. The plants table is unaffected.</div>';
@@ -298,7 +256,6 @@
  /* kept for older links that set one plant */
  window.s91PulsePlant=function(v){setPlantScope(v||"all")};
  window.s91PulseRange=function(key,v){st()[key]=v;render()};
- window.s91PulseSeries=function(k){const f=st();f.show[k]=!f.show[k];render()};
  /* every card opens its module with the same plant, equipment, district and engineer filters */
  window.s91PulseGo=function(key){
   const f=st(),plant=f.plant,d=scopeData(typeof dashScope==="function"?dashScope():(S.plants||[]));
@@ -306,11 +263,6 @@
   if(key==="issues"){drillIssues(Object.assign(iss,{chip:"all"}));return}
   if(key==="issOpen"){drillIssues(Object.assign(iss,{chip:"Open"}));return}
   if(key==="issOver"){drillIssues(Object.assign(iss,{chip:"Overdue"}));return}
-  if(key==="issToday"){drillIssues(Object.assign(iss,{chip:"all",from:TODAY,to:TODAY}));return}
-  if(key==="pmToday"){
-   S.pmLive=Object.assign(S.pmLive||{},{plant,day:TODAY,dayFrom:addDays(TODAY,-2),dayEquip:f.eq,plantOpen:false,view:"schedule",calMonth:TODAY.slice(0,7)});
-   S._glanceScroll="pm-day-planner";goScheduledOM("maintenance");return;
-  }
   if(key==="pm"||key==="pmOver"||key==="pmSoon"){
    const status=key==="pmSoon"?"Due soon":key==="pmOver"?"Overdue":"all";
    S.pmLive=Object.assign(S.pmLive||{},{plant,status,week:"all",age:"all",equipment:f.eq,person:f.eng,query:"",page:1,plantOpen:false,view:"register"});
@@ -324,10 +276,9 @@
    S.washF=Object.assign({},ui);S._glanceScroll="wc-results";goScheduledOM("washing");return;
   }
  };
- /* bars and pie slices live inside SVG, so they are wired with one delegated listener */
+ /* pie slices live inside SVG, so they are wired with one delegated listener */
  document.addEventListener("click",e=>{
-  const t=e.target&&e.target.closest?e.target.closest("[data-pp-go],.pp-bar"):null;if(!t||!t.closest(".pp"))return;
-  if(t.dataset.ppGo){s91PulseGo(t.dataset.ppGo);return}
-  const f=st();drillIssues(Object.assign({plant:f.plant,chip:"all",q:"",from:t.dataset.ppFrom,to:t.dataset.ppTo,vert:f.eq,assignee:f.eng},f.area.indexOf("d:")===0?{district:f.area.slice(2)}:{}));
+  const t=e.target&&e.target.closest?e.target.closest("[data-pp-go]"):null;if(!t||!t.closest(".pp"))return;
+  s91PulseGo(t.dataset.ppGo);
  });
 })();

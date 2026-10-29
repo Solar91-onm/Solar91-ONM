@@ -1,4 +1,5 @@
-/* Plants · Operations pulse — gauges, activity bars, open-work pie, trend lines and washing battery.
+/* Plants · Operations pulse — two rows of three: PM and site-issue gauges with the washing level between them, then
+   the open-work pie and the two trend lines.
    Uses the --gx-* tokens from 41-glance-experience.css so it follows light and dark mode.
    .pp-fit (laptop / desktop, set by 42-plant-pulse.js) fits everything in one screen; otherwise the cards stack. */
 .pp{display:grid;gap:12px;margin:2px 0 14px;color:var(--gx-ink)}
@@ -24,9 +25,7 @@
 .pp-reset{border:0;background:none;padding:6px 8px;font:inherit;font-size:12.5px;font-weight:700;color:var(--gx-brand);cursor:pointer;text-decoration:underline}
 
 .pp-row{display:grid;gap:12px;align-items:stretch;min-width:0}
-.pp-row-1{grid-template-columns:repeat(3,minmax(0,1fr)) minmax(0,.8fr)}
-.pp-row-2{grid-template-columns:minmax(0,1.45fr) minmax(0,1fr) minmax(0,1.1fr) minmax(0,.72fr)}
-.pp-stack{display:grid;gap:12px;min-width:0;min-height:0}
+.pp-row-1,.pp-row-2{grid-template-columns:repeat(3,minmax(0,1fr))}
 .pp-card{min-width:0;display:flex;flex-direction:column;text-align:left;font:inherit;color:inherit;background:var(--gx-card);border:1px solid var(--gx-line);border-radius:16px;padding:13px;box-shadow:var(--gx-shadow);transition:box-shadow .18s ease,border-color .18s ease}
 .pp-card[role="button"],button.pp-card{cursor:pointer}
 .pp-card[role="button"]:hover,button.pp-card:hover{border-color:color-mix(in srgb,var(--gx-brand) 30%,var(--gx-line));box-shadow:var(--gx-shadow-hi)}
@@ -59,37 +58,16 @@
 .pp-needle{stroke:var(--gx-ink);stroke-width:2.6;stroke-linecap:round}
 .pp-hub{fill:var(--gx-ink);stroke:var(--gx-card);stroke-width:1.6}
 
-/* today */
-.pp-today{gap:5px;background:radial-gradient(120% 90% at 100% 0%,rgba(242,161,0,.16),transparent 55%),linear-gradient(160deg,color-mix(in srgb,var(--gx-brand) 8%,var(--gx-card)),var(--gx-card))}
-.pp-today-h{display:flex;justify-content:space-between;align-items:baseline;gap:6px;margin-bottom:2px}
-.pp-today-h b{font-size:13.5px;font-weight:800}.pp-today-h span{font-size:11.5px;font-weight:600;color:var(--gx-mut);white-space:nowrap}
-.pp-today button{display:flex;justify-content:space-between;align-items:center;gap:8px;width:100%;border:1px solid var(--gx-line);background:var(--gx-card);border-radius:9px;padding:5px 9px;font:inherit;font-size:12px;color:var(--gx-ink);cursor:pointer;transition:border-color .15s}
-.pp-today button:hover{border-color:var(--gx-brand)}
-.pp-today button b{font-size:14px}
-
-/* segmented control + series switches */
+/* segmented control */
 .pp-seg{display:inline-flex;flex-shrink:0;border:1px solid color-mix(in srgb,var(--gx-brand) 25%,var(--gx-line));border-radius:9px;overflow:hidden;background:var(--gx-card)}
 .pp-seg button{border:0;background:none;padding:5px 9px;font:inherit;font-size:11.5px;font-weight:700;color:var(--gx-mut);cursor:pointer}
 .pp-seg button+button{border-left:1px solid var(--gx-line)}
 .pp-seg button.on{background:#22A35A;color:#fff}
-.pp-toggles{display:flex;gap:12px;flex-wrap:wrap;margin:0 0 4px}
-.pp-switch{display:inline-flex;align-items:center;gap:7px;border:0;background:none;padding:2px 0;font:inherit;font-size:12px;font-weight:700;color:var(--gx-ink);cursor:pointer}
-.pp-switch i{position:relative;display:inline-block;width:30px;height:16px;border-radius:999px;background:color-mix(in srgb,var(--gx-mut) 30%,transparent);transition:background .2s}
-.pp-switch i b{position:absolute;top:2px;left:2px;width:12px;height:12px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.25);transition:left .2s}
-.pp-switch.on i{background:var(--c)}
-.pp-switch.on i b{left:16px}
-.pp-switch:not(.on){color:var(--gx-mut)}
 
 /* charts */
 .pp-grid{stroke:var(--gx-line);stroke-width:1}
 .pp-grid.dashed{stroke-dasharray:4 4}
 .pp-axis{font-size:10px;fill:var(--gx-mut);font-weight:600}
-.pp-bar{cursor:pointer}
-.pp-bar .pp-hit{fill:transparent;rx:6}
-.pp-bar:hover .pp-hit{fill:color-mix(in srgb,var(--gx-brand) 7%,transparent)}
-.pp-bar:hover rect:not(.pp-hit){opacity:.85}
-.pp-totals{display:flex;gap:12px;flex-wrap:wrap;margin-top:4px;font-size:11.5px;color:var(--gx-mut)}
-.pp-totals i{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:5px}
 
 /* pie */
 .pp-total{display:flex;flex-direction:column;align-items:flex-end;font-size:22px;font-weight:800;line-height:1}
@@ -119,25 +97,24 @@
 .pp-avg{stroke-dasharray:5 4;stroke-width:1.4;opacity:.75}
 .pp-avg-label{font-size:9.5px;font-weight:800}
 
-/* battery */
-.pp-batt-meta{display:flex;flex-direction:column;gap:2px;font-size:11.5px;margin-bottom:6px}
-.pp-batt-meta b{font-weight:800}
-.pp-batt-meta .warn{color:var(--danger);font-weight:700}
-.pp-batt-meta .late{color:#C2410C;font-weight:700}
-.pp-batt-row{display:flex;align-items:center;justify-content:center;gap:10px;flex:1;min-height:0}
-.pp-battery{width:auto;height:150px;max-width:46%;filter:drop-shadow(0 8px 14px rgba(16,40,26,.18))}
+/* washing level: tank on the left, figures on the right; a water drop marks it as washing */
+.pp-batt-row{display:flex;align-items:center;justify-content:center;gap:14px;flex:1;min-height:0}
+.pp-battery{width:auto;height:120px;max-width:40%;flex-shrink:0;filter:drop-shadow(0 6px 12px rgba(16,40,26,.16))}
 .pp-batt-cap,.pp-batt-body{fill:#1C2621}
 .pp-batt-empty{fill:#34413A}
 .pp-batt-fill{transition:y .6s ease,height .6s ease}
 .pp-batt-warn{stroke:#fff;stroke-width:1.4;stroke-dasharray:4 3;opacity:.85}
-.pp-bolt{fill:#fff;opacity:.92}
+.pp-drop{fill:#fff;opacity:.5}
+.pp-drop-shine{fill:none;stroke:#fff;stroke-width:2.4;stroke-linecap:round;opacity:.55}
 .pp-batt-val{min-width:0}
 .pp-batt-val b{display:block;font-size:28px;font-weight:800;letter-spacing:-.04em;line-height:1}
-.pp-batt-val small{display:block;font-size:11px;color:var(--gx-mut);margin-top:4px;line-height:1.3}
-.pp-batt-val span{display:block;font-size:11px;font-weight:700;margin-top:6px}
+.pp-batt-val small{display:block;font-size:11.5px;color:var(--gx-mut);margin-top:4px;line-height:1.3}
+.pp-batt-val span{display:block;font-size:11px;font-weight:700;margin-top:3px;line-height:1.3}
+.pp-batt-val .due{color:var(--gx-mut)}
+.pp-batt-val .late{color:#C2410C}
 
-/* ---------- one screen (laptop / desktop): two rows that share the window height ---------- */
-.pp.pp-fit{grid-template-rows:auto minmax(132px,.7fr) minmax(0,1.6fr);gap:10px;margin:0;min-height:470px}
+/* ---------- one screen (laptop / desktop): the top row keeps its own height, the charts take the rest ---------- */
+.pp.pp-fit{grid-template-rows:auto auto minmax(0,1fr);gap:10px;margin:0;min-height:470px}
 .pp-fit .pp-top{gap:8px 14px;align-items:center}
 .pp-fit .pp-top h2{display:none}
 .pp-fit .pp-filters{justify-content:flex-start}
@@ -145,8 +122,6 @@
 .pp-fit .pp-legend{display:none}
 .pp-fit .pp-gauge{padding:10px 10px 8px 14px}
 .pp-fit .pp-gauge-copy>strong{font-size:26px}
-.pp-fit .pp-today{gap:3px;padding:9px 12px}
-.pp-fit .pp-today button{padding:2px 9px;min-height:26px}
 .pp-fit .pp-line .pp-head{gap:6px}
 .pp-fit .pp-line-now b{font-size:18px}
 /* pie and legend side by side */
@@ -157,18 +132,15 @@
 .pp-fit .pp-card{min-height:0;overflow:hidden}
 .pp-fit .pp-head p{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .pp-fit .pp-plot{flex:1}
-.pp-fit .pp-stack{grid-template-rows:minmax(0,1fr) minmax(0,1fr);gap:10px}
-.pp-fit .pp-battery{height:100%;max-height:160px}
 .pp-fit .pp-gauge-body{grid-template-columns:minmax(0,1fr) 104px}
 .pp-fit .pp-dial{width:104px}
 
 /* ---------- stacked (tablet / phone, or a short window) ---------- */
-.pp:not(.pp-fit) .pp-wide .pp-plot{height:230px}
 .pp:not(.pp-fit) .pp-pie-plot{height:200px}
 .pp:not(.pp-fit) .pp-line .pp-plot{height:150px}
 @media (max-width:1240px){
- .pp:not(.pp-fit) .pp-row-1{grid-template-columns:repeat(2,minmax(0,1fr))}
- .pp:not(.pp-fit) .pp-row-2{grid-template-columns:repeat(2,minmax(0,1fr))}
+ .pp:not(.pp-fit) .pp-row-1,.pp:not(.pp-fit) .pp-row-2{grid-template-columns:repeat(2,minmax(0,1fr))}
+ .pp:not(.pp-fit) .pp-row>:last-child:nth-child(odd){grid-column:1/-1}
 }
 @media (max-width:720px){
  .pp-filters{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));width:100%;gap:6px}
@@ -181,4 +153,4 @@
  .pp-top h2{font-size:16px}
  .pp-head{flex-wrap:wrap}
 }
-@media (prefers-reduced-motion:reduce){.pp-card,.pp-slice,.pp-switch i,.pp-switch i b,.pp-batt-fill{transition:none!important}}
+@media (prefers-reduced-motion:reduce){.pp-card,.pp-slice,.pp-batt-fill{transition:none!important}}

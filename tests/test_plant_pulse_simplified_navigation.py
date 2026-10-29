@@ -18,7 +18,8 @@ def test_navigation_markup_and_pwa_manifest():
     assert 'link("issues","Site Issues"' not in core
     assert 'link("scheduled","Preventive Maintenance"' not in core
     assert 'link("dashboard","Command Center"' not in core
-    assert 'PM on schedule' in pulse and 'Washing compliance' in pulse and 'Site issues resolved' in pulse
+    assert 'PM on schedule' in pulse and 'Washing level' in pulse and 'Site issues resolved' in pulse
+    assert 'Washing compliance' not in pulse and 'Work activity' not in pulse and 'PM due today' not in pulse
     assert '/static/css/52-navigation-and-mobile.css' in html
     assert '/static/css/45-command-center.css' not in html
     assert 'Command Center' not in manifest['name']
