@@ -45,8 +45,10 @@
    if(!map.has(key))map.set(key,{key,plant:t.plant||"",vert,items:[]});map.get(key).items.push(t)});
   return [...map.values()].map(g=>{g.worst=g.items.map(sevOf).sort((a,b)=>(SEV_RANK[a]??9)-(SEV_RANK[b]??9))[0]||"Medium";return g});
  }
+ /* a typed reference that only repeats the equipment or subpart name (e.g. "IDT" for "IDT: Breather Required") is not a unit / part number */
+ const siSameName=(t,c)=>{const n=String(c).trim().toLowerCase();return [t.vertical,t.sub,String(t.sub||"").split(":")[0]].some(x=>x&&String(x).trim().toLowerCase()===n)};
  function siUnitCodes(items){
-  const out=[];items.forEach(t=>{const u=Array.isArray(t.units)&&t.units.length?t.units.map(x=>x.code||x.name):(t.equip&&t.equip!=="—"?String(t.equip).split(/\s*,\s*/):[]);u.forEach(c=>{if(c&&!out.includes(c))out.push(c)})});
+  const out=[];items.forEach(t=>{const u=Array.isArray(t.units)&&t.units.length?t.units.map(x=>x.code||x.name):(t.equip&&t.equip!=="—"?String(t.equip).split(/\s*,\s*/).filter(c=>!siSameName(t,c)):[]);u.forEach(c=>{if(c&&!out.includes(c))out.push(c)})});
   return out;
  }
  function siUnitsCell(t){
@@ -57,17 +59,17 @@
  function siRow(t,cls){
   const p=plantRec(t.plant),sla=slaState(t),c=PRI[issueLevel(t)]||"#64748B";
   const prob=String(t.desc||t.sub||"No description supplied").trim();
-  const unitCodes=siUnitCodes([t]),id=unitCodes.join(", ")||t.equip||"";
+  const id=siUnitCodes([t]).join(", ");
   const company=t.supplier||t.maker||"";
   const origin=t.supplier?(t.maker?"Supplier · Maker: "+t.maker:"Supplier"):(t.maker?"Manufacturer":"");
   const done=t.status==="Closed"||t.status==="Resolved";
   const statusTone=done?"complete":sla==="breach"?"overdue":t.status==="Pending Vendor"?"waiting":"active";
   const deadline=done?"Completed":sla==="breach"?"Overdue":sla==="nearing"?"Due soon":t.etc?"On track":"No deadline";
   return '<tr class="si-r click'+cls+(S.flashId===t.id?' flash-new':'')+'" data-rid="'+esc(t.id)+'" data-act="issue" data-id="'+esc(t.id)+'">'+
-   '<td class="si-ticket" style="--c:'+c+'"><b class="si-strong">'+esc(t.id)+'</b><small class="si-quiet"><i class="si-priority-dot" style="background:'+c+'"></i>'+esc(issueLevel(t))+'</small></td>'+
-   '<td><span class="si-strong">'+esc(t.vertical||"Other")+'</span></td>'+
+   '<td class="si-ticket" style="--c:'+c+'" title="'+esc(issueLevel(t))+' priority"><b class="si-strong">'+esc(t.id)+'</b></td>'+
+   '<td><span class="si-strong si-equip">'+esc(t.vertical||"Other")+'</span></td>'+
    '<td><span class="si-cell-text">'+esc(t.sub||"—")+'</span></td>'+
-   '<td><span class="si-strong si-ref" title="'+esc(id||"No registered unit or part reference")+'">'+esc(id||"—")+'</span></td>'+
+   '<td><span class="si-strong si-ref" title="'+esc(id||"No unit or part number entered")+'">'+esc(id||"—")+'</span></td>'+
    '<td class="si-problem-cell"><span class="si-problem-text" title="'+esc(prob)+'">'+esc(prob)+'</span></td>'+
    '<td><b class="si-strong">'+esc(p?p.id:t.plant||"—")+'</b>'+(p&&p.name?'<small class="si-quiet" title="'+esc(p.name)+'">'+esc(p.name)+'</small>':'')+'</td>'+
    '<td><span class="si-cell-text">'+esc(company||"—")+'</span>'+(origin?'<small class="si-quiet">'+esc(origin)+'</small>':'')+'</td>'+

@@ -23,6 +23,8 @@
  #app table.plt .btn.sm{font-size:11px;padding:7px 5px;white-space:normal;line-height:1.2;min-height:34px}
  #app table.plt td input.inp{width:100%!important;min-width:0!important;font-size:11px!important}
  #app table.plt .plt-code-col{width:11%}
+ /* fixed layout reads the base 1% literally (an 11px column); give SPV / project number a real width */
+ #app table.plt .plt-narrow{width:7%;padding-left:4px;padding-right:4px}
  #app table.plt th:last-child,#app table.plt td:last-child{width:8%}
 }
 /* Mobile: each plant is a compact tappable card; labels stay visible and no sideways scrolling. */
@@ -88,3 +90,36 @@
 .cp-photo-jump{flex-shrink:0;border:1px solid #b8d8bf;background:#f2faf4;color:#176b3b;border-radius:9px;font-size:12px;font-weight:800;padding:6px 9px;min-height:34px;cursor:pointer}
 .cp-photo-jump:focus-visible{outline:2px solid #148645;outline-offset:2px}
 @media(max-width:640px){.s91-copilot .cp-context{flex-wrap:wrap;gap:6px}.s91-copilot #s91-assistant-query{font-size:16px}}
+/* Washing plant pop-up on phones: chips wrap inside the header card, and the record sheet is one card per day
+   (date and running total, then tables cleaned and remarks, then photos / status) instead of a sideways table. */
+@media(max-width:640px){
+ #app .wx-ov-top{flex-wrap:wrap;gap:10px}
+ #app .wx-ov-top .wx-ov-k{flex:1 1 calc(100% - 92px)}
+ #app .wx-ov-top>.btn{margin-left:auto}
+ #app .wx-ov-chips .wc-chip{white-space:normal;max-width:100%;line-height:1.3}
+ #app .wx-cpick button{flex:1 1 0;min-width:0}
+ #app .wx-sheet{border:0;border-radius:0;overflow:visible}
+ #app .wx-sheet>table,#app .wx-sheet tbody{display:block;width:100%;min-width:0}
+ #app .wx-sheet thead{display:none}
+ #app .wx-sheet tr{display:grid;grid-template-columns:112px minmax(0,1fr);gap:8px 10px;align-items:end;padding:10px 12px;margin-bottom:8px;border:1px solid var(--wx-line);border-radius:12px;background:var(--wx-bg)}
+ #app .wx-sheet .wc-compact td{display:block;min-width:0;padding:0;border:0;white-space:normal;text-align:left}
+ #app .wx-sheet td:empty{display:none}
+ #app .wx-sheet td:nth-child(1){grid-area:1 / 1;align-self:center}
+ #app .wx-sheet td:nth-child(2){grid-area:2 / 1}
+ #app .wx-sheet td:nth-child(3){grid-area:2 / 2}
+ #app .wx-sheet td:nth-child(4){grid-area:3 / 1 / 4 / -1}
+ #app .wx-sheet td:nth-child(5){grid-area:4 / 1 / 5 / -1}
+ #app .wx-sheet td:nth-child(7){grid-area:5 / 1 / 6 / -1}
+ #app .wx-sheet td.wx-run{grid-area:1 / 2;align-self:center;text-align:right;white-space:normal}
+ #app .wx-sheet tr.wx-blank td:nth-child(2){grid-area:2 / 1 / 3 / -1}
+ #app .wx-sheet tr:not(.wx-blank) td:nth-child(2)::before,#app .wx-sheet tr:not(.wx-blank) td.wx-pics::before{display:block;margin-bottom:3px;font-size:10.5px;font-weight:800;letter-spacing:.03em;text-transform:uppercase;color:var(--wx-mut)}
+ #app .wx-sheet tr:not(.wx-blank) td:nth-child(2)::before{content:"Tables cleaned"}
+ #app .wx-sheet tr:not(.wx-blank) td.wx-pics::before{content:"Photos"}
+ #app .wx-sheet td.wx-st{white-space:normal}
+ #app .wx-sheet td.wx-st .wx-by{max-width:100%}
+ #app .wx-sheet .wx-in{height:42px;font-size:16px}
+ #app .wx-sheet .wx-num{max-width:none}
+ #app .wx-sheet .wx-pic{height:38px;padding:0 12px}
+ #app .wx-sheet td:nth-child(7) .btn{width:100%;justify-content:center;min-height:36px}
+ #app .wx-sheet-foot .btn{flex:1 1 100%;justify-content:center}
+}

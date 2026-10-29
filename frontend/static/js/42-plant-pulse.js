@@ -74,17 +74,15 @@
   /* washing has no equipment or engineer: it follows the plant filters only */
   const wc=S._washCycles,washRows=wc?(wc.plants||[]).filter(p=>pick.has(p.plant)):[];
   const thr=(washRows[0]&&washRows[0].compliance_threshold_percent)||85;
-  let washPct=null,washDone=0,washDue=0;
-  if(wc&&washRows.length){
-   /* current cycle: tables done / due by today; a plant ahead counts only up to its due (as on the server) */
-   const ccs=washRows.map(p=>p.cycle_compliance).filter(Boolean);washDue=ccs.reduce((a,c)=>a+c.due,0);washDone=ccs.reduce((a,c)=>a+Math.min(c.done,c.due),0);
-   washPct=ccs.length?(washDue?Math.min(100,Math.round(100*washDone/washDue)):100):null
-  }
-  const cyclesDone=washRows.reduce((a,p)=>a+(p.cycles_this_month||0),0),cyclesTarget=washRows.reduce((a,p)=>a+(p.monthly_target||3),0);
+  /* washing compliance = cycles completed this month / the month's cycles (3 a plant): one plant's own cycles, or the
+     total for every plant in scope. It only rises as cycles complete; the colour compares it with the cycles due by today. */
+  const cyclesDone=washRows.reduce((a,p)=>a+Math.min(p.cycles_this_month||0,p.monthly_target||3),0),cyclesTarget=washRows.reduce((a,p)=>a+(p.monthly_target||3),0);
+  const washDue=washRows.reduce((a,p)=>a+(p.cycles||[]).filter(c=>c.due_date&&c.due_date<TODAY).length,0);
+  const washPct=wc&&cyclesTarget?Math.round(100*cyclesDone/cyclesTarget):null,washDuePct=cyclesTarget?Math.round(100*washDue/cyclesTarget):0,washDone=cyclesDone;
   const washLate=washRows.filter(p=>p.overdue_bucket&&p.overdue_bucket!=="on_track").length;
   const whole=f.plant==="all"&&f.area==="all";
   const tablesToday=whole&&wc&&wc.portfolio?(wc.portfolio.tables_washed_today||0):washRows.reduce((a,p)=>{const d=(p.daily_status||[]).find(x=>x.date===TODAY);return a+(d?(d.confirmed||0):0)},0);
-  return{f,plants,pick,issues,tasks,open,overdueIssues,resolved,pmOverdue,pmDueSoon,wc,washRows,thr,washPct,washDone,washDue,cyclesDone,cyclesTarget,washLate,tablesToday,
+  return{f,plants,pick,issues,tasks,open,overdueIssues,resolved,pmOverdue,pmDueSoon,wc,washRows,thr,washPct,washDuePct,washDone,washDue,cyclesDone,cyclesTarget,washLate,tablesToday,
    washAll:f.eq!=="all"||f.eng!=="all",notSetUp:wc?(wc.unconfigured||[]).filter(p=>pick.has(p.plant)).length:0};
  }
 
@@ -200,15 +198,15 @@
   else if(!d.wc)body='<div class="pp-empty">Loading washing status…</div>';
   else if(!d.washRows.length)body='<div class="pp-empty">'+(d.notSetUp?(d.plants.length>1?"No plant in this scope has washing set up yet.":"Washing is not set up for this plant yet."):"No washing records in this scope.")+'</div>';
   else{
-   const v=typeof d.washPct==="number"?d.washPct:0,tone=v>=d.thr?"#22C55E":v>=d.thr-15?"#F59E0B":"#EF4444";
-   const fillH=Math.max(0,Math.min(100,v))*1.36,warnY=24+136-136*d.thr/100;
-   body='<div class="pp-batt-meta"><span>Cycles this month: <b>'+d.cyclesDone+' / '+d.cyclesTarget+'</b></span><span class="warn">Warning level: &lt; '+d.thr+'%</span>'+(d.washLate?'<span class="late">'+d.washLate+' plant'+(d.washLate===1?"":"s")+' behind a deadline</span>':'')+'</div>'+
+   const v=typeof d.washPct==="number"?d.washPct:0,tone=v>=d.washDuePct?"#22C55E":v>=d.washDuePct-15?"#F59E0B":"#EF4444";
+   const fillH=Math.max(0,Math.min(100,v))*1.36,warnY=24+136-136*d.washDuePct/100;
+   body='<div class="pp-batt-meta"><span>Cycles this month: <b>'+d.cyclesDone+' / '+d.cyclesTarget+'</b></span><span class="warn">Due by today: '+d.washDue+' ('+d.washDuePct+'%)</span>'+(d.washLate?'<span class="late">'+d.washLate+' plant'+(d.washLate===1?"":"s")+' behind a deadline</span>':'')+'</div>'+
     '<div class="pp-batt-row"><svg class="pp-battery" viewBox="0 0 90 170" aria-hidden="true"><rect x="30" y="6" width="30" height="14" rx="4" class="pp-batt-cap"/><rect x="8" y="18" width="74" height="148" rx="14" class="pp-batt-body"/>'+
     '<clipPath id="ppBattClip"><rect x="14" y="24" width="62" height="136" rx="9"/></clipPath><g clip-path="url(#ppBattClip)"><rect x="14" y="24" width="62" height="136" class="pp-batt-empty"/><rect x="14" y="'+(160-fillH).toFixed(1)+'" width="62" height="'+fillH.toFixed(1)+'" fill="'+tone+'" class="pp-batt-fill"/></g>'+
     '<line x1="14" x2="76" y1="'+warnY.toFixed(1)+'" y2="'+warnY.toFixed(1)+'" class="pp-batt-warn"/><path d="M49 52 L33 98 L45 98 L40 132 L58 82 L46 82 L52 52 Z" class="pp-bolt"/></svg>'+
-    '<div class="pp-batt-val"><b style="color:'+tone+'">'+(typeof d.washPct==="number"?d.washPct+"%":"—")+'</b><small>current-cycle compliance</small><span>'+d.tablesToday+' tables cleaned today</span></div></div>';
+    '<div class="pp-batt-val"><b style="color:'+tone+'">'+(typeof d.washPct==="number"?d.washPct+"%":"—")+'</b><small>cycles done this month</small><span>'+d.tablesToday+' tables cleaned today</span></div></div>';
   }
-  return '<article class="pp-card pp-batt" role="button" tabindex="0" onclick="s91PulseGo(\'wash\')"><header class="pp-head"><div><h3>Washing level</h3><p>'+(d.washAll?"All equipment and people · plant filters only":"Current cycle vs target · click to open")+'</p></div></header>'+body+'</article>';
+  return '<article class="pp-card pp-batt" role="button" tabindex="0" onclick="s91PulseGo(\'wash\')"><header class="pp-head"><div><h3>Washing level</h3><p>'+(d.washAll?"All equipment and people · plant filters only":"Cycles done this month · click to open")+'</p></div></header>'+body+'</article>';
  }
 
  /* ---------- "Today" card ---------- */
@@ -278,7 +276,7 @@
     '<div class="pp-top"><div class="pp-title"><div class="pp-eyeline"><span class="pp-eyebrow">OPERATIONS PULSE · '+h(scope.toUpperCase())+'</span>'+caps+'</div><h2>Site Issues, Preventive Maintenance &amp; Washing at a glance</h2></div>'+filtersHtml(sp||[])+'</div>'+
     '<div class="pp-row pp-row-1">'+
      gauge({title:"PM on schedule",value:pmPct,low:70,high:90,go:"pm",sub:d.tasks.length?d.pmOverdue.length+" overdue of "+d.tasks.length+" work orders":"No PM work orders",tip:"Preventive Maintenance work orders not past their due date · click to open"})+
-     gauge({title:"Washing compliance",value:typeof d.washPct==="number"?d.washPct:null,low:Math.max(0,d.thr-15),high:d.thr,go:"wash",sub:d.washRows.length?"target "+d.thr+"% · "+d.cyclesDone+" / "+d.cyclesTarget+" cycles this month":d.wc?"Washing not set up":"Loading washing status…",tip:"Current washing cycle: tables done vs tables due by today, against the plant target"+(d.washAll?" (washing follows the plant filters only)":"")+" · click to open Washing"})+
+     gauge({title:"Washing compliance",value:typeof d.washPct==="number"?d.washPct:null,low:Math.max(0,d.washDuePct-15),high:d.washDuePct,go:"wash",sub:d.washRows.length?d.cyclesDone+" / "+d.cyclesTarget+" cycles done this month · "+d.washDue+" due by today":d.wc?"Washing not set up":"Loading washing status…",tip:"Washing cycles completed this month out of the month's cycles"+(d.f.plant!=="all"?" for this plant":" for all plants in scope")+"; green when every cycle due by today is done"+(d.washAll?" (washing follows the plant filters only)":"")+" · click to open Washing"})+
      gauge({title:"Site issues resolved",value:issPct,low:50,high:80,go:"issues",sub:d.issues.length?d.open.length+" open · "+d.overdueIssues.length+" past ETC":"No site issues recorded",tip:"Share of Site Issues resolved or closed · click to open Site Issues"})+
      todayCard(d)+'</div>'+
     '<div class="pp-row pp-row-2">'+barsCard(d)+pieCard(d)+
@@ -322,7 +320,7 @@
    const ui=S._washUi=S._washUi||{q:"",bucket:"all",show:"all",assignee:"all",region:"all",sort:"late",page:1,pageSize:12,selected:[]};
    const wc=S._washCycles||{},rec=(S.plants||[]).find(p=>p.name===plant),row=plant==="all"?null:(wc.plants||[]).concat(wc.unconfigured||[]).find(p=>p.plant===plant);
    const plantId=plant==="all"?"all":String(row&&row.plant_id||rec&&(rec.dbId||rec.id)||"all");
-   Object.assign(ui,{plant:plantId,region:f.area.indexOf("d:")===0?f.area.slice(2):"all",state:key==="washLate"?"late":"all",show:"all",bucket:"all",cyc:"all",q:"",page:1,view:"table"});
+   Object.assign(ui,{plant:plantId,region:f.area.indexOf("d:")===0?f.area.slice(2):"all",state:key==="washLate"?"late":"all",show:"all",bucket:"all",cyc:"all",q:"",page:1,view:"tiles"});
    S.washF=Object.assign({},ui);S._glanceScroll="wc-results";goScheduledOM("washing");return;
   }
  };

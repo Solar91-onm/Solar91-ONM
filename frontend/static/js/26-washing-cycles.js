@@ -440,6 +440,9 @@
   return S._washUi&&S._washUi.view==="table"?registerHtml():wallHtml();
  }
  window.washSetView=function(v){S._washUi.view=v;render()};
+ /* the plant list always opens as tiles; the table is a choice made on the page, not carried into the next visit */
+ if(typeof goScheduledOM==="function"){const _go=goScheduledOM;goScheduledOM=function(part){
+  if(part==="washing"&&!(S.view==="om-module"&&S.omTab==="washing")&&S._washUi)S._washUi.view="tiles";return _go.apply(this,arguments)}}
 
  /* Glance clicks: toggle a filter, repaint, then land on the plant list. */
  window.washGlance=function(k,v){
@@ -480,7 +483,7 @@
   const f=S.washF=Object.assign({},ui);
   const plants=d.plants||[],unconfigured=d.unconfigured||[],allN=plants.length+unconfigured.length,m=d.overdue_matrix||{};
   S._currentUserId=d.viewer_user_id||S._currentUserId;
-  const cc=pf.cycle_compliance||null,wk=cc&&cc.due?cc.percent:null,thr=(plants[0]&&plants[0].compliance_threshold_percent)||85;
+  const thr=(plants[0]&&plants[0].compliance_threshold_percent)||85;
   const done=pf.cycles_completed_month||0,target=pf.cycles_target_month||0,late=(m["1d"]||0)+(m["3d"]||0)+(m["7d"]||0);
   const howTo=head?"Every plant needs 3 full washing cycles a month (all tables each time), due by the 10th, 20th and month-end — the dates can be changed per plant. Site Engineers report the tables cleaned each day; once all tables are confirmed the next cycle starts automatically.":"Report how many tables you cleaned each day with before and after photos. When all tables are cleaned and confirmed, the next cycle starts automatically.";
   const header='<div class="wx-head"><div class="wx-title"><span class="wx-ico" aria-hidden="true">💧</span><div><h1>Plant washing</h1><p>'+allN+' plant'+(allN===1?'':'s')+' · 3 cycles a month <span class="wx-info" tabindex="0" title="'+h(howTo)+'">ⓘ How it works</span></p></div></div>'+
@@ -504,17 +507,9 @@
    {key:"review",label:"Awaiting confirmation",n:stCount.review,color:WX_STATE_COLOR.review},
    {key:"late",label:"Behind schedule",n:lateN,color:WX_STATE_COLOR.late},
    {key:"done",label:"Month done",n:stCount.done,color:WX_STATE_COLOR.done}];
-  const wkTone=wk==null?"var(--info)":wk>=thr?"var(--success)":wk>=thr-15?"var(--warning)":"var(--danger)";
   /* Hero score: cycles done / cycles due this month (3 per active plant). It starts the month at 0% and only rises as
      cycles complete. Ring colour: green while no plant is past a deadline, amber when some are, red past a quarter. */
   const heroColor=!late?"#4ADE80":plants.length&&late/plants.length>0.25?"#F87171":"#FBBF24";
-  const kt=(label,value,note,color,attr,on,pct)=>kpiTile(label,value,note,color,attr,{on:!!on,pct});
-  const kpis='<div class="gx-kpis">'+
-   kt("Cycles this month",done+' <em class="gx-of">/ '+target+'</em>',cyPct+"% of monthly cycles complete","var(--success)",'onclick="washGlance(\'state\',\'done\')"',f.state==="done",cyPct)+
-   (head?kt("Compliance"+(cc&&cc.cycle_no?" · cycle "+cc.cycle_no:""),wk==null?"—":wk+"%",(cc&&cc.start?fmt(cc.start)+"–"+fmt(cc.end)+" · ":"")+"target "+thr+"% · "+plural(pf.plants_below_threshold||0,"plant")+" below",wkTone,'onclick="washGlance(\'show\',\'below\')"',f.show==="below",wk==null?undefined:wk):'')+
-   (head?kt("Behind deadline",late,late?plural(late,"plant")+" past a cycle deadline":"every plant on track",late?"var(--danger)":"var(--success)",'onclick="washGlance(\'state\',\'late\')"',f.state==="late",allN?Math.round(100*late/allN):0):'')+
-   kt("Awaiting confirmation",pf.pending_reviews||0,"daily report"+((pf.pending_reviews||0)===1?"":"s")+" to review","var(--info)",'onclick="washGlance(\'show\',\'review\')"',f.show==="review")+
-   kt("Tables cleaned today",pf.tables_washed_today||0,"confirmed today","#0891B2","")+'</div>';
   const heroLine=head
    ?(late?'<b class="gx-hot">'+plural(late,"plant")+' behind a cycle deadline</b>':'<b>Every plant on track</b>')+' · '+(pf.pending_reviews||0)+' report'+((pf.pending_reviews||0)===1?'':'s')+' awaiting confirmation · '+(pf.tables_washed_today||0)+' tables cleaned today'
    :'<b>'+done+' of '+target+' cycles complete</b> · '+(pf.pending_reviews||0)+' report'+((pf.pending_reviews||0)===1?'':'s')+' awaiting confirmation';
@@ -528,7 +523,7 @@
   const cycleCard='<article class="gx-card"><header><h3>Cycle progress this month</h3><p>Plants per cycle · click a segment to list those plants</p></header><div class="gx-cycles">'+cycRows.map(c=>{const tot=c.done+c.run+c.wait;return '<div class="gx-cycle"><div class="gx-cycle-h"><b>Cycle '+c.n+'</b><small>'+(c.due?'first deadline '+fmt(c.due)+' · ':'')+c.done+' / '+tot+' done</small></div><div class="gx-segbar">'+(tot?cycSeg(c.n,"Completed",c.done,"done","Completed")+cycSeg(c.n,"In progress",c.run,"run","In progress")+cycSeg(c.n,"Not started",c.wait,"wait","Not started"):'<span class="gx-seg-empty">No plants set up</span>')+'</div></div>'}).join("")+'</div><div class="gx-mini-legend"><span><i style="background:#16A34A"></i>Completed</span><span><i style="background:#2563EB"></i>In progress</span><span><i style="background:#CBD5E1"></i>Not started</span></div></article>';
   const lowest=plants.filter(p=>p.active!==false&&ccPct(p)!=null).sort((x,y)=>ccPct(x)-ccPct(y)||x.plant.localeCompare(y.plant)).slice(0,6);
   const compCard=head?'<article class="gx-card"><header><h3>Lowest cycle compliance</h3><p>Current cycle, against tables due by today · click a plant to open its cycles and reports</p></header>'+(lowest.length?'<div class="gx-hbars gx-comp">'+lowest.map(p=>{const v=ccPct(p),t=p.compliance_threshold_percent||thr,c=v>=t?"#16A34A":v>=t-15?"#D97706":"#DC2626";return '<button type="button" class="gx-hbar" style="--c:'+c+'" onclick="openWashingPlantDetails(\''+h(p.plant_id)+'\')" title="'+h(p.plant+': '+ccRatio(p.cycle_compliance)+' tables ('+v+'%, target '+t+'%)')+'"><span>'+h(p.plant)+'</span><i><b style="width:'+Math.max(v?4:0,Math.min(100,v))+'%"></b><u style="left:'+Math.min(100,t)+'%"></u></i><strong>'+v+'%</strong></button>'}).join("")+'</div>':'<div class="gx-allclear"><span>✓</span><b>No compliance data yet</b><small>Compliance appears once daily reports are confirmed.</small></div>')+'</article>':'';
-  const stats='<div class="gx-glance gx-wash">'+hero+kpis+'<div class="gx-grid '+(head?'gx-grid-3':'gx-grid-2')+'">'+donutCard+cycleCard+compCard+'</div></div>';
+  const stats='<div class="gx-glance gx-wash">'+hero+'<div class="gx-grid '+(head?'gx-grid-3':'gx-grid-2')+'">'+donutCard+cycleCard+compCard+'</div></div>';
   const counts={all:allN,attention:plants.filter(p=>p.active&&(p.overdue_bucket!=="on_track"||ccPct(p)<p.compliance_threshold_percent)).length,review:plants.filter(p=>p.pending_tables_cleaned>0).length,notreported:0,notsetup:unconfigured.length,mine:plants.filter(p=>p.assignee_user_id===S._currentUserId).length};
   const rd=repDay(),rdLoaded=!!dayEntry(rd).status||rd===todayIso(),repName=rd===todayIso()&&!data().past_month?"Not reported today":"Not reported "+fmt(rd);
   counts.notreported=rdLoaded?plants.filter(p=>notReportedOn(p,rd)).length:"…";

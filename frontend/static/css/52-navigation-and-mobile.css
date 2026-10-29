@@ -77,3 +77,5 @@
  .pp-gauge,.pp-line[role="button"],.pp-pie-legend button{touch-action:manipulation}
 }
 @media(prefers-reduced-motion:reduce){.pp-card,.side-sublink,.mnav>div{transition:none!important}}
+/* narrower sidebar: the brand subtitle wraps onto two lines instead of being cut off */
+.side-title span{display:block;margin-top:2px;white-space:normal;font-size:10px;letter-spacing:.06em;line-height:1.25}

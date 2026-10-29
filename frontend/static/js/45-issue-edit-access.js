@@ -126,7 +126,7 @@
    '<div class="row" style="gap:12px"><div class="field" style="flex:1"><span class="lbl">Priority</span><select id="edit-tk-sev" class="inp">'+sevOpts(t.severity)+'</select></div>'+
    '<div class="field" style="flex:1"><span class="lbl">Issue type</span><select id="edit-tk-vert" class="inp">'+verts.map(v=>'<option'+(v===t.vertical?" selected":"")+'>'+text(v)+'</option>').join("")+'</select></div></div>'+
    '<div class="row" style="gap:12px"><div class="field" style="flex:1"><span class="lbl">Sub-category</span><select id="edit-tk-sub" class="inp">'+subs.map(s=>'<option'+((t.sub||"(none)")===s?" selected":"")+'>'+text(s)+'</option>').join("")+'</select></div>'+
-   '<div class="field" style="flex:1"><span class="lbl">Equipment</span><input id="edit-tk-equip" class="inp" value="'+text(t.equip&&t.equip!=="—"?t.equip:"")+'" placeholder="e.g. INV-03"/></div></div>'+
+   '<div class="field" style="flex:1"><span class="lbl">Subpart / unit ID</span><input id="edit-tk-equip" class="inp" value="'+text(t.equip&&t.equip!=="—"?t.equip:"")+'" placeholder="e.g. INV-03"/></div></div>'+
    '<div class="field"><span class="lbl">Description</span><textarea id="edit-tk-desc" class="txt" rows="3">'+text(t.desc)+'</textarea></div>'+
    '<div class="field"><span class="lbl">Maker / manufacturer</span><input id="edit-tk-maker" class="inp" value="'+text(t.maker||"")+'" placeholder="e.g. Sungrow"/></div>'+
    (t.status!=="Closed"?'<div class="row" style="gap:12px"><div class="field" style="flex:1"><span class="lbl">Start date</span><input id="edit-tk-occurred" class="inp" type="date" value="'+text(localDay(t.occurred||t.created))+'"/></div>'+

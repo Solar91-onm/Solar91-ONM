@@ -279,11 +279,11 @@ body .topbar{height:auto !important;min-height:64px !important;flex-shrink:0}
 }
 /* sidebar gives space back on smaller screens */
 @media (min-width:901px) and (max-width:1366px){
-  .sidebar{width:222px} .main{margin-left:222px}
+  .sidebar{width:204px} .main{margin-left:204px}
   .content{padding-left:16px !important;padding-right:16px !important}
 }
 @media (min-width:901px) and (max-width:1100px){
-  .sidebar{width:204px} .main{margin-left:204px}
+  .sidebar{width:192px} .main{margin-left:192px}
 }
 /* phones / tablets */
 @media (max-width:900px){

@@ -123,10 +123,11 @@ button.pmc-pill:hover{background:rgba(255,255,255,.22);transform:translateY(-1px
 .pmc-progress{min-height:18px;font-size:12.5px;font-weight:700;color:var(--primary,#0c5e2a)}
 
 /* ---------- 9 · small screens ---------- */
+/* phones and tablets: menus open as a sheet at the bottom, so a button that wrapped to the left edge never pushes its list off screen */
+@media (max-width:900px){.pmc-menu-list{position:fixed;left:12px!important;right:12px!important;top:auto;bottom:calc(72px + env(safe-area-inset-bottom));max-width:none;min-width:0;max-height:70dvh;overflow-y:auto}}
 @media (max-width:1180px){#app .gx-kpis.pmc-kpis{grid-template-columns:repeat(3,minmax(0,1fr))}}
 @media (max-width:760px){
  #app .gx-kpis.pmc-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}
- .pmc-menu-list{position:fixed;left:12px!important;right:12px!important;top:auto;bottom:12px;max-width:none;min-width:0}
  .pmd-seg{width:100%;overflow-x:auto}
  .pmd-table thead{display:none}
  .pmd-table,.pmd-table tbody{display:block}

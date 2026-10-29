@@ -1,19 +1,20 @@
 /* Solar91 Issue register and PM: calm, centered, touch-safe tables.
    Layout-only: business actions, status transitions and backend permissions are unchanged. */
 #app .m26-issues.si .si-tbl{background:var(--card,#fff)}
-#app .m26-issues.si .si-register{width:100%;min-width:1260px;table-layout:fixed;border-collapse:separate;border-spacing:0}
-#app .m26-issues.si .si-register th,#app .m26-issues.si .si-register td{padding:12px 10px;text-align:center;vertical-align:middle;border-bottom:1px solid var(--border,#e5ebe7);background:var(--card,#fff);overflow-wrap:anywhere;line-height:1.45}
+/* column widths add up to ~980px: the whole register fits the main frame on laptops; tablets and phones scroll inside the table */
+#app .m26-issues.si .si-register{width:100%;min-width:960px;table-layout:fixed;border-collapse:separate;border-spacing:0}
+#app .m26-issues.si .si-register th,#app .m26-issues.si .si-register td{padding:10px 6px;text-align:center;vertical-align:middle;border-bottom:1px solid var(--border,#e5ebe7);background:var(--card,#fff);overflow-wrap:anywhere;line-height:1.45}
 #app .m26-issues.si .si-register th{position:sticky;top:0;z-index:1;background:var(--secondary,#f4f7f5);font-size:11px;letter-spacing:.025em;text-transform:uppercase;color:var(--muted-foreground,#53675c);font-weight:750;white-space:normal}
-#app .m26-issues.si .si-register th.si-h-id{width:105px}
-#app .m26-issues.si .si-register th.si-h-eq{width:120px}
-#app .m26-issues.si .si-register th.si-h-sub{width:120px}
-#app .m26-issues.si .si-register th.si-h-ref{width:115px}
-#app .m26-issues.si .si-register th.si-h-problem{width:205px}
-#app .m26-issues.si .si-register th.si-h-plant{width:100px}
-#app .m26-issues.si .si-register th.si-h-company{width:125px}
-#app .m26-issues.si .si-register th.si-h-owner{width:130px}
-#app .m26-issues.si .si-register th.si-h-status{width:105px}
-#app .m26-issues.si .si-register th.si-h-action{width:155px}
+#app .m26-issues.si .si-register th.si-h-id{width:110px}
+#app .m26-issues.si .si-register th.si-h-eq{width:96px}
+#app .m26-issues.si .si-register th.si-h-sub{width:88px}
+#app .m26-issues.si .si-register th.si-h-ref{width:62px}
+#app .m26-issues.si .si-register th.si-h-problem{width:126px}
+#app .m26-issues.si .si-register th.si-h-plant{width:76px}
+#app .m26-issues.si .si-register th.si-h-company{width:84px}
+#app .m26-issues.si .si-register th.si-h-owner{width:88px}
+#app .m26-issues.si .si-register th.si-h-status{width:84px}
+#app .m26-issues.si .si-register th.si-h-action{width:128px}
 #app .m26-issues.si .si-register tr.si-r.od,#app .m26-issues.si .si-register tr.si-r.od:hover{background:transparent}
 #app .m26-issues.si .si-register tr.si-r.od td,#app .m26-issues.si .si-register tr.si-r.od:hover td{background:var(--card,#fff)}
 #app .m26-issues.si .si-register tr.si-r:hover td,#app .m26-issues.si .si-register tr.si-g:hover td{background:var(--secondary,#f6f8f6)}
@@ -42,10 +43,16 @@
 #app .m26-issues.si .si-register tr.si-g td{background:var(--secondary,#f8faf8);padding:10px 8px}
 #app .m26-issues.si .si-register tr.si-child td{background:var(--card,#fff)}
 #app .m26-issues.si .si-register tr.si-child td:nth-child(2){padding-left:10px}
-#app .m26-issues.si .si-register td.oi-action-cell{min-width:155px;width:auto;padding:9px!important;position:static}
+#app .m26-issues.si .si-register td.oi-action-cell{min-width:0;width:auto;padding:8px 6px!important;position:static}
 #app .m26-issues.si .si-register td.oi-action-cell .oi-row-actions,#app .m26-issues.si .si-register td.oi-action-cell .row{display:flex!important;align-items:center;justify-content:center;flex-wrap:wrap!important;position:static!important;transform:none!important;gap:5px;max-width:none!important;padding:0!important;box-shadow:none!important}
 #app .m26-issues.si .si-register tr.si-r td.oi-action-cell::after{display:none}
 #app .m26-issues.si .si-register td.oi-action-cell .btn{position:static!important;opacity:1!important;pointer-events:auto!important;transform:none!important;margin:0!important;max-width:100%;height:auto;min-height:30px}
+/* ticket actions: two on top, two below, always inside the Action column (beats the older one-line hover rail) */
+#app .m26-issues.si .si-register tr.si-r td.oi-action-cell .row{display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px;flex-direction:row!important;width:100%}
+#app .m26-issues.si .si-register tr.si-r td.oi-action-cell .btn{width:100%;min-width:0;min-height:28px;padding:3px 4px;font-size:11.5px;justify-content:center;overflow:hidden;text-overflow:ellipsis}
+#app .m26-issues.si .si-register .cc-sla{font-size:10.5px;padding:1px 6px;line-height:1.3;max-width:100%}
+#app .m26-issues.si .si-register .si-status-label{padding:3px 7px;gap:5px;overflow-wrap:normal;word-break:keep-all}
+#app .m26-issues.si .si-register .si-equip{font-size:12px;overflow-wrap:normal;hyphens:auto}
 #app .m26-issues.si .si-scroll{overflow:auto;max-width:100%;overscroll-behavior-x:contain;scrollbar-width:thin}
 #app .m26-issues.si .si-scroll:focus-visible{outline:2px solid var(--primary,#0e6336);outline-offset:-3px}
 /* PM: soft rows, centered values and a compact workflow action area. */
@@ -75,8 +82,7 @@
  #app .m26-issues.si .si-tbl-top{padding:12px;align-items:flex-start}
  #app .m26-issues.si .si-tbl-tools{width:100%;justify-content:space-between}
  #app .m26-issues.si .si-scroll{margin:0;max-width:100%;-webkit-overflow-scrolling:touch}
- #app .m26-issues.si .si-register{min-width:1180px}
- #app .m26-issues.si .si-register th,#app .m26-issues.si .si-register td{padding:10px 8px;font-size:12px}
+ #app .m26-issues.si .si-register th,#app .m26-issues.si .si-register td{padding:9px 5px;font-size:12px}
  #app .m26-issues.si .si-bar,#app .pml-filters{padding:12px}
  #app .m26-issues.si .si-row .si-search{flex-basis:100%}
  #app .m26-issues.si .si-row .si-sel{max-width:calc(50% - 6px);flex:1 1 140px}
