@@ -55,19 +55,27 @@
   return esc(t.equip||"—")+(t.maker?'<div class="si-sub">'+esc(t.maker)+'</div>':'');
  }
  function siRow(t,cls){
-  const p=plantRec(t.plant),sla=slaState(t),age=issueAgeDays(t),ab=ageBucket(t),c=PRI[issueLevel(t)]||"#ccc",prob=String(t.desc||t.sub||t.vertical||"Issue").trim();
-  return '<tr class="si-r click'+cls+(sla==="breach"?" od":"")+(S.flashId===t.id?" flash-new":"")+'" data-rid="'+esc(t.id)+'" data-act="issue" data-id="'+esc(t.id)+'">'+
-   /* the problem leads (bold), the equipment sits under it, the ticket ID is on the right */
-   '<td style="--c:'+c+'"><div class="si-prob"><b title="'+esc(prob)+'">'+esc(prob.slice(0,120))+'</b><span class="si-tid">'+esc(t.id)+'</span></div>'+
-   '<div class="si-eqline">'+esc(t.vertical||"Other")+(t.sub&&t.sub!==prob?' · '+esc(t.sub):'')+(t.equip&&t.equip!=="—"?' · '+esc(t.equip):'')+'</div></td>'+
-   '<td><div style="font-weight:600">'+esc(p?p.id:t.plant)+'</div><div class="si-sub">'+esc(p?p.name:"")+'</div></td>'+
-   '<td>'+siUnitsCell(t)+'</td>'+
-   '<td><span class="si-pri" style="--c:'+c+'"><i></i>'+esc(issueLevel(t))+'</span></td>'+
-   '<td class="si-age" style="--c:'+(AGEC[ab]||"#94A3B8")+'"><b>'+age+'d</b><div class="tr"><i style="width:'+Math.min(100,Math.round(age/15*100))+'%"></i></div></td>'+
-   '<td>'+(t.assignee?'<span class="si-av"><i>'+esc(ccIni(t.assignee))+'</i>'+esc(t.assignee)+'</span>':'<span class="si-un">⚑ Unassigned</span>')+'</td>'+
-   '<td>'+badge(t.status)+(sla==="breach"?" "+badge("Overdue"):"")+etcLabel(t)+'</td>'+
+  const p=plantRec(t.plant),sla=slaState(t),c=PRI[issueLevel(t)]||"#64748B";
+  const prob=String(t.desc||t.sub||"No description supplied").trim();
+  const unitCodes=siUnitCodes([t]),id=unitCodes.join(", ")||t.equip||"";
+  const company=t.supplier||t.maker||"";
+  const origin=t.supplier?(t.maker?"Supplier · Maker: "+t.maker:"Supplier"):(t.maker?"Manufacturer":"");
+  const done=t.status==="Closed"||t.status==="Resolved";
+  const statusTone=done?"complete":sla==="breach"?"overdue":t.status==="Pending Vendor"?"waiting":"active";
+  const deadline=done?"Completed":sla==="breach"?"Overdue":sla==="nearing"?"Due soon":t.etc?"On track":"No deadline";
+  return '<tr class="si-r click'+cls+(S.flashId===t.id?' flash-new':'')+'" data-rid="'+esc(t.id)+'" data-act="issue" data-id="'+esc(t.id)+'">'+
+   '<td class="si-ticket" style="--c:'+c+'"><b class="si-strong">'+esc(t.id)+'</b><small class="si-quiet"><i class="si-priority-dot" style="background:'+c+'"></i>'+esc(issueLevel(t))+'</small></td>'+
+   '<td><span class="si-strong">'+esc(t.vertical||"Other")+'</span></td>'+
+   '<td><span class="si-cell-text">'+esc(t.sub||"—")+'</span></td>'+
+   '<td><span class="si-strong si-ref" title="'+esc(id||"No registered unit or part reference")+'">'+esc(id||"—")+'</span></td>'+
+   '<td class="si-problem-cell"><span class="si-problem-text" title="'+esc(prob)+'">'+esc(prob)+'</span></td>'+
+   '<td><b class="si-strong">'+esc(p?p.id:t.plant||"—")+'</b>'+(p&&p.name?'<small class="si-quiet" title="'+esc(p.name)+'">'+esc(p.name)+'</small>':'')+'</td>'+
+   '<td><span class="si-cell-text">'+esc(company||"—")+'</span>'+(origin?'<small class="si-quiet">'+esc(origin)+'</small>':'')+'</td>'+
+   '<td>'+(t.assignee?'<span class="si-av"><i>'+esc(ccIni(t.assignee))+'</i>'+esc(t.assignee)+'</span>':'<span class="si-un">Unassigned</span>')+'</td>'+
+   '<td><div class="si-status si-status-'+statusTone+'"><span class="si-status-label"><i aria-hidden="true"></i>'+esc(t.status||"Open")+'</span><small>'+deadline+'</small></div></td>'+
    '<td class="oi-action-cell"><div class="oi-row-actions">'+issueQuickActs(t)+'</div></td></tr>';
  }
+
  const MIXC={Open:"#3B82F6",Assigned:"#6675D9",Acknowledged:"#8B5CF6","In Progress":"#0F9F8C","Pending Vendor":"#D97706",Resolved:"#16A34A",Closed:"#15803D"};
  function siStatusMix(items){
   const order=Object.keys(MIXC),cnt={};
@@ -75,21 +83,26 @@
   return '<div class="si-mix">'+order.filter(k=>cnt[k]).map(k=>'<span style="--c:'+MIXC[k]+'"><i></i>'+esc(k==="Pending Vendor"?"Pending parts":k)+' <b>'+cnt[k]+'</b></span>').join("")+'</div>';
  }
  function siGroupRow(g,open){
-  const p=plantRec(g.plant),oldest=Math.max.apply(null,g.items.map(issueAgeDays)),un=g.items.filter(t=>!t.assignee).length,who=[...new Set(g.items.map(t=>t.assignee).filter(Boolean))];
-  const units=siUnitCodes(g.items),sev={};g.items.forEach(t=>{const k=sevOf(t);sev[k]=(sev[k]||0)+1});
-  const over=g.items.filter(t=>slaState(t)==="breach").length,ids=g.items.map(t=>t.id);
-  return '<tr class="si-g'+(open?" open":"")+'" onclick="siGroupToggle(\''+q(g.key)+'\')" title="'+(open?"Hide":"Show")+' the '+g.items.length+' tickets">'+
+  const p=plantRec(g.plant),un=g.items.filter(t=>!t.assignee).length,who=[...new Set(g.items.map(t=>t.assignee).filter(Boolean))];
+  const units=siUnitCodes(g.items),ids=g.items.map(t=>t.id),over=g.items.filter(t=>slaState(t)==="breach").length;
+  const subparts=[...new Set(g.items.map(t=>t.sub).filter(Boolean))];
+  const companies=[...new Set(g.items.map(t=>t.supplier||t.maker).filter(Boolean))];
+  const allDone=g.items.every(t=>!isOpenT(t));
+  return '<tr class="si-g'+(open?' open':'')+'" onclick="siGroupToggle(\''+q(g.key)+'\')" title="'+(open?'Hide':'Show')+' the '+g.items.length+' tickets">'+
    '<td class="cc-cbcell" onclick="event.stopPropagation()"><input type="checkbox" class="si-gcb" aria-label="Select all '+g.items.length+' tickets" data-ids="'+esc(ids.join(","))+'" onchange="siGroupSelect(this)"/></td>'+
-   '<td style="--c:'+(PRI[g.worst]||"#ccc")+'"><div class="si-gid"><span class="si-chev">'+(open?"▾":"▸")+'</span><b>'+esc(g.vert)+'</b><em>'+g.items.length+' tickets</em></div><div class="si-desc">'+esc(ids.slice(0,4).join(" · ")+(ids.length>4?" +"+(ids.length-4):""))+'</div></td>'+
-   '<td><div style="font-weight:600">'+esc(p?p.id:g.plant)+'</div><div class="si-sub">'+esc(p?p.name:"")+'</div></td>'+
-   '<td>'+(units.length?'<div class="si-units"><b>'+units.length+' unit'+(units.length>1?"s":"")+'</b><small>'+esc(units.slice(0,4).join(", "))+(units.length>4?" +"+(units.length-4):"")+'</small></div>':'<span class="si-sub">Not specified</span>')+'</td>'+
-   '<td><span class="si-pri" style="--c:'+(PRI[g.worst]||"#ccc")+'"><i></i>'+esc(g.worst)+'</span><div class="si-sub">'+SEVS.filter(k=>sev[k]).map(k=>sev[k]+" "+k).join(" · ")+'</div></td>'+
-   '<td class="si-age" style="--c:'+(oldest>=15?"#DC4C3E":oldest>=4?"#D97706":"#3B82F6")+'"><b>'+oldest+'d</b><div class="si-sub">oldest</div></td>'+
-   '<td>'+(un?'<span class="si-un">⚑ '+un+' unassigned</span>':'')+(who.length===1?'<span class="si-av"><i>'+esc(ccIni(who[0]))+'</i>'+esc(who[0])+'</span>':who.length?'<span class="si-sub">'+who.length+' people</span>':'')+'</td>'+
-   '<td>'+siStatusMix(g.items)+(over?'<div class="si-over">'+over+' overdue</div>':'')+'</td>'+
-   '<td class="oi-action-cell" onclick="event.stopPropagation()"><div class="oi-row-actions"><button type="button" class="btn g sm" onclick="siGroupToggle(\''+q(g.key)+'\')">'+(open?"Hide":"Show "+g.items.length)+'</button>'+
+   '<td class="si-ticket"><div class="si-gid"><span class="si-chev">'+(open?'▾':'▸')+'</span><b>'+g.items.length+' issues</b></div><small class="si-quiet">'+esc(ids.slice(0,2).join(' · '))+(ids.length>2?' +'+(ids.length-2):'')+'</small></td>'+
+   '<td><b class="si-strong">'+esc(g.vert)+'</b></td>'+
+   '<td><span class="si-cell-text">'+esc(subparts.length===1?subparts[0]:subparts.length?subparts.length+' subparts':'—')+'</span></td>'+
+   '<td><span class="si-strong si-ref">'+esc(units.length===1?units[0]:units.length?units.length+' unit IDs':'—')+'</span></td>'+
+   '<td><span class="si-cell-text">'+g.items.length+' reported problems</span><small class="si-quiet">Tap to expand</small></td>'+
+   '<td><b class="si-strong">'+esc(p?p.id:g.plant||'—')+'</b>'+(p&&p.name?'<small class="si-quiet">'+esc(p.name)+'</small>':'')+'</td>'+
+   '<td><span class="si-cell-text">'+esc(companies.length===1?companies[0]:companies.length?companies.length+' companies':'—')+'</span></td>'+
+   '<td>'+(un?'<span class="si-un">'+un+' unassigned</span>':who.length===1?'<span class="si-av"><i>'+esc(ccIni(who[0]))+'</i>'+esc(who[0])+'</span>':'<span class="si-quiet">'+who.length+' assignees</span>')+'</td>'+
+   '<td><div class="si-status si-status-'+(allDone?'complete':over?'overdue':'active')+'"><span class="si-status-label"><i aria-hidden="true"></i>'+esc(allDone?'All resolved':'Open issues')+'</span><small>'+(over?over+' overdue':allDone?'Completed':g.items.filter(isOpenT).length+' active')+'</small></div></td>'+
+   '<td class="oi-action-cell" onclick="event.stopPropagation()"><div class="oi-row-actions"><button type="button" class="btn g sm" onclick="siGroupToggle(\''+q(g.key)+'\')">'+(open?'Hide':'Show '+g.items.length)+'</button>'+
    (scheduledAdmin()&&un?'<button type="button" class="btn o sm" onclick="siGroupBulkAssign(\''+esc(ids.join(","))+'\')">Assign all</button>':'')+'</div></td></tr>';
  }
+
  window.siView=function(mode){S.issView=mode;S.tablePages.issues=1;render()};
  window.siGroupToggle=function(key){const o=siOpen();if(o.has(key))o.delete(key);else o.add(key);render()};
  window.siGroupSelect=function(el){
@@ -285,13 +298,13 @@
 
   /* ---- results: one row per plant + equipment type (expand to see its tickets) ---- */
   const sorted=filtered.slice().sort((a,b)=>f.sort==="created"?String(b.created).localeCompare(String(a.created)):f.sort==="severity"?(SEV_RANK[a.severity]??9)-(SEV_RANK[b.severity]??9):f.sort==="age"?issueAgeDays(b)-issueAgeDays(a):new Date(a.etc)-new Date(b.etc));
-  const mode=S.issView==="board"?"board":S.issView==="sites"?"sites":"list",grouped=S.siGroup!==false;
+  const mode=S.issView==="board"?"board":S.issView==="sites"?"sites":"list",grouped=S.siGroup===true;
   const groups=grouped?siGroups(sorted):sorted.map(t=>({key:t.id,plant:t.plant,vert:t.vertical||"Other",items:[t],worst:t.severity}));
   const rv=S.reveal;
   if(rv&&rv.kind==="issues"&&rv.id){const gi=groups.findIndex(g=>g.items.some(t=>t.id===rv.id));if(gi>=0){S.tablePages.issues=Math.floor(gi/GROUP_PAGE)+1;if(groups[gi].items.length>1)siOpen().add(groups[gi].key)}S.reveal=null}
   const pageGroups=pageRows("issues",groups,GROUP_PAGE);
   const top='<div class="si-tbl-top"><div><b>'+(hasF?"Matching issues":"All issues")+'</b> <span>· '+filtered.length+' ticket'+(filtered.length===1?"":"s")+(grouped&&mode==="list"?' in '+groups.length+' plant · equipment group'+(groups.length===1?"":"s"):'')+'</span></div><div class="si-tbl-tools">'+
-   (mode==="list"?'<label class="si-tog"><input type="checkbox"'+(grouped?" checked":"")+' onchange="S.siGroup=this.checked;S.tablePages.issues=1;render()"/> Group by plant &amp; equipment</label>':'')+
+   (mode==="list"?'<label class="si-tog"><input type="checkbox"'+(grouped?" checked":"")+' onchange="S.siGroup=this.checked;S.tablePages.issues=1;render()"/> Group similar issues</label>':'')+
    '<div class="si-seg"><button type="button" class="'+(mode==="list"?"on":"")+'" onclick="siView(\'list\')">☰ List</button><button type="button" class="'+(mode==="sites"?"on":"")+'" onclick="siView(\'sites\')">▦ Sites</button><button type="button" class="'+(mode==="board"?"on":"")+'" onclick="siView(\'board\')">◫ Board</button></div></div></div>';
   const th=(l,k)=>'<th class="s'+(f.sort===k?" on":"")+'" onclick="siSort(\''+k+'\')">'+l+(f.sort===k?" ↓":"")+'</th>';
   /* the Sites matrix uses its own id so the batch-checkbox injector (which targets #section-results table) leaves it alone */
@@ -299,8 +312,8 @@
   if(mode==="board"&&typeof m26Board==="function"){tb+='<div style="padding:0 12px 12px">'+m26Board()+'</div>'}
   else if(mode==="sites"){tb+=siSitesMatrix(filtered)}
   else{
-   tb+='<div class="si-scroll"><table class="si-t dense"><thead><tr><th>Problem · equipment · ID</th><th>Plant / site</th><th>Equipment</th>'+th("Priority","severity")+th("Age","age")+'<th>Assignee</th>'+th("Status / due","etc")+'<th>Action</th></tr></thead><tbody>';
-   if(!pageGroups.length)tb+='<tr><td colspan="9"><div class="si-empty"><div class="ico">'+(all.length?"⌕":"✓")+'</div><b>'+(all.length?"No issues match these filters":"No issues raised yet")+'</b><p>'+(all.length?"Try removing a filter or searching with different words.":"When a fault is reported at a plant it will appear here, ranked by priority.")+'</p>'+(all.length&&hasF?'<button class="btn o sm" onclick="S.issF=blankIssF();S.tablePages.issues=1;render()">Clear all filters</button>':'<button class="btn p sm" onclick="openModal(\'newTicket\')">'+I.plus(12)+' Raise Issue</button>')+'</div></td></tr>';
+   tb+='<div class="si-scroll" role="region" aria-label="Site issues table, scroll sideways to see all columns" tabindex="0"><table class="si-t si-register dense"><thead><tr><th class="si-h-id">Issue ID</th><th class="si-h-eq">Equipment</th><th class="si-h-sub">Subpart</th><th class="si-h-ref">Subpart / unit ID</th><th class="si-h-problem">Problem</th><th class="si-h-plant">Plant code</th><th class="si-h-company">Supplier / maker</th><th class="si-h-owner">Assigned to</th><th class="si-h-status">Status</th><th class="si-h-action">Action</th></tr></thead><tbody>';
+   if(!pageGroups.length)tb+='<tr><td colspan="10"><div class="si-empty"><div class="ico">'+(all.length?"⌕":"✓")+'</div><b>'+(all.length?"No issues match these filters":"No issues raised yet")+'</b><p>'+(all.length?"Try removing a filter or searching with different words.":"When a fault is reported at a plant it will appear here, ranked by priority.")+'</p>'+(all.length&&hasF?'<button class="btn o sm" onclick="S.issF=blankIssF();S.tablePages.issues=1;render()">Clear all filters</button>':'<button class="btn p sm" onclick="openModal(\'newTicket\')">'+I.plus(12)+' Raise Issue</button>')+'</div></td></tr>';
    pageGroups.forEach(g=>{
     if(g.items.length===1){tb+=siRow(g.items[0],"");return}
     const open=siOpen().has(g.key);tb+=siGroupRow(g,open);

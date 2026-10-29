@@ -83,18 +83,22 @@ def main() -> int:
             ("bootstrap_full", "/api/bootstrap"),
             ("bootstrap_lite", "/api/bootstrap?lite=1"),
             ("state_collections_issues", "/api/state/collections?keys=issues"),
+            # what 34-live-refresh.js fetches when the issue pulse changes (it used to fetch bootstrap_lite)
+            ("live_refresh_issues", "/api/state/collections?keys=plants,events,issues,equipment"),
             ("field_overview", "/api/field/overview?limit=15"),
             ("issue_list", "/api/issues?limit=50"),
             ("issue_pulse", "/api/issues/pulse"),
             ("scheduled_tasks", "/api/scheduled/tasks"),
             ("washing_overview", "/api/scheduled/washing/overview"),
             ("plant_list", "/api/plants?limit=50"),
+            ("photo_list", "/api/photos?limit=60"),
         ]
         samples: dict[str, dict[str, list[float]]] = {
             name: defaultdict(list) for name, _ in paths
         }
         errors: dict[str, int] = {name: 0 for name, _ in paths}
         payload_bytes: dict[str, list[int]] = {name: [] for name, _ in paths}
+        transfer_bytes: dict[str, list[int]] = {name: [] for name, _ in paths}
         status_codes: dict[str, set[int]] = {name: set() for name, _ in paths}
         try:
             with TestClient(fastapi_app) as client:
@@ -112,6 +116,8 @@ def main() -> int:
                             errors[name] += 1
                             continue
                         payload_bytes[name].append(len(response.content))
+                        # httpx decodes gzip for us; Content-Length is what actually crossed the network
+                        transfer_bytes[name].append(int(response.headers.get("content-length") or len(response.content)))
                         timing = response.headers.get("server-timing", "")
                         samples[name]["wall_ms"].append(wall_ms)
                         for metric in ("total", "app", "db"):
@@ -138,6 +144,7 @@ def main() -> int:
                         "p95": percentile(values, 95),
                     }
                 fields["decoded_payload_bytes_p50"] = percentile(payload_bytes[name], 50) if payload_bytes[name] else None
+                fields["transfer_bytes_p50"] = percentile(transfer_bytes[name], 50) if transfer_bytes[name] else None
                 fields["status_codes"] = sorted(status_codes[name])
                 fields["errors"] = errors[name]
                 fields["samples"] = len(samples[name].get("wall_ms", []))

@@ -1,10 +1,7 @@
 "use strict";
-/* O&M Photo Intelligence · data layer.
-   The page only talks to window.S91PhotoService. Today that is the DEMO adapter below: sample records plus the
-   photos added in this browser tab, all in memory — nothing is uploaded, saved or kept after a reload.
-   A later FastAPI adapter implements the same methods (listPhotos, getPhotoDetails, createSubmission, getPlants,
-   getCategories, getProcessingStatus); the server then enforces sign-in, role and plant access, keeps the files in
-   private storage and applies the real 30-day expiry. Nothing in this file holds a secret or decides access. */
+/* O&M Photo Intelligence pure filters, validation, tagging, and legacy demo test fixtures.
+   The production service is replaced by the authenticated API adapter in 49-photo-live-adapter.js.
+   No demo photos are shown in the live portal. 30d is a default display window, not a deletion policy. */
 (function(root){
  const DAY=864e5,RETENTION_DAYS=30,PAGE_SIZE=60;
  /* demo volume: about 4.5 photos per plant per day (≈ 150–200 a day across 40–50 plants), at most 220 a day,
@@ -17,13 +14,13 @@
   {id:"equipment",label:"Equipment"},
   {id:"issue",label:"Site Issue"},
   {id:"safety",label:"Safety"},
-  {id:"handover",label:"Handover"},
+  {id:"inventory",label:"Inventory"},
   {id:"other",label:"Other"}
  ];
  const STATUSES=[{id:"queued",label:"Awaiting processing"},{id:"processed",label:"Processed"},{id:"failed",label:"Processing failed"}];
- const WINDOWS=[{id:"24h",label:"Last 24 hours",ms:DAY},{id:"7d",label:"Last 7 days",ms:7*DAY},{id:"30d",label:"Last 30 days",ms:RETENTION_DAYS*DAY}];
- const DEFAULT_QUERY={q:"",plant:"all",window:"30d",category:"all",uploader:"all",issue:"all",status:"all",sort:"newest"};
- const ACCEPT_TYPES=["image/jpeg","image/png","image/webp","image/heic","image/heif"],ACCEPT_EXT=/\.(jpe?g|png|webp|heic|heif)$/i;
+ const WINDOWS=[{id:"24h",label:"Last 24 hours",ms:DAY},{id:"7d",label:"Last 7 days",ms:7*DAY},{id:"30d",label:"Last 30 days",ms:RETENTION_DAYS*DAY},{id:"all",label:"All time",ms:Infinity}];
+ const DEFAULT_QUERY={q:"",plant:"all",window:"30d",category:"all",uploader:"all",issue:"all",link:"all",status:"all",sort:"newest"};
+ const ACCEPT_TYPES=["image/jpeg","image/png","image/webp"],ACCEPT_EXT=/\.(jpe?g|png|webp)$/i;
  const MAX_BYTES=15*1024*1024,MAX_FILES=10,MAX_DESCRIPTION=300;
 
  const catLabel=id=>(CATEGORIES.find(c=>c.id===id)||{label:id}).label;
@@ -37,9 +34,9 @@
  }
 
  /* ---------- pure logic (unit-tested in tests/test_photo_intelligence.py) ---------- */
- /* Records past the 30-day retention never show, whatever the window. */
+ /* The live gallery supports all history. Demo fixtures use the selected date window. */
  function filterPhotos(records,query,now){
-  const q=normalizeQuery(query),win=WINDOWS.find(w=>w.id===q.window),from=now-Math.min(win.ms,RETENTION_DAYS*DAY);
+  const q=normalizeQuery(query),win=WINDOWS.find(w=>w.id===q.window),from=now-Math.min(win.ms,q.window==="all"?Infinity:RETENTION_DAYS*DAY);
   const words=String(q.q||"").toLowerCase().split(/\s+/).filter(Boolean);
   const rows=(records||[]).filter(r=>{
    const t=Date.parse(r.uploadedAt);
@@ -48,6 +45,7 @@
    if(q.category!=="all"&&r.category!==q.category)return false;
    if(q.uploader!=="all"&&r.uploader!==q.uploader)return false;
    if(q.status!=="all"&&r.status!==q.status)return false;
+   if(q.link!=="all"&&(r.linkType||null)!==q.link)return false;
    if(q.issue==="linked"&&!r.issue)return false;
    if(q.issue==="unlinked"&&r.issue)return false;
    if(q.issue!=="all"&&q.issue!=="linked"&&q.issue!=="unlinked"&&(!r.issue||r.issue.id!==q.issue))return false;
@@ -67,7 +65,7 @@
   const accepted=[],rejected=[];let room=MAX_FILES-(alreadySelected||0);
   Array.from(files||[]).forEach(f=>{
    const typeOk=ACCEPT_TYPES.includes(String(f.type||"").toLowerCase())||(!f.type&&ACCEPT_EXT.test(f.name||""));
-   if(!typeOk)rejected.push({name:f.name,reason:"Not a supported image (JPEG, PNG, WebP or HEIC)"});
+   if(!typeOk)rejected.push({name:f.name,reason:"Please use a JPEG, PNG or WebP photo (convert HEIC to JPEG first)"});
    else if(!(f.size>0))rejected.push({name:f.name,reason:"The file is empty"});
    else if(f.size>MAX_BYTES)rejected.push({name:f.name,reason:"Larger than 15 MB"});
    else if(room<=0)rejected.push({name:f.name,reason:"Up to "+MAX_FILES+" photos per submission"});
@@ -98,6 +96,13 @@
   return out;
  }
 
+ /* Fast, transparent suggestions from category and engineer remark; never claims image recognition. */
+ function suggestTags(input){
+  const category=String(input&&input.category||"").toLowerCase(),remark=String(input&&input.description||"").toLowerCase();
+  const out=[category],rules={urgent:/urgent|critical|tripped|breakdown/,before:/\bbefore\b/,after:/\bafter\b/,'follow-up':/follow.?up|pending/,inverter:/inverter|\binv[- ]?\d+/,dust:/dust|soiling/,cleaning:/wash|clean/,safety:/ppe|hazard|safety/,inspection:/check|inspection/};
+  Object.entries(rules).forEach(([tag,re])=>{if(re.test(remark))out.push(tag)});
+  return cleanTags(out);
+ }
  /* ---------- demo sample records (deterministic, generated in the browser) ---------- */
  function rng(seed){let a=seed>>>0;return()=>{a=(a+0x6D2B79F5)>>>0;let t=a;t=Math.imul(t^(t>>>15),t|1);t^=t+Math.imul(t^(t>>>7),t|61);return((t^(t>>>14))>>>0)/4294967296}}
  const pick=(r,list)=>list[Math.floor(r()*list.length)];
@@ -189,7 +194,7 @@
  }
 
  root.S91PhotoLogic={CATEGORIES,STATUSES,WINDOWS,DEFAULT_QUERY,RETENTION_DAYS,PAGE_SIZE,MAX_FILES,MAX_BYTES,MAX_DESCRIPTION,QUICK_TAGS,MAX_TAGS,QUALITY,
-  catLabel,statusLabel,normalizeQuery,filterPhotos,summarize,dayKey,countByDay,validateFiles,cleanTags,measureGray,qualityFlags,makeMockPhotos,createDemoAdapter};
+  catLabel,statusLabel,normalizeQuery,filterPhotos,summarize,dayKey,countByDay,validateFiles,cleanTags,suggestTags,measureGray,qualityFlags,makeMockPhotos,createDemoAdapter};
  root.S91PhotoService=createDemoAdapter({
   getPlants:()=>typeof S!=="undefined"&&S&&Array.isArray(S.plants)?S.plants.map(p=>p&&p.name):[],
   now:()=>Date.now(),

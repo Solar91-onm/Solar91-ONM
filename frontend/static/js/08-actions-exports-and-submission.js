@@ -256,25 +256,33 @@ function scheduledCompressImage(file){
   fr.readAsDataURL(file);
  });
 }
-/* Downscale phone photos before upload to save mobile bandwidth and Supabase Storage. */
-async function compressEvidenceImage(file){
- const LIMIT=3.5*1024*1024;
+/* Downscale phone photos and re-encode them as WebP before upload (JPEG where the browser cannot write WebP)
+   to save mobile bandwidth and Supabase Storage. A JPEG/PNG/WebP original that is already smaller is kept. */
+async function compressEvidenceImage(file,opts){
+ const o=opts||{},LIMIT=o.limit||3.5*1024*1024,maxSide=o.maxSide||1920;
  if(!file||!file.type.startsWith("image/"))return file;
- if(file.size<=LIMIT&&file.type==="image/jpeg")return file;
+ const keepable=/^image\/(jpeg|png|webp)$/i.test(file.type)&&file.size<=LIMIT;
+ let bmp=null;
  try{
-  const bmp=await createImageBitmap(file);
-  let scale=Math.min(1,1920/Math.max(bmp.width,bmp.height));
+  bmp=await createImageBitmap(file);
+  let scale=Math.min(1,maxSide/Math.max(bmp.width,bmp.height));
   for(let attempt=0;attempt<5;attempt++){
    const c=document.createElement("canvas");
    c.width=Math.max(1,Math.round(bmp.width*scale));c.height=Math.max(1,Math.round(bmp.height*scale));
    c.getContext("2d").drawImage(bmp,0,0,c.width,c.height);
-   for(const q of [0.82,0.7,0.6]){
-    const blob=await new Promise(r=>c.toBlob(r,"image/jpeg",q));
-    if(blob&&blob.size<=LIMIT)return new File([blob],(file.name||"photo").replace(/\.[^.]+$/,"")+".jpg",{type:"image/jpeg"});
+   for(const q of [0.8,0.7,0.6]){
+    let blob=await new Promise(r=>c.toBlob(r,"image/webp",q));
+    if(!blob||blob.type!=="image/webp")blob=await new Promise(r=>c.toBlob(r,"image/jpeg",q));
+    if(blob&&blob.size<=LIMIT){
+     c.width=c.height=0;
+     if(keepable&&blob.size>=file.size)return file;
+     return new File([blob],(file.name||"photo").replace(/\.[^.]+$/,"")+(blob.type==="image/webp"?".webp":".jpg"),{type:blob.type});
+    }
    }
-   scale*=0.75;
+   c.width=c.height=0;scale*=0.75;
   }
  }catch(e){}
+ finally{if(bmp&&bmp.close)bmp.close()}
  return file;
 }
 async function scheduledUploadEvidence(input,taskId,kind){
@@ -1859,15 +1867,18 @@ function ccLinkPlants(){
  var n=0;
  function norm(s){return String(s==null?"":s).trim().toLowerCase()}
  function stripCap(s){return norm(s).replace(/\s*-\s*\d+(?:\.\d+)?\s*m?w\.?\s*$/,"")}
+ /* lookup tables built once per run (first plant wins, rules tried in the same order as before) instead of scanning
+    every plant for each of thousands of tickets and PM work orders every few seconds */
+ var byName=new Map(),byNorm=new Map(),byCap=new Map(),byIdNorm=new Map(),byIdBare=new Map(),seen=new Map();
+ function put(m,k,x){if(!m.has(k))m.set(k,x)}
+ (S.plants||[]).forEach(function(x){
+  put(byName,String(x.name).trim(),x);put(byNorm,norm(x.name),x);put(byCap,stripCap(x.name),x);
+  put(byIdNorm,norm(x.id),x);put(byIdBare,String(x.id).replace(/_/g,""),x);
+ });
  function findPlant(raw){
-  var p=(S.plants||[]).find(function(x){return String(x.name).trim()===String(raw).trim()});
-  if(p)return p;
-  p=(S.plants||[]).find(function(x){return norm(x.name)===norm(raw)});
-  if(p)return p;
-  p=(S.plants||[]).find(function(x){return stripCap(x.name)===stripCap(raw)});
-  if(p)return p;
-  p=(S.plants||[]).find(function(x){return norm(x.id)===norm(raw)||String(x.id).replace(/_/g,"")===String(raw).replace(/[_\s\-]/g,"")});
-  return p||null;
+  if(seen.has(raw))return seen.get(raw);
+  var p=byName.get(raw)||byNorm.get(norm(raw))||byCap.get(stripCap(raw))||byIdNorm.get(norm(raw))||byIdBare.get(String(raw).replace(/[_\s\-]/g,""))||null;
+  seen.set(raw,p);return p;
  }
  ["issues","tasks"].forEach(function(key){
   (S[key]||[]).forEach(function(t){
@@ -1881,12 +1892,16 @@ function ccLinkPlants(){
  return n;
 }
 (function(){
+ var lastOrphans="";
  function run(){
   if(document.hidden)return;
   try{
    var n=ccLinkPlants();
-   var orphans=(S.issues||[]).filter(function(t){return t.plant&&!(S.plants||[]).some(function(p){return p.name===t.plant})});
-   if(orphans.length)console.warn("[CC LINKFIX] still unlinked: "+orphans.map(function(t){return t.id+" → '"+t.plant+"'"}).join(", "));
+   var names=new Set((S.plants||[]).map(function(p){return p.name}));
+   var orphans=(S.issues||[]).filter(function(t){return t.plant&&!names.has(t.plant)});
+   var msg=orphans.map(function(t){return t.id+" → '"+t.plant+"'"}).join(", ");
+   if(msg&&msg!==lastOrphans)console.warn("[CC LINKFIX] still unlinked: "+msg);   /* once per change, not every 8 s */
+   lastOrphans=msg;
    if(n>0){persist();render();toast(n+" ticket/task plant link(s) repaired — plant issue counts now show.");}
   }catch(e){}
  }

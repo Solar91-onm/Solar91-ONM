@@ -1,0 +1,90 @@
+/* Field-first portal polish, 2026-10-29. No global font scaling or hidden critical actions. */
+:root {--field-surface:#fff;--field-line:#dce6df;--field-ink:#16271e}
+.phx-live-note,.phx-compose-tip{padding:12px 14px;border:1px solid #cfe7d5;background:#f2faf4;border-radius:12px;font-size:13px;line-height:1.5;color:#245236}
+.phx-live-note>b{font-weight:800}
+.phx-head .phx-actions .btn,.phx-compose .phx-actions .btn{min-height:44px}
+.phx-bar{align-items:stretch}
+.phx-search .inp{min-height:42px}
+.phx-tile{background:#e7efe9}
+.phx-compose .phx-field{min-width:0}
+.phx-compose :is(.inp,select,textarea){font-size:16px!important}
+.phx-compose-tip{margin:0 0 10px}
+#phx-picker .phx-tile{touch-action:manipulation}
+#app .plp-head,#app .plt-panel,#app .plp-actions{min-width:0}
+#app table.plt td,#app table.plt th{vertical-align:middle}
+/* Desktop: fit the entire plant register in one framed table, not a giant sideways strip. */
+@media (min-width:1050px){
+ #app .plt-scroll{overflow-x:visible}
+ #app table.plt{width:100%;table-layout:fixed;min-width:0}
+ #app table.plt th{padding:9px 4px;font-size:10px;white-space:normal;overflow-wrap:anywhere}
+ #app table.plt td{padding:9px 4px;font-size:11px;white-space:normal;overflow-wrap:anywhere;line-height:1.4}
+ #app table.plt .plt-proj{max-width:100%;white-space:normal;text-overflow:clip}
+ #app table.plt .plt-code small{max-width:100%}
+ #app table.plt .btn.sm{font-size:11px;padding:7px 5px;white-space:normal;line-height:1.2;min-height:34px}
+ #app table.plt td input.inp{width:100%!important;min-width:0!important;font-size:11px!important}
+ #app table.plt .plt-code-col{width:11%}
+ #app table.plt th:last-child,#app table.plt td:last-child{width:8%}
+}
+/* Mobile: each plant is a compact tappable card; labels stay visible and no sideways scrolling. */
+@media(max-width:690px){
+ #app .plt-scroll{overflow:visible;padding:10px;background:#f4f7f5}
+ #app table.plt,#app table.plt tbody{display:block;width:100%;min-width:0}
+ #app table.plt thead{display:none}
+ #app table.plt tbody tr{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 10px;margin-bottom:10px;padding:10px 12px;border:1px solid var(--field-line);border-radius:13px;background:var(--field-surface);box-shadow:0 2px 10px #1327190a}
+ #app table.plt tbody tr:last-child{margin-bottom:0}
+ #app table.plt td{display:flex;flex-direction:column;justify-content:center;align-items:flex-start;min-width:0;width:auto!important;white-space:normal;overflow-wrap:anywhere;text-align:left;padding:7px 0;border:0;font-size:12px;line-height:1.4}
+ #app table.plt td::before{content:attr(data-label);display:block;margin:0 0 3px;color:#62746a;letter-spacing:.025em;font-size:10px;font-weight:800;text-transform:uppercase}
+ #app table.plt td.plt-code-col{grid-column:1 / -1;border-bottom:1px solid var(--field-line);padding-bottom:9px;margin-bottom:3px}
+ #app table.plt .plt-code{text-align:left}
+ #app table.plt .plt-code small{max-width:none;margin-left:0}
+ #app table.plt td:last-child{grid-column:1 / -1;border-top:1px solid var(--field-line);align-items:stretch}
+ #app table.plt td:last-child button{min-height:42px;justify-content:center}
+ #app table.plt td .plt-status{align-items:flex-start}
+ #app table.plt td input.inp{width:100%!important;min-width:0!important}
+ #app .plt-meta{flex-wrap:wrap}
+ #app .plp-head h1{font-size:18px}
+ #app .plp-actions{display:flex;flex-wrap:wrap;gap:7px}
+ #app .plp-actions>.btn{flex:1 1 140px;min-height:44px}
+}
+@media(max-width:900px){
+ html,body,#app,.shell,.main,.content{max-width:100%;min-width:0}
+ .content{overflow-x:hidden;padding-bottom:calc(105px + env(safe-area-inset-bottom))}
+ .portal-page-stack{min-width:0}
+ #app .panel{max-width:100%}
+ #app :is(.ops-table-scroll,.pml-register,.idk,.wx-results,.phx-panel){max-width:100%}
+ #app :is(.ops-table-scroll,.pml-register,.wx-results) table{font-size:12px}
+ #app :is(.ops-table-scroll,.pml-register,.wx-results){overflow-x:auto;-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain}
+ #app :is(.modal,.phx-pk,.s91-assistant-panel){max-width:min(100vw - 18px,720px);max-height:calc(100dvh - 18px)}
+ #app :is(.modal-b,.phx-pk-grid,.s91-assistant-conversation){min-height:0;overflow-y:auto}
+ #app .topbar{min-width:0}
+ #app .topbar :is(input,select){min-width:0}
+ #app :is(.btn,button,select){touch-action:manipulation}
+ #app :is(.btn,button,select,input,textarea):focus-visible{outline:2px solid #148645;outline-offset:2px}
+ .phx-head .phx-actions{width:100%;display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}
+ .phx-head .phx-actions .btn{justify-content:center;white-space:normal}
+ .phx-head h1{font-size:18px}
+ .phx-bar{padding:10px}
+ .phx-search{flex:1 1 100%}
+ .phx-seg{flex:1}
+ .phx-seg button{flex:1;min-height:42px}
+ .phx-ftoggle{min-height:42px}
+ .phx-kpis{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+ .phx-kpi{padding:12px 10px}
+ .phx-kpi>b{font-size:22px}
+}
+@media(max-width:420px){
+ .phx-filters.open,.phx-compose .phx-form{grid-template-columns:minmax(0,1fr)}
+ .phx-tile{border-radius:9px}
+ .phx-tiles{grid-template-columns:repeat(3,minmax(0,1fr))}
+ .phx-li{grid-template-columns:46px minmax(0,1fr) 10px;gap:7px}
+ .phx-li>img{width:46px;height:46px}
+ .phx-li .phx-issue{display:none}
+ #app .phx-head .phx-actions{gap:6px}
+ #app .plt-meta .plt-export{width:100%;justify-content:flex-end}
+}
+@media(prefers-reduced-motion:reduce){.phx-tile img{transition:none}}
+
+/* Assistant: a one-tap route to the same plant-scoped field evidence, not a fake AI analysis. */
+.cp-photo-jump{flex-shrink:0;border:1px solid #b8d8bf;background:#f2faf4;color:#176b3b;border-radius:9px;font-size:12px;font-weight:800;padding:6px 9px;min-height:34px;cursor:pointer}
+.cp-photo-jump:focus-visible{outline:2px solid #148645;outline-offset:2px}
+@media(max-width:640px){.s91-copilot .cp-context{flex-wrap:wrap;gap:6px}.s91-copilot #s91-assistant-query{font-size:16px}}

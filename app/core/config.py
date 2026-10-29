@@ -44,6 +44,13 @@ class Settings(BaseSettings):
     mail_from: str = ""  # e.g. "Solar91 <invites@yourdomain.com>" (domain must be verified in Resend)
     app_public_url: str = ""  # link used in e-mails, e.g. https://solar91-om.onrender.com
 
+    # Photo Intelligence WebP pipeline (app/photos/imaging.py): stored display copy and gallery thumbnail.
+    photo_max_side: int = 2048
+    photo_webp_quality: int = 80
+    photo_thumb_side: int = 640
+    photo_thumb_quality: int = 70
+    photo_webp_method: int = 4  # 0 fastest … 6 smallest; 4 balances CPU on the small Render instance
+
     allowed_origins: str = "http://localhost:8000,http://127.0.0.1:8000"
     trust_proxy_headers: bool = False
     max_upload_mb: int = 4

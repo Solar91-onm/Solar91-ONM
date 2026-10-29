@@ -1,18 +1,18 @@
 "use strict";
-/* O&M Photo Intelligence · page (#/photos). Summary cards, filters, gallery, detail view and the phone submission
-   composer. All data comes through window.S91PhotoService (46-photo-service.js), which is a DEMO adapter for now:
-   sample records plus photos added in this tab, never uploaded or saved. The page says so wherever it matters. */
+/* Photo Intelligence: authenticated operations photos, links, smart quick tags, searchable gallery. */
 (function(){
  if(window.renderPhotoIntelligence)return;
  const L=window.S91PhotoLogic,svc=()=>window.S91PhotoService;
- const P=window.S91PhotoUI={q:Object.assign({},L.DEFAULT_QUERY),limit:L.PAGE_SIZE,result:null,plants:null,loading:false,error:null,
-  key:null,seq:0,showFilters:false,fresh:new Set(),draft:null,layout:(()=>{try{return localStorage.getItem("s91-photo-layout")==="list"?"list":"grid"}catch(e){return "grid"}})()};
+ const P=window.S91PhotoUI={q:Object.assign({},L.DEFAULT_QUERY),result:null,plants:null,loading:false,error:null,
+  key:null,seq:0,showFilters:false,links:[],linksKey:"",fresh:new Set(),draft:null,layout:(()=>{try{return localStorage.getItem("s91-photo-layout")==="list"?"list":"grid"}catch(e){return "grid"}})()};
  const role=()=>S._roleLabel||S.currentRole||"O&M Head";
  const sePlant=()=>role()==="Site Engineer"?(S._sePlant||""):"";
  const readOnly=()=>role()==="Administration"||(typeof rev05ReadOnly==="function"&&rev05ReadOnly());
- /* the demo narrows a Site Engineer to their plant; the real API will enforce plant access on the server */
+ /* The backend enforces plant scope regardless of these convenient UI filters. */
  const viewer=()=>sePlant()?{plants:[sePlant()]}:null;
- const blankDraft=()=>({files:[],plant:"",category:"",description:"",tags:[],otherTags:"",issueId:"",attachTicket:false,errors:[],progress:null,busy:false,qualityAck:false});
+ /* submissionId: one id per draft, sent with every attempt, so a retried upload is saved once (server replays it) */
+ const newSubmissionId=()=>{try{return crypto.randomUUID()}catch(e){return ""}};
+ const blankDraft=()=>({submissionId:newSubmissionId(),files:[],plant:"",category:"",description:"",tags:[],otherTags:"",linkType:"",linkId:"",issueId:"",attachTicket:false,errors:[],progress:null,busy:false,qualityAck:false});
  /* a linked ticket that this person may add photos to, with its free photo slots (tickets hold 10, see uploadIssuePhotos) */
  function ticketSlot(id){
   const t=id&&(S.issues||[]).find(x=>x.id===id);
@@ -40,19 +40,38 @@
   const url="data:image/svg+xml;charset=utf-8,"+encodeURIComponent(svg);thumbs.set(k,url);return url;
  }
  const imgOf=r=>r.previewUrl||placeholder(r.category,r.variant||0);
- const altOf=r=>r.source==="session"?"Photo added in this tab: "+(r.fileName||"image"):"Sample placeholder for a "+L.catLabel(r.category)+" photo at "+r.plant;
+ const photoAttr=r=>r.source==="server"?' data-photo-id="'+esc(r.id)+'"':"";
+ const altOf=r=>"Site photo: "+(r.description||L.catLabel(r.category))+" · "+r.plant;
  const ago=iso=>{const m=Math.max(0,Math.round((Date.now()-Date.parse(iso))/6e4));return m<1?"just now":m<60?m+" min ago":m<1440?Math.round(m/60)+" h ago":Math.round(m/1440)+" d ago"};
  const fmtSize=b=>b>=1048576?(b/1048576).toFixed(1)+" MB":Math.max(1,Math.round(b/1024))+" KB";
 
  /* ---------- data ---------- */
- function queryKey(){return JSON.stringify([P.q,P.limit,sePlant(),(S.plants||[]).length])}
+ function queryKey(){return JSON.stringify([P.q,sePlant(),(S.plants||[]).length])}
+ /* first page (with totals, facets and day counts) whenever the filters change; further pages are appended by loadMore */
  function refresh(force){
   const key=queryKey();if(!force&&key===P.key)return;P.key=key;
-  const seq=++P.seq,q=Object.assign({},P.q,{offset:0,limit:P.limit});P.loading=true;P.error=null;
+  /* a newer filter supersedes the request still on its way: cancel it instead of downloading a page nobody sees */
+  if(P.abort)P.abort.abort();P.abort=typeof AbortController==="function"?new AbortController():null;
+  const seq=++P.seq,q=Object.assign({},P.q,{offset:0,limit:L.PAGE_SIZE,signal:P.abort&&P.abort.signal});P.loading=true;P.error=null;
   Promise.all([svc().listPhotos(q,viewer()),P.plants&&!force?Promise.resolve(P.plants):svc().getPlants(viewer())]).then(([res,plants])=>{
    if(seq!==P.seq)return;P.result=res;P.plants=plants;P.loading=false;if(S.view==="photos")render();
-   if(P.afterLoad){const f=P.afterLoad;P.afterLoad=null;f()}
   }).catch(err=>{if(seq!==P.seq)return;P.loading=false;P.error=(err&&err.message)||"Photos could not load.";if(S.view==="photos")render()});
+ }
+ /* the next page only (rows, no totals), appended to what is loaded: earlier pages are never fetched again */
+ function loadMore(after){
+  const res=P.result;if(!res||P.loading||res.items.length>=res.total)return;
+  const seq=P.seq,have=new Set(res.items.map(r=>r.id));P.loading=true;
+  /* the server's cursor continues exactly after the last photo shown (new uploads cannot shift the page); the demo
+     service has no cursor and pages by offset */
+  const at=res.next_cursor?{cursor:res.next_cursor}:{offset:res.items.length};
+  svc().listPhotos(Object.assign({},P.q,at,{limit:L.PAGE_SIZE,meta:false}),viewer()).then(page=>{
+   if(seq!==P.seq)return;P.loading=false;
+   const add=(page.items||[]).filter(r=>!have.has(r.id)),end=page.has_more===false||(page.items||[]).length<L.PAGE_SIZE;
+   /* the end of the list, even if photos were deleted meanwhile */
+   P.result=Object.assign({},res,{items:res.items.concat(add),next_cursor:page.next_cursor||null,total:end?res.items.length+add.length:res.total});
+   if(S.view==="photos"||S.modal==="photoDetail")render();
+   if(after)after();
+  }).catch(err=>{if(seq!==P.seq)return;P.loading=false;toast((err&&err.message)||"More photos could not load.");if(S.view==="photos")render()});
  }
  window.s91PhotoRetry=function(){P.key=null;refresh(true)};
 
@@ -70,8 +89,8 @@
      :sel("plant","Plant",[["all","All plants ("+plants.length+")"]].concat(plants.map(p=>[p.name,p.name]))))+
    sel("category","Category",[["all","All categories"]].concat(L.CATEGORIES.map(c=>[c.id,c.label])))+
    sel("uploader","Uploaded by",[["all","Anyone"]].concat(f.uploaders.map(u=>[u,u])))+
-   sel("issue","Related issue",[["all","Any"],["linked","Linked to an issue"],["unlinked","Not linked"]].concat(f.issues.map(x=>[x.id,x.id+" · "+x.status])))+
-   sel("status","Processing",[["all","Any status"]].concat(L.STATUSES.map(s=>[s.id,s.label])))+
+   sel("issue","Linked record",[["all","Any"],["linked","Linked to any record"],["unlinked","Not linked"]].concat(f.issues.map(x=>[x.id,x.id+" · "+x.status])))+
+   sel("link","Record type",[["all","Any record type"],["issue","Site Issue"],["pm","Preventive Maintenance"],["washing","Washing"],["inventory","Inventory"]])+
    sel("sort","Sort",[["newest","Newest first"],["oldest","Oldest first"]])+
    '<button type="button" class="btn o sm phx-reset" onclick="s91PhotoReset()"'+(active||P.q.window!=="30d"||P.q.sort!=="newest"?"":" disabled")+'>Reset filters</button></div>';
  }
@@ -80,8 +99,8 @@
   const card=(label,n,note,act,on)=>act?'<button type="button" class="phx-kpi'+(on?" on":"")+'" onclick="'+act+'" aria-pressed="'+!!on+'"><span>'+label+'</span><b>'+n+'</b><small>'+note+'</small></button>'
    :'<div class="phx-kpi"><span>'+label+'</span><b>'+n+'</b><small>'+note+'</small></div>';
   return '<div class="phx-kpis">'+card("Photos",v(s&&s.inWindow),esc(win)+" · matching filters")+card("Received today",v(s&&s.today),"since midnight")+
-   card("Awaiting processing",v(s&&s.awaiting),P.q.status==="queued"?"showing these · tap to clear":"tap to show","s91PhotoSet('status','"+(P.q.status==="queued"?"all":"queued")+"')",P.q.status==="queued")+
-   card("Not linked to an issue",v(s&&s.unlinked),P.q.issue==="unlinked"?"showing these · tap to clear":"tap to show","s91PhotoSet('issue','"+(P.q.issue==="unlinked"?"all":"unlinked")+"')",P.q.issue==="unlinked")+'</div>';
+   card("Linked to work",v(s&&(s.inWindow-s.unlinked)),P.q.issue==="linked"?"showing linked · tap to clear":"tap to show linked","s91PhotoSet('issue','"+(P.q.issue==="linked"?"all":"linked")+"')",P.q.issue==="linked")+
+   card("Without a record link",v(s&&s.unlinked),P.q.issue==="unlinked"?"showing these · tap to clear":"tap to show","s91PhotoSet('issue','"+(P.q.issue==="unlinked"?"all":"unlinked")+"')",P.q.issue==="unlinked")+'</div>';
  }
  /* ---------- gallery: photos grouped by day, compact tiles (or one-line rows) for 150–200 photos a day ---------- */
  let codes=null,codesN=-1;
@@ -97,13 +116,13 @@
  function tileHtml(r){
   const code=codeOf(r.plant);
   return '<button type="button" class="phx-tile'+(P.fresh.has(r.id)?" fresh":"")+'" onclick="s91PhotoOpen(\''+esc(r.id)+'\')" aria-label="'+esc(label(r))+'">'+
-   '<img src="'+esc(imgOf(r))+'" alt="" loading="lazy" decoding="async" onerror="this.classList.add(\'noimg\')"/>'+dot(r)+(r.source==="session"?'<i class="phx-you">You</i>':'')+
+   '<img src="'+esc(imgOf(r))+'"'+photoAttr(r)+' alt="" loading="lazy" decoding="async" onerror="this.classList.add(\'noimg\')"/>'+dot(r)+(r.source==="session"?'<i class="phx-you">You</i>':'')+
    '<span class="phx-tile-meta"><b>'+esc(code||r.plant)+'</b><small>'+timeOf(r.uploadedAt)+'</small></span></button>';
  }
  function rowHtml(r){
   const code=codeOf(r.plant);
   return '<button type="button" class="phx-li'+(P.fresh.has(r.id)?" fresh":"")+'" onclick="s91PhotoOpen(\''+esc(r.id)+'\')" aria-label="'+esc(label(r))+'">'+
-   '<img src="'+esc(imgOf(r))+'" alt="" loading="lazy" decoding="async" onerror="this.classList.add(\'noimg\')"/>'+
+   '<img src="'+esc(imgOf(r))+'"'+photoAttr(r)+' alt="" loading="lazy" decoding="async" onerror="this.classList.add(\'noimg\')"/>'+
    '<span class="phx-li-main"><b>'+esc(code?code+" · "+r.plant:r.plant)+(r.source==="session"?' <i class="phx-you in">You</i>':'')+'</b>'+
    '<small>'+esc(L.catLabel(r.category))+' · '+timeOf(r.uploadedAt)+' · '+esc(r.uploader)+'</small>'+(r.description?'<small class="phx-li-desc">'+esc(r.description)+'</small>':'')+'</span>'+
    (r.issue?'<span class="phx-issue">'+esc(r.issue.id)+'</span>':'<span></span>')+dot(r)+'</button>';
@@ -137,9 +156,8 @@
   else if(!items.length)grid='<div class="phx-state"><b>No photos match these filters</b><span>Try a longer time window or clear a filter.</span><button type="button" class="btn o sm" onclick="s91PhotoReset()">Reset filters</button></div>';
   else grid=galleryHtml(res);
   return '<section class="phx" aria-labelledby="phx-title">'+
-   '<header class="phx-head"><div><h1 id="phx-title">O&amp;M Photo Intelligence</h1><p>'+(sePlant()?esc(sePlant())+' · ':'All authorised plants · ')+'photos are kept for '+L.RETENTION_DAYS+' days · <button type="button" class="phx-link" onclick="window.s91AppSettings&&s91AppSettings()">Camera &amp; notifications</button></p></div>'+pick+'</header>'+
-   '<div class="phx-demo" role="note"><b>Demo mode</b><span>Sample photos and numbers. Photos you add stay in this browser tab only: they are <strong>not uploaded or saved</strong> and disappear when the page reloads.</span>'+
-    (res&&res.sessionCount?'<button type="button" class="btn g sm" onclick="s91PhotoClearSession()">Remove my '+res.sessionCount+' demo photo'+(res.sessionCount===1?"":"s")+'</button>':'')+'</div>'+
+   '<header class="phx-head"><div><h1 id="phx-title">O&amp;M Photo Intelligence</h1><p>'+(sePlant()?esc(sePlant())+' · ':'All authorised plants · ')+'recent photos · older photos available under All time · <button type="button" class="phx-link" onclick="window.s91AppSettings&&s91AppSettings()">Camera &amp; notifications</button></p></div>'+pick+'</header>'+
+   '<div class="phx-live-note" role="note"><b>Field photo library</b> · Photos are securely saved in the portal and remain available across devices. Choose a plant and optionally link to a site issue, PM work order, washing report or inventory item.</div>'+
    cardsHtml(res)+
    '<div class="phx-panel">'+filtersHtml(res)+
     '<div class="phx-meta"><span aria-live="polite">'+(res?'<b>'+res.total+'</b> photo'+(res.total===1?"":"s")+' match'+(res.total===1?"es":"")+(res.total>items.length?' · showing '+items.length:''):'Loading photos…')+(P.loading&&res?' <span class="phx-muted">· updating…</span>':'')+'</span>'+
@@ -148,26 +166,30 @@
  };
 
  /* ---------- filter actions ---------- */
- window.s91PhotoSet=function(k,v,soon){P.q[k]=v;P.limit=L.PAGE_SIZE;if(soon&&typeof renderSoon==="function")renderSoon();else render()};
- window.s91PhotoReset=function(){P.q=Object.assign({},L.DEFAULT_QUERY);P.limit=L.PAGE_SIZE;render()};
- window.s91PhotoMore=function(){P.limit+=L.PAGE_SIZE;render()};
+ /* typed search waits for a 300 ms pause, so one request goes out per search rather than one per letter */
+ let typed=null;
+ window.s91PhotoSet=function(k,v,soon){P.q[k]=v;clearTimeout(typed);if(soon)typed=setTimeout(render,300);else render()};
+ window.s91PhotoReset=function(){P.q=Object.assign({},L.DEFAULT_QUERY);render()};
+ window.s91PhotoMore=function(){loadMore()};
 
  /* ---------- detail ---------- */
  window.s91PhotoOpen=function(id){
+  const loaded=P.result&&P.result.items.find(x=>x.id===id);
+  if(loaded){S.modal="photoDetail";S.modalCtx={record:loaded};render();return}
   svc().getPhotoDetails(id).then(r=>{if(!r){toast("That photo is no longer available.");return}S.modal="photoDetail";S.modalCtx={record:r};render()});
  };
  function detailModal(){
   const r=(S.modalCtx||{}).record;if(!r)return "";
   const row=(k,v)=>'<div><dt>'+k+'</dt><dd>'+v+'</dd></div>';
-  const expires=Math.max(0,Math.ceil((Date.parse(r.expiresAt)-Date.now())/864e5));
-  const body='<div class="phx-detail"><div class="phx-big'+(r.previewUrl?"":" ph")+'"><img src="'+esc(imgOf(r))+'" alt="'+esc(altOf(r))+'" decoding="async" onerror="this.parentNode.classList.add(\'noimg\')"/></div>'+
-   '<div class="phx-info"><div class="phx-demo sm" role="note"><b>Demo</b><span>'+(r.source==="session"?'Added in this tab · not uploaded or saved':'Sample record · not a real site photo')+'</span></div>'+
+  const expires=r.expiresAt?Math.max(0,Math.ceil((Date.parse(r.expiresAt)-Date.now())/864e5)):null;
+  const body='<div class="phx-detail"><div class="phx-big'+(r.previewUrl?"":" ph")+'"><img src="'+esc(imgOf(r))+'"'+photoAttr(r)+' alt="'+esc(altOf(r))+'" decoding="async" onerror="this.parentNode.classList.add(\'noimg\')"/></div>'+
+   '<div class="phx-info">'+
    '<h4>Description</h4><p>'+(r.description?esc(r.description):'<span class="phx-muted">No description added.</span>')+'</p>'+
-   '<h4>AI caption</h4><p class="phx-muted">Not available yet. Automatic captions and tags come in a later phase.</p>'+
+   '<h4>Tags</h4><p class="phx-muted">Suggested from the selected category and your remark; no unverified AI claims.</p>'+
    ((r.tags||[]).length?'<div class="phx-tags">'+r.tags.map(t=>'<span>#'+esc(t)+'</span>').join("")+'</div>':'')+
    '<dl class="phx-dl">'+row("Plant",esc(r.plant))+row("Category",esc(L.catLabel(r.category)))+row("Uploaded",esc(fmtDT(r.uploadedAt))+' <span class="phx-muted">('+ago(r.uploadedAt)+')</span>')+row("Uploaded by",esc(r.uploader))+
-    row("Equipment ID",r.equipmentId?esc(r.equipmentId):'<span class="phx-muted">—</span>')+row("Related issue",r.issue?esc(r.issue.id+" · "+r.issue.status):'<span class="phx-muted">Not linked</span>')+
-    row("Processing",'<em class="phx-st inline st-'+r.status+'">'+esc(L.statusLabel(r.status))+'</em>')+row("Expires",esc(fmtDT(r.expiresAt))+' <span class="phx-muted">(in '+expires+' day'+(expires===1?"":"s")+')</span>')+
+    row("Equipment ID",r.equipmentId?esc(r.equipmentId):'<span class="phx-muted">—</span>')+row("Linked record",r.linkType?esc(r.linkType.toUpperCase()+" · "+r.linkId):(r.issue?esc(r.issue.id):'<span class="phx-muted">General photo · no link</span>'))+
+    row("Processing",'<em class="phx-st inline st-'+r.status+'">'+esc(L.statusLabel(r.status))+'</em>')+(expires===null?"":row("Expires",esc(fmtDT(r.expiresAt))+' <span class="phx-muted">(in '+expires+' days)</span>'))+
     (r.fileName?row("File",esc(r.fileName)+' · '+fmtSize(r.fileSize||0)):'')+
     (r.quality?row("Photo check",r.quality.dark?'<span class="phx-warnword">Too dark</span>':r.quality.blurry?'<span class="phx-warnword">May be blurry</span>':'Clear'):'')+row("Record",esc(r.id))+'</dl></div></div>';
   const items=(P.result&&P.result.items)||[],i=items.findIndex(x=>x.id===r.id),more=P.result&&P.result.total>items.length;
@@ -181,7 +203,7 @@
   const r=(S.modalCtx||{}).record,items=(P.result&&P.result.items)||[],i=r?items.findIndex(x=>x.id===r.id):-1;if(i<0)return;
   const j=i+d;
   if(j>=0&&j<items.length){S.modalCtx={record:items[j]};render();return}
-  if(j>=items.length&&P.result.total>items.length){P.limit+=L.PAGE_SIZE;P.afterLoad=()=>{const n=P.result.items[j];if(n&&S.modal==="photoDetail"){S.modalCtx={record:n};render()}};render()}
+  if(j>=items.length&&P.result.total>items.length)loadMore(()=>{const n=P.result.items[j];if(n&&S.modal==="photoDetail"){S.modalCtx={record:n};render()}})
  };
  document.addEventListener("keydown",e=>{
   if(S.modal!=="photoDetail"||e.altKey||e.ctrlKey||e.metaKey)return;
@@ -219,14 +241,31 @@
  window.s91PhotoDraft=function(k,v){
   P.draft[k]=v;
   if(k==="description"){const c=document.getElementById("phx-desc-count");if(c)c.textContent=String(v.length)+" / "+L.MAX_DESCRIPTION}
-  if(k==="plant"){P.draft.issueId="";P.draft.attachTicket=false;render()} /* the issue list belongs to the plant */
+  if(k==="plant"){P.draft.issueId="";P.draft.linkId="";P.draft.attachTicket=false;loadLinks();render()} /* the issue list belongs to the plant */
+  if(k==="linkType"){P.draft.linkId="";P.draft.issueId="";P.draft.attachTicket=false;loadLinks();render()}
+  if(k==="linkId"){P.draft.issueId=P.draft.linkType==="issue"?v:"";P.draft.attachTicket=false;render()}
+  if(k==="category"&&!P.draft.tags.length){const guess=L.suggestTags?L.suggestTags({category:v,description:P.draft.description}):[];P.draft.tags=guess;render()}
   if(k==="issueId"){P.draft.attachTicket=false;render()} /* shows or hides "Also attach to ticket" */
  };
+ function loadLinks(){
+  const d=P.draft,key=d.plant+'|'+d.linkType;P.linksKey=key;P.links=[];
+  if(!d.plant||!d.linkType)return;
+  svc().getLinks(d.plant,d.linkType).then(items=>{if(P.linksKey===key){P.links=items;if(S.modal==="photoCompose")render()}})
+   .catch(err=>{if(P.linksKey===key){P.links=[];toast((err&&err.message)||"Linked records could not load.")}});
+ }
+ window.s91PhotoAutoTags=function(){
+  const d=P.draft;if(!d.category||d.busy)return;
+  d.tags=L.cleanTags(d.tags.concat(L.suggestTags({category:d.category,description:d.description})));
+  // Do not replace the entire modal during textarea blur: that would swallow the next Save click.
+  document.querySelectorAll('.phx-compose .phx-chip').forEach(ch=>{const on=d.tags.includes((ch.textContent||'').trim().replace(/^#/,''));ch.classList.toggle('on',on);ch.setAttribute('aria-pressed',String(on))});
+  const note=document.getElementById('phx-auto-tags');if(note)note.textContent=d.tags.length?'Suggested: '+d.tags.map(t=>'#'+t).join('  '):'';
+ };
+ window.s91PhotoSuggest=function(){window.s91PhotoAutoTags()};
  window.s91PhotoTag=function(t){const d=P.draft,i=d.tags.indexOf(t);if(i>=0)d.tags.splice(i,1);else d.tags.push(t);render()};
  window.s91PhotoDiscard=function(){if(P.draft.busy)return;discardDraft();S.modal=null;S.modalCtx=null;render()};
  function setProgress(p){
   P.draft.progress=p;const bar=document.getElementById("phx-progress");
-  if(bar){bar.setAttribute("aria-valuenow",String(p));const i=bar.querySelector("i");if(i)i.style.width=p+"%";const t=document.getElementById("phx-progress-text");if(t)t.textContent="Simulating upload… "+p+"%"}
+  if(bar){bar.setAttribute("aria-valuenow",String(p));const i=bar.querySelector("i");if(i)i.style.width=p+"%";const t=document.getElementById("phx-progress-text");if(t)t.textContent="Saving photos… "+p+"%"}
  }
  window.s91PhotoSubmit=async function(){
   const d=P.draft;if(d.busy||readOnly())return;
@@ -234,36 +273,37 @@
   if(!d.files.length){toast("Add at least one photo.");return}
   if(!plant){toast("Choose the plant.");return}
   if(!d.category){toast("Choose a category.");return}
+  if(d.linkType&&!d.linkId){toast("Choose a linked record or select Nothing.");return}
   const weak=flagged(d);
   if(weak.length&&!d.qualityAck){d.qualityAck=true;render();toast(weak.length+" photo"+(weak.length===1?" looks":"s look")+" too dark or blurry. Retake, or tap Submit anyway.");return}
   d.busy=true;d.progress=0;render();
   try{
-   const linked=d.issueId?plantIssues(plant).find(t=>t.id===d.issueId):null;
+   const linked=d.linkType==='issue'&&d.linkId?plantIssues(plant).find(t=>t.id===d.linkId):null;
    const slot=linked&&d.attachTicket?ticketSlot(linked.id):null,files=d.files.map(f=>f.file);
    const res=await svc().createSubmission({files:d.files.map(f=>({name:f.name,size:f.size,type:f.type,previewUrl:f.url,quality:f.quality,file:f.file})),plant,category:d.category,description:d.description,
-    tags:d.tags.concat(String(d.otherTags||"").split(",")),issue:linked?{id:linked.id,status:linked.status}:null,uploader:(S.currentUser||"You")+" (you)"},setProgress);
+    tags:d.tags.concat(String(d.otherTags||"").split(",")),linkType:d.linkType,linkId:d.linkId,submissionId:d.submissionId,issue:linked?{id:linked.id,status:linked.status}:null,uploader:(S.currentUser||"You")+" (you)"},setProgress);
    P.fresh=new Set(res.records.map(r=>r.id));
-   P.draft=blankDraft(); /* the preview URLs now belong to the demo gallery records */
+   d.files.forEach(f=>revoke(f.url));P.draft=blankDraft(); /* saved by server; free local previews */
    S.modal=null;S.modalCtx=null;
-   P.q=Object.assign({},L.DEFAULT_QUERY);P.limit=L.PAGE_SIZE;P.key=null;
-   render();
+   P.q=Object.assign({},L.DEFAULT_QUERY);P.key=null;
+   refresh(true);render();
    const n=res.records.length,word=n+" photo"+(n===1?"":"s");
-   if(!slot){toast(word+" added to the demo gallery · not uploaded or saved");return}
+   if(!slot){toast(word+" saved in Photo Intelligence");return}
    /* the person chose "Also attach to ticket": a real upload through the ticket's own photo upload */
-   toast(word+" added to the gallery · attaching to "+slot.t.id+"…");
+   toast(word+" saved · attaching to "+slot.t.id+"…");
    try{
     const saved=await uploadIssuePhotos(slot.t,{files:files.slice(0,slot.left)});
     slot.t.evidence=(slot.t.evidence||[]).concat(saved);slot.t.photos=slot.t.evidence.length;render();
     toast(saved.length+" photo"+(saved.length===1?"":"s")+" saved on ticket "+slot.t.id);
-   }catch(e){toast("Added to the demo gallery, but attaching to "+slot.t.id+" failed: "+((e&&e.message)||"server error")+". Nothing was saved on the ticket.")}
-  }catch(err){d.busy=false;d.progress=null;render();toast((err&&err.message)||"The demo submission failed.")}
+   }catch(e){toast("Photo saved to gallery; ticket attachment failed: "+((e&&e.message)||"server error"))}
+  }catch(err){d.busy=false;d.progress=null;render();toast((err&&err.message)||"Photo submission failed.")}
  };
- window.s91PhotoClearSession=function(){svc().clearSession().forEach(revoke);P.fresh=new Set();P.key=null;render();toast("Your demo photos were removed from this tab.")};
+
  function composeModal(){
   const d=P.draft,se=sePlant(),plants=P.plants||[],n=d.files.length,weak=flagged(d);
   const opts=(list,val,ph)=>'<option value="">'+ph+'</option>'+list.map(([v,l])=>'<option value="'+esc(v)+'"'+(val===v?" selected":"")+'>'+esc(l)+'</option>').join("");
   const body='<div class="phx-compose">'+
-   '<div class="phx-demo sm" role="note"><b>Demo</b><span>Nothing is uploaded or saved. Submitted photos appear in this tab’s gallery until the page reloads.</span></div>'+
+   '<div class="phx-compose-tip">Photos are saved securely and are visible to authorised team members. Add a link only when it matches an existing record.</div>'+
    '<div class="phx-actions">'+
     '<label class="btn o sm phx-pick">'+ic.cam+' Take photo<input class="phx-file" type="file" accept="image/*" capture="environment" onchange="s91PhotoPick(this)"'+(d.busy?" disabled":"")+'/></label>'+
     '<label class="btn o sm phx-pick">'+ic.img+' Choose photos<input class="phx-file" type="file" accept="image/*" multiple onchange="s91PhotoPick(this)"'+(d.busy?" disabled":"")+'/></label>'+
@@ -278,26 +318,22 @@
     '<label class="phx-field"><span>Plant <i>required</i></span>'+(se?'<select class="inp" disabled><option>'+esc(se)+'</option></select>'
       :'<select class="inp" id="phx-c-plant" onchange="s91PhotoDraft(\'plant\',this.value)"'+(d.busy?" disabled":"")+'>'+opts(plants.map(p=>[p.name,p.name]),d.plant,"Choose plant…")+'</select>')+'</label>'+
     '<label class="phx-field"><span>Category <i>required</i></span><select class="inp" id="phx-c-cat" onchange="s91PhotoDraft(\'category\',this.value)"'+(d.busy?" disabled":"")+'>'+opts(L.CATEGORIES.map(c=>[c.id,c.label]),d.category,"Choose category…")+'</select></label>'+
-    '<label class="phx-field wide"><span>Link to site issue <i>optional</i></span><select class="inp" id="phx-c-issue" onchange="s91PhotoDraft(\'issueId\',this.value)"'+(d.busy||!(se||d.plant)?" disabled":"")+'>'+
-      opts(plantIssues(se||d.plant).map(t=>[t.id,t.id+" · "+(t.equip&&t.equip!=="—"?t.equip:t.vertical||"Issue")+" · "+t.status]),d.issueId,(se||d.plant)?(plantIssues(se||d.plant).length?"Not linked":"No open issues at this plant"):"Choose the plant first")+'</select></label>'+
-    (()=>{const s=d.issueId?ticketSlot(d.issueId):null;if(!d.issueId)return "";
-      if(!s)return '<p class="phx-attach-note wide">Ticket '+esc(d.issueId)+' cannot take photos from here (closed, not synchronised yet, or your role cannot post on it).</p>';
-      const fits=n<=s.left;
-      return '<label class="phx-check wide'+(fits?"":" off")+'"><input type="checkbox" id="phx-c-attach"'+(d.attachTicket&&fits?" checked":"")+(fits&&!d.busy?"":" disabled")+' onchange="s91PhotoDraft(\'attachTicket\',this.checked)"/>'+
-       '<span><b>Also attach to ticket '+esc(s.t.id)+'</b><small>'+(fits?'Saved on the ticket for real, like its 📎 button · '+s.left+' of 10 photo slots left':'The ticket has only '+s.left+' photo slot'+(s.left===1?"":"s")+' left; remove some photos to attach them')+'</small></span></label>'})()+
-    '<label class="phx-field wide"><span>Remark <i>optional</i></span><textarea class="inp" id="phx-c-desc" rows="3" maxlength="'+L.MAX_DESCRIPTION+'" placeholder="What does the photo show? e.g. INV-03 filter after cleaning" oninput="s91PhotoDraft(\'description\',this.value)"'+(d.busy?" disabled":"")+'>'+esc(d.description)+'</textarea><small id="phx-desc-count">'+d.description.length+' / '+L.MAX_DESCRIPTION+'</small></label>'+
-    '<div class="phx-field wide"><span id="phx-tags-lab">Tags <i>optional</i></span><div class="phx-chips" role="group" aria-labelledby="phx-tags-lab">'+
+    '<label class="phx-field"><span>Link photos to <i>optional</i></span><select class="inp" id="phx-c-linktype" onchange="s91PhotoDraft(\'linkType\',this.value)"'+(d.busy?' disabled':'')+'>'+opts([["issue","Site Issue"],["pm","Preventive Maintenance"],["washing","Washing Report"],["inventory","Inventory Item"]],d.linkType,"Nothing · general photo")+'</select></label>'+
+    (d.linkType?'<label class="phx-field"><span>Choose linked record</span><select class="inp" id="phx-c-linkid" onchange="s91PhotoDraft(\'linkId\',this.value)"'+(d.busy||!P.links.length?' disabled':'')+'>'+opts(P.links.map(x=>[x.id,x.label]),d.linkId,P.links.length?"Choose record…":"No matching records found")+'</select></label>':'')+
+    '<label class="phx-field wide"><span>Remark <i>optional</i></span><textarea class="inp" id="phx-c-desc" rows="3" maxlength="'+L.MAX_DESCRIPTION+'" placeholder="What does the photo show? e.g. INV-03 filter after cleaning" oninput="s91PhotoDraft(\'description\',this.value)" onblur="s91PhotoAutoTags()"'+(d.busy?" disabled":"")+'>'+esc(d.description)+'</textarea><small id="phx-desc-count">'+d.description.length+' / '+L.MAX_DESCRIPTION+'</small></label>'+
+    '<div class="phx-field wide"><span id="phx-tags-lab">Smart tags <i>optional · suggested from your remark</i> <button type="button" class="btn g sm" onclick="s91PhotoSuggest()">Suggest tags</button></span><div class="phx-chips" role="group" aria-labelledby="phx-tags-lab">'+
       L.QUICK_TAGS.map(t=>'<button type="button" class="phx-chip'+(d.tags.includes(t)?" on":"")+'" aria-pressed="'+d.tags.includes(t)+'" onclick="s91PhotoTag(\''+t+'\')"'+(d.busy?" disabled":"")+'>#'+t+'</button>').join("")+'</div>'+
+      '<small id="phx-auto-tags" aria-live="polite">'+(d.tags.length?'Suggested: '+d.tags.map(t=>'#'+esc(t)).join('  '):'')+'</small>'+
       '<input class="inp" id="phx-c-tags" value="'+esc(d.otherTags)+'" placeholder="Other tags, comma separated" aria-label="Other tags, comma separated" oninput="s91PhotoDraft(\'otherTags\',this.value)"'+(d.busy?" disabled":"")+'/></div></div>'+
-   (d.busy?'<div class="phx-progress" id="phx-progress" role="progressbar" aria-label="Simulated upload" aria-valuemin="0" aria-valuemax="100" aria-valuenow="'+(d.progress||0)+'"><i style="width:'+(d.progress||0)+'%"></i></div><p class="phx-ptext" id="phx-progress-text" aria-live="polite">Simulating upload… '+(d.progress||0)+'%</p>':'')+
+   (d.busy?'<div class="phx-progress" id="phx-progress" role="progressbar" aria-label="Photo upload" aria-valuemin="0" aria-valuemax="100" aria-valuenow="'+(d.progress||0)+'"><i style="width:'+(d.progress||0)+'%"></i></div><p class="phx-ptext" id="phx-progress-text" aria-live="polite">Saving photos… '+(d.progress||0)+'%</p>':'')+
    '</div>';
-  const foot='<button class="btn o" onclick="s91PhotoDiscard()"'+(d.busy?" disabled":"")+'>Cancel</button><button class="btn p" onclick="s91PhotoSubmit()"'+(d.busy||!n?" disabled":"")+'>'+(d.busy?"Submitting…":(weak.length&&d.qualityAck?"Submit anyway":"Submit to demo gallery")+(n?" ("+n+")":""))+'</button>';
-  return modal("Add site photos","Demo mode · not uploaded or saved",body,foot,true);
+  const foot='<button class="btn o" onclick="s91PhotoDiscard()"'+(d.busy?" disabled":"")+'>Cancel</button><button class="btn p" onclick="s91PhotoSubmit()"'+(d.busy||!n?" disabled":"")+'>'+(d.busy?"Submitting…":(weak.length&&d.qualityAck?"Submit anyway":"Save photos")+(n?" ("+n+")":""))+'</button>';
+  return modal("Add site photos","Saved in your secure O&M library",body,foot,true);
  }
 
  /* ---------- inside a Site Issue ticket (Issue Desk): a link to the photos linked to that issue ----------
     Tickets keep their own real photo upload (POST /api/issues/{id}/evidence); this only links across. */
- window.s91PhotoForIssue=function(id){P.q=Object.assign({},L.DEFAULT_QUERY,{issue:id});P.limit=L.PAGE_SIZE;S.modal=null;S.modalCtx=null;goView("photos")};
+ window.s91PhotoForIssue=function(id){P.q=Object.assign({},L.DEFAULT_QUERY,{issue:id});S.modal=null;S.modalCtx=null;goView("photos")};
  function ticketHook(){
   if(S.modal!=="ticket")return;
   const t=(S.issues||[]).find(x=>x.id===(S.modalCtx||{}).id);
@@ -313,26 +349,26 @@
  window.s91PhotoPicker=async function(o){
   const old=document.getElementById("phx-picker");if(old)old.remove();
   if(!(o.max>0)){toast("No photo slots left here.");return}
-  let res;try{res=await svc().listPhotos(Object.assign({},L.DEFAULT_QUERY,{plant:o.plant||"all",limit:2000}),viewer())}catch(e){toast("Photos could not load.");return}
-  const mine=res.items.filter(r=>r.source==="session"&&r.file).sort((a,b)=>((b.issue&&b.issue.id===o.issueId)?1:0)-((a.issue&&a.issue.id===o.issueId)?1:0));
+  let res;try{res=await svc().listPhotos(Object.assign({},L.DEFAULT_QUERY,{plant:o.plant||"all",limit:240}),viewer())}catch(e){toast("Photos could not load.");return}
+  const mine=res.items.filter(r=>r.source==="server").sort((a,b)=>((b.issue&&b.issue.id===o.issueId)?1:0)-((a.issue&&a.issue.id===o.issueId)?1:0));
   const picked=new Set(),el=document.createElement("div");el.id="phx-picker";el.setAttribute("role","dialog");el.setAttribute("aria-modal","true");el.setAttribute("aria-labelledby","phx-pk-title");
   const paint=()=>{
    el.innerHTML='<div class="phx-pk"><header><div><h2 id="phx-pk-title">'+esc(o.title||"Choose photos")+'</h2><small>'+esc(o.plant||"All plants")+' · from Photo Intelligence · up to '+o.max+'</small></div><button type="button" class="btn g sm" data-pk="close" aria-label="Close">'+I.x(16)+'</button></header>'+
-    (mine.length?'<div class="phx-pk-grid">'+mine.map(r=>'<button type="button" class="phx-tile'+(picked.has(r.id)?" on":"")+'" data-pk-id="'+esc(r.id)+'" aria-pressed="'+picked.has(r.id)+'" aria-label="'+esc(label(r))+'"><img src="'+esc(imgOf(r))+'" alt=""/>'+(picked.has(r.id)?'<i class="phx-pk-check">✓</i>':'')+
+    (mine.length?'<div class="phx-pk-grid">'+mine.map(r=>'<button type="button" class="phx-tile'+(picked.has(r.id)?" on":"")+'" data-pk-id="'+esc(r.id)+'" aria-pressed="'+picked.has(r.id)+'" aria-label="'+esc(label(r))+'"><img src="'+esc(imgOf(r))+'"'+photoAttr(r)+' alt=""/>'+(picked.has(r.id)?'<i class="phx-pk-check">✓</i>':'')+
       '<span class="phx-tile-meta"><b>'+esc(r.issue&&r.issue.id===o.issueId?"This issue":L.catLabel(r.category))+'</b><small>'+timeOf(r.uploadedAt)+'</small></span></button>').join("")+'</div>'
-     :'<div class="phx-state sm"><b>No photos of yours here yet</b><span>Take photos in Photo Intelligence first. In this demo, only photos added in this browser tab can be attached.</span><button type="button" class="btn o sm" data-pk="open">Open Photo Intelligence</button></div>')+
-    '<p class="phx-pk-note">'+(res.total-mine.length)+' sample photos are demo placeholders and cannot be attached.</p>'+
+     :'<div class="phx-state sm"><b>No saved photos here yet</b><span>Upload a field photo in Photo Intelligence first.</span><button type="button" class="btn o sm" data-pk="open">Open Photo Intelligence</button></div>')+
+    '<p class="phx-pk-note">Shows up to 240 recent photos. Selected photos will be copied into the work record.</p>'+
     '<footer><button type="button" class="btn o" data-pk="close">Cancel</button><button type="button" class="btn p" data-pk="use"'+(picked.size?"":" disabled")+'>Attach '+(picked.size||"")+' photo'+(picked.size===1?"":"s")+'</button></footer></div>';
   };
   el.addEventListener("click",async e=>{
    const b=e.target.closest("[data-pk],[data-pk-id]");if(!b){if(e.target===el)el.remove();return}
-   if(b.dataset.pkId){const id=b.dataset.pkId;if(picked.has(id))picked.delete(id);else if(picked.size<o.max)picked.add(id);else toast("Up to "+o.max+" photo"+(o.max===1?"":"s")+" here.");paint();return}
+   if(b.dataset.pkId){const id=b.dataset.pkId;if(picked.has(id))picked.delete(id);else if(picked.size<o.max)picked.add(id);else toast("Up to "+o.max+" photo"+(o.max===1?"":"s")+" here.");paint();window.s91PhotoHydrate&&s91PhotoHydrate();return}
    if(b.dataset.pk==="close"){el.remove();return}
    if(b.dataset.pk==="open"){el.remove();S.modal=null;S.modalCtx=null;goView("photos");return}
-   if(b.dataset.pk==="use"){const files=(await Promise.all([...picked].map(id=>svc().getPhotoFile(id)))).filter(Boolean);el.remove();if(files.length)o.onPick(files)}
+   if(b.dataset.pk==="use"){try{b.disabled=true;b.textContent="Attaching…";const files=(await Promise.all([...picked].map(id=>svc().getPhotoFile(id)))).filter(Boolean);el.remove();if(files.length)o.onPick(files)}catch(err){b.disabled=false;toast((err&&err.message)||"Could not retrieve saved photo. Try again.");paint()}}
   });
   document.addEventListener("keydown",function k(e){if(e.key==="Escape"&&document.body.contains(el)){el.remove();document.removeEventListener("keydown",k)}});
-  paint();document.body.appendChild(el);
+  paint();document.body.appendChild(el);window.s91PhotoHydrate&&s91PhotoHydrate();
  };
  /* Issue Desk: "From photos" beside the 📎 attach; picked photos join the message and save on Send, like attached files */
  function ticketPickHook(){
@@ -366,7 +402,7 @@
  if(typeof render==="function"){const prev=render;render=function(){prev.apply(this,arguments);
   try{ticketHook();ticketPickHook()}catch(e){console.warn("[Photo Intelligence] ticket hook",e)}
   try{pmPickHook()}catch(e){console.warn("[Photo Intelligence] PM hook",e)}
-  try{watchEnd()}catch(e){}}}
+  try{watchEnd();window.s91PhotoHydrate&&s91PhotoHydrate()}catch(e){}}}
 
  /* ---------- wiring: modals, closing, page unload ---------- */
  if(typeof renderModal==="function"){const prev=renderModal;renderModal=function(){if(S.modal==="photoCompose")return composeModal();if(S.modal==="photoDetail")return detailModal();return prev.apply(this,arguments)}}

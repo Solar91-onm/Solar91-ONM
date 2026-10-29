@@ -310,7 +310,7 @@
   return '<section class="s91-assistant-panel s91-copilot'+(assistant.wide?' is-wide':'')+'" role="dialog" aria-label="Ask Solar91 operations copilot">'+
    '<header class="cp-head"><span class="cp-orb" aria-hidden="true"></span><div><h2>Ask Solar91</h2><small>Live answers from the records you can see</small></div>'+
    '<div class="cp-head-tools">'+(assistant.log.length?'<button type="button" data-cp-new title="Start a new conversation" aria-label="New conversation">✎</button>':'')+'<button type="button" data-cp-wide title="'+(assistant.wide?'Narrow':'Widen')+' panel" aria-label="'+(assistant.wide?'Narrow':'Widen')+' panel">'+(assistant.wide?'⇥':'⇤')+'</button><button type="button" data-s91-assist="close" aria-label="Close assistant">×</button></div></header>'+
-   '<div class="cp-context"><label><span>Focus</span><select data-cp-plant aria-label="Focus suggestions on a plant">'+opts+'</select></label><span class="cp-badge">● Live</span></div>'+
+   '<div class="cp-context"><label><span>Focus</span><select data-cp-plant aria-label="Focus suggestions on a plant">'+opts+'</select></label><button type="button" class="cp-photo-jump" data-cp-photos title="Open searchable field evidence">Field photos</button><span class="cp-badge">● Live</span></div>'+
    '<div class="s91-assistant-conversation cp-body" aria-live="polite">'+conv+'</div>'+
    '<div id="cp-suggest-slot" class="cp-suggest-slot"></div><form id="s91-assistant-form" class="cp-composer"><input id="s91-assistant-query" maxlength="300" aria-label="Ask an operations question" placeholder="Ask anything, or type a ticket / plant…" autocomplete="off"'+(assistant.busy?' disabled':'')+'><button type="submit" aria-label="Ask"'+(assistant.busy?' disabled':'')+'>'+(assistant.busy?'<span class="gx-spin" aria-hidden="true"></span>':'↑')+'</button></form>'+
    '<p class="cp-foot">Read-only · try “overdue maintenance at '+esc91((plants[0]&&plants[0].id)||'QA02')+'” or a ticket number</p></section>';
@@ -438,6 +438,7 @@
  document.addEventListener('click',e=>{
   if(assistant.dragged){assistant.dragged=false;e.preventDefault();return}
   const item=e.target.closest('[data-s91-assist]');if(item){assistant.open=item.dataset.s91Assist==='toggle'?!assistant.open:item.dataset.s91Assist!=='close';drawAssistant();return}
+  if(e.target.closest('[data-cp-photos]')){const photos=window.S91PhotoUI;if(photos){photos.q.plant=focusPlant()||'all';photos.key=null}assistant.open=false;drawAssistant();if(typeof goView==='function')goView('photos');return}
   const question=e.target.closest('[data-s91-question]');if(question){assistant.open=true;ask(question.dataset.s91Question);return}
   const record=e.target.closest('[data-s91-record-kind]');if(record){openAssistantRecord(record.dataset.s91RecordKind,record.dataset.s91RecordId,record.dataset.s91RecordPlant,record.dataset.s91RecordTicket);return}
   if(e.target.closest('[data-cp-new]')){assistant.log=[];assistant.expandedRecs={};assistant.lastQuery='';saveAssistantHistory([]);drawAssistant();return}

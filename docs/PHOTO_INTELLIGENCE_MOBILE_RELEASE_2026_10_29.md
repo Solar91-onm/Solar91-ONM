@@ -1,0 +1,37 @@
+# Solar91 O&M — Photo Intelligence and mobile portal release (2026-10-29)
+
+## What changed
+
+- **Photo Intelligence now uses authenticated, persisted records**, not demo/photos stored in the browser tab. `app/photos/router.py` handles photo metadata, private display copies and 640-pixel WebP thumbnails. Every photo is decoded and stored as WebP by the server (`app/photos/imaging.py`: upright, at most 2048 px, EXIF/GPS removed, PNG kept lossless); the phone already converts to WebP at 2048 px where it can, and such a file is stored as is. Requires migration 031 (duplicate-submission guard). See `docs/PERFORMANCE_OPTIMIZATION_REPORT.md`. Individual upload sessions accept up to 10 valid JPEG/PNG/WebP photos, maximum 15 MB per image. Category, plant, engineer remark and short tags are recorded with the authenticated uploader's identity.
+- **Optional record links**: Site Issue (ticket number), Preventive Maintenance (work order), Washing (report UUID), and Inventory (item ID). All links are checked against a real record in the same plant *before* an upload. Omit the link for general field photography. Nothing can be attached against a fabricated/other-plant record.
+- **Field-first gallery**: photo/album views, date ranges including All time, plant/search/category/engineer/record link filters, day grouping, auto-loading 60-photo pages (each further page fetches only its own rows, without totals or facets), on-demand thumbnail decoding, a 240-thumbnail in-memory cache, and a device-camera button. Smart tags are transparent **rule-based suggestions** from category and engineer's remark, not claims of visual image recognition.
+- **Evidence reuse**: existing Site Issue and PM evidence screens can pick saved photos and copy them into their existing attachment workflow. Linking a photo in the gallery does not silently change a ticket/work order or count as closing work.
+- **Navigation removed**: standalone Command Center, Project Handover, Extra Services, Data Imports, Work Assignments, duplicate Site Issues/PM sidebar entries. Existing backend records and historical endpoints are preserved; removed navigation is not a destructive database change.
+- **Plants**: table before dashboard in the sidebar, desktop registers fit columns within one table frame; mobile layout stacks each plant record as a labeled card. Dashboard cards preserve plant-scoped navigation to PM, Washing and Site Issues.
+- **Mobile/PWA**: safe-area padding, smaller responsive cards, readable inputs, scroll-contained complex tables, compact Photo Intelligence with touch-sized controls, and full-height Ask Solar91 panel on phones. Existing manifest and offline-navigation fallback remain. Offline writes and photo uploads are **not supported**.
+- **Ask Solar91** retains grounded, layered, read-only answers, plant scope, source records, follow-up filters and existing 10-day user-scoped conversation retention. Added a fast shortcut from the assistant to the searchable field photo library, retaining the selected plant. Optional LLM narration is separately controlled by server configuration; this release does not enable autonomous writes or external AI providers.
+
+## Mandatory database / deployment setup
+
+1. Make verified backups of the *staging* database and existing private storage. Do not run any production migration automatically.
+2. With the project's normal migration process, apply `database/migrations/030_site_photos.sql` to **staging PostgreSQL**, in order after existing migrations. It creates `public.site_photos`, plant/date indexes, and RLS. FastAPI reads/writes with its database identity; direct anonymous/authenticated access to the table is revoked.
+3. Verify `SUPABASE_STORAGE_BUCKET` refers to the existing **private** storage bucket; server-side `SUPABASE_SERVICE_ROLE_KEY` must never be placed in frontend code. Ensure this bucket has adequate retention/capacity policies and backups. Image objects are private and retrieved through signed-in, plant-authorized FastAPI endpoints.
+4. Install updated `requirements.txt` (adds Pillow). Deploy the updated `app/` and `frontend/` together to avoid missing API endpoints after the new navigation deploys.
+5. Sign in on staging as Head, Assignee, Site Engineer assigned to one plant, and Administration. Verify Administration is read-only, an engineer cannot read or upload to another plant, and unauthenticated photo responses are denied.
+6. On an actual Android and iOS device, add a home-screen shortcut; upload from camera, choose photos, reload/sign in again, retrieve linked/unlinked images, check a large album and moderate connectivity interruptions. HEIC must be converted to JPEG or PNG before selecting; unsupported images produce a visible message. Photos require connectivity to persist.
+7. Verify the existing optional AI assistant integration only if intentionally enabled and approved. This release does not activate it; it continues to use role-scoped backend records and remain read-only.
+
+## Verification executed in the isolated build environment
+
+- Focused local regression suite: **26 tests passed** including Photo Intelligence API, JS filtering/validation, navigation, dashboard paths, role and upload checks. New API tests use a real SQLite transaction, generated images, and a fake private Storage client; they verify persistence, thumbnails, issue/PM links, rejection of wrong-plant links, role restrictions and rollback on partial storage failure.
+- A **real Chromium** automated smoke script against an isolated FastAPI/SQLite test server passed issue creation, editing, assignments, closure, reload persistence, centered issue table controls, and zero unhandled browser errors.
+- The same browser script successfully opened **ten authenticated major views** — Dashboard, Plants table, Site Issues, Preventive Maintenance, Washing, Photo Intelligence, Equipment Register, Performance, Reports and Settings — at **360, 390 and 768 CSS-pixel mobile widths**, checking no document-level horizontal scrolling, using the actual project stylesheets.
+- `node --check` on modified frontend scripts and Python compilation performed; no live Supabase/Clerk credentials used.
+- The full `pytest -q` run **was not completed** in this environment (time limit). Two tests in `tests/test_chat_history_retention.py` were blocked by the system's missing Playwright-managed Chromium binary; `/usr/bin/chromium` was separately used for the passing browser smoke. These environment failures do not establish a product regression, but they are not a full-suite pass.
+
+## Limitations / design trade-offs
+
+- **Tagging uses rules and engineer-entered text**; no image analysis or computer vision model is trained or connected. Do not label it an AI visual diagnosis.
+- **Photo-link metadata does not change existing work order state.** If a photograph must be evidence for issue status changes, use the existing attachment workflow (including "From photos"). The link and the existing work evidence are separate records for traceability.
+- Saving to Photo Intelligence is not an offline queue; a failed write shows a failure, not a success. Backups and content retention are governed by deployed database/Storage policies ("30 days" in the gallery is a display filter, not automatic deletion).
+- Live cloud performance, real device camera behavior, production PostgreSQL RLS/permissions and scale under concurrent uploads were not tested. Review with production-like staging data before rollout.

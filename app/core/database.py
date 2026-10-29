@@ -62,3 +62,13 @@ def get_db() -> Generator[Session, None, None]:
         yield db
     finally:
         db.close()
+
+
+def release_connection(db: Session) -> None:
+    """Return the pooled connection before slow non-database work (Storage uploads/downloads, image encoding).
+
+    Ends the current read transaction only; loaded objects stay usable (expire_on_commit=False) and the session
+    checks a connection out again on its next query. Pending writes are never committed here.
+    """
+    if not (db.new or db.dirty or db.deleted):
+        db.commit()

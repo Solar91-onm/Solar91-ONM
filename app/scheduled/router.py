@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.core.timeutil import business_today, log_stamp, utc_now
 from app.core.config import get_settings
-from app.core.database import get_db
+from app.core.database import get_db, release_connection
 from app.core.models import AuditLog, Equipment, Issue, OMTask, PMAlertLog, PMDueChange, PMFollowUp, Plant, User, WashingHistory, WashingTable, WashingConfig, Permit, StateRevision
 from app.core.security import WASHING_TYPE, equipment_scope_matches, get_current_user, require_csrf, require_permission, user_scoped_equipment_types, user_scoped_plant_ids, resolve_equipment_id
 from app.plants.codes import find_plant_by_code, normalize_site_code
@@ -628,6 +628,7 @@ def get_evidence(work_order_no: str, kind: str, db: Annotated[Session, Depends(g
     entry = next((e for e in (task.evidence or []) if e.get("kind") == kind), None)
     if not entry or not entry.get("storage_path"):
         raise HTTPException(404, "Photo evidence not found")
+    release_connection(db)  # the Storage download can be slow; do not hold a pooled connection through it
     data, content_type = SupabaseStorage().download(str(entry["storage_path"]))
     return Response(content=data, media_type=content_type, headers={"Cache-Control":"private, max-age=60"})
 
@@ -935,6 +936,7 @@ def get_washing_evidence(
     entry = next((item for item in (report.evidence or []) if item.get("id") == evidence_id), None)
     if not entry or not entry.get("storage_path"):
         raise HTTPException(404, "Washing photo evidence not found")
+    release_connection(db)  # the Storage download can be slow; do not hold a pooled connection through it
     data, content_type = SupabaseStorage().download(str(entry["storage_path"]))
     return Response(content=data, media_type=content_type, headers={"Cache-Control": "private, max-age=60"})
 

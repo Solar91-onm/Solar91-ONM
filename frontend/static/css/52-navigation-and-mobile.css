@@ -1,0 +1,79 @@
+/* Solar91 navigation simplification and touch-first PWA polish, Oct 2026. */
+.s91-side-scope{padding:15px 14px 12px;margin:0;border-bottom:1px solid var(--sidebar-border);background:#111a15;flex-shrink:0}
+.s91-side-scope label{display:block;font-size:11px;font-weight:800;letter-spacing:.07em;text-transform:uppercase;color:#a9bdb0;margin-bottom:7px}
+#app .s91-side-scope select{width:100%;max-width:100%;min-width:0;padding:9px 10px;min-height:40px;border:1px solid #435649;border-radius:10px;background:#24342a;color:#fff;font-size:13px;font-weight:650;cursor:pointer}
+#app .s91-side-scope select:disabled{opacity:.78;cursor:not-allowed}
+.s91-side-scope small{display:block;margin-top:7px;font-size:11px;color:#a9bdb0;line-height:1.45}
+.side-scroll{min-height:0;overflow-y:auto}
+.side-link,.side-sublink{min-height:38px;display:flex;align-items:center;white-space:normal;line-height:1.35}
+.side-sub{margin-left:16px}
+.side-sublink{font-size:13px;padding:8px 10px}
+.plp-switch{width:100%;max-width:100%;justify-content:stretch}
+.plp-switch button{flex:1;min-height:42px}
+/* Every chart/card and toolbar must be allowed to shrink, but never clip text. */
+.portal-page-stack,.pp,.pp-card,.pp-head,.pp-head>div,.plt-panel,.wx-head{min-width:0}
+.pp-card{overflow-wrap:anywhere}
+.pp-card button{max-width:100%}
+#app :is(.panel,.pp-card,.wc-card,.wx-results,.plp-head){scroll-margin-top:95px}
+#app :is(button,select,input,textarea){max-width:100%}
+#app :is(.pp-gauge,.pp-today,.plp-head,.plt-meta){overflow-wrap:anywhere}
+#app .plt-scroll,.ops-table-scroll{max-width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}
+#app .pp-plot svg{max-width:100%}
+@media(max-width:1100px){
+ #app .pp:not(.pp-fit){height:auto!important}
+}
+@media(max-width:900px){
+ .main,.content,.portal-page-stack{width:100%;min-width:0;max-width:100%}
+ .content{overflow-x:hidden;padding:14px max(12px,env(safe-area-inset-right)) calc(108px + env(safe-area-inset-bottom)) max(12px,env(safe-area-inset-left))}
+ .portal-page-stack{gap:14px!important}
+ #app .topbar{gap:8px!important;border-bottom:1px solid var(--border)}
+ #app .topbar>div:first-child>div:last-child{white-space:normal!important;line-height:1.3;font-size:14px!important}
+ #app .topbar>div:last-child{flex-wrap:wrap!important;justify-content:flex-end;gap:6px!important;min-width:0}
+ #app .topbar>div:last-child>select{min-width:116px;max-width:42vw}
+ .mnav{gap:2px;align-items:stretch;padding:5px max(4px,env(safe-area-inset-right)) calc(6px + env(safe-area-inset-bottom)) max(4px,env(safe-area-inset-left))}
+ .mnav>div{min-height:53px;justify-content:center;border-radius:9px;padding:6px 3px;gap:3px;outline-offset:-2px}
+ .mnav>div:focus-visible{outline:2px solid #4ade80}
+ .mnav>div span{max-width:100%;white-space:normal;text-align:center;font-size:11px;line-height:1.2}
+ .pp{gap:12px;margin-bottom:18px}
+ .pp-top{align-items:stretch;gap:12px}
+ .pp-top h2{font-size:17px;line-height:1.35}
+ .pp-filters{justify-content:flex-start;gap:8px}
+ .pp-pill{flex:1 1 135px;min-width:0;justify-content:space-between;gap:4px}
+ .pp-pill select{min-width:0;flex:1;max-width:100%}
+ .pp-row{gap:12px}
+ .pp-row-1{grid-template-columns:repeat(2,minmax(0,1fr))}
+ .pp-card{border-radius:14px;padding:12px;box-shadow:0 2px 12px rgba(12,32,21,.06)}
+ .pp-gauge-body{grid-template-columns:minmax(0,1fr) minmax(64px,96px)}
+ .pp-dial{width:min(100%,96px)}
+ .pp-gauge-copy>strong{font-size:26px}
+ .pp-today button{min-height:42px;padding:8px 9px}
+ .pp-row-2{grid-template-columns:minmax(0,1fr)}
+ .plp-head{align-items:stretch}
+ .plp-actions{width:100%;gap:8px}
+ .plp-actions>.btn{min-height:41px}
+ .plt-bar{padding:12px;gap:8px}
+ #app .plt-search{flex:1 1 100%;max-width:none;min-width:0}
+ .plt-meta{gap:8px;flex-wrap:wrap}
+}
+@media(max-width:540px){
+ .pp-row-1{grid-template-columns:minmax(0,1fr)}
+ .pp-gauge-body{grid-template-columns:minmax(0,1fr) 112px}
+ .pp-dial{width:108px}
+ .pp-filters{width:100%}
+ .pp-pill{flex:1 1 calc(50% - 6px)}
+ .pp-card{padding:14px}
+ .pp-plot{min-height:155px}
+ .pp-today button{min-height:44px}
+ .plp-actions>.btn{flex:1 1 auto}
+}
+@media(max-width:365px){
+ .pp-pill{flex:1 1 100%}
+ .pp-gauge-body{grid-template-columns:minmax(0,1fr) 92px}
+ .pp-dial{width:90px}
+ #app .topbar>div:last-child>select{max-width:38vw}
+}
+@media(pointer:coarse){
+ .side-link,.side-sublink,.pp-seg button,.pp-switch,.pp-pill select,.pp-pie-legend button,.plt-bar button{min-height:40px}
+ .pp-gauge,.pp-line[role="button"],.pp-pie-legend button{touch-action:manipulation}
+}
+@media(prefers-reduced-motion:reduce){.pp-card,.side-sublink,.mnav>div{transition:none!important}}

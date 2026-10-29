@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from typing import Any
 
 from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Index, Integer, JSON, Numeric, String, Text, UniqueConstraint, func, text
@@ -62,6 +62,33 @@ class Plant(Base, TimestampMixin):
             raise ValueError("site_code must contain at least one letter or digit")
         return code
 
+
+
+class SitePhoto(Base):
+    """Private field evidence, independent of whether it is linked to a work record."""
+    __tablename__ = "site_photos"
+    id: Mapped[uuid.UUID] = uuid_pk()
+    plant_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("plants.id", ondelete="CASCADE"), nullable=False, index=True)
+    uploaded_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    uploader_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    category: Mapped[str] = mapped_column(String(40), nullable=False)
+    description: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    tags: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
+    link_type: Mapped[str | None] = mapped_column(String(30))
+    link_id: Mapped[str | None] = mapped_column(String(120))
+    storage_path: Mapped[str] = mapped_column(Text, nullable=False)
+    thumbnail_path: Mapped[str | None] = mapped_column(Text)
+    file_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    content_type: Mapped[str] = mapped_column(String(80), nullable=False)
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    # Browser-generated id of one submission (and the photo's position in it): a retried or double-tapped
+    # upload returns the photos already saved instead of storing them twice. Migration 031.
+    submission_id: Mapped[uuid.UUID | None] = mapped_column()
+    submission_index: Mapped[int | None] = mapped_column(Integer)
+    # set in Python as well, so a new row has its time without a read-back query (and gallery cursors are exact)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), server_default=func.now(), nullable=False)
+    __table_args__ = (Index("ix_site_photos_plant_created", "plant_id", "created_at"),
+                      Index("ux_site_photos_submission", "uploaded_by", "submission_id", "submission_index", unique=True))
 
 class UserPlantAssignment(Base):
     __tablename__ = "user_plant_assignments"

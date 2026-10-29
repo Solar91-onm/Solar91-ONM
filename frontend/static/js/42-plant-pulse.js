@@ -13,7 +13,7 @@
  const LABELS={raised:"Raised",resolved:"Resolved",pm:"PM done"};
  const st=()=>{
   const f=S.plPulse=S.plPulse||{};
-  const d={plant:"all",eq:"all",area:"all",eng:"all",bars:"day",issues:"day",pm:"day"};
+  const d={plant:S.dashPlant||"all",eq:"all",area:"all",eng:"all",bars:"day",issues:"day",pm:"day"};
   Object.keys(d).forEach(k=>{if(f[k]===undefined)f[k]=d[k]});
   if(!f.show)f.show={raised:true,resolved:true,pm:true};
   return f;
@@ -279,7 +279,7 @@
     '<div class="pp-row pp-row-1">'+
      gauge({title:"PM on schedule",value:pmPct,low:70,high:90,go:"pm",sub:d.tasks.length?d.pmOverdue.length+" overdue of "+d.tasks.length+" work orders":"No PM work orders",tip:"Preventive Maintenance work orders not past their due date · click to open"})+
      gauge({title:"Washing compliance",value:typeof d.washPct==="number"?d.washPct:null,low:Math.max(0,d.thr-15),high:d.thr,go:"wash",sub:d.washRows.length?"target "+d.thr+"% · "+d.cyclesDone+" / "+d.cyclesTarget+" cycles this month":d.wc?"Washing not set up":"Loading washing status…",tip:"Current washing cycle: tables done vs tables due by today, against the plant target"+(d.washAll?" (washing follows the plant filters only)":"")+" · click to open Washing"})+
-     gauge({title:"Site issues resolved",value:issPct,low:50,high:80,go:"issues",sub:d.issues.length?d.open.length+" open · "+d.overdueIssues.length+" past ETC":"No site issues recorded",tip:"Share of Site Issues resolved or closed · click to open the open issues"})+
+     gauge({title:"Site issues resolved",value:issPct,low:50,high:80,go:"issues",sub:d.issues.length?d.open.length+" open · "+d.overdueIssues.length+" past ETC":"No site issues recorded",tip:"Share of Site Issues resolved or closed · click to open Site Issues"})+
      todayCard(d)+'</div>'+
     '<div class="pp-row pp-row-2">'+barsCard(d)+pieCard(d)+
      '<div class="pp-stack">'+
@@ -292,17 +292,21 @@
   }
  };
 
- window.s91PulseFilter=function(k,v){st()[k]=v||"all";render()};
- window.s91PulseReset=function(){Object.assign(st(),{plant:"all",eq:"all",area:"all",eng:"all"});render()};
+ window.s91PulseFilter=function(k,v){
+  if(k==="plant"){setPlantScope(v||"all");return}
+  st()[k]=v||"all";render();
+ };
+ window.s91PulseReset=function(){Object.assign(st(),{eq:"all",area:"all",eng:"all"});setPlantScope("all")};
  /* kept for older links that set one plant */
- window.s91PulsePlant=function(v){st().plant=v||"all";render()};
+ window.s91PulsePlant=function(v){setPlantScope(v||"all")};
  window.s91PulseRange=function(key,v){st()[key]=v;render()};
  window.s91PulseSeries=function(k){const f=st();f.show[k]=!f.show[k];render()};
  /* every card opens its module with the same plant, equipment, district and engineer filters */
  window.s91PulseGo=function(key){
   const f=st(),plant=f.plant,d=scopeData(typeof dashScope==="function"?dashScope():(S.plants||[]));
-  const iss=Object.assign({plant,q:"",from:"",to:"",vert:f.eq,assignee:f.eng},f.area.indexOf("d:")===0?{district:f.area.slice(2)}:{});
-  if(key==="issues"||key==="issOpen"){drillIssues(Object.assign(iss,{chip:"Open"}));return}
+  const iss=Object.assign(blankIssF(),{plant,q:"",from:"",to:"",vert:f.eq,assignee:f.eng},f.area.indexOf("d:")===0?{district:f.area.slice(2)}:{});
+  if(key==="issues"){drillIssues(Object.assign(iss,{chip:"all"}));return}
+  if(key==="issOpen"){drillIssues(Object.assign(iss,{chip:"Open"}));return}
   if(key==="issOver"){drillIssues(Object.assign(iss,{chip:"Overdue"}));return}
   if(key==="issToday"){drillIssues(Object.assign(iss,{chip:"all",from:TODAY,to:TODAY}));return}
   if(key==="pmToday"){
@@ -310,14 +314,15 @@
    S._glanceScroll="pm-day-planner";goScheduledOM("maintenance");return;
   }
   if(key==="pm"||key==="pmOver"||key==="pmSoon"){
-   const status=key==="pmSoon"?"Due soon":key==="pmOver"?"Overdue":d.pmOverdue.length?"Overdue":"all";
+   const status=key==="pmSoon"?"Due soon":key==="pmOver"?"Overdue":"all";
    S.pmLive=Object.assign(S.pmLive||{},{plant,status,week:"all",age:"all",equipment:f.eq,person:f.eng,query:"",page:1,plantOpen:false,view:"register"});
    S._glanceScroll="pm-unit-register";goScheduledOM("maintenance");return;
   }
   if(key==="wash"||key==="washLate"){
    const ui=S._washUi=S._washUi||{q:"",bucket:"all",show:"all",assignee:"all",region:"all",sort:"late",page:1,pageSize:12,selected:[]};
-   const wc=S._washCycles||{},row=plant==="all"?null:(wc.plants||[]).concat(wc.unconfigured||[]).find(p=>p.plant===plant);
-   Object.assign(ui,{plant:row?row.plant_id:"all",state:key==="washLate"?"late":"all",show:"all",bucket:"all",cyc:"all",page:1});
+   const wc=S._washCycles||{},rec=(S.plants||[]).find(p=>p.name===plant),row=plant==="all"?null:(wc.plants||[]).concat(wc.unconfigured||[]).find(p=>p.plant===plant);
+   const plantId=plant==="all"?"all":String(row&&row.plant_id||rec&&(rec.dbId||rec.id)||"all");
+   Object.assign(ui,{plant:plantId,region:f.area.indexOf("d:")===0?f.area.slice(2):"all",state:key==="washLate"?"late":"all",show:"all",bucket:"all",cyc:"all",q:"",page:1,view:"table"});
    S.washF=Object.assign({},ui);S._glanceScroll="wc-results";goScheduledOM("washing");return;
   }
  };

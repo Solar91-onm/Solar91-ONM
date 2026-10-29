@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 
 from app.core.spreadsheet import neutralise_formulas
 from app.core.config import get_settings
-from app.core.database import get_db
+from app.core.database import get_db, release_connection
 from app.issues.schemas import normalize_issue_severity
 from app.core.models import (
     AuditLog, Equipment, EquipmentDocument, Issue, OMTask, Plant, User,
@@ -281,6 +281,7 @@ def get_equipment_document(equipment_id:UUID,document_id:UUID,db:Annotated[Sessi
     _ensure_equipment_read(db,user,row)
     doc=db.get(EquipmentDocument,document_id)
     if not doc or doc.equipment_id!=row.id: raise HTTPException(404,"Document not found")
+    release_connection(db)  # the Storage download can be slow; do not hold a pooled connection through it
     data,content_type=SupabaseStorage().download(doc.storage_path)
     return Response(content=data,media_type=content_type,headers={"Content-Disposition":_document_content_disposition(doc.original_name),"Cache-Control":"private, max-age=60"})
 

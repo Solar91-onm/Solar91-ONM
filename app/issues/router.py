@@ -12,7 +12,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.core.database import get_db
+from app.core.database import get_db, release_connection
 from app.core.models import Issue, IssueHistory, OMTask, User, UserEquipmentTypeAssignment
 from app.core.security import ensure_equipment_scope, ensure_plant_scope, has_portfolio_scope, equipment_scope_matches, get_current_user, is_head, require_csrf, require_permission, text_is_current_user, user_scoped_equipment_types, user_scoped_plant_ids
 from app.issues import importer as issue_importer
@@ -277,6 +277,7 @@ def get_issue_evidence(issue_id:UUID,evidence_id:str,db:Annotated[Session,Depend
     _require_issue_action_scope(db,user,issue_id)
     entry=next((item for item in (row.legacy_payload or {}).get("evidence",[]) if item.get("id")==evidence_id),None)
     if not entry or not entry.get("storage_path"): raise HTTPException(404,"Issue photo evidence not found")
+    release_connection(db)  # the Storage download can be slow; do not hold a pooled connection through it
     data,content_type=SupabaseStorage().download(str(entry["storage_path"]))
     return Response(content=data,media_type=content_type,headers={"Cache-Control":"private, max-age=60"})
 

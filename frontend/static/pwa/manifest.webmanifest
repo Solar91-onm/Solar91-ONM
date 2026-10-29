@@ -1,15 +1,18 @@
 {
   "id": "/",
-  "name": "SOLAR 91 — O&M Command Center & Photo Intelligence",
+  "name": "SOLAR 91 — Plant Operations & Photo Intelligence",
   "short_name": "SOLAR 91 O&M",
-  "description": "Solar91 Cleantech Limited — solar plant operations and maintenance, with O&M Photo Intelligence for site photos",
+  "description": "Solar91 plant dashboard, site issues, preventive maintenance, washing and photo intelligence",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
   "orientation": "any",
   "background_color": "#ffffff",
   "theme_color": "#009710",
-  "categories": ["business", "productivity"],
+  "categories": [
+    "business",
+    "productivity"
+  ],
   "icons": [
     {
       "src": "/static/pwa/icon-192.png",
@@ -34,7 +37,13 @@
       "short_name": "Photos",
       "description": "Add site photos and browse photos from your plants",
       "url": "/#/photos",
-      "icons": [{ "src": "/static/pwa/icon-192.png", "sizes": "192x192", "type": "image/png" }]
+      "icons": [
+        {
+          "src": "/static/pwa/icon-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
     }
   ]
 }

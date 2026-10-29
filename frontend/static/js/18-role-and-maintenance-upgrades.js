@@ -2,7 +2,7 @@
 /* ================================================================
    REV08 — INTERNAL ROLE SET + SITE ENGINEER MODULE LOCK + PHOTO EVIDENCE
    External Client / Asset Owner and Vendor test roles were removed.
-   Site Engineer can see only Command Center, Site Issues and Preventive Maintenance.
+   Site Engineer can see only the plant dashboard, Site Issues and Preventive Maintenance.
    ================================================================ */
 (function(){
   var INTERNAL_ROLES=["O&M Head","Assignee","Administration","Site Engineer"];
@@ -22,7 +22,7 @@
 
   function enforceSiteEngineerModules(){
     if(rev05Role()!=="Site Engineer")return;
-    var allowed=["Command Center","My Plant","Site Issues","Preventive Maintenance","Washing","Photo Intelligence"];
+    var allowed=["Plants dashboard","My Plant","Site Issues","Preventive Maintenance","Washing","Photo Intelligence"];
     document.querySelectorAll(".side-link").forEach(function(a){
       var sp=a.querySelector("span"),txt=(sp?sp.textContent:a.textContent||"").trim();
       a.style.display=allowed.some(function(x){return txt===x||txt.indexOf(x)===0})?"":"none";
@@ -30,7 +30,7 @@
     document.querySelectorAll(".mnav > div").forEach(function(d){
       var txt=(d.textContent||"").replace(/\d+/g,"").trim();
       if(txt==="More"){d.style.display="";return}
-      var map={Home:"Command Center","My Plant":"Command Center",Plants:"Plants",Issues:"Site Issues",Preventive:"Preventive Maintenance",Planned:"Preventive Maintenance",Work:"Work / Assignments",Reports:"Reports",Photos:"Photo Intelligence"};
+      var map={Home:"Plants dashboard",Dashboard:"Plants dashboard","Plants table":"Plants","My Plant":"My Plant",Plants:"Plants",Issues:"Site Issues",Preventive:"Preventive Maintenance",Planned:"Preventive Maintenance",Work:"Work / Assignments",Reports:"Reports",Photos:"Photo Intelligence"};
       var lab=map[txt]||txt;
       d.style.display=allowed.some(function(x){return lab===x||lab.indexOf(x)===0})?"":"none";
     });
@@ -335,7 +335,7 @@
     if(S.view==="om-module"&&["issues","scheduled","washing"].indexOf(S.omTab)<0)S.omTab="issues";
 
     /* exact desktop module whitelist */
-    var allowed=["Command Center","My Plant","Site Issues","Preventive Maintenance","Washing","Photo Intelligence"];
+    var allowed=["Plants dashboard","My Plant","Site Issues","Preventive Maintenance","Washing","Photo Intelligence"];
     document.querySelectorAll(".side-link").forEach(function(a){
       var sp=a.querySelector("span"),txt=(sp?sp.textContent:a.textContent||"").trim();
       a.style.display=allowed.indexOf(txt)>=0?"":"none";
@@ -367,7 +367,7 @@
   var prevGoView=window.goView;
   window.goView=function(v){
     if(seRole()&&v!=="dashboard"&&v!=="photos"){ /* Photo Intelligence is plant-scoped for Site Engineers */
-      toast("Site Engineer can access only Command Center, Site Issues and Preventive Maintenance for "+sePlant()+".");
+      toast("Site Engineer can access only the plant dashboard, Site Issues and Preventive Maintenance for "+sePlant()+".");
       S.view="dashboard";saveSE();render();return;
     }
     return prevGoView.apply(this,arguments);

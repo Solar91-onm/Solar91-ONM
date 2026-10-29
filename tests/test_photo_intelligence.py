@@ -66,8 +66,8 @@ def test_file_validation_limits():
       const f=(name,type,size)=>({name,type,size});
       const v=L.validateFiles([f('a.jpg','image/jpeg',1000),f('b.pdf','application/pdf',1000),f('c.png','image/png',0),
         f('d.webp','image/webp',16*1024*1024),f('e.HEIC','',2000)],0);
-      assert.deepStrictEqual(Array.from(v.accepted,x=>x.name),['a.jpg','e.HEIC']);
-      assert.deepStrictEqual(Array.from(v.rejected,x=>x.name),['b.pdf','c.png','d.webp']);
+      assert.deepStrictEqual(Array.from(v.accepted,x=>x.name),['a.jpg']);
+      assert.deepStrictEqual(Array.from(v.rejected,x=>x.name),['b.pdf','c.png','d.webp','e.HEIC']);
       const many=Array.from({length:4},(_,i)=>f('p'+i+'.jpg','image/jpeg',10));
       const capped=L.validateFiles(many,L.MAX_FILES-2);
       assert.strictEqual(capped.accepted.length,2,'at most MAX_FILES per submission');
@@ -176,7 +176,7 @@ def test_portal_is_ready_to_install_on_phones():
                 'name="mobile-web-app-capable" content="yes"', 'rel="apple-touch-icon"', 'rel="manifest"'):
         assert tag in page, tag
     assert page.index("/static/js/47-photo-intelligence.js") < page.index("/static/js/48-mobile-pwa.js")
-    assert page.index("/static/css/51-mobile-pwa.css") < page.index("/static/css/48-laptop-fit.css"), "laptop-fit stays the last stylesheet"
+    assert page.index("/static/css/51-mobile-pwa.css") < page.index("/static/css/48-laptop-fit.css") < page.index("/static/css/52-navigation-and-mobile.css"), "responsive navigation styles load last"
     sw = (ROOT / "frontend/static/pwa/sw.js").read_text(encoding="utf-8")
     assert "notificationclick" in sw and "caches." not in sw
     pwa = (ROOT / "frontend/static/js/48-mobile-pwa.js").read_text(encoding="utf-8")

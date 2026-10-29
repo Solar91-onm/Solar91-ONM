@@ -63,14 +63,14 @@ def state_collections(
     user: Annotated[User, Depends(get_current_user)],
 ):
     requested={key.strip() for key in keys.split(",") if key.strip()}
-    result=load_state(db,user,include_washing="washing" in requested)
+    result=load_state(db,user,include_washing="washing" in requested,only=requested)
     state=result["state"]
-    return {
+    return json_response({
         "state":{key:state[key] for key in requested if key in state},
         "collection_revisions":{
             key:result["collection_revisions"].get(key,0) for key in requested
         },
-    }
+    })
 
 
 @router.put("/state/sync", dependencies=[Depends(require_csrf)])
@@ -90,7 +90,7 @@ def state_sync(
 
 
 def _state_collection(db: Session, user: User, key: str):
-    return load_state(db, user)["state"].get(key, [])
+    return json_response(load_state(db, user, only={key})["state"].get(key, []))
 
 
 @router.get("/handovers", tags=["Project Handover"])

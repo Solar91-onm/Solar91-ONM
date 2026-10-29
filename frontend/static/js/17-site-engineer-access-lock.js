@@ -292,17 +292,17 @@
 var REV05_PERMISSION_MATRIX=[
  {role:"O&M Head",modules:["Full","Full","Full","Full","Full","Full","Full","Full"],scope:"Portfolio"},
  {role:"Assignee",modules:["View","View","Assigned · edit","Assigned · execute","Assigned","Hidden","Assigned items","Field tools / docs"],scope:"Assigned work"},
- {role:"Administration",modules:["Command Center","Hidden","Hidden","Reports","Hidden","Hidden","Hidden","Hidden"],scope:"Portfolio read-only"},
+ {role:"Administration",modules:["Plants dashboard","Hidden","Hidden","Reports","Hidden","Hidden","Hidden","Hidden"],scope:"Portfolio read-only"},
  {role:"Site Engineer",modules:["Plant view","Hidden","Plant · edit","Plant · execute","Hidden","Hidden","Hidden","Hidden"],scope:"Single plant"}
 ];
 function rev05Role(){return S._roleLabel||S.currentRole||"O&M Head"}
 function rev05ReadOnly(){return rev05Role()==="Administration"}
 function rev05AllowedModules(){
  const m={
-  "O&M Head":["Command Center","Plants","Site Issues","Preventive Maintenance","Washing","Work / Assignments","Performance","Reports","Data / Imports","Settings","Project Handover","Extra Services","Photo Intelligence"],
-  "Assignee":["Command Center","Plants","Site Issues","Preventive Maintenance","Washing","Work / Assignments","Project Handover","Extra Services","Photo Intelligence"],
-  "Administration":["Command Center","Reports","Photo Intelligence"],
-  "Site Engineer":["Command Center","Site Issues","Preventive Maintenance","Washing","Photo Intelligence"]
+  "O&M Head":["Plants dashboard","Plants","Site Issues","Preventive Maintenance","Washing","Work / Assignments","Performance","Reports","Data / Imports","Settings","Project Handover","Extra Services","Photo Intelligence"],
+  "Assignee":["Plants dashboard","Plants","Site Issues","Preventive Maintenance","Washing","Work / Assignments","Project Handover","Extra Services","Photo Intelligence"],
+  "Administration":["Plants dashboard","Reports","Photo Intelligence"],
+  "Site Engineer":["Plants dashboard","My Plant","Site Issues","Preventive Maintenance","Washing","Photo Intelligence"]
  };
  return m[rev05Role()]||m["O&M Head"];
 }
@@ -317,7 +317,7 @@ function rev05RebuildRolePicker(){
  }
  const labels=["O&M Head","Assignee","Administration","Site Engineer"],want=rev05Role();
  sel.innerHTML=labels.map(l=>'<option value="'+esc(l)+'"'+(l===want?' selected':'')+'>'+esc(l)+'</option>').join("");
- sel.title="O&M Head — full portfolio and team access\nAssignee — assigned O&M work\nAdministration — read-only Command Center and Reports\nSite Engineer — single-plant Command Center + Site Issues + Preventive Maintenance only";
+ sel.title="O&M Head — full portfolio and team access\nAssignee — assigned O&M work\nAdministration — read-only plant dashboard and Reports\nSite Engineer — single-plant dashboard, Site Issues and Preventive Maintenance";
 }
 (function(){
  const baseSwitch=window.ccSwitchRole;
@@ -333,7 +333,7 @@ function rev05ApplyPermissions(){
  const role=rev05Role(),allowed=rev05AllowedModules();
  document.querySelectorAll(".side-link").forEach(a=>{const sp=a.querySelector("span"),txt=(sp?sp.textContent:a.textContent||"").trim();a.style.display=allowed.some(x=>txt===x||txt.indexOf(x)===0)?"":"none"});
  /* Bottom bar: ignore badge counts in the label ("Issues76") and map the short mobile names; "More" lists only role-allowed modules. */
- document.querySelectorAll(".mnav > div").forEach(d=>{const txt=(d.textContent||"").replace(/\d+/g,"").trim(),map={Home:"Command Center","My Plant":"Command Center",Plants:"Plants",Issues:"Site Issues",Preventive:"Preventive Maintenance",Planned:"Preventive Maintenance",Work:"Work / Assignments",Reports:"Reports",Photos:"Photo Intelligence"};if(txt==="More"){d.style.display="";return}const lab=map[txt]||txt;d.style.display=allowed.some(x=>lab===x||lab.indexOf(x)===0)?"":"none"});
+ document.querySelectorAll(".mnav > div").forEach(d=>{const txt=(d.textContent||"").replace(/\d+/g,"").trim(),map={Home:"Plants dashboard",Dashboard:"Plants dashboard","Plants table":"Plants","My Plant":"My Plant",Plants:"Plants",Issues:"Site Issues",Preventive:"Preventive Maintenance",Planned:"Preventive Maintenance",Work:"Work / Assignments",Reports:"Reports",Photos:"Photo Intelligence"};if(txt==="More"){d.style.display="";return}const lab=map[txt]||txt;d.style.display=allowed.some(x=>lab===x||lab.indexOf(x)===0)?"":"none"});
  if(rev05ReadOnly()){
   const mutate=/create|save|delete|remove|assign|reassign|approve|reject|startTask|completeTask|convertToIssue|washTable|bulkWash|logException|import|updateWash|toggleRule|syncQueue|renewDoc|reorder|bumpESR|verifyESR|changeESR|closePTW|reportIncident|omHeadMoveTicket/i;
   document.querySelectorAll(".content button,.modal button").forEach(b=>{const oc=b.getAttribute("onclick")||"",tx=(b.textContent||"").trim();if(mutate.test(oc)||/^(Add|Build|Upload|Create|Start|Complete|Reassign|Approve|Reject|Close ticket|Log |Record renewal|Run now|Sync now|\+ Add)/i.test(tx)){b.style.display="none"}});

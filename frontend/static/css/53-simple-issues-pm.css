@@ -1,0 +1,90 @@
+/* Solar91 Issue register and PM: calm, centered, touch-safe tables.
+   Layout-only: business actions, status transitions and backend permissions are unchanged. */
+#app .m26-issues.si .si-tbl{background:var(--card,#fff)}
+#app .m26-issues.si .si-register{width:100%;min-width:1260px;table-layout:fixed;border-collapse:separate;border-spacing:0}
+#app .m26-issues.si .si-register th,#app .m26-issues.si .si-register td{padding:12px 10px;text-align:center;vertical-align:middle;border-bottom:1px solid var(--border,#e5ebe7);background:var(--card,#fff);overflow-wrap:anywhere;line-height:1.45}
+#app .m26-issues.si .si-register th{position:sticky;top:0;z-index:1;background:var(--secondary,#f4f7f5);font-size:11px;letter-spacing:.025em;text-transform:uppercase;color:var(--muted-foreground,#53675c);font-weight:750;white-space:normal}
+#app .m26-issues.si .si-register th.si-h-id{width:105px}
+#app .m26-issues.si .si-register th.si-h-eq{width:120px}
+#app .m26-issues.si .si-register th.si-h-sub{width:120px}
+#app .m26-issues.si .si-register th.si-h-ref{width:115px}
+#app .m26-issues.si .si-register th.si-h-problem{width:205px}
+#app .m26-issues.si .si-register th.si-h-plant{width:100px}
+#app .m26-issues.si .si-register th.si-h-company{width:125px}
+#app .m26-issues.si .si-register th.si-h-owner{width:130px}
+#app .m26-issues.si .si-register th.si-h-status{width:105px}
+#app .m26-issues.si .si-register th.si-h-action{width:155px}
+#app .m26-issues.si .si-register tr.si-r.od,#app .m26-issues.si .si-register tr.si-r.od:hover{background:transparent}
+#app .m26-issues.si .si-register tr.si-r.od td,#app .m26-issues.si .si-register tr.si-r.od:hover td{background:var(--card,#fff)}
+#app .m26-issues.si .si-register tr.si-r:hover td,#app .m26-issues.si .si-register tr.si-g:hover td{background:var(--secondary,#f6f8f6)}
+#app .m26-issues.si .si-register td:first-child{min-width:0;border-left:0;box-shadow:none}
+#app .m26-issues.si .si-register td.si-ticket{border-left:3px solid var(--c,#b0bfba);box-shadow:none;min-width:0}
+#app .m26-issues.si .si-register th.cc-cbcell{width:38px!important;min-width:38px!important;max-width:38px!important;padding:8px 4px!important;text-align:center}
+#app .m26-issues.si .si-register td.cc-cbcell{width:38px;min-width:38px!important;max-width:38px;border-left:0;box-shadow:none;padding:8px 4px!important}
+#app .m26-issues.si .si-register .si-strong{font-weight:750;color:var(--foreground,#183026);font-size:12.5px;display:block;max-width:100%;overflow-wrap:anywhere}
+#app .m26-issues.si .si-register .si-quiet{display:block;font-size:11px;line-height:1.4;color:var(--muted-foreground,#64746b);font-weight:450;margin-top:3px;overflow-wrap:anywhere}
+#app .m26-issues.si .si-register .si-priority-dot{display:inline-block;width:7px;height:7px;border-radius:50%;vertical-align:1px;margin-right:4px}
+#app .m26-issues.si .si-register .si-cell-text{display:block;max-width:100%;font-size:12px;line-height:1.45;overflow-wrap:anywhere}
+#app .m26-issues.si .si-register .si-problem-cell{min-width:0}
+#app .m26-issues.si .si-register .si-problem-text{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;line-clamp:3;overflow:hidden;max-width:100%;font-size:12.5px;line-height:1.45;color:var(--foreground,#183026);overflow-wrap:anywhere}
+#app .m26-issues.si .si-register .si-av{display:inline-flex;align-items:center;justify-content:center;white-space:normal;max-width:100%;gap:5px;font-size:11.5px;overflow-wrap:anywhere}
+#app .m26-issues.si .si-register .si-av i{flex-shrink:0;width:23px;height:23px}
+#app .m26-issues.si .si-register .si-un{white-space:normal;font-size:11px;justify-content:center}
+#app .m26-issues.si .si-register .si-status{display:flex;flex-direction:column;justify-content:center;align-items:center;gap:4px;min-width:0}
+#app .m26-issues.si .si-register .si-status-label{display:inline-flex;align-items:center;justify-content:center;gap:6px;max-width:100%;padding:4px 8px;border-radius:999px;font-size:11.5px;line-height:1.25;font-weight:750;color:var(--foreground,#183026);background:var(--secondary,#f4f7f5);text-align:center}
+#app .m26-issues.si .si-register .si-status-label i{height:8px;width:8px;flex:0 0 8px;display:inline-block;border-radius:50%;background:#397bb9;box-shadow:0 0 0 2px rgba(57,123,185,.1)}
+#app .m26-issues.si .si-register .si-status-complete .si-status-label i{background:#16a34a;box-shadow:0 0 0 2px rgba(22,163,74,.15)}
+#app .m26-issues.si .si-register .si-status-overdue .si-status-label i{background:#dc463d;box-shadow:0 0 0 2px rgba(220,70,61,.16)}
+#app .m26-issues.si .si-register .si-status-waiting .si-status-label i{background:#d59b25;box-shadow:0 0 0 2px rgba(213,155,37,.15)}
+#app .m26-issues.si .si-register .si-status small{font-size:11px;color:var(--muted-foreground,#697c72);line-height:1.35;text-align:center}
+#app .m26-issues.si .si-register .si-status-overdue small{color:#b53d34;font-weight:700}
+#app .m26-issues.si .si-register .si-gid{justify-content:center;flex-wrap:wrap}
+#app .m26-issues.si .si-register tr.si-g td{background:var(--secondary,#f8faf8);padding:10px 8px}
+#app .m26-issues.si .si-register tr.si-child td{background:var(--card,#fff)}
+#app .m26-issues.si .si-register tr.si-child td:nth-child(2){padding-left:10px}
+#app .m26-issues.si .si-register td.oi-action-cell{min-width:155px;width:auto;padding:9px!important;position:static}
+#app .m26-issues.si .si-register td.oi-action-cell .oi-row-actions,#app .m26-issues.si .si-register td.oi-action-cell .row{display:flex!important;align-items:center;justify-content:center;flex-wrap:wrap!important;position:static!important;transform:none!important;gap:5px;max-width:none!important;padding:0!important;box-shadow:none!important}
+#app .m26-issues.si .si-register tr.si-r td.oi-action-cell::after{display:none}
+#app .m26-issues.si .si-register td.oi-action-cell .btn{position:static!important;opacity:1!important;pointer-events:auto!important;transform:none!important;margin:0!important;max-width:100%;height:auto;min-height:30px}
+#app .m26-issues.si .si-scroll{overflow:auto;max-width:100%;overscroll-behavior-x:contain;scrollbar-width:thin}
+#app .m26-issues.si .si-scroll:focus-visible{outline:2px solid var(--primary,#0e6336);outline-offset:-3px}
+/* PM: soft rows, centered values and a compact workflow action area. */
+#app .pml-table-wrap,#app .pmd-table-wrap,#app .pml-coverage-scroll,#app .pm-group-table-scroll{overflow-x:auto;overscroll-behavior-x:contain;scrollbar-width:thin}
+#app .pml-consolidated-table{width:100%;min-width:930px;table-layout:auto}
+#app .pml-consolidated-table th,#app .pml-consolidated-table td,#app .pmd-table th,#app .pmd-table td,#app .pm-group-table th,#app .pm-group-table td{padding:12px 10px;text-align:center;vertical-align:middle;line-height:1.4}
+#app .pml-consolidated-table th,#app .pmd-table th,#app .pm-group-table th{font-size:11.5px;white-space:normal;background:var(--secondary,#f4f7f5);color:var(--muted-foreground,#53665a)}
+#app .pml-consolidated-table tr.pmc-late td,#app .pml-consolidated-table tr.pmc-soon td,#app .pmd-table tr.st-late td{background:var(--card,#fff)}
+#app .pml-consolidated-table tbody tr:hover td,#app .pmd-table tbody tr:hover td{background:var(--secondary,#f6f8f6)}
+#app .pml-consolidated-table tr.pmc-row td:first-child{box-shadow:none;border-left:3px solid var(--pmc-tone,transparent)}
+#app .pml-consolidated-table td:first-child b,#app .pmd-table td b{font-weight:750}
+#app .pml-consolidated-table td small,#app .pmd-table td small{white-space:normal;overflow-wrap:anywhere;line-height:1.4}
+#app .pml-consolidated-table .pmc-task{max-width:240px;margin:3px auto 0;white-space:normal;line-height:1.35;overflow-wrap:anywhere}
+#app .pml-consolidated-table .pml-unit-bar,#app .pmd-table .pml-unit-bar,#app .pml-consolidated-table .pml-stack{margin-inline:auto}
+#app .pml-consolidated-table .pml-badge{display:inline-flex;align-items:center;justify-content:center;gap:6px;line-height:1.3}
+#app .pml-consolidated-table .pml-badge::before{content:"";display:inline-block;width:8px;height:8px;border-radius:50%;flex:none;background:#397bb9}
+#app .pml-consolidated-table .pml-badge.done::before{background:#16a34a}
+#app .pml-consolidated-table .pml-badge.overdue::before{background:#d3463a}
+#app .pml-consolidated-table .pml-badge.due-soon::before{background:#da9b29}
+#app .pml-consolidated-table td.pmc-act,#app .pmd-table td.pmd-c-act{white-space:normal}
+#app .pml-consolidated-table td.pmc-act .btn,#app .pmd-table td.pmd-c-act .btn{margin:3px!important;min-height:34px;white-space:nowrap}
+#app .pml-filters{gap:10px;align-items:center;padding:12px 14px}
+#app .pml-filters select,#app .pml-filters input{min-height:40px;border-radius:10px;font-size:13px;max-width:100%}
+#app .pmv-tabs{display:flex;flex-wrap:wrap;gap:6px;max-width:100%}
+#app .pmv-tab{min-height:39px;line-height:1.35}
+@media(max-width:760px){
+ #app .m26-issues.si .si-tbl-top{padding:12px;align-items:flex-start}
+ #app .m26-issues.si .si-tbl-tools{width:100%;justify-content:space-between}
+ #app .m26-issues.si .si-scroll{margin:0;max-width:100%;-webkit-overflow-scrolling:touch}
+ #app .m26-issues.si .si-register{min-width:1180px}
+ #app .m26-issues.si .si-register th,#app .m26-issues.si .si-register td{padding:10px 8px;font-size:12px}
+ #app .m26-issues.si .si-bar,#app .pml-filters{padding:12px}
+ #app .m26-issues.si .si-row .si-search{flex-basis:100%}
+ #app .m26-issues.si .si-row .si-sel{max-width:calc(50% - 6px);flex:1 1 140px}
+ #app .pmv-tabs{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:thin;padding-bottom:5px;-webkit-overflow-scrolling:touch}
+ #app .pmv-tab{flex:0 0 auto;min-height:42px}
+ #app .pml-filters input{flex:1 1 100%;min-width:0}
+ #app .pml-filters select,#app .pml-filters .pml-inline-select select{max-width:100%;min-width:130px}
+ #app .pml-consolidated-table,#app .pmd-table{min-width:900px}
+ #app .pml-consolidated-table th,#app .pml-consolidated-table td{padding:10px 9px}
+}
+@media(prefers-reduced-motion:reduce){#app .si-register tr,#app .pml-consolidated-table tr{transition:none}}

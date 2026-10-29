@@ -55,7 +55,7 @@ function showClerkSignIn(errorMessage){
     '<main class="s91-side"><i class="blob b1"></i><i class="blob b2"></i><i class="blob b3"></i>'+
       '<div class="s91-col">'+
         '<div class="s91-brand">'+EM.replace('<img','<img class="em"')+'<img class="wm" src="/static/brand/solar91-wordmark.png" alt="SOLAR 91"></div>'+
-        '<h2 class="s91-title">O&amp;M Command Center</h2>'+
+        '<h2 class="s91-title">O&amp;M Plant Operations</h2>'+
         '<p class="s91-sub">Sign in with the email your O&amp;M Head added</p>'+
         '<div class="s91-glow"></div>'+
         '<div class="s91-foot">Solar91 Cleantech Limited · <b>Energizing India</b></div>'+
@@ -435,6 +435,21 @@ if(typeof window!=="undefined"){
   const monitor=window.Solar91Latency.enabled&&typeof performance!=="undefined"?{started:performance.now(),fetchMs:0,status:null,serverTiming:"",contentLength:null}:null;
   try{return await apiFetchCore(url,opts,monitor)}
   finally{if(monitor){const elapsed=performance.now()-monitor.started;S91_LATENCY_SAMPLES.push({route:routeFamily(url),method:String(opts&&opts.method||"GET").toUpperCase(),clientMs:elapsed,fetchMs:monitor.fetchMs,serverTotalMs:metric(monitor.serverTiming,"total"),serverAppMs:metric(monitor.serverTiming,"app"),serverDbMs:metric(monitor.serverTiming,"db"),contentLength:monitor.contentLength,failed:!monitor.status||monitor.status>=400});if(S91_LATENCY_SAMPLES.length>500)S91_LATENCY_SAMPLES.splice(0,S91_LATENCY_SAMPLES.length-500)}}
+ };
+}
+
+/* One network request for identical concurrent plain reads (e.g. two modules asking for the same list in one render).
+   The first caller gets the parsed response; later callers get their own copy, so no two callers share mutable data. */
+{
+ const apiFetchUnshared=apiFetch,inflightReads=new Map();
+ const copy=v=>v==null||typeof v!=="object"?v:(typeof structuredClone==="function"?structuredClone(v):JSON.parse(JSON.stringify(v)));
+ apiFetch=function(url,opts){
+  const o=opts||{},plain=!o.signal&&!o.headers&&o.body==null&&(!o.method||String(o.method).toUpperCase()==="GET");
+  if(!plain)return apiFetchUnshared(url,opts);
+  const key=String(url);
+  if(inflightReads.has(key))return inflightReads.get(key).then(copy);
+  const pending=apiFetchUnshared(url,opts).finally(()=>inflightReads.delete(key));
+  inflightReads.set(key,pending);return pending;
  };
 }
 

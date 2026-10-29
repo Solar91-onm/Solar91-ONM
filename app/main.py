@@ -10,7 +10,6 @@ import sys
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.middleware.gzip import GZipMiddleware
 from sqlalchemy import inspect as sa_inspect, text
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
@@ -22,12 +21,14 @@ from app.audit.router import router as audit_router
 from app.field.router import router as field_router
 from app.auth.router import router as auth_router
 from app.core.assets import asset_hash, build_info, version_static_urls
+from app.core.compression import TextGZipMiddleware
 from app.core.config import get_settings
 from app.imports.router import router as imports_router
 from app.issues.router import router as issues_router
 from app.notifications.router import router as notifications_router
 from app.operations.router import router as operations_router
 from app.plants.router import router as plants_router
+from app.photos.router import router as photos_router
 from app.pmplan.router import router as pmplan_router
 from app.scada.router import router as scada_router
 from app.scheduled.router import router as scheduled_router
@@ -105,8 +106,9 @@ app.add_middleware(
     expose_headers=["X-Request-ID", "Rndr-Id", "Server-Timing"],
 )
 
-# Compress big responses (the 740 KB page shrinks to roughly 130 KB) so pages load fast on site-office mobile networks.
-app.add_middleware(GZipMiddleware,minimum_size=1000)
+# Compress big text responses (the 740 KB page shrinks to roughly 130 KB) so pages load fast on site-office mobile
+# networks; photos, PDFs and spreadsheets are already compressed and pass through (app/core/compression.py).
+app.add_middleware(TextGZipMiddleware,minimum_size=1000)
 
 @app.middleware("http")
 async def require_bootstrap(request: Request, call_next):
@@ -289,6 +291,7 @@ templates=Jinja2Templates(directory=TEMPLATES)
 app.include_router(auth_router)
 app.include_router(field_router)
 app.include_router(plants_router)
+app.include_router(photos_router)
 app.include_router(issues_router)
 app.include_router(operations_router)
 app.include_router(services_router)

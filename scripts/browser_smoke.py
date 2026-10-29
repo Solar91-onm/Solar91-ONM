@@ -100,20 +100,21 @@ def main():
                                 '<script>'+SDK_STUB+'</script>',html)
                     scripts=re.findall(r'<script defer src="(/static/js/[^"]+)"></script>',html)
                     html=re.sub(r'<script defer src="/static/js/[^"]+"></script>','',html)
-                    css=re.findall(r'<link rel="stylesheet" href="(/static/css/[^"]+)">',html)
-                    html=re.sub(r'<link rel="stylesheet" href="/static/css/[^"]+">','',html)
+                    css=re.findall(r'<link rel="stylesheet" href="(/static/css/[^"]+)"\s*/?>',html)
+                    html=re.sub(r'<link rel="stylesheet" href="/static/css/[^"]+"\s*/?>','',html)
                     page.set_content(html,wait_until="domcontentloaded")
                     page.evaluate('''() => {window.fetch=async (url,options={})=>{const result=await window.__s91BrowserTransport({url:String(url),method:options.method||'GET',body:options.body||null,headers:options.headers||{}});return new Response(result.body||'',{status:result.status,headers:{'Content-Type':'application/json'}})}}''')
                     for href in css:
                         f=ROOT/href.split("?",1)[0].lstrip("/").replace("static/","frontend/static/",1)
-                        if f.exists():page.add_style_tag(content=f.read_text(encoding="utf8"))
+                        if f.exists():
+                            page.evaluate("css=>{const e=document.createElement('style');e.textContent=css;document.head.appendChild(e)}",f.read_text(encoding="utf8"))
                     for href in scripts:
                         f=ROOT/href.split("?",1)[0].lstrip("/").replace("static/","frontend/static/",1)
                         if not f.exists():raise AssertionError("Missing frontend asset "+href)
                         page.add_script_tag(content=f.read_text(encoding="utf8"))
                 load()
                 page.wait_for_selector(".shell",timeout=30000)
-                assert "Command Center" in page.locator("#app").inner_text()
+                assert "Plants dashboard" in page.locator("#app").inner_text()
                 print("PASS: real browser loads authenticated dashboard")
                 # Create plant via actual HTTP API (no fake register state); reload to verify persistence.
                 plant=page.evaluate('''async()=>{const r=await apiFetch("/api/plants",{method:"POST",body:{site_code:"BROWSER-01",plant_name:"Browser QA Solar Plant",district:"Jaipur"}});return r;}''')
@@ -157,6 +158,17 @@ def main():
                 page.evaluate('goTab("issues")');page.wait_for_selector(".si-head",timeout=12000)
                 assert page.locator("#app").get_by_text(ticket["id"]).count()>=1
                 print("PASS: issue survives refresh and renders in issue register")
+                # The register shows one centered column per field. The existing ticket actions remain usable.
+                cols=page.locator('.si-register thead th').all_text_contents()
+                cols=[label.strip() for label in cols if label.strip()]
+                assert cols==["Issue ID","Equipment","Subpart","Subpart / unit ID","Problem","Plant code","Supplier / maker","Assigned to","Status","Action"],cols
+                assert page.evaluate('getComputedStyle(document.querySelector(".si-register thead th.si-h-id")).textAlign')=="center"
+                assert page.locator('.si-register tbody tr[data-act="issue"] .si-status').count()>=1
+                assert page.locator('.si-register tbody tr[data-act="issue"] .oi-row-actions').count()>=1
+                page.set_viewport_size({"width":390,"height":844})
+                assert page.locator('.si-scroll').evaluate('(el)=>el.scrollWidth>el.clientWidth'),"Issue table must scroll within its own container on mobile"
+                page.set_viewport_size({"width":1400,"height":900})
+                print("PASS: centered issue hierarchy, existing actions, and mobile horizontal table scroll")
                 # Closing a dialog and opening another screen in one click (ticket -> "Open plant page") must stay there;
                 # the dialog's deferred history step used to send the person back to Site Issues.
                 page.evaluate('id=>openModal("ticket",{id})',ticket["id"]);page.wait_for_timeout(500)
@@ -272,6 +284,26 @@ def main():
                 assert n["n"]<=366 and not n["from"],n
                 page.evaluate('siSet({from:"",to:""})')
                 print("PASS: 100-year ranges bounded; malformed dates rejected")
+                # Cross-portal mobile smoke: authenticated screens remain navigable without document-level sideways scrolling.
+                for width in (360,390,768):
+                    page.set_viewport_size({"width":width,"height":844})
+                    for view,nav in (("dashboard","goView('dashboard')"),("plants table","goView('plants','table')"),
+                                     ("site issues","goTab('issues')"),("PM","goScheduledOM('maintenance')"),
+                                     ("washing","goScheduledOM('washing')"),("photos","goView('photos')"),
+                                     ("equipment","m26GoEq()"),("performance","goView('performance')"),
+                                     ("reports","goView('reports')"),("settings","goView('settings')")):
+                        page.evaluate('''()=>{S.modal=null;S.modalCtx=null;}''')
+                        print("MOBILE CHECK",width,view,flush=True)
+                        page.evaluate(nav)
+                        page.wait_for_timeout(160)
+                        layout=page.evaluate('''()=>({pageWidth:document.documentElement.scrollWidth,viewport:innerWidth,contentWidth:document.querySelector('.content')?.clientWidth,photos:!!document.querySelector('.phx')})''')
+                        if layout["pageWidth"]>width+2:
+                            offenders=page.evaluate(r'''()=>[...document.querySelectorAll('*')].filter(e=>{const r=e.getBoundingClientRect(),c=getComputedStyle(e);return r.width>2&&r.right>innerWidth+3&&c.position!=='fixed'&&c.display!=='none'}).sort((a,b)=>b.getBoundingClientRect().right-a.getBoundingClientRect().right).slice(0,12).map(e=>({name:e.tagName.toLowerCase()+'.'+String(e.className).replace(/\s+/g,'.').slice(0,80),right:Math.round(e.getBoundingClientRect().right),left:Math.round(e.getBoundingClientRect().left),width:Math.round(e.getBoundingClientRect().width)}))''')
+                            print("MOBILE OVERFLOW",width,view,layout,offenders,flush=True)
+                            raise AssertionError((width,view,layout))
+                        if view=="photos":assert layout["photos"],(width,view,layout)
+                    print("PASS: authenticated portal views fit",width,"px mobile viewport without page-level sideways scroll")
+                page.set_viewport_size({"width":1400,"height":900})
                 assert not errors,"Unhandled browser errors: "+json.dumps(errors[-5:])
                 print("PASS: zero uncaught browser JavaScript exceptions")
                 browser.close()

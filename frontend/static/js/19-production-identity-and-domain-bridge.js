@@ -11,10 +11,10 @@
   document.querySelectorAll('.cc-proto-role-badge,#standalone-proto-pill').forEach(x=>x.remove());
  }
  function modulesFor(r){return {
-  'O&M Head':['Command Center','Plants','Site Issues','Preventive Maintenance','Washing','Work / Assignments','Performance','Reports','Data / Imports','Settings','Project Handover','Extra Services','Photo Intelligence'],
-  'Assignee':['Command Center','Plants','Site Issues','Preventive Maintenance','Washing','Work / Assignments','Project Handover','Extra Services','Photo Intelligence'],
-  'Administration':['Command Center','Reports','Photo Intelligence'],
-  'Site Engineer':['Command Center','My Plant','Site Issues','Preventive Maintenance','Washing','Photo Intelligence','Notifications','My Profile']
+  'O&M Head':['Plants dashboard','Plants','Site Issues','Preventive Maintenance','Washing','Work / Assignments','Performance','Reports','Data / Imports','Settings','Project Handover','Extra Services','Photo Intelligence'],
+  'Assignee':['Plants dashboard','Plants','Site Issues','Preventive Maintenance','Washing','Work / Assignments','Project Handover','Extra Services','Photo Intelligence'],
+  'Administration':['Plants dashboard','Reports','Photo Intelligence'],
+  'Site Engineer':['Plants dashboard','My Plant','Site Issues','Preventive Maintenance','Washing','Photo Intelligence','Notifications','My Profile']
  }[r]||[]}
  function enforce(){
   if(AUTH_IDENTITY.role){S.currentRole=AUTH_IDENTITY.role;S._roleLabel=AUTH_IDENTITY.role}
@@ -35,7 +35,7 @@
  window.ccSwitchRole=function(){toast('Your role is managed by the Solar91 administrator.');};
  const priorRender=render;render=function(){enforce();const out=priorRender.apply(this,arguments);enforce();setTimeout(enforce,30);return out};
  const priorGoView=window.goView;window.goView=function(v){
-  const r=role(),map={'dashboard':'Command Center','plants':'Plants','work':'Work / Assignments','performance':'Performance','reports':'Reports','data':'Data / Imports','settings':'Settings'};
+  const r=role(),map={'dashboard':'Plants dashboard','plants':'Plants','work':'Work / Assignments','performance':'Performance','reports':'Reports','data':'Data / Imports','settings':'Settings'};
   if(map[v]&&modulesFor(r).indexOf(map[v])<0){toast('This module is not available for your role.');S.view='dashboard';render();return}
   return priorGoView.apply(this,arguments);
  };

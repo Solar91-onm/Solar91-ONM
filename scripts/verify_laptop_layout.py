@@ -6,7 +6,7 @@ browser reports a JavaScript error. Screenshots are kept for a visual review.
     python scripts/verify_laptop_layout.py                 # all sizes, screenshots in a temp folder
     python scripts/verify_laptop_layout.py 1366x768 --out shots
 """
-import json, os, re, socket, subprocess, sys, tempfile, time
+import json, os, re, shutil, socket, subprocess, sys, tempfile, time
 from datetime import timedelta
 from pathlib import Path
 from urllib.request import urlopen
@@ -75,7 +75,7 @@ def main():
             except Exception: time.sleep(.2)
         from playwright.sync_api import sync_playwright
         with sync_playwright() as pw:
-            b = pw.chromium.launch(headless=True)
+            b = pw.chromium.launch(headless=True, executable_path=shutil.which("chromium") or shutil.which("google-chrome"), args=["--no-sandbox"])
             for w, h in SIZES:
                 pg = b.new_page(viewport={"width": w, "height": h}, reduced_motion="reduce")
                 errors = []; pg.on("pageerror", lambda e: errors.append(str(e)))

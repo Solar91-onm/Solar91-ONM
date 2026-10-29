@@ -335,8 +335,11 @@
    .catch(e=>{if(S.washDay===d&&d.loading===key){d.error=detailOf(e,"Could not load washing activity for this day.");d.loading=false}})
    .finally(()=>{if(S.modal==="washingDaySummary"&&S.washDay===d)render()});
  }
+ const DAY_ROWS=50;   /* the day summary lists plants a page at a time; "Show more" adds the next page */
  window.washDaySet=function(k,v){
   const d=S.washDay;if(!d)return;
+  if(k==="more"){d.show=(d.show||DAY_ROWS)+DAY_ROWS;render();return}
+  d.show=DAY_ROWS;
   if(k==="st"){d.st=v;render();return}          // grouping filter only: no reload
   if(k==="shift")d.date=addDays(d.date,v);else d[k]=v;
   if(!d.date)return;d.data=null;d.error=null;render();loadDaySummary();
@@ -365,11 +368,13 @@
    const list=r.plants.filter(pick);
    const diff=p=>p.difference===null||p.difference===undefined?'—':'<b class="'+(p.difference<0?'wx-neg':'wx-pos')+'">'+(p.difference>0?'+':'')+p.difference+'</b>';
    const cleaned=p=>p.cleaned_confirmed||p.cleaned_pending?(p.cleaned_confirmed?'<b>'+p.cleaned_confirmed+'</b>':'0')+(p.cleaned_pending?' <small>+'+p.cleaned_pending+' awaiting</small>':''):'—';
-   const rows=list.map(p=>'<tr><td><b>'+h(p.plant)+'</b><small class="wx-by">'+h(p.site_code)+'</small></td><td>'+dayChip(p)+'</td><td>'+cleaned(p)+'</td>'+
+   const shown=list.slice(0,d.show||DAY_ROWS);
+   const rows=shown.map(p=>'<tr><td><b>'+h(p.plant)+'</b><small class="wx-by">'+h(p.site_code)+'</small></td><td>'+dayChip(p)+'</td><td>'+cleaned(p)+'</td>'+
     (hasTarget?'<td>'+(p.target===null?'—':p.target)+'</td><td>'+diff(p)+'</td>':'')+
     '<td>'+(p.cycles_completed.length?p.cycles_completed.map(n=>chip("Cycle "+n,"ok")).join(" "):'—')+'</td><td>'+(p.confirmations?p.confirmations+' <small>('+plural(p.tables_confirmed,"table")+')</small>':'—')+'</td><td><small>'+h(p.reported_by.join(", ")||"—")+'</small></td><td><small>'+h(p.confirmed_by.join(", ")||"—")+'</small></td><td><button type="button" class="btn g sm" onclick="openWashingPlantDetails(\''+h(p.plant_id)+'\')">Open</button></td></tr>').join("");
    const head='<tr><th>Plant</th><th>Status</th><th>Tables cleaned</th>'+(hasTarget?'<th>Target</th><th>Difference</th>':'')+'<th>Cycles completed</th><th>Confirmations made</th><th>Reported by</th><th>Confirmed by</th><th></th></tr>';
-   const table=list.length?'<div class="wc-table-wrap wx-dsum-table"><table class="wc-table wc-compact" style="min-width:'+(hasTarget?980:820)+'px"><thead>'+head+'</thead><tbody>'+rows+'</tbody></table></div>'
+   const table=list.length?'<div class="wc-table-wrap wx-dsum-table"><table class="wc-table wc-compact" style="min-width:'+(hasTarget?980:820)+'px"><thead>'+head+'</thead><tbody>'+rows+'</tbody></table></div>'+
+    (list.length>shown.length?'<div class="wc-pager"><span>Showing '+shown.length+' of '+list.length+' plants</span><button type="button" class="btn o sm" onclick="washDaySet(\'more\')">Show '+Math.min(DAY_ROWS,list.length-shown.length)+' more</button></div>':'')
     :'<div class="wc-empty">No plant in this group on '+h(fmt(r.date))+'.</div>';
    const filt=d.st!=="all"?'<p class="sub" style="margin:0 0 8px">Showing '+plural(list.length,"plant")+' · <a href="#" onclick="washDaySet(\'st\',\'all\');return false">show all '+r.plants.length+'</a></p>':'';
    body=tiles+filt+table+'<p class="sub" style="margin-top:8px">Tables cleaned are the tables washed on this date. Confirmations made counts reports confirmed on this date, whatever day they were washed.'+(hasTarget?' Difference = tables cleaned − the day\'s target.':'')+'</p>';
@@ -951,7 +956,9 @@
    '<button class="btn o" onclick="closeModal()">Cancel</button><button class="btn p" onclick="submitWashingDailyReport()">'+(isField()?'Submit for O&amp;M confirmation':'Save confirmed record')+'</button>',true);
  }
  async function upload(reportId,files,kind){
-  if(!files.length)return;const body=new FormData();files.forEach(f=>body.append("files",f,f.name));body.append("kind",kind);
+  if(!files.length)return;const body=new FormData();
+  for(const f of files){const up=typeof compressEvidenceImage==="function"?await compressEvidenceImage(f):f;body.append("files",up,up.name||f.name)}
+  body.append("kind",kind);
   await apiFetch("/api/scheduled/washing/daily-reports/"+encodeURIComponent(reportId)+"/evidence",{method:"POST",body});
  }
  window.washPhotoSelection=function(kind,input){

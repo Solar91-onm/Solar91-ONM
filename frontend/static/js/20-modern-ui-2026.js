@@ -659,10 +659,10 @@ function m26EqExport(){const q=m26EqQuery(1);q.delete("offset");q.delete("limit"
 /* ---- wiring: sidebar link, page, crumb, modals ---- */
 if(typeof sidebar==="function"){
  const m26OrigSidebar=sidebar;
- sidebar=function(){let h=m26OrigSidebar.apply(this,arguments);if(((typeof AUTH_IDENTITY!=="undefined"&&AUTH_IDENTITY.role)||S.currentRole)==="Site Engineer")return h;const on=S.view==="equipment",link='<div class="side-link '+(on?"active":"")+'" onclick="m26GoEq()">'+I.boxes(16)+'<span>Equipment Register</span></div>',lab=h.indexOf("<span>Project Handover</span>");if(lab<0)lab=h.indexOf("<span>Preventive Maintenance</span>");if(lab<0)return h;const end=h.indexOf("</div>",lab)+6;return h.slice(0,end)+link+h.slice(end)};
+ sidebar=function(){let h=m26OrigSidebar.apply(this,arguments);if(((typeof AUTH_IDENTITY!=="undefined"&&AUTH_IDENTITY.role)||S.currentRole)==="Site Engineer")return h;const on=S.view==="equipment",link='<div class="side-link '+(on?"active":"")+'" onclick="m26GoEq()">'+I.boxes(16)+'<span>Equipment Register</span></div>';let lab=h.indexOf("<span>Photo Intelligence</span>");if(lab<0)return h;const end=h.indexOf("</div>",lab)+6;return h.slice(0,end)+link+h.slice(end)};
 }
 if(typeof renderServices==="function"){const m26OrigServices=renderServices;renderServices=function(){return S.view==="equipment"?renderEquipmentRegister():m26OrigServices.apply(this,arguments)}}
-if(typeof render==="function"){const m26OrigRender=render;render=function(){m26OrigRender.apply(this,arguments);if(S.view==="equipment"){try{document.querySelectorAll(".topbar *").forEach(el=>{if(el.children.length===0){const t=el.textContent.trim();if(t==="Extra Services")el.textContent="Equipment Register";else if(t==="Operations")el.textContent="Command Center"}})}catch(e){}}}}
+if(typeof render==="function"){const m26OrigRender=render;render=function(){m26OrigRender.apply(this,arguments);if(S.view==="equipment"){try{document.querySelectorAll(".topbar *").forEach(el=>{if(el.children.length===0){const t=el.textContent.trim();if(t==="Extra Services")el.textContent="Equipment Register";else if(t==="Operations")el.textContent="Equipment"}})}catch(e){}}}}
 if(typeof renderModal==="function"){const m26OrigModal2=renderModal;renderModal=function(){if(S.modal==="m26Eq"){const c=S.modalCtx||{};return m26EqForm(c.mode,c.id)}if(S.modal==="m26EqAssign")return m26EqAssignModal((S.modalCtx||{}).type);if(S.modal==="m26EqMove")return m26EqMoveModal((S.modalCtx||{}).id);if(S.modal==="m26EqDetail")return m26EqDetailModal((S.modalCtx||{}).id);if(S.modal==="m26EqImport")return m26EqImportModal();return m26OrigModal2.apply(this,arguments)}}
 
 /* Mobile navigation: keep the compact primary destinations and place secondary
@@ -673,8 +673,8 @@ function m26MobileMoreGo(kind){S.modal=null;S.modalCtx=null;if(kind==="app")retu
 function m26MobileMoreModal(){
  const role=S._roleLabel||S.currentRole||"O&M Head";
  const byRole={
-  "O&M Head":[["work","Work / Assignments","Your operational work"],["reports","Reports","Operational reporting and exports"],["performance","Performance","Portfolio performance views"],["photos","Photo Intelligence","Site photos from every plant"],["handover","Project Handover","Handover and commissioning workflows"],["services","Extra Services","Additional operations services"],["data","Data / Imports","Imports and operational data"],["settings","Settings","Application settings"]],
-  "Assignee":[["work","Work / Assignments","Your assigned operational work"],["photos","Photo Intelligence","Site photos from every plant"],["handover","Project Handover","Handover and commissioning workflows"],["services","Extra Services","Additional operations services"]],
+  "O&M Head":[["reports","Reports","Operational reporting and exports"],["performance","Performance","Portfolio performance views"],["photos","Photo Intelligence","Site photos from every plant"],["settings","Settings","Application settings"]],
+  "Assignee":[["photos","Photo Intelligence","Search field photos and attach evidence"],["performance","Performance","Equipment and plant performance"]],
   "Administration":[["reports","Reports","Operational reporting and exports"],["photos","Photo Intelligence","Site photos (view only)"]],
   "Site Engineer":[["washing","Washing","Plant-scoped washing work"]]
  };

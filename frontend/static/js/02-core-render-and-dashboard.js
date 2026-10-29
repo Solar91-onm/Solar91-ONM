@@ -14,10 +14,10 @@ function render(){
  const waBadge=(typeof washDueCount==="function")?washDueCount():S.washing.filter(t=>wDue(t,((S.washMeta||{})[t.plant]||{freq:14}).freq)&&!washedToday(t)&&!excToday(t)).length;
  const isBadge=openTk(S.issues).length;
  const plant=S.plants.find(p=>p.id===S.plantId);
- const CRUMB={dashboard:["Command Center","Portfolio operations"],plants:["Plants",S.plantsTab==="dashboard"?"Plants dashboard":"Plants table"],plant:["Plants",plant?plant.name:"Plant detail"],work:["Command Center","Work / Assignments"],performance:["Command Center","Performance"],reports:["Command Center","Reports"],data:["Command Center","Data / Imports"],settings:["Command Center","Settings"],handover:["Operations","Project Handover"],scheduled:["Planned Maintenance","Preventive Maintenance"],washing:["Planned Maintenance","Washing"],issues:["Command Center","Site Issues"],services:["Operations","Extra Services"],analytics:["Command Center","Analytics"],photos:["Operations","Photo Intelligence"]};
+ const CRUMB={dashboard:["Plants","Plants dashboard"],plants:["Plants",S.plantsTab==="dashboard"?"Plants dashboard":"Plants table"],plant:["Plants",plant?plant.name:"Plant detail"],work:["Operations","Work / Assignments"],performance:["Operations","Performance"],reports:["Operations","Reports"],data:["Operations","Data / Imports"],settings:["Operations","Settings"],handover:["Operations","Project Handover"],scheduled:["Planned Maintenance","Preventive Maintenance"],washing:["Planned Maintenance","Washing"],issues:["Operations","Site Issues"],services:["Operations","Extra Services"],analytics:["Operations","Analytics"],photos:["Operations","Photo Intelligence"]};
  const crumb=S.view==="dashboard"?((S._roleLabel||S.currentRole)==="Site Engineer"?["Field operations","My plant"]:CRUMB.dashboard):S.view==="plants"?CRUMB.plants:S.view==="plant"?CRUMB.plant:S.view==="work"?CRUMB.work:S.view==="performance"?CRUMB.performance:S.view==="reports"?CRUMB.reports:S.view==="data"?CRUMB.data:S.view==="settings"?CRUMB.settings:S.view==="photos"?CRUMB.photos:(CRUMB[S.omTab]||CRUMB.services);
  let body;
- try{body=S.view==="dashboard"?renderDashboard():S.view==="plants"?renderPlants():S.view==="plant"?renderPlantPage():S.view==="work"?renderWork():S.view==="performance"?renderPerformance():S.view==="reports"?renderReportsHub():S.view==="data"?renderDataHub():S.view==="settings"?renderSettings():S.view==="photos"?(typeof renderPhotoIntelligence==="function"?renderPhotoIntelligence():'<div class="panel">Loading Photo Intelligence…</div>'):S.omTab==="handover"?renderHandover():(S.omTab==="scheduled"||S.omTab==="washing")?renderScheduledHub():S.omTab==="issues"?renderIssues():S.omTab==="analytics"?renderAnalytics():renderServices()}catch(renderErr){
+ try{body=S.view==="dashboard"?renderPlantsDashboard():S.view==="plants"?renderPlants():S.view==="plant"?renderPlantPage():S.view==="work"?renderWork():S.view==="performance"?renderPerformance():S.view==="reports"?renderReportsHub():S.view==="data"?renderDataHub():S.view==="settings"?renderSettings():S.view==="photos"?(typeof renderPhotoIntelligence==="function"?renderPhotoIntelligence():'<div class="panel">Loading Photo Intelligence…</div>'):S.omTab==="handover"?renderHandover():(S.omTab==="scheduled"||S.omTab==="washing")?renderScheduledHub():S.omTab==="issues"?renderIssues():S.omTab==="analytics"?renderAnalytics():renderServices()}catch(renderErr){
   console.error("Solar91 module render failed",S.view,S.omTab,renderErr);
   body='<div class="panel" style="padding:24px;border:1px solid #F5C2C0;background:#FFF7F6;border-radius:14px"><h2 style="margin:0 0 8px">This section could not be displayed</h2><p style="color:#4F5B55;margin:0 0 12px">One of the saved records has missing or unexpected data. You can still use the menu to open other sections.</p><pre style="white-space:pre-wrap;font-size:12px;margin:0 0 12px">'+esc(String(renderErr&&renderErr.message||renderErr))+'</pre><button class="btn o" onclick="render()">Try again</button></div>';
  };
@@ -31,11 +31,18 @@ function render(){
  try{window.scrollTo(_scroll.x,_scroll.y);const c=document.querySelector(".content");if(c)c.scrollTop=_scroll.content}catch(e){}
 }
 S.toastMsg=null;
-function mobileNav(b){const raw=S.view==="dashboard"?"dashboard":(S.view==="plants"||S.view==="plant")?"plants":S.view==="work"?"work":S.omTab;const act=(raw==="scheduled"||raw==="washing")?"scheduled":raw;
- const it=(id,l,ic,fn,n)=>'<div class="'+(act===id?"active":"")+'" onclick="'+fn+'">'+ic+'<span>'+l+'</span>'+(n?'<span class="side-badge">'+Math.min(n,99)+'</span>':'')+'</div>';
- const isSE=(S._roleLabel||S.currentRole)==="Site Engineer";
- if(isSE){return '<nav class="mnav">'+it("dashboard","My Plant",I.dash(18),"goView('dashboard')")+it("issues","Issues",I.alert(18),"goTab('issues')",b.isBadge)+it("scheduled","Preventive",I.clipc(18),"goScheduledOM('maintenance')",(b.scBadge||0)+(b.waBadge||0))+it("washing","Washing",I.clipc(18),"goScheduledOM('washing')",b.waBadge)+'</nav>';}
- return '<nav class="mnav">'+it("dashboard","Home",I.dash(18),"goView('dashboard')")+it("plants","Plants",I.sun(18),"goView('plants')")+it("issues","Issues",I.alert(18),"goTab('issues')",b.isBadge)+it("scheduled","Preventive",I.clipc(18),"goScheduledOM('maintenance')",(b.scBadge||0)+(b.waBadge||0))+it("work","Work",I.clipc(18),"goView('work')")+it("reports","Reports",I.gauge(18),"goView('reports')")+'</nav>'}
+function mobileNav(b){
+ const role=S._roleLabel||S.currentRole||"O&M Head";
+ const dashboard=S.view==="dashboard"||(S.view==="plants"&&S.plantsTab==="dashboard");
+ const table=S.view==="plants"&&S.plantsTab!=="dashboard";
+ const it=(active,label,icon,fn)=>'<div role="button" tabindex="0" class="'+(active?'active':'')+'" onclick="'+fn+'" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();this.click()}" aria-label="'+label+'">'+icon+'<span>'+label+'</span></div>';
+ let links=it(dashboard,role==="Site Engineer"?"My Plant":"Dashboard",I.dash(18),"goView('dashboard')");
+ if(role!=="Site Engineer"&&role!=="Administration")links+=it(table,"Plants table",I.sun(18),"goView('plants','table')");
+
+ if(role==="O&M Head"||role==="Administration")links+=it(S.view==="reports","Reports",I.gauge(18),"goView('reports')");
+ links+=it(S.view==="photos","Photos",I.ftext(18),"goView('photos')");
+ return '<nav class="mnav" aria-label="Mobile primary navigation">'+links+'</nav>';
+}
 function sidebar(b){
  let act=S.view==="dashboard"?"dashboard":S.view==="plants"||S.view==="plant"?"plants":["work","performance","reports","data","settings","photos"].includes(S.view)?S.view:((S.omTab==="scheduled"||S.omTab==="washing")?"scheduled":S.omTab);
  const link=(id,label,icon,fn,badgeN)=>'<div class="side-link '+(act===id?"active":"")+'" onclick="'+fn+'">'+icon+'<span>'+label+'</span>'+(badgeN?'<span class="side-badge">'+Math.min(badgeN,99)+'</span>':'')+'</div>';
@@ -44,32 +51,23 @@ function sidebar(b){
  if(isSE){
   links='<div class="side-label">Field Operations</div>'+
    link("dashboard","My Plant",I.dash(16),"goView('dashboard')")+
-   link("issues","Site Issues",I.alert(16),"goTab('issues')",b.isBadge)+
-   link("scheduled","Preventive Maintenance",I.clipc(16),"goScheduledOM('maintenance')",(b.scBadge||0)+(b.waBadge||0))+
-   link("washing","Washing",I.clipc(16),"goScheduledOM('washing')",b.waBadge)+
    link("photos","Photo Intelligence",I.ftext(16),"goView('photos')");
  }else{
-  links='<div class="side-label">Command Center</div>'+
-   link("dashboard","Command Center",I.dash(16),"goView('dashboard')")+
-   plantsNavGroup(act==="plants")+
-   link("issues","Site Issues",I.alert(16),"goTab('issues')",b.isBadge)+
-   link("scheduled","Preventive Maintenance",I.clipc(16),"goScheduledOM('maintenance')",(b.scBadge||0)+(b.waBadge||0))+
-   link("work","Work / Assignments",I.clipc(16),"goView('work')")+
+  links='<div class="side-label">Plants &amp; Operations</div>'+
+   ( (S._roleLabel||S.currentRole)==="Administration" ? link("dashboard","Plants dashboard",I.dash(16),"goView('dashboard')") : plantsNavGroup(act==="plants"||S.view==="dashboard"))+
    link("performance","Performance",I.gauge(16),"goView('performance')")+
    link("reports","Reports",I.gauge(16),"goView('reports')")+
-   link("data","Data / Imports",I.boxes(16),"goView('data')")+
    link("settings","Settings",I.gear(16),"goView('settings')")+
    '<div class="side-label">Operations</div>'+
-   link("photos","Photo Intelligence",I.ftext(16),"goView('photos')")+
-   link("handover","Project Handover",I.fcheck(16),"goTab('handover')",b.hoBadge)+
-   link("services","Extra Services",I.boxes(16),"goTab('services')");
+   link("photos","Photo Intelligence",I.ftext(16),"goView('photos')");
  }
  const displayName=S.currentUser||OM_HEAD;
  const displayRole=S._roleLabel||S.currentRole||"O&amp;M Head";
  const initials=String(displayName).split(/\s+/).filter(Boolean).slice(0,2).map(x=>x[0]).join("").toUpperCase()||"S9";
  return '<aside class="sidebar">'+
- '<div class="side-brand"><div class="side-mark" style="background:none;border-radius:0;width:44px;height:44px"><span style="display:grid;place-items:center;width:44px;height:44px;background:#fff;border-radius:12px"><img src="/static/brand/solar91-emblem.png" width="34" height="34" alt="" style="display:block"></span></div><div class="side-title"><b style="display:flex;align-items:baseline;gap:0;font-size:15px;letter-spacing:.01em">SOLAR<span style="color:#ffa400;margin-left:6px">91<sup style="font-size:10.5px;font-weight:700;vertical-align:super;margin-left:1px;color:#ffa400">™</sup></span></b><span>O&amp;M Command Center</span></div></div>'+
+ '<div class="side-brand"><div class="side-mark" style="background:none;border-radius:0;width:44px;height:44px"><span style="display:grid;place-items:center;width:44px;height:44px;background:#fff;border-radius:12px"><img src="/static/brand/solar91-emblem.png" width="34" height="34" alt="" style="display:block"></span></div><div class="side-title"><b style="display:flex;align-items:baseline;gap:0;font-size:15px;letter-spacing:.01em">SOLAR<span style="color:#ffa400;margin-left:6px">91<sup style="font-size:10.5px;font-weight:700;vertical-align:super;margin-left:1px;color:#ffa400">™</sup></span></b><span>Operations Management</span></div></div>'+
   (["O&M Head","Assignee","Administration"].includes(S._roleLabel||S.currentRole||"")?'<button type="button" class="s91-side-ask" onclick="window.s91AssistantOpen&&window.s91AssistantOpen()" aria-label="Ask Solar91 about operations"><span>✦</span><b>Ask Solar91</b><small>Find work &amp; site records</small></button>':'')+
+  s91SidePlantFilter()+
   '<div class="side-scroll">'+links+'</div>'+
   '<div class="side-user"><div class="av">'+esc(initials)+'</div><div><div class="nm">'+esc(displayName)+'</div><div class="rl">'+esc(displayRole)+'</div></div></div></aside>';
 }
@@ -79,9 +77,18 @@ function plantsNavGroup(on){
  const open=S._plantsNavOpen!=null?S._plantsNavOpen:on,tab=S.view==="plants"?(S.plantsTab==="dashboard"?"dashboard":"table"):"";
  const sub=(id,label)=>'<div class="side-sublink'+(tab===id?" active":"")+'" onclick="goView(\'plants\',\''+id+'\')">'+label+'</div>';
  return '<div class="side-link side-parent'+(on?" on":"")+'" aria-expanded="'+open+'" onclick="s91TogglePlantsNav()">'+I.sun(16)+'<span>Plants</span><i class="side-caret'+(open?" open":"")+'" aria-hidden="true"></i></div>'+
-  (open?'<div class="side-sub">'+sub("dashboard","Plants dashboard")+sub("table","Plants table")+'</div>':'');
+  (open?'<div class="side-sub">'+sub("table","Plants table")+sub("dashboard","Plants dashboard")+'</div>':'');
 }
-function s91TogglePlantsNav(){const on=S.view==="plants"||S.view==="plant";S._plantsNavOpen=!(S._plantsNavOpen!=null?S._plantsNavOpen:on);render()}
+/* Black sidebar plant scope. The existing picker (40-plant-picker.js) provides
+   keyboard navigation and site-code search while preserving the native select. */
+function s91SidePlantFilter(){
+ const role=S._roleLabel||S.currentRole||"O&M Head",locked=role==="Site Engineer";
+ const value=locked?(S._sePlant||S.dashPlant||"all"):(S.dashPlant||"all");
+ const sorted=[...(S.plants||[])].sort((a,b)=>String(a.id||"").localeCompare(String(b.id||""),undefined,{numeric:true}));
+ const opts=sorted.map(p=>'<option value="'+esc(p.name)+'"'+(value===p.name?' selected':'')+'>'+esc(displayCode(p.id)||p.site_code||'—')+' · '+esc(p.name)+'</option>').join('');
+ return '<div class="s91-side-scope"><label for="s91-side-plant">Plant scope</label><select id="s91-side-plant" class="inp" data-pp aria-label="Select plant by name or plant code" onchange="setPlantScope(this.value)"'+(locked?' disabled':'')+'><option value="all"'+(value==="all"?' selected':'')+'>'+ (locked?'Assigned plant':'All plants') +'</option>'+opts+'</select><small>'+(locked?'Your assigned plant':'Search by plant code or name · '+sorted.length+' plants')+'</small></div>';
+}
+function s91TogglePlantsNav(){const on=S.view==="dashboard"||S.view==="plants"||S.view==="plant";S._plantsNavOpen=!(S._plantsNavOpen!=null?S._plantsNavOpen:on);render()}
 function topbar(crumb,notifs){
  const sc=scadaUiState(),allResults=quickSearchResults();
  const authName=S.currentUser||OM_HEAD,authRole=S.currentRole||"Viewer";
@@ -95,10 +102,10 @@ function topbar(crumb,notifs){
    if(r.type==="handover") return false;
    return true;
  }).slice(0,10):allResults;
- const scopePlant=isSE&&sePlant?sePlant:(S.view==="dashboard"?(S.dashPlant||"all"):S.omTab==="washing"&&S.view!=="dashboard"?S.washPlant:S.omTab==="scheduled"&&S.schedScope!=="all"?S.schedScope:S.omTab==="issues"&&S.issF.plant!=="all"?S.issF.plant:"all");
+ const scopePlant=isSE&&sePlant?sePlant:((S.view==="dashboard"||(S.view==="plants"&&S.plantsTab==="dashboard"))?(S.dashPlant||"all"):S.omTab==="washing"&&S.view!=="dashboard"?S.washPlant:S.omTab==="scheduled"&&S.schedScope!=="all"?S.schedScope:S.omTab==="issues"&&S.issF.plant!=="all"?S.issF.plant:"all");
  const plantSelector=isSE&&sePlant
    ? '<select class="inp" style="width:168px" onchange="setPlantScope(this.value)" disabled title="Site Engineer — locked to '+esc(sePlant)+'"><option selected>'+esc(sePlant)+'</option></select>'
-   : '<select class="inp" style="width:168px" onchange="setPlantScope(this.value)"><option value="all" '+(scopePlant==="all"?"selected":"")+'>All Plants</option>'+S.plants.map(p=>'<option '+(scopePlant===p.name?"selected":"")+'>'+esc(p.name)+'</option>').join("")+'</select>';
+   : '<select class="inp" data-pp style="width:168px" aria-label="Choose plant code or name" onchange="setPlantScope(this.value)"><option value="all" '+(scopePlant==="all"?"selected":"")+'>All Plants</option>'+S.plants.map(p=>'<option value="'+esc(p.name)+'" '+(scopePlant===p.name?"selected":"")+'>'+esc(displayCode(p.id))+' · '+esc(p.name)+'</option>').join("")+'</select>';
  return '<div class="topbar">'+
   '<div style="min-width:148px"><div style="font-size:12px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted-foreground)">'+esc(crumb[0])+'</div><div style="font-size:15px;font-weight:700;white-space:nowrap">'+esc(crumb[1])+'</div></div>'+
   '<div style="position:relative;flex:1;max-width:360px;display:flex;align-items:center">'+
@@ -127,9 +134,15 @@ function setPlantScope(v){
   toast("Site Engineer is scoped to "+locked+".");
   v=locked;
  }
+ const selected=(S.plants||[]).find(p=>p.name===v||p.id===v);
+ if(v!=="all"&&!selected){toast("That plant is not available in your portfolio.");return}
+ v=selected?selected.name:"all";
  S.dashPlant=v;
- if(v==="all"){S.schedScope="all";S.issF.plant="all";}
- else{S.schedScope=v;S.issF.plant=v;S.washPlant=v;}
+ S.plPulse=Object.assign(S.plPulse||{},{plant:v});
+ S.schedScope=v;
+ S.issF=Object.assign(S.issF||{},{plant:v});
+ S.washPlant=v;
+ S.tablePages=Object.assign(S.tablePages||{},{issues:1,scheduled:1,washing:1,plants:1});
  persist();render();toast(v==="all"?"Scope cleared — showing all plants":"Scoped to "+v);
 }
 /* ---------- dashboard visualization helpers ---------- */
@@ -187,7 +200,7 @@ function plantTableHead(){return '<tr>'+visiblePlantColumns().map(c=>'<th'+plant
 function plantTableBody(rows){
  const cols=visiblePlantColumns();
  return rows.map(p=>'<tr class="click" data-act="plant" data-id="'+esc(p.id)+'">'+
-   cols.map(c=>'<td'+plantColClass(c)+'>'+c.render(p)+'</td>').join("")+'</tr>').join("");
+   cols.map(c=>'<td data-label="'+esc(c.label)+'"'+plantColClass(c)+'>'+c.render(p)+'</td>').join("")+'</tr>').join("");
 }
 
 function exportPlantRegistryRows(){
@@ -261,11 +274,11 @@ function dbStatusBanner(){
 function renderPlants(){return S.plantsTab==="dashboard"?renderPlantsDashboard():renderPlantsTable()}
 /* page switch for phones, where the sidebar dropdown is not shown */
 function plantsPageSwitch(tab){
- return '<div class="plp-switch" role="group" aria-label="Plants pages">'+[["dashboard","Dashboard"],["table","Plants table"]].map(x=>'<button type="button" class="'+(tab===x[0]?"on":"")+'" aria-pressed="'+(tab===x[0])+'" onclick="goView(\'plants\',\''+x[0]+'\')">'+x[1]+'</button>').join("")+'</div>';
+ return '<div class="plp-switch" role="group" aria-label="Plants pages">'+[["table","Plants table"],["dashboard","Dashboard"]].map(x=>'<button type="button" class="'+(tab===x[0]?"on":"")+'" aria-pressed="'+(tab===x[0])+'" onclick="goView(\'plants\',\''+x[0]+'\')">'+x[1]+'</button>').join("")+'</div>';
 }
 function renderPlantsDashboard(){
  const sp=dashScope();
- return plantsPageSwitch("dashboard")+
+ return ((S._roleLabel||S.currentRole)==="Site Engineer"||(S._roleLabel||S.currentRole)==="Administration"?"":plantsPageSwitch("dashboard"))+
   (typeof s91PlantPulse==="function"?s91PlantPulse(sp):'<div class="panel">'+emptyState("Plants dashboard is unavailable","Reload the portal, or open the plants table.")+'</div>');
 }
 function renderPlantsTable(){

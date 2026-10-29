@@ -38,10 +38,13 @@
     return fixed.length+mine.length+fresh.length;
   }
 
-  async function refresh(){
+  /* Only the collections whose pulse changed are fetched (state/collections builds just those on the server):
+     an issue change does not re-download every PM work order, and nothing else of the application state is re-read. */
+  async function refresh(what){
     var before=snap();
-    var boot=await apiFetch("/api/bootstrap?lite=1");
-    var st=(boot&&boot.state)||{};
+    var keys=["plants","events"].concat(what.issues?["issues","equipment"]:[]).concat(what.tasks?["tasks"]:[]);
+    var res=await apiFetch("/api/state/collections?keys="+encodeURIComponent(keys.join(",")));
+    var st=(res&&res.state)||{};
     if(uiBusy())return false;                       /* user started typing / opened a form meanwhile: try again next tick */
     ["issues","tasks","equipment","events"].forEach(function(k){if(Array.isArray(st[k]))S[k]=st[k]});
     /* Plants added or edited elsewhere (another user, Excel import) appear without a reload; unsynced local edits are kept. */
@@ -62,10 +65,11 @@
     busy=true;lastTick=Date.now();
     try{
       var p=await apiFetch("/api/issues/pulse");
-      var fp=String(p&&p.count)+"|"+String(p&&p.latest)+"|"+String(p&&p.tasks);   /* issues and PM work orders */
+      var fp={issues:String(p&&p.count)+"|"+String(p&&p.latest),tasks:String(p&&p.tasks)};   /* issues and PM work orders */
       if(base===null){base=fp;return}
-      if(fp!==base&&!uiBusy()&&Date.now()-lastRefresh>=MIN_REFRESH_GAP){
-        if(await refresh())base=fp;
+      var what={issues:fp.issues!==base.issues,tasks:fp.tasks!==base.tasks};
+      if((what.issues||what.tasks)&&!uiBusy()&&Date.now()-lastRefresh>=MIN_REFRESH_GAP){
+        if(await refresh(what))base=fp;
       }
     }catch(e){/* offline / server asleep / session expired: stay quiet and try again next tick */}
     finally{busy=false}

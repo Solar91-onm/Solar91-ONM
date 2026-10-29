@@ -128,7 +128,8 @@ def test_frontend_wiring_for_day_reports_and_lite_pm_refresh():
     body = actions[start:actions.index("function reassignTask()", start)]
     assert "/api/bootstrap?lite=1" in body and "washing:S.washing" in body
     live = (ROOT / "frontend/static/js/34-live-refresh.js").read_text(encoding="utf-8")
-    assert "/api/bootstrap?lite=1" in live
+    # live refresh reads only the changed collections, never washing or the whole bootstrap
+    assert "/api/state/collections?keys=" in live and "/api/bootstrap" not in live and '"washing"' not in live
 
 
 def test_overview_sends_recent_reports_by_default_and_full_window_on_request(client, db):

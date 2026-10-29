@@ -258,7 +258,8 @@ def test_expired_token_401_is_retried_once_with_a_fresh_token_before_sign_out():
 def test_pm_command_stylesheet_loads_last_and_pm_page_parses():
     index=(ROOT/'frontend/templates/index.html').read_text(encoding='utf-8')
     assert '/static/css/46-pm-command.css' in index
-    assert index.index('/static/css/46-pm-command.css')>index.index('/static/css/45-command-center.css')
+    assert '/static/css/45-command-center.css' not in index
+    assert index.index('/static/css/46-pm-command.css') < index.index('/static/css/52-navigation-and-mobile.css')
     js=(ROOT/'frontend/static/js/29-pm-live-dashboard.js').read_text(encoding='utf-8')
     # group assignment goes through the existing per-task API so role, equipment scope and audit stay server-side
     assert '"/api/scheduled/tasks/"+encodeURIComponent(task.id)+"/assignee"' in js
@@ -352,7 +353,8 @@ def test_local_dates_typed_in_india_reach_the_api_as_exact_utc_instants():
 def test_laptop_fit_stylesheet_loads_last_and_dialog_history_step_is_deferred():
     index=(ROOT/'frontend/templates/index.html').read_text(encoding='utf-8')
     css=[line for line in index.splitlines() if 'rel="stylesheet" href="/static/css/' in line]
-    assert '48-laptop-fit.css' in css[-1]
+    assert '48-laptop-fit.css' in css[-2]
+    assert '52-navigation-and-mobile.css' in css[-1]
     nav=(ROOT/'frontend/static/js/44-session-nav.js').read_text(encoding='utf-8')
     # history.back() for a closed dialog runs one tick later, and only if nothing navigated in the same click
     assert 'setTimeout(()=>{const now=st();if(NAV.i===at&&now&&now.modal){NAV.skipPop+=1;history.back()}},0)' in nav

@@ -153,10 +153,15 @@ def _events_for_bootstrap(db:Session,user:User)->list[dict[str,Any]]:
     return events
 
 
-def load_state(db:Session,user:User,include_washing:bool=True)->dict[str,Any]:
+def load_state(db:Session,user:User,include_washing:bool=True,only:set[str]|None=None)->dict[str,Any]:
+    """The browser's application state. ``only`` (from /api/state/collections) builds just those collections and
+    leaves the others empty, so refreshing one collection does not read and serialise every table; None = everything."""
+    def want(key:str)->bool:
+        return only is None or key in only
     plants,by_name,by_code=_plant_maps(db); name_by_id={p.id:p.plant_name for p in plants}
     state:dict[str,Any]={"plants":[_plant_legacy(p) for p in plants]}
-    equipment_rows=list(db.scalars(select(Equipment).order_by(Equipment.equipment_name)))
+    # issues (Assignee scope) and PM tasks (equipment matching) are resolved against the equipment register
+    equipment_rows=list(db.scalars(select(Equipment).order_by(Equipment.equipment_name))) if want("equipment") or want("issues") or want("tasks") else []
     user_ids={e.in_charge_user_id for e in equipment_rows if e.in_charge_user_id}
     users_by_id={u.id:u for u in db.scalars(select(User).where(User.id.in_(user_ids)))} if user_ids else {}
     equipment=[]
@@ -193,7 +198,7 @@ def load_state(db:Session,user:User,include_washing:bool=True)->dict[str,Any]:
     if closed_days>0:
         cutoff=datetime.now(timezone.utc)-timedelta(days=closed_days)
         issue_query=issue_query.where(or_(Issue.status!="Closed",Issue.updated_at>=cutoff))
-    issue_result=db.scalars(issue_query.order_by(Issue.created_at.desc()))
+    issue_result=db.scalars(issue_query.order_by(Issue.created_at.desc())) if want("issues") else []
     # Only scoped roles need the ORM rows again during access filtering. Portfolio roles
     # keep the streaming path so large issue sets do not need a second in-memory copy.
     issue_rows=list(issue_result) if not has_portfolio_scope(user) else None
@@ -205,7 +210,7 @@ def load_state(db:Session,user:User,include_washing:bool=True)->dict[str,Any]:
     state["issues"]=issues
 
     handovers=[]
-    handover_rows=list(db.scalars(select(Handover).order_by(Handover.created_at.desc())))
+    handover_rows=list(db.scalars(select(Handover).order_by(Handover.created_at.desc()))) if want("handovers") else []
     items_by_handover=defaultdict(list)
     if handover_rows:
         for i in db.scalars(select(HandoverItem).where(HandoverItem.handover_id.in_([h.id for h in handover_rows]))):
@@ -225,7 +230,7 @@ def load_state(db:Session,user:User,include_washing:bool=True)->dict[str,Any]:
     task_query=select(OMTask)
     if pm_since is not None:
         task_query=task_query.where(recent_or_open(pm_since))
-    for t in db.scalars(task_query.order_by(OMTask.created_at.desc())):
+    for t in (db.scalars(task_query.order_by(OMTask.created_at.desc())) if want("tasks") else []):
         r=dict(t.legacy_payload or {})
         ev=[]
         for item in t.evidence or []:
@@ -259,6 +264,7 @@ def load_state(db:Session,user:User,include_washing:bool=True)->dict[str,Any]:
     # Plain column rows, not ORM entities: building ~40,000 entities cost more than the whole rest of the bootstrap.
     wash_stmt=select(WashingTable.id,WashingTable.legacy_id,WashingTable.plant_id,WashingTable.inverter_no,WashingTable.secondary_inverter_no,WashingTable.table_code,WashingTable.next_due_on,WashingTable.rescheduled_to,WashingTable.legacy_payload).order_by(WashingTable.table_code)
     wash_ids=select(WashingTable.id)
+    include_washing=include_washing and want("washing")
     if include_washing and not is_head(user):
         if user.role not in {"Assignee","Site Engineer"}: include_washing=False
         else:
@@ -278,7 +284,7 @@ def load_state(db:Session,user:User,include_washing:bool=True)->dict[str,Any]:
         r.update({"id":w.legacy_id,"plant":name_by_id.get(w.plant_id,r.get("plant") or "") or "","inv":w.inverter_no,"invSecondary":w.secondary_inverter_no,"tableId":w.table_code,"history":hist,"nextDue":w.next_due_on.isoformat() if w.next_due_on else r.get("nextDue"),"rescheduledTo":w.rescheduled_to.isoformat() if w.rescheduled_to else None}); washing.append(r)
     state["washing"]=washing
     wm={}
-    for c in db.scalars(select(WashingConfig)):
+    for c in (db.scalars(select(WashingConfig)) if want("washMeta") else []):
         nm=name_by_id.get(c.plant_id)
         if nm: wm[nm]={"team":c.team or [],"freq":c.frequency_days}
     state["washMeta"]=wm
@@ -287,18 +293,13 @@ def load_state(db:Session,user:User,include_washing:bool=True)->dict[str,Any]:
         stmt=select(model)
         if order is not None: stmt=stmt.order_by(order)
         return [dict(x.payload or {}) for x in db.scalars(stmt)]
-    state["inventory"]=payloads(InventoryItem,InventoryItem.created_at.desc())
-    state["movements"]=payloads(InventoryMovement,InventoryMovement.created_at.desc())
-    state["ptw"]=payloads(Permit,Permit.created_at.desc())
-    state["incidents"]=payloads(Incident,Incident.created_at.desc())
-    state["docs"]=payloads(Document,Document.created_at.desc())
-    state["vendors"]=payloads(Vendor,Vendor.created_at.desc())
-    state["serviceRequests"]=payloads(ServiceRequest,ServiceRequest.created_at.desc())
-    state["sla"]=payloads(SLAContract,SLAContract.created_at.desc())
-    state["offlineQueue"]=payloads(OfflineQueueItem,OfflineQueueItem.created_at.desc())
-    state["rules"]=[{**dict(x.payload or {}),"id":x.legacy_id,"event":x.event_name,"channel":x.channel,"to":x.recipients,"tiers":x.tiers,"on":x.enabled} for x in db.scalars(select(NotificationRule).order_by(NotificationRule.created_at))]
-    state["events"]=_events_for_bootstrap(db,user)
-    state["audit"]=[{"id":x.legacy_id or str(x.id),"at":x.created_at.isoformat(),"module":x.module,"text":x.action,"user":x.actor_name,**dict(x.metadata_json or {})} for x in db.scalars(select(AuditLog).order_by(AuditLog.created_at.desc()).limit(500))]
+    for key,model in (("inventory",InventoryItem),("movements",InventoryMovement),("ptw",Permit),("incidents",Incident),
+                      ("docs",Document),("vendors",Vendor),("serviceRequests",ServiceRequest),("sla",SLAContract),
+                      ("offlineQueue",OfflineQueueItem)):
+        state[key]=payloads(model,model.created_at.desc()) if want(key) else []
+    state["rules"]=[{**dict(x.payload or {}),"id":x.legacy_id,"event":x.event_name,"channel":x.channel,"to":x.recipients,"tiers":x.tiers,"on":x.enabled} for x in db.scalars(select(NotificationRule).order_by(NotificationRule.created_at))] if want("rules") else []
+    state["events"]=_events_for_bootstrap(db,user) if want("events") else []
+    state["audit"]=[{"id":x.legacy_id or str(x.id),"at":x.created_at.isoformat(),"module":x.module,"text":x.action,"user":x.actor_name,**dict(x.metadata_json or {})} for x in db.scalars(select(AuditLog).order_by(AuditLog.created_at.desc()).limit(500))] if want("audit") else []
 
     settings={x.setting_key:x.setting_value for x in db.scalars(select(AppSetting))}
     for k in SETTING_KEYS: state[k]=settings.get(k)
@@ -354,7 +355,7 @@ def _scope_state(db:Session,user:User,state:dict[str,Any],issue_rows:list[Issue]
                         (str(e.get("id")) in allowed_equipment_ids_str if user.role=="Assignee"
                          else str(e.get("plant_id")) in allowed_ids_str)]
 
-    issue_by_ticket={x.ticket_no:x for x in (issue_rows if issue_rows is not None else db.scalars(select(Issue).where(Issue.deleted_at.is_(None))))}
+    issue_by_ticket={x.ticket_no:x for x in (issue_rows if issue_rows is not None else db.scalars(select(Issue).where(Issue.deleted_at.is_(None))))} if state.get("issues") else {}
     equipment_rows=all_equipment_rows
     equipment_by_id={str(e.get("id")):e for e in equipment_rows if e.get("id")}
     equipment_codes:dict[tuple[str,str],list[dict]]={}
