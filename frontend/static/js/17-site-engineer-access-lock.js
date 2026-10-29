@@ -299,10 +299,10 @@ function rev05Role(){return S._roleLabel||S.currentRole||"O&M Head"}
 function rev05ReadOnly(){return rev05Role()==="Administration"}
 function rev05AllowedModules(){
  const m={
-  "O&M Head":["Plants dashboard","Plants","Site Issues","Preventive Maintenance","Washing","Work / Assignments","Performance","Reports","Data / Imports","Settings","Project Handover","Extra Services","Photo Intelligence"],
-  "Assignee":["Plants dashboard","Plants","Site Issues","Preventive Maintenance","Washing","Work / Assignments","Project Handover","Extra Services","Photo Intelligence"],
-  "Administration":["Plants dashboard","Reports","Photo Intelligence"],
-  "Site Engineer":["Plants dashboard","My Plant","Site Issues","Preventive Maintenance","Washing","Photo Intelligence"]
+  "O&M Head":["Plants dashboard","Plants","Site Issues","Preventive Maintenance","Washing","Work / Assignments","Performance","Reports","Data / Imports","Settings","Project Handover","Extra Services","Photo Intelligence","Operations Calendar"],
+  "Assignee":["Plants dashboard","Plants","Site Issues","Preventive Maintenance","Washing","Work / Assignments","Project Handover","Extra Services","Photo Intelligence","Operations Calendar"],
+  "Administration":["Plants dashboard","Reports","Photo Intelligence","Operations Calendar"],
+  "Site Engineer":["Plants dashboard","My Plant","Site Issues","Preventive Maintenance","Washing","Photo Intelligence","Operations Calendar"]
  };
  return m[rev05Role()]||m["O&M Head"];
 }
@@ -346,7 +346,7 @@ function rev05ApplyPermissions(){
 }
 (function(){
  const oldRender=render;
- render=function(){if(rev05Role()==="Administration"&&S.view!=="dashboard"&&S.view!=="reports"&&S.view!=="photos")S.view="dashboard";oldRender.apply(this,arguments);try{rev05ApplyPermissions()}catch(e){console.warn("[REV07 permissions]",e)}setTimeout(()=>{try{rev05ApplyPermissions()}catch(e){}},60);setTimeout(()=>{try{rev05ApplyPermissions()}catch(e){}},180)};
+ render=function(){if(rev05Role()==="Administration"&&S.view!=="dashboard"&&S.view!=="reports"&&S.view!=="photos"&&!(S.view==="om-module"&&S.omTab==="calendar"))S.view="dashboard";oldRender.apply(this,arguments);try{rev05ApplyPermissions()}catch(e){console.warn("[REV07 permissions]",e)}setTimeout(()=>{try{rev05ApplyPermissions()}catch(e){}},60);setTimeout(()=>{try{rev05ApplyPermissions()}catch(e){}},180)};
 })();
 (function(){
  const css=document.createElement("style");css.textContent=

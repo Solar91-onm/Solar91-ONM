@@ -44,6 +44,19 @@
           "type": "image/png"
         }
       ]
+    },
+    {
+      "name": "Operations Calendar",
+      "short_name": "Calendar",
+      "description": "Site issues, preventive maintenance and washing by date",
+      "url": "/#/calendar",
+      "icons": [
+        {
+          "src": "/static/pwa/icon-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
     }
   ]
 }

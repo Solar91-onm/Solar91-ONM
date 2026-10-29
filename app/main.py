@@ -18,6 +18,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.audit.router import router as audit_router
+from app.calendar.router import router as calendar_router
 from app.field.router import router as field_router
 from app.auth.router import router as auth_router
 from app.core.assets import asset_hash, build_info, version_static_urls
@@ -293,6 +294,7 @@ app.include_router(field_router)
 app.include_router(plants_router)
 app.include_router(photos_router)
 app.include_router(issues_router)
+app.include_router(calendar_router)
 app.include_router(operations_router)
 app.include_router(services_router)
 app.include_router(imports_router)

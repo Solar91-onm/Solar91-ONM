@@ -669,7 +669,7 @@ if(typeof renderModal==="function"){const m26OrigModal2=renderModal;renderModal=
    modules (including Equipment Register) behind More. Site Engineer navigation
    is deliberately unchanged because that role is plant-scoped and locked. */
 function m26MobileMoreOpen(){S.modal="m26MobileMore";S.modalCtx={};render()}
-function m26MobileMoreGo(kind){S.modal=null;S.modalCtx=null;if(kind==="app")return window.s91AppSettings&&s91AppSettings();if(kind==="equipment")return m26GoEq();if(kind==="photos")return goView("photos");if(kind==="issues"||kind==="scheduled"||kind==="washing"||kind==="handover"||kind==="services")return goTab(kind);return goView(kind)}
+function m26MobileMoreGo(kind){S.modal=null;S.modalCtx=null;if(kind==="app")return window.s91AppSettings&&s91AppSettings();if(kind==="equipment")return m26GoEq();if(kind==="photos")return goView("photos");if(kind==="calendar")return goTab("calendar");if(kind==="issues"||kind==="scheduled"||kind==="washing"||kind==="handover"||kind==="services")return goTab(kind);return goView(kind)}
 function m26MobileMoreModal(){
  const role=S._roleLabel||S.currentRole||"O&M Head";
  const byRole={
@@ -678,7 +678,7 @@ function m26MobileMoreModal(){
   "Administration":[["reports","Reports","Operational reporting and exports"],["photos","Photo Intelligence","Site photos (view only)"]],
   "Site Engineer":[["washing","Washing","Plant-scoped washing work"]]
  };
- const items=(byRole[role]||[]).concat([["app","App & permissions","Install, camera and notifications on this device"]]);
+ const items=(byRole[role]||[]).concat([["calendar","Operations Calendar","Issues, maintenance & washing by date"]]).concat([["app","App & permissions","Install, camera and notifications on this device"]]);
  return modal("More","All available modules",'<div class="m26-mobile-more">'+items.map(x=>'<button class="panel" type="button" onclick="m26MobileMoreGo('+m26Js(x[0])+')"><b>'+esc(x[1])+'</b><span>'+esc(x[2])+'</span></button>').join("")+'</div>','<button class="btn o" onclick="closeModal()">Close</button>',true)
 }
 if(typeof mobileNav==="function"){

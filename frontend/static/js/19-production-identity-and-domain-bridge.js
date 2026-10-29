@@ -11,10 +11,10 @@
   document.querySelectorAll('.cc-proto-role-badge,#standalone-proto-pill').forEach(x=>x.remove());
  }
  function modulesFor(r){return {
-  'O&M Head':['Plants dashboard','Plants','Site Issues','Preventive Maintenance','Washing','Work / Assignments','Performance','Reports','Data / Imports','Settings','Project Handover','Extra Services','Photo Intelligence'],
-  'Assignee':['Plants dashboard','Plants','Site Issues','Preventive Maintenance','Washing','Work / Assignments','Project Handover','Extra Services','Photo Intelligence'],
-  'Administration':['Plants dashboard','Reports','Photo Intelligence'],
-  'Site Engineer':['Plants dashboard','My Plant','Site Issues','Preventive Maintenance','Washing','Photo Intelligence','Notifications','My Profile']
+  'O&M Head':['Plants dashboard','Plants','Site Issues','Preventive Maintenance','Washing','Work / Assignments','Performance','Reports','Data / Imports','Settings','Project Handover','Extra Services','Photo Intelligence','Operations Calendar'],
+  'Assignee':['Plants dashboard','Plants','Site Issues','Preventive Maintenance','Washing','Work / Assignments','Project Handover','Extra Services','Photo Intelligence','Operations Calendar'],
+  'Administration':['Plants dashboard','Reports','Photo Intelligence','Operations Calendar'],
+  'Site Engineer':['Plants dashboard','My Plant','Site Issues','Preventive Maintenance','Washing','Photo Intelligence','Operations Calendar','Notifications','My Profile']
  }[r]||[]}
  function enforce(){
   if(AUTH_IDENTITY.role){S.currentRole=AUTH_IDENTITY.role;S._roleLabel=AUTH_IDENTITY.role}
@@ -27,7 +27,7 @@
    const p=S._sePlant||(S.plants&&S.plants[0]&&S.plants[0].name)||'';
    if(p){S.dashPlant=p;S.schedScope=p;S.washPlant=p;S.issF=S.issF||{};S.issF.plant=p}
    if(S.view!=='dashboard'&&S.view!=='om-module'&&S.view!=='photos')S.view='dashboard';
-   if(S.view==='om-module'&&['issues','scheduled','washing'].indexOf(S.omTab)<0)S.omTab='issues';
+   if(S.view==='om-module'&&['issues','scheduled','washing','calendar'].indexOf(S.omTab)<0)S.omTab='issues';
    const creator=document.getElementById('rev12-problem-task-card');if(creator)creator.remove();
   }
   if(r==='Administration')S._readOnly=true;

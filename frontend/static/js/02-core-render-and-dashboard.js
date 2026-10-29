@@ -14,10 +14,10 @@ function render(){
  const waBadge=(typeof washDueCount==="function")?washDueCount():S.washing.filter(t=>wDue(t,((S.washMeta||{})[t.plant]||{freq:14}).freq)&&!washedToday(t)&&!excToday(t)).length;
  const isBadge=openTk(S.issues).length;
  const plant=S.plants.find(p=>p.id===S.plantId);
- const CRUMB={dashboard:["Plants","Plants dashboard"],plants:["Plants",S.plantsTab==="dashboard"?"Plants dashboard":"Plants table"],plant:["Plants",plant?plant.name:"Plant detail"],work:["Operations","Work / Assignments"],performance:["Operations","Performance"],reports:["Operations","Reports"],data:["Operations","Data / Imports"],settings:["Operations","Settings"],handover:["Operations","Project Handover"],scheduled:["Planned Maintenance","Preventive Maintenance"],washing:["Planned Maintenance","Washing"],issues:["Operations","Site Issues"],services:["Operations","Extra Services"],analytics:["Operations","Analytics"],photos:["Operations","Photo Intelligence"]};
+ const CRUMB={dashboard:["Plants","Plants dashboard"],plants:["Plants",S.plantsTab==="dashboard"?"Plants dashboard":"Plants table"],plant:["Plants",plant?plant.name:"Plant detail"],work:["Operations","Work / Assignments"],performance:["Operations","Performance"],reports:["Operations","Reports"],data:["Operations","Data / Imports"],settings:["Operations","Settings"],handover:["Operations","Project Handover"],scheduled:["Planned Maintenance","Preventive Maintenance"],washing:["Planned Maintenance","Washing"],issues:["Operations","Site Issues"],calendar:["Operations","Operations Calendar"],services:["Operations","Extra Services"],analytics:["Operations","Analytics"],photos:["Operations","Photo Intelligence"]};
  const crumb=S.view==="dashboard"?((S._roleLabel||S.currentRole)==="Site Engineer"?["Field operations","My plant"]:CRUMB.dashboard):S.view==="plants"?CRUMB.plants:S.view==="plant"?CRUMB.plant:S.view==="work"?CRUMB.work:S.view==="performance"?CRUMB.performance:S.view==="reports"?CRUMB.reports:S.view==="data"?CRUMB.data:S.view==="settings"?CRUMB.settings:S.view==="photos"?CRUMB.photos:(CRUMB[S.omTab]||CRUMB.services);
  let body;
- try{body=S.view==="dashboard"?renderPlantsDashboard():S.view==="plants"?renderPlants():S.view==="plant"?renderPlantPage():S.view==="work"?renderWork():S.view==="performance"?renderPerformance():S.view==="reports"?renderReportsHub():S.view==="data"?renderDataHub():S.view==="settings"?renderSettings():S.view==="photos"?(typeof renderPhotoIntelligence==="function"?renderPhotoIntelligence():'<div class="panel">Loading Photo Intelligence…</div>'):S.omTab==="handover"?renderHandover():(S.omTab==="scheduled"||S.omTab==="washing")?renderScheduledHub():S.omTab==="issues"?renderIssues():S.omTab==="analytics"?renderAnalytics():renderServices()}catch(renderErr){
+ try{body=S.view==="dashboard"?renderPlantsDashboard():S.view==="plants"?renderPlants():S.view==="plant"?renderPlantPage():S.view==="work"?renderWork():S.view==="performance"?renderPerformance():S.view==="reports"?renderReportsHub():S.view==="data"?renderDataHub():S.view==="settings"?renderSettings():S.view==="photos"?(typeof renderPhotoIntelligence==="function"?renderPhotoIntelligence():'<div class="panel">Loading Photo Intelligence…</div>'):S.omTab==="handover"?renderHandover():(S.omTab==="scheduled"||S.omTab==="washing")?renderScheduledHub():S.omTab==="issues"?renderIssues():S.omTab==="calendar"?renderOperationsCalendar():S.omTab==="analytics"?renderAnalytics():renderServices()}catch(renderErr){
   console.error("Solar91 module render failed",S.view,S.omTab,renderErr);
   body='<div class="panel" style="padding:24px;border:1px solid #F5C2C0;background:#FFF7F6;border-radius:14px"><h2 style="margin:0 0 8px">This section could not be displayed</h2><p style="color:#4F5B55;margin:0 0 12px">One of the saved records has missing or unexpected data. You can still use the menu to open other sections.</p><pre style="white-space:pre-wrap;font-size:12px;margin:0 0 12px">'+esc(String(renderErr&&renderErr.message||renderErr))+'</pre><button class="btn o" onclick="render()">Try again</button></div>';
  };
@@ -51,7 +51,8 @@ function sidebar(b){
  if(isSE){
   links='<div class="side-label">Field Operations</div>'+
    link("dashboard","My Plant",I.dash(16),"goView('dashboard')")+
-   link("photos","Photo Intelligence",I.ftext(16),"goView('photos')");
+   link("photos","Photo Intelligence",I.ftext(16),"goView('photos')")+
+   link("calendar","Operations Calendar",I.clipc(16),"goTab('calendar')");
  }else{
   links='<div class="side-label">Plants &amp; Operations</div>'+
    ( (S._roleLabel||S.currentRole)==="Administration" ? link("dashboard","Plants dashboard",I.dash(16),"goView('dashboard')") : plantsNavGroup(act==="plants"||S.view==="dashboard"))+
@@ -59,7 +60,8 @@ function sidebar(b){
    link("reports","Reports",I.gauge(16),"goView('reports')")+
    link("settings","Settings",I.gear(16),"goView('settings')")+
    '<div class="side-label">Operations</div>'+
-   link("photos","Photo Intelligence",I.ftext(16),"goView('photos')");
+   link("photos","Photo Intelligence",I.ftext(16),"goView('photos')")+
+   link("calendar","Operations Calendar",I.clipc(16),"goTab('calendar')");
  }
  const displayName=S.currentUser||OM_HEAD;
  const displayRole=S._roleLabel||S.currentRole||"O&amp;M Head";
@@ -67,7 +69,6 @@ function sidebar(b){
  return '<aside class="sidebar">'+
  '<div class="side-brand"><div class="side-mark" style="background:none;border-radius:0;width:44px;height:44px"><span style="display:grid;place-items:center;width:44px;height:44px;background:#fff;border-radius:12px"><img src="/static/brand/solar91-emblem.png" width="34" height="34" alt="" style="display:block"></span></div><div class="side-title"><b style="display:flex;align-items:baseline;gap:0;font-size:15px;letter-spacing:.01em">SOLAR<span style="color:#ffa400;margin-left:6px">91<sup style="font-size:10.5px;font-weight:700;vertical-align:super;margin-left:1px;color:#ffa400">™</sup></span></b><span>Operations Management</span></div></div>'+
   (["O&M Head","Assignee","Administration"].includes(S._roleLabel||S.currentRole||"")?'<button type="button" class="s91-side-ask" onclick="window.s91AssistantOpen&&window.s91AssistantOpen()" aria-label="Ask Solar91 about operations"><span>✦</span><b>Ask Solar91</b><small>Find work &amp; site records</small></button>':'')+
-  s91SidePlantFilter()+
   '<div class="side-scroll">'+links+'</div>'+
   '<div class="side-user"><div class="av">'+esc(initials)+'</div><div><div class="nm">'+esc(displayName)+'</div><div class="rl">'+esc(displayRole)+'</div></div></div></aside>';
 }

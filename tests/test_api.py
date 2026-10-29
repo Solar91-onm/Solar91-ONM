@@ -418,7 +418,7 @@ def test_site_engineer_scope_uses_explicit_assignment_not_legacy_engineer_text(c
     body = boot.json()
     assert body['pending_access'] is True
     assert body['scope']['plant_ids'] == []
-    assert body['modules'] == ['Command Center', 'My Plant', 'Site Issues', 'Preventive Maintenance', 'Notifications', 'My Profile']
+    assert body['modules'] == ['Command Center', 'My Plant', 'Site Issues', 'Preventive Maintenance', 'Notifications', 'Operations Calendar', 'My Profile']
 
     plants = client.get('/api/plants')
     assert plants.status_code == 200
@@ -476,7 +476,7 @@ def test_bootstrap_contains_authenticated_scope_permissions_and_identity(client,
 def test_administration_bootstrap_exposes_only_command_centre_and_reports(client, db):
     login_user(client, db, role='Administration', name='Executive', email='exec-modules@example.com')
     body = client.get('/api/bootstrap').json()
-    assert body['modules'] == ['Command Center', 'Reports']
+    assert body['modules'] == ['Command Center', 'Reports', 'Operations Calendar']
     assert 'tasks.create' not in body['permissions']
 
 

@@ -13,7 +13,9 @@ def test_navigation_markup_and_pwa_manifest():
     manifest = json.loads((ROOT / 'frontend/static/pwa/manifest.webmanifest').read_text(encoding='utf-8'))
     assert 'S.view==="dashboard"?renderPlantsDashboard()' in core
     assert 'sub("table","Plants table")+sub("dashboard","Plants dashboard")' in core
-    assert 's91SidePlantFilter()+' in core
+    # The black sidebar no longer repeats the plant dropdown; the topbar selector keeps plant scope.
+    assert 's91SidePlantFilter()+' not in core
+    assert 'aria-label="Choose plant code or name" onchange="setPlantScope(this.value)"' in core
     assert 'data-pp aria-label="Select plant by name or plant code"' in core
     assert 'link("issues","Site Issues"' not in core
     assert 'link("scheduled","Preventive Maintenance"' not in core

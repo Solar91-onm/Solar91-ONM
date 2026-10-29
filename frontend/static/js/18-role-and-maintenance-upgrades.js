@@ -22,7 +22,7 @@
 
   function enforceSiteEngineerModules(){
     if(rev05Role()!=="Site Engineer")return;
-    var allowed=["Plants dashboard","My Plant","Site Issues","Preventive Maintenance","Washing","Photo Intelligence"];
+    var allowed=["Plants dashboard","My Plant","Site Issues","Preventive Maintenance","Washing","Photo Intelligence","Operations Calendar"];
     document.querySelectorAll(".side-link").forEach(function(a){
       var sp=a.querySelector("span"),txt=(sp?sp.textContent:a.textContent||"").trim();
       a.style.display=allowed.some(function(x){return txt===x||txt.indexOf(x)===0})?"":"none";
@@ -332,10 +332,10 @@
 
     /* exact route whitelist */
     if(S.view!=="dashboard"&&S.view!=="om-module"&&S.view!=="photos")S.view="dashboard";
-    if(S.view==="om-module"&&["issues","scheduled","washing"].indexOf(S.omTab)<0)S.omTab="issues";
+    if(S.view==="om-module"&&["issues","scheduled","washing","calendar"].indexOf(S.omTab)<0)S.omTab="issues";
 
     /* exact desktop module whitelist */
-    var allowed=["Plants dashboard","My Plant","Site Issues","Preventive Maintenance","Washing","Photo Intelligence"];
+    var allowed=["Plants dashboard","My Plant","Site Issues","Preventive Maintenance","Washing","Photo Intelligence","Operations Calendar"];
     document.querySelectorAll(".side-link").forEach(function(a){
       var sp=a.querySelector("span"),txt=(sp?sp.textContent:a.textContent||"").trim();
       a.style.display=allowed.indexOf(txt)>=0?"":"none";
@@ -374,7 +374,7 @@
   };
   var prevGoTab=window.goTab;
   window.goTab=function(t){
-    if(seRole()&&["issues","scheduled","washing"].indexOf(t)<0){
+    if(seRole()&&["issues","scheduled","washing","calendar"].indexOf(t)<0){
       toast("This module is not available in Site Engineer view.");
       S.view="om-module";S.omTab="issues";saveSE();render();return;
     }

@@ -4,6 +4,10 @@ FastAPI operations portal for Solar91's solar plants, equipment, Site Issues, sc
 
 The portal includes a **site-engineer-first Field Desk** for daily issue and scheduled maintenance work, plus a top-left Ask Solar91 entry. The search assistant is read-only and grounded in role-authorized operational data. See [`docs/FIELD_DESK_RELEASE_2026-10-13.md`](docs/FIELD_DESK_RELEASE_2026-10-13.md) for access rights and verification.
 
+## Operations Calendar
+
+The new **Operations Calendar** combines authorised Site Issues, individual PM work orders, actual washing reports and configured washing-cycle deadlines in compact month/week/day views, with plant-scoped filtering, severity/status colours and anchored detail popups. It keeps all existing record workflows intact. Implementation, security and local verification are documented in [`docs/OPERATIONS_CALENDAR_IMPLEMENTATION.md`](docs/OPERATIONS_CALENDAR_IMPLEMENTATION.md).
+
 ## Daily field operations
 
 **Site Engineers are the principal on-plant workers.** An O&M Head assigns each Site Engineer one plant via Team & Access. On sign-in, the first dashboard displays a live Field Desk: open issues, critical priorities, scheduled PM and overdue PM. Engineers can record a field observation directly against an active issue; the note enters PostgreSQL issue history without changing ownership or closing the ticket. Existing PM and Washing modules remain available for executing scheduled jobs and evidence. The O&M Head and Assignee continue their existing workflows. An approved **Administration** account is the read-only observer role; newly created **Viewer** accounts stay blocked until promoted.
