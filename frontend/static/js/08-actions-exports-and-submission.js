@@ -5,7 +5,8 @@
 function goView(v,sub){
  if(S.modal){S.modal=null;S.modalCtx=null;}
  const role=S._roleLabel||S.currentRole||"O&M Head";
- if(role==="Site Engineer"&&["performance","reports","settings","data","plants","work"].includes(v)){toast("This module is not available in Site Engineer view.");S.view="dashboard";persistView();render();return}
+ if(v==="performance"||v==="reports")v="dashboard";  // these pages were removed; old links land on the dashboard
+ if(role==="Site Engineer"&&["settings","data","plants","work"].includes(v)){toast("This module is not available in Site Engineer view.");S.view="dashboard";persistView();render();return}
  /* Plants: the sidebar names the page; every other link (filters, search, drill-downs) lands on the table */
  if(v==="plants"){S.plantsTab=sub==="dashboard"?"dashboard":"table";S._plantsNavOpen=true}
  S.view=v;persistView();render()
@@ -894,7 +895,7 @@ function ccHero(plants,open,overdue,health,mW){
  return '<div class="cc-hero">'+
   '<div class="cc-hero-top">'+
   '<span class="cc-hero-mark">'+I.sun(22)+'</span>'+
-  '<div><div class="cc-hero-title">SOLAR 91<sup style="font-size:11px;font-weight:700;vertical-align:super;color:#FFD666;margin-left:2px">™</sup> — Portfolio Operations</div></div>'+
+  '<div><div class="cc-hero-title">Solar91 - O&amp;M Intelligence Centre</div></div>'+
   '<span class="cc-hero-pill"><span class="cc-hero-dot" style="background:'+stCol+'"></span>'+stTxt+'</span>'+
   (actions?'<div class="cc-hero-actions">'+actions+'</div>':"")+'</div>'+
   '<div class="cc-hero-stats">'+
@@ -1400,30 +1401,6 @@ function renderWork(){
  return h;
 }
 
-/* PERFORMANCE — clicking an engineer now filters THIS page */
-function renderPerformance(){
- const who=S.perfWho||null;
- const src=who?(S.issues||[]).filter(t=>t.assignee===who):(S.issues||[]);
- const days=S.trendDays||30,open=openTk(src);
- const plants=S.plants.map(p=>({p,n:open.filter(t=>t.plant===p.name).length})).filter(x=>x.n).sort((a,b)=>b.n-a.n).slice(0,10);
- const eq={};src.forEach(t=>{const k=t.equip||"—";eq[k]=(eq[k]||0)+1});
- const mk={};src.forEach(t=>{if(t.maker)mk[t.maker]=(mk[t.maker]||0)+1});
- const loads=engineerLoad().slice(0,8);
- let h='<div class="ops-page ops-performance"><div class="ops-page-head"><div><div class="kpi-label">SOLAR OPERATIONS · LIVE METRICS</div><h1>Performance</h1><p>Explore issue resolution, plant fault frequency and team workload using live operational data.</p></div><span class="ops-page-status"><i></i>Live issue data</span></div>';
- h+='<div class="ops-performance-metrics"><div><span>Issues tracked</span><b>'+src.length+'</b></div><div><span>Open</span><b>'+open.length+'</b></div><div><span>Critical open</span><b>'+open.filter(t=>t.severity==="Critical").length+'</b></div><div><span>Overdue</span><b>'+open.filter(isOverdueIssue).length+'</b></div></div>';
- if(who)h+='<div class="ccbar" style="margin-bottom:2px"><span class="kpi-label" style="flex:0 0 auto">VIEWING</span>'+
-  '<span class="pill pillsm gf-chip">Engineer: <b>'+esc(who)+'</b><button type="button" onclick="S.perfWho=null;render()" title="Clear" style="border:0;background:none;color:inherit;cursor:pointer;font-size:13px;padding:0 0 0 5px">×</button></span>'+
-  '<button class="btn o sm" onclick="S.perfWho=null;render()">← All engineers</button></div>';
- h+='<div class="panel ops-performance-trend"><div class="row between wrap"><div><div class="kpi-label">RESOLUTION ACTIVITY</div><h2>Issue &amp; resolution trend'+(who?" — "+esc(who):"")+'</h2></div><div class="row wrap" style="gap:6px">'+[[10,"10d"],[14,"2w"],[21,"3w"],[30,"Month"]].map(([n,l])=>'<button class="pill sev-pill'+(days===n?" active":"")+'" onclick="setTrendDays('+n+')">'+l+'</button>').join("")+'</div></div>'+issueSpark(issueTrendRows(days,src))+'</div>';
- h+='<div class="kgrid ops-performance-grid" style="grid-template-columns:1fr 1fr 1fr"><div class="panel ops-performance-panel"><div class="ops-section-head"><div><div class="kpi-label">PLANT HEALTH SIGNAL</div><h2>Plant issue frequency</h2></div><span class="ops-section-count">'+plants.length+' plants</span></div>'+(plants.length?plants.map(x=>'<div class="kpi-click ops-rank-row" data-act="issuesPlant" data-id="'+esc(x.p.name)+'" style="margin:8px 0"><div class="row between" style="font-size:12px"><span>'+esc(x.p.name)+'</span><b>'+x.n+'</b></div><span class="ops-rank-track"><i style="width:'+Math.max(4,Math.round(x.n/Math.max(1,...plants.map(z=>z.n))*100))+'%"></i></span></div>').join(""):emptyState("No plant issue trend","Raise issues to rank plants."))+'</div>'+
-  '<div class="panel ops-performance-panel"><div class="ops-section-head"><div><div class="kpi-label">ASSET SIGNAL</div><h2>Equipment frequency</h2></div><span class="ops-section-count">'+Object.keys(eq).length+' types</span></div>'+(Object.keys(eq).length?Object.entries(eq).sort((a,b)=>b[1]-a[1]).slice(0,10).map(e=>'<div class="row between ops-data-row"><span>'+esc(e[0])+'</span><b>'+e[1]+'</b></div>').join(""):emptyState("No equipment frequency","Equipment is captured on each ticket."))+'</div>'+
-  '<div class="panel ops-performance-panel"><div class="ops-section-head"><div><div class="kpi-label">MANUFACTURER SIGNAL</div><h2>Manufacturer frequency</h2></div><span class="ops-section-count">'+Object.keys(mk).length+' makers</span></div>'+(Object.keys(mk).length?Object.entries(mk).sort((a,b)=>b[1]-a[1]).map(e=>'<div class="row between ops-data-row"><span>'+esc(e[0])+'</span><b>'+e[1]+'</b></div>').join(""):emptyState("No manufacturer data","Add maker when raising an issue."))+'</div></div>';
- h+='<div class="panel ops-performance-panel ops-workload-table"><div class="ops-section-head"><div><div class="kpi-label">TEAM CAPACITY</div><h2>Workload</h2><p>Click a row to view that engineer’s performance.</p></div><span class="ops-section-count">'+loads.length+' engineers</span></div>'+(1?'<div class="ops-table-scroll"><table class="dense"><thead><tr><th>Engineer</th><th>Assigned</th><th>Critical</th><th>Overdue</th></tr></thead><tbody>'+
-  '<tr class="click" onclick="S.perfWho=null;render()" style="'+(who?"":"background:var(--secondary)")+'"><td style="font-weight:600">All engineers (combined)</td><td>'+openTk(S.issues).length+'</td><td>'+openTk(S.issues).filter(t=>t.severity==="Critical").length+'</td><td>'+openTk(S.issues).filter(isOverdueIssue).length+'</td></tr>'+
-  loads.map(r=>'<tr class="click" onclick="S.perfWho=\''+esc(r.name)+'\';render()" style="'+(who===r.name?"background:var(--secondary)":"")+'"><td style="font-weight:600">'+esc(r.name)+'</td><td>'+r.assigned+'</td><td>'+(r.critical||0)+'</td><td>'+(r.overdue?'<b style="color:var(--danger)">'+r.overdue+'</b>':"0")+'</td></tr>').join("")+'</tbody></table></div>':emptyState("No workload trend","Assign work to engineers."))+'</div>';
- h+='<div class="bn-info banner ops-future-note"><b>Future integration</b> — generation, PR, irradiance, inverter efficiency, SCADA and financials will appear here when live telemetry is connected. They are not simulated.</div></div>';
- return h;
-}
 
 function ccParseCSV(text){
  const lines=String(text||"").split(/\r?\n/).filter(l=>l.trim());
@@ -1663,7 +1640,7 @@ function bindUi(){
   if(act==="chip"){e.preventDefault();S.issF.chip=id;S.tablePages.issues=1;if(S.view==="dashboard"){render();return}goTab("issues");return}
   if(act==="workWho"){e.preventDefault();S.workWho=id;goView("work");return}
   if(act==="assignQuick"){e.preventDefault();e.stopPropagation();openModal("assign",{id:id});return}
-  if(act==="go"){e.preventDefault();if(["plants","dashboard","work","performance","reports","data","settings"].includes(id))goView(id);else goTab(id);return}
+  if(act==="go"){e.preventDefault();if(["plants","dashboard","work","data","settings"].includes(id))goView(id);else goTab(id);return}
   if(act==="issues"){e.preventDefault();if(id==="breach"){S.issF.status="all";S.issF.sev="all";S.issF.q="";S.issF.sort="etc";goTab("issues");return}drillIssues(id==="all"?{sev:"all",q:"",plant:S.issF.plant||"all"}:{sev:id,q:""});return}
   if(act==="vert"){e.preventDefault();drillIssues({vert:id,q:""});return}
   if(act==="issuesPlant"){e.preventDefault();drillIssues({plant:id,q:""});return}
@@ -1892,9 +1869,14 @@ function ccLinkPlants(){
  return n;
 }
 (function(){
- var lastOrphans="";
+ var lastOrphans="",lastSig="",lastAt=0,lastRefs=[];
  function run(){
   if(document.hidden)return;
+  /* Rescan only when the plant/issue/task lists were replaced or grew, or once a minute as a fallback,
+     instead of walking every issue and task every 8 s. */
+  var sig=[S.plants,S.issues,S.tasks].map(function(a){return a?a.length:0}).join("/"),now=Date.now();
+  if(sig===lastSig&&lastRefs[0]===S.plants&&lastRefs[1]===S.issues&&lastRefs[2]===S.tasks&&now-lastAt<60000)return;
+  lastSig=sig;lastRefs=[S.plants,S.issues,S.tasks];lastAt=now;
   try{
    var n=ccLinkPlants();
    var names=new Set((S.plants||[]).map(function(p){return p.name}));

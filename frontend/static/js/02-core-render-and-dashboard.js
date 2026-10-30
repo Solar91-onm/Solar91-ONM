@@ -14,10 +14,10 @@ function render(){
  const waBadge=(typeof washDueCount==="function")?washDueCount():S.washing.filter(t=>wDue(t,((S.washMeta||{})[t.plant]||{freq:14}).freq)&&!washedToday(t)&&!excToday(t)).length;
  const isBadge=openTk(S.issues).length;
  const plant=S.plants.find(p=>p.id===S.plantId);
- const CRUMB={dashboard:["Plants","Plants dashboard"],plants:["Plants",S.plantsTab==="dashboard"?"Plants dashboard":"Plants table"],plant:["Plants",plant?plant.name:"Plant detail"],work:["Operations","Work / Assignments"],performance:["Operations","Performance"],reports:["Operations","Reports"],data:["Operations","Data / Imports"],settings:["Operations","Settings"],handover:["Operations","Project Handover"],scheduled:["Planned Maintenance","Preventive Maintenance"],washing:["Planned Maintenance","Washing"],issues:["Operations","Site Issues"],calendar:["Operations","Operations Calendar"],services:["Operations","Extra Services"],analytics:["Operations","Analytics"],photos:["Operations","Photo Intelligence"]};
- const crumb=S.view==="dashboard"?((S._roleLabel||S.currentRole)==="Site Engineer"?["Field operations","My plant"]:CRUMB.dashboard):S.view==="plants"?CRUMB.plants:S.view==="plant"?CRUMB.plant:S.view==="work"?CRUMB.work:S.view==="performance"?CRUMB.performance:S.view==="reports"?CRUMB.reports:S.view==="data"?CRUMB.data:S.view==="settings"?CRUMB.settings:S.view==="photos"?CRUMB.photos:(CRUMB[S.omTab]||CRUMB.services);
+ const CRUMB={dashboard:["Plants","Plants dashboard"],plants:["Plants",S.plantsTab==="dashboard"?"Plants dashboard":"Plants table"],plant:["Plants",plant?plant.name:"Plant detail"],work:["Operations","Work / Assignments"],data:["Operations","Data / Imports"],settings:["Operations","Settings"],handover:["Operations","Project Handover"],scheduled:["Planned Maintenance","Preventive Maintenance"],washing:["Planned Maintenance","Washing"],issues:["Operations","Site Issues"],calendar:["Operations","Operations Calendar"],services:["Operations","Extra Services"],analytics:["Operations","Analytics"],photos:["Operations","Photo Intelligence"]};
+ const crumb=S.view==="dashboard"?((S._roleLabel||S.currentRole)==="Site Engineer"?["Field operations","My plant"]:CRUMB.dashboard):S.view==="plants"?CRUMB.plants:S.view==="plant"?CRUMB.plant:S.view==="work"?CRUMB.work:S.view==="data"?CRUMB.data:S.view==="settings"?CRUMB.settings:S.view==="photos"?CRUMB.photos:(CRUMB[S.omTab]||CRUMB.services);
  let body;
- try{body=S.view==="dashboard"?renderPlantsDashboard():S.view==="plants"?renderPlants():S.view==="plant"?renderPlantPage():S.view==="work"?renderWork():S.view==="performance"?renderPerformance():S.view==="reports"?renderReportsHub():S.view==="data"?renderDataHub():S.view==="settings"?renderSettings():S.view==="photos"?(typeof renderPhotoIntelligence==="function"?renderPhotoIntelligence():'<div class="panel">Loading Photo Intelligence…</div>'):S.omTab==="handover"?renderHandover():(S.omTab==="scheduled"||S.omTab==="washing")?renderScheduledHub():S.omTab==="issues"?renderIssues():S.omTab==="calendar"?renderOperationsCalendar():S.omTab==="analytics"?renderAnalytics():renderServices()}catch(renderErr){
+ try{body=S.view==="dashboard"?renderPlantsDashboard():S.view==="plants"?renderPlants():S.view==="plant"?renderPlantPage():S.view==="work"?renderWork():S.view==="data"?renderDataHub():S.view==="settings"?renderSettings():S.view==="photos"?(typeof renderPhotoIntelligence==="function"?renderPhotoIntelligence():'<div class="panel">Loading Photo Intelligence…</div>'):S.omTab==="handover"?renderHandover():(S.omTab==="scheduled"||S.omTab==="washing")?renderScheduledHub():S.omTab==="issues"?renderIssues():S.omTab==="calendar"?renderOperationsCalendar():S.omTab==="analytics"?renderAnalytics():renderServices()}catch(renderErr){
   console.error("Solar91 module render failed",S.view,S.omTab,renderErr);
   body='<div class="panel" style="padding:24px;border:1px solid #F5C2C0;background:#FFF7F6;border-radius:14px"><h2 style="margin:0 0 8px">This section could not be displayed</h2><p style="color:#4F5B55;margin:0 0 12px">One of the saved records has missing or unexpected data. You can still use the menu to open other sections.</p><pre style="white-space:pre-wrap;font-size:12px;margin:0 0 12px">'+esc(String(renderErr&&renderErr.message||renderErr))+'</pre><button class="btn o" onclick="render()">Try again</button></div>';
  };
@@ -39,29 +39,26 @@ function mobileNav(b){
  let links=it(dashboard,role==="Site Engineer"?"My Plant":"Dashboard",I.dash(18),"goView('dashboard')");
  if(role!=="Site Engineer"&&role!=="Administration")links+=it(table,"Plants table",I.sun(18),"goView('plants','table')");
 
- if(role==="O&M Head"||role==="Administration")links+=it(S.view==="reports","Reports",I.gauge(18),"goView('reports')");
  links+=it(S.view==="photos","Photos",I.ftext(18),"goView('photos')");
  return '<nav class="mnav" aria-label="Mobile primary navigation">'+links+'</nav>';
 }
 function sidebar(b){
- let act=S.view==="dashboard"?"dashboard":S.view==="plants"||S.view==="plant"?"plants":["work","performance","reports","data","settings","photos"].includes(S.view)?S.view:((S.omTab==="scheduled"||S.omTab==="washing")?"scheduled":S.omTab);
+ let act=S.view==="dashboard"?"dashboard":S.view==="plants"||S.view==="plant"?"plants":["work","data","settings","photos"].includes(S.view)?S.view:((S.omTab==="scheduled"||S.omTab==="washing")?"scheduled":S.omTab);
  const link=(id,label,icon,fn,badgeN)=>'<div class="side-link '+(act===id?"active":"")+'" onclick="'+fn+'">'+icon+'<span>'+label+'</span>'+(badgeN?'<span class="side-badge">'+Math.min(badgeN,99)+'</span>':'')+'</div>';
  const isSE=(S._roleLabel||S.currentRole)==="Site Engineer";
  let links='';
  if(isSE){
   links='<div class="side-label">Field Operations</div>'+
+   link("calendar","Operations Calendar",I.clipc(16),"goTab('calendar')")+
    link("dashboard","My Plant",I.dash(16),"goView('dashboard')")+
-   link("photos","Photo Intelligence",I.ftext(16),"goView('photos')")+
-   link("calendar","Operations Calendar",I.clipc(16),"goTab('calendar')");
+   link("photos","Photo Intelligence",I.ftext(16),"goView('photos')");
  }else{
   links='<div class="side-label">Plants &amp; Operations</div>'+
+   calendarNavGroup(act==="calendar")+
    ( (S._roleLabel||S.currentRole)==="Administration" ? link("dashboard","Plants dashboard",I.dash(16),"goView('dashboard')") : plantsNavGroup(act==="plants"||S.view==="dashboard"))+
-   link("performance","Performance",I.gauge(16),"goView('performance')")+
-   link("reports","Reports",I.gauge(16),"goView('reports')")+
    link("settings","Settings",I.gear(16),"goView('settings')")+
    '<div class="side-label">Operations</div>'+
-   link("photos","Photo Intelligence",I.ftext(16),"goView('photos')")+
-   link("calendar","Operations Calendar",I.clipc(16),"goTab('calendar')");
+   link("photos","Photo Intelligence",I.ftext(16),"goView('photos')");
  }
  const displayName=S.currentUser||OM_HEAD;
  const displayRole=S._roleLabel||S.currentRole||"O&amp;M Head";
@@ -71,6 +68,34 @@ function sidebar(b){
   (["O&M Head","Assignee","Administration"].includes(S._roleLabel||S.currentRole||"")?'<button type="button" class="s91-side-ask" onclick="window.s91AssistantOpen&&window.s91AssistantOpen()" aria-label="Ask Solar91 about operations"><span>✦</span><b>Ask Solar91</b><small>Find work &amp; site records</small></button>':'')+
   '<div class="side-scroll">'+links+'</div>'+
   '<div class="side-user"><div class="av">'+esc(initials)+'</div><div><div class="nm">'+esc(displayName)+'</div><div class="rl">'+esc(displayRole)+'</div></div></div></aside>';
+}
+/* "Operations Calendar" opens a dropdown: All plants, then one entry per authorised plant, with a plant search.
+   Choosing an entry sets the shared plant scope (setPlantScope) and opens the calendar for it.
+   The search filters the rendered list in place, so typing never re-renders the page. */
+function calendarNavGroup(on){
+ const open=S._calNavOpen!=null?S._calNavOpen:on,q=String(S._calNavQ||"").trim().toLowerCase(),cur=on?(S.dashPlant||"all"):"";
+ const plants=[...(S.plants||[])].sort((a,b)=>String(a.id||"").localeCompare(String(b.id||""),undefined,{numeric:true}));
+ const item=(v,label,hay)=>'<div class="side-sublink'+(cur===v?" active":"")+'" data-cal-plant="'+esc(v)+'"'+(hay!=null?' data-cal-nav="'+esc(hay)+'"'+(q&&hay.indexOf(q)<0?' hidden':''):'')+' title="'+esc(label)+'" onclick="s91CalendarPlant(this.dataset.calPlant)">'+esc(label)+'</div>';
+ const shown=plants.filter(p=>!q||((displayCode(p.id)||"")+" "+(p.site_code||"")+" "+p.name).toLowerCase().indexOf(q)>=0).length;
+ return '<div class="side-link side-parent'+(on?" on":"")+'" aria-expanded="'+open+'" onclick="s91ToggleCalendarNav()">'+I.clipc(16)+'<span>Operations Calendar</span><i class="side-caret'+(open?" open":"")+'" aria-hidden="true"></i></div>'+
+  (open?'<div class="side-sub side-cal">'+
+   '<input type="search" id="s91-cal-nav-q" class="side-cal-search" placeholder="Search plants…" aria-label="Search plants for the calendar" autocomplete="off" value="'+esc(S._calNavQ||"")+'" oninput="s91CalendarNavFilter(this.value)">'+
+   item("all","All plants",null)+
+   '<div class="side-cal-list">'+plants.map(p=>{const code=displayCode(p.id)||p.site_code||"";return item(p.name,(code?code+" · ":"")+p.name,(code+" "+(p.site_code||"")+" "+p.name).toLowerCase())}).join('')+'</div>'+
+   '<small class="side-cal-count" aria-live="polite">'+(q?shown+" of "+plants.length+" plants":plants.length+" plants")+'</small></div>':'');
+}
+function s91ToggleCalendarNav(){const on=S.view==="om-module"&&S.omTab==="calendar";S._calNavOpen=!(S._calNavOpen!=null?S._calNavOpen:on);render()}
+function s91CalendarNavFilter(v){
+ S._calNavQ=v;const q=String(v||"").trim().toLowerCase();let shown=0,total=0;
+ document.querySelectorAll(".side-cal [data-cal-nav]").forEach(el=>{total++;const ok=!q||el.dataset.calNav.indexOf(q)>=0;el.hidden=!ok;if(ok)shown++});
+ const c=document.querySelector(".side-cal-count");if(c)c.textContent=q?shown+" of "+total+" plants":total+" plants";
+}
+function s91CalendarPlant(v){
+ S._calNavOpen=true;
+ if((S.dashPlant||"all")===v){goTab("calendar");return}
+ // setPlantScope validates the plant against the user's portfolio, persists and renders.
+ if(S.modal){S.modal=null;S.modalCtx=null}
+ S.view="om-module";S.omTab="calendar";persistView();setPlantScope(v);
 }
 /* "Plants" opens a small dropdown with its two pages. The sub-items are not .side-link on purpose:
    role scripts hide every .side-link whose label is not a module name; the group hides with its parent. */

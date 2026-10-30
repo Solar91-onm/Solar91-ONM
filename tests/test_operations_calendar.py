@@ -182,3 +182,25 @@ def test_overdue_filter_uses_real_due_date_and_uncompleted_status(client, db):
     rows = fetch(client, late.isoformat(), late.isoformat(), status='Overdue').json()['events']
     assert [r['reference'] for r in rows] == ['LATE-01']
     assert rows[0]['tone'] == 'overdue'
+
+
+def test_summary_counts_match_events_and_respect_scope(client, db):
+    a, b, issues, tasks, wash = fixtures(db)
+    login_user(client, db)
+    summary = client.get('/api/operations-calendar/summary', params={'start': '2026-10-28', 'end': '2026-10-30'})
+    assert summary.status_code == 200, summary.text
+    body = summary.json()
+    events = fetch(client, start='2026-10-28', end='2026-10-30').json()['events']
+    expected = {}
+    for e in events:
+        expected.setdefault(e['date'], {'issue': 0, 'pm': 0, 'washing': 0})[e['kind']] += 1
+    assert body['days'] == expected == {'2026-10-29': {'issue': 3, 'pm': 2, 'washing': 1}}
+    assert 'Inverter' in body['facets']['equipment'] and 'Ravi' in body['facets']['assignee']
+    assert 'events' not in body  # counts only: records load per day
+    filtered = client.get('/api/operations-calendar/summary', params={'start': '2026-10-29', 'end': '2026-10-29', 'severity': 'Critical'}).json()
+    assert filtered['days']['2026-10-29'] == {'issue': 2, 'pm': 0, 'washing': 0}
+    field = login_user(client, db, role='Site Engineer', name='Field', email='cal-summary-field@example.com')
+    db.add(UserPlantAssignment(user_id=field.id, plant_id=a.id)); db.commit()
+    scoped = client.get('/api/operations-calendar/summary', params={'start': '2026-10-29', 'end': '2026-10-29'}).json()
+    assert scoped['days']['2026-10-29'] == {'issue': 2, 'pm': 2, 'washing': 1}
+    assert client.get('/api/operations-calendar/summary', params={'start': '2026-10-29', 'end': '2026-10-29', 'plant_id': str(b.id)}).status_code == 403

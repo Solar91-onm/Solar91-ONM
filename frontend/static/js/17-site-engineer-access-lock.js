@@ -24,8 +24,6 @@
   var EXTRA_HIDE = [
     "Plants",
     "Work / Assignments",
-    "Performance",
-    "Reports",
     "Data / Imports",
     "Settings",
     "Project Handover",
@@ -50,7 +48,7 @@
     S.plF         = Object.assign({}, S.plF||{}, { site: p });
 
     /* Redirect any fleet-wide view */
-    if(["work","performance","reports","data","settings"].indexOf(S.view) >= 0){
+    if(["work","data","settings"].indexOf(S.view) >= 0){
       S.view = "dashboard";
     }
     if(S.view === "plants"){
@@ -292,16 +290,16 @@
 var REV05_PERMISSION_MATRIX=[
  {role:"O&M Head",modules:["Full","Full","Full","Full","Full","Full","Full","Full"],scope:"Portfolio"},
  {role:"Assignee",modules:["View","View","Assigned · edit","Assigned · execute","Assigned","Hidden","Assigned items","Field tools / docs"],scope:"Assigned work"},
- {role:"Administration",modules:["Plants dashboard","Hidden","Hidden","Reports","Hidden","Hidden","Hidden","Hidden"],scope:"Portfolio read-only"},
+ {role:"Administration",modules:["Plants dashboard","Hidden","Hidden","Hidden","Hidden","Hidden","Hidden","Hidden"],scope:"Portfolio read-only"},
  {role:"Site Engineer",modules:["Plant view","Hidden","Plant · edit","Plant · execute","Hidden","Hidden","Hidden","Hidden"],scope:"Single plant"}
 ];
 function rev05Role(){return S._roleLabel||S.currentRole||"O&M Head"}
 function rev05ReadOnly(){return rev05Role()==="Administration"}
 function rev05AllowedModules(){
  const m={
-  "O&M Head":["Plants dashboard","Plants","Site Issues","Preventive Maintenance","Washing","Work / Assignments","Performance","Reports","Data / Imports","Settings","Project Handover","Extra Services","Photo Intelligence","Operations Calendar"],
+  "O&M Head":["Plants dashboard","Plants","Site Issues","Preventive Maintenance","Washing","Work / Assignments","Data / Imports","Settings","Project Handover","Extra Services","Photo Intelligence","Operations Calendar"],
   "Assignee":["Plants dashboard","Plants","Site Issues","Preventive Maintenance","Washing","Work / Assignments","Project Handover","Extra Services","Photo Intelligence","Operations Calendar"],
-  "Administration":["Plants dashboard","Reports","Photo Intelligence","Operations Calendar"],
+  "Administration":["Plants dashboard","Photo Intelligence","Operations Calendar"],
   "Site Engineer":["Plants dashboard","My Plant","Site Issues","Preventive Maintenance","Washing","Photo Intelligence","Operations Calendar"]
  };
  return m[rev05Role()]||m["O&M Head"];
@@ -346,7 +344,7 @@ function rev05ApplyPermissions(){
 }
 (function(){
  const oldRender=render;
- render=function(){if(rev05Role()==="Administration"&&S.view!=="dashboard"&&S.view!=="reports"&&S.view!=="photos"&&!(S.view==="om-module"&&S.omTab==="calendar"))S.view="dashboard";oldRender.apply(this,arguments);try{rev05ApplyPermissions()}catch(e){console.warn("[REV07 permissions]",e)}setTimeout(()=>{try{rev05ApplyPermissions()}catch(e){}},60);setTimeout(()=>{try{rev05ApplyPermissions()}catch(e){}},180)};
+ render=function(){if(rev05Role()==="Administration"&&S.view!=="dashboard"&&S.view!=="photos"&&!(S.view==="om-module"&&S.omTab==="calendar"))S.view="dashboard";oldRender.apply(this,arguments);try{rev05ApplyPermissions()}catch(e){console.warn("[REV07 permissions]",e)}setTimeout(()=>{try{rev05ApplyPermissions()}catch(e){}},60);setTimeout(()=>{try{rev05ApplyPermissions()}catch(e){}},180)};
 })();
 (function(){
  const css=document.createElement("style");css.textContent=

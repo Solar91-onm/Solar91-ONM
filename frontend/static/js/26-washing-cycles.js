@@ -563,9 +563,12 @@
  }
 
  /* ---------- photos ---------- */
- const thumbs=new Map();
+ // Thumbnail blobs are kept for quick redraws, but bounded: the oldest are released so a long session
+ // browsing many washing reports does not keep every photo in memory.
+ const thumbs=new Map(),THUMB_MAX=120;
  function thumb(rep,ev){const c=thumbs.get(ev.url);return '<button class="wc-thumb" title="'+h(ev.name||"photo")+'" onclick="openWashingEvidence(\''+h(rep.id)+'\',\''+h(ev.id)+'\')"><img alt="" '+(c?'src="'+c+'"':'data-wc-src="'+h(ev.url)+'" class="wc-pending-img"')+'/></button>'}
  async function hydrate(){
+  while(thumbs.size>THUMB_MAX){const [k,v]=thumbs.entries().next().value;thumbs.delete(k);try{URL.revokeObjectURL(v)}catch(e){}}
   for(const img of Array.from(document.querySelectorAll("img[data-wc-src]"))){
    const url=img.getAttribute("data-wc-src");
    try{let o=thumbs.get(url);if(!o){const r=await authenticatedFetch(url);if(!r.ok)continue;o=URL.createObjectURL(await r.blob());thumbs.set(url,o)}img.src=o;img.removeAttribute("data-wc-src");img.classList.remove("wc-pending-img")}catch(e){}

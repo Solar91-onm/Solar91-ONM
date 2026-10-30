@@ -673,12 +673,12 @@ function m26MobileMoreGo(kind){S.modal=null;S.modalCtx=null;if(kind==="app")retu
 function m26MobileMoreModal(){
  const role=S._roleLabel||S.currentRole||"O&M Head";
  const byRole={
-  "O&M Head":[["reports","Reports","Operational reporting and exports"],["performance","Performance","Portfolio performance views"],["photos","Photo Intelligence","Site photos from every plant"],["settings","Settings","Application settings"]],
-  "Assignee":[["photos","Photo Intelligence","Search field photos and attach evidence"],["performance","Performance","Equipment and plant performance"]],
-  "Administration":[["reports","Reports","Operational reporting and exports"],["photos","Photo Intelligence","Site photos (view only)"]],
+  "O&M Head":[["photos","Photo Intelligence","Site photos from every plant"],["settings","Settings","Application settings"]],
+  "Assignee":[["photos","Photo Intelligence","Search field photos and attach evidence"]],
+  "Administration":[["photos","Photo Intelligence","Site photos (view only)"]],
   "Site Engineer":[["washing","Washing","Plant-scoped washing work"]]
  };
- const items=(byRole[role]||[]).concat([["calendar","Operations Calendar","Issues, maintenance & washing by date"]]).concat([["app","App & permissions","Install, camera and notifications on this device"]]);
+ const items=[["calendar","Operations Calendar","Issues, maintenance & washing by date"]].concat(byRole[role]||[]).concat([["app","App & permissions","Install, camera and notifications on this device"]]);
  return modal("More","All available modules",'<div class="m26-mobile-more">'+items.map(x=>'<button class="panel" type="button" onclick="m26MobileMoreGo('+m26Js(x[0])+')"><b>'+esc(x[1])+'</b><span>'+esc(x[2])+'</span></button>').join("")+'</div>','<button class="btn o" onclick="closeModal()">Close</button>',true)
 }
 if(typeof mobileNav==="function"){
@@ -690,7 +690,7 @@ if(typeof mobileNav==="function"){
    return '<nav class="mnav" aria-label="Mobile navigation">'+it("dashboard","My Plant",I.dash(18),"goView(\'dashboard\')")+it("issues","Issues",I.alert(18),"goTab(\'issues\')",b.isBadge)+it("scheduled","Preventive",I.clipc(18),"goScheduledOM(\'maintenance\')",(b.scBadge||0)+(b.waBadge||0))+it("photos","Photos",I.ftext(18),"goView(\'photos\')")+it("more","More",I.boxes(18),"m26MobileMoreOpen()")+'</nav>';
   }
   const raw=S.view==="dashboard"?"dashboard":(S.view==="plants"||S.view==="plant")?"plants":(S.view==="equipment"||S.view==="photos")?"more":S.omTab;
-  const act=(raw==="scheduled"||raw==="washing")?"scheduled":(["work","reports","performance","data","settings"].includes(S.view)?"more":raw);
+  const act=(raw==="scheduled"||raw==="washing")?"scheduled":(["work","data","settings"].includes(S.view)?"more":raw);
   const it=(id,l,ic,fn,n)=>'<div class="'+(act===id?"active":"")+'" role="button" tabindex="0" aria-label="'+esc(l)+'" onclick="'+fn+'">'+ic+'<span>'+l+'</span>'+(n?'<span class="side-badge">'+Math.min(n,99)+'</span>':'')+'</div>';
   return '<nav class="mnav" aria-label="Mobile navigation">'+it("dashboard","Home",I.dash(18),"goView(\'dashboard\')")+it("plants","Plants",I.sun(18),"goView(\'plants\')")+it("issues","Issues",I.alert(18),"goTab(\'issues\')",b.isBadge)+it("scheduled","Preventive",I.clipc(18),"goScheduledOM(\'maintenance\')",(b.scBadge||0)+(b.waBadge||0))+it("more","More",I.boxes(18),"m26MobileMoreOpen()")+'</nav>';
  }

@@ -1,6 +1,6 @@
 # Solar91 O&M Portal — Field Desk + stabilized source release
 
-FastAPI operations portal for Solar91's solar plants, equipment, Site Issues, scheduled maintenance, washing, reports and administrative access. The **database is authoritative**: the browser sends operational writes to FastAPI, backed by Supabase PostgreSQL. Clerk sends email sign-in codes; Solar91 roles and access scopes remain in the application database.
+FastAPI operations portal for Solar91's solar plants, equipment, Site Issues, scheduled maintenance, washing and administrative access. The **database is authoritative**: the browser sends operational writes to FastAPI, backed by Supabase PostgreSQL. Clerk sends email sign-in codes; Solar91 roles and access scopes remain in the application database.
 
 The portal includes a **site-engineer-first Field Desk** for daily issue and scheduled maintenance work, plus a top-left Ask Solar91 entry. The search assistant is read-only and grounded in role-authorized operational data. See [`docs/FIELD_DESK_RELEASE_2026-10-13.md`](docs/FIELD_DESK_RELEASE_2026-10-13.md) for access rights and verification.
 

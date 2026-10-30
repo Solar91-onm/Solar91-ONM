@@ -147,12 +147,32 @@ def _cycle_record(p: Plant, cfg: WashingConfig, due: date, start: date, month: s
         "tone": "done" if confirmed else "overdue" if due < business_today() else "washing"}
 
 
+FACETS = ("equipment", "subpart", "engineer", "assignee", "status", "severity")
+
+
 def _get_data(db, user, start, end, plant_id=None, kinds=None, equipment=None, subpart=None,
-              engineer=None, assignee=None, status=None, severity=None, search=None, cap=1000, offset=0):
+              engineer=None, assignee=None, status=None, severity=None, search=None, cap=1000, offset=0,
+              summary=False):
+    """Calendar events for the period, or with ``summary`` only per-day counts by kind plus filter options.
+
+    The summary runs the same filtered, permission-scoped queries but selects just the date and filter
+    columns, so a month view never builds or transfers thousands of full event rows."""
     scope = _allowed(db, user, plant_id)
     types = user_scoped_equipment_types(db, user) if user.role == "Assignee" else None
-    if scope is not None and not scope: return [], False
-    if types is not None and not types: return [], False
+    counts: dict[str, dict[str, int]] = {}
+    facets: dict[str, set[str]] = {name: set() for name in FACETS}
+
+    def tally(kind, day, **values):
+        if day is None: return
+        counts.setdefault(day, {"issue": 0, "pm": 0, "washing": 0})[kind] += 1
+        for name, value in values.items():
+            if value: facets[name].add(value)
+
+    def finish_summary():
+        return {"days": counts, "facets": {name: sorted(v, key=str.casefold)[:150] for name, v in facets.items()}}
+
+    if (scope is not None and not scope) or (types is not None and not types):
+        return finish_summary() if summary else ([], False)
     allowed_kinds = set(kinds or ("issue", "pm", "washing"))
     # The max is enforced in SQL, never in Python after loading all history.
     take = cap + offset + 1
@@ -173,7 +193,14 @@ def _get_data(db, user, start, end, plant_id=None, kinds=None, equipment=None, s
         if status: query = query.where(func.lower(Issue.status) == status.casefold())
         if severity: query = query.where(func.lower(Issue.severity) == severity.casefold())
         if search_text: query = query.where(or_(Issue.ticket_no.ilike(search_text), Issue.description.ilike(search_text), Issue.vertical.ilike(search_text), Issue.subcategory.ilike(search_text), Issue.equipment_ref.ilike(search_text), Issue.assignee_text.ilike(search_text), Plant.plant_name.ilike(search_text), Plant.site_code.ilike(search_text), Plant.assigned_engineer.ilike(search_text)))
-        result.extend(_event_issue(r, p) for r, p in db.execute(query.order_by(Issue.occurred_at, Issue.id).limit(take)))
+        if summary:
+            for when, vertical, ref, sub, who, st, sev, eng in db.execute(query.with_only_columns(
+                    Issue.occurred_at, Issue.vertical, Issue.equipment_ref, Issue.subcategory, Issue.assignee_text,
+                    Issue.status, Issue.severity, Plant.assigned_engineer)):
+                tally("issue", _issue_date(when), equipment=vertical or ref, subpart=sub, assignee=who,
+                      status=st, severity=sev, engineer=eng)
+        else:
+            result.extend(_event_issue(r, p) for r, p in db.execute(query.order_by(Issue.occurred_at, Issue.id).limit(take)))
     if "pm" in allowed_kinds:
         query = (select(OMTask, Plant).join(Plant, Plant.id == OMTask.plant_id)
             .where(*shared, OMTask.due_on >= start, OMTask.due_on <= end))
@@ -189,7 +216,13 @@ def _get_data(db, user, start, end, plant_id=None, kinds=None, equipment=None, s
                 query = query.where(func.lower(OMTask.status) == status.casefold())
         if severity: query = query.where(False)  # PM has no severity column
         if search_text: query = query.where(or_(OMTask.work_order_no.ilike(search_text), OMTask.task_name.ilike(search_text), OMTask.task_type.ilike(search_text), OMTask.equipment_ref.ilike(search_text), OMTask.assignee_text.ilike(search_text), Plant.plant_name.ilike(search_text), Plant.site_code.ilike(search_text), Plant.assigned_engineer.ilike(search_text)))
-        result.extend(_event_pm(r, p) for r, p in db.execute(query.order_by(OMTask.due_on, OMTask.id).limit(take)))
+        if summary:
+            for due, kind_, ref, who, st, eng in db.execute(query.with_only_columns(
+                    OMTask.due_on, OMTask.task_type, OMTask.equipment_ref, OMTask.assignee_text, OMTask.status,
+                    Plant.assigned_engineer)):
+                tally("pm", due.isoformat(), equipment=kind_ or ref, subpart=ref, assignee=who, status=st, engineer=eng)
+        else:
+            result.extend(_event_pm(r, p) for r, p in db.execute(query.order_by(OMTask.due_on, OMTask.id).limit(take)))
     if "washing" in allowed_kinds and user.role != "Administration" and (types is None or WASHING_TYPE.casefold() in types):
         query = (select(WashingDailyReport, Plant).join(Plant, Plant.id == WashingDailyReport.plant_id)
             .where(*shared, WashingDailyReport.report_date >= start, WashingDailyReport.report_date <= end))
@@ -199,7 +232,13 @@ def _get_data(db, user, start, end, plant_id=None, kinds=None, equipment=None, s
         if status: query = query.where(or_(func.lower(WashingDailyReport.review_status) == status.casefold(), func.lower(WashingDailyReport.job_status) == status.casefold()))
         if severity: query = query.where(False)
         if search_text: query = query.where(or_(WashingDailyReport.reported_by.ilike(search_text), WashingDailyReport.remarks.ilike(search_text), WashingDailyReport.job_status.ilike(search_text), Plant.plant_name.ilike(search_text), Plant.site_code.ilike(search_text), Plant.assigned_engineer.ilike(search_text)))
-        result.extend(_event_wash(r, p) for r, p in db.execute(query.order_by(WashingDailyReport.report_date, WashingDailyReport.id).limit(take)))
+        if summary:
+            for day, who, st, eng in db.execute(query.with_only_columns(
+                    WashingDailyReport.report_date, WashingDailyReport.reported_by, WashingDailyReport.review_status,
+                    Plant.assigned_engineer)):
+                tally("washing", day.isoformat(), equipment=WASHING_TYPE, assignee=who, status=st, engineer=eng)
+        else:
+            result.extend(_event_wash(r, p) for r, p in db.execute(query.order_by(WashingDailyReport.report_date, WashingDailyReport.id).limit(take)))
         # Scheduled cycle due dates are configured independently of daily reports.
         # A cycle deadline is one activity; each actual daily report is another,
         # with a distinct key. Never synthesize a confirmed/completed report.
@@ -247,8 +286,14 @@ def _get_data(db, user, start, end, plant_id=None, kinds=None, equipment=None, s
                                 search.casefold() in (p.assigned_engineer or "").casefold() or
                                 search.casefold() in "washing" or search.casefold() in "cycle"):
                                 continue
-                            result.append(_cycle_record(p, cfg, due, begin, month, n, state,
-                                display_name, report_count, confirmed))
+                            if summary:
+                                tally("washing", due.isoformat(), equipment=WASHING_TYPE, assignee=display_name,
+                                      status=state, engineer=p.assigned_engineer)
+                            else:
+                                result.append(_cycle_record(p, cfg, due, begin, month, n, state,
+                                    display_name, report_count, confirmed))
+    if summary:
+        return finish_summary()
     result.sort(key=lambda e: (e["date"], e["kind"], e["key"]))
     return result[offset:offset + cap], len(result) > offset + cap
 
@@ -271,6 +316,24 @@ def list_calendar(start: date, end: date,
         engineer, assignee, status, severity, q, limit, offset)
     return {"events": rows, "has_more": more, "next_offset": offset + len(rows) if more else None,
         "start": start.isoformat(), "end": end.isoformat()}
+
+
+@router.get("/summary")
+def calendar_summary(start: date, end: date,
+    db: Annotated[Session, Depends(get_db)], user: Annotated[User, Depends(get_current_user)],
+    plant_id: UUID | None = None, activity_type: str | None = None,
+    equipment: str | None = Query(None, max_length=120), subpart: str | None = Query(None, max_length=160),
+    engineer: str | None = Query(None, max_length=160), assignee: str | None = Query(None, max_length=160),
+    status: str | None = Query(None, max_length=80), severity: str | None = Query(None, max_length=60),
+    q: str | None = Query(None, max_length=160)):
+    """Per-day counts by activity type for month/week grids; records load per day from the list endpoint."""
+    if end < start or (end - start).days > MAX_DAYS:
+        raise HTTPException(422, f"Date range must be 1–{MAX_DAYS + 1} days")
+    if activity_type and activity_type not in {"issue", "pm", "washing"}:
+        raise HTTPException(422, "Unknown activity type")
+    out = _get_data(db, user, start, end, plant_id, {activity_type} if activity_type else None, equipment,
+        subpart, engineer, assignee, status, severity, q, summary=True)
+    return {**out, "start": start.isoformat(), "end": end.isoformat()}
 
 
 @router.get("/washing-cycle/{plant_id}/{month}/{cycle_no}")

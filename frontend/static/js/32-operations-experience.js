@@ -22,7 +22,7 @@
         ['issue','Site issues','Review open tickets',count,"goTab('issues')"],
         ['pm','Preventive maintenance','Check upcoming and overdue work',pending,"goScheduledOM('maintenance')"],
         ['washing','Washing','View progress and approvals',null,"goScheduledOM('washing')"],
-        ...(head?[['plants','Plant portfolio','Inspect every solar site',plants,"goView('plants')"],['reports','Reports','Review operations and trends',null,"goView('reports')"]]:[])
+        ...(head?[['plants','Plant portfolio','Inspect every solar site',plants,"goView('plants')"]]:[])
       ];
       const washRows = (S._washCycles?.plants||[]).filter(p=>!currentPlant || (S.plants||[]).some(x=>(x.dbId===p.plant_id||x.id===p.plant_id)&&x.name===currentPlant));
       const washDue = washRows.filter(p=>['1d','3d','7d'].includes(p.overdue_bucket)||Number(p.late_days||0)>0).length;

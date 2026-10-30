@@ -4,7 +4,7 @@
 
 `Operations Calendar` is a read-only, role-scoped view of **existing** operational entities. It adds no new operational database table, form, or migration. Site Issues, Preventive Maintenance and Washing retain their own authoritative record workflows. Event detail and edit actions open those modules.
 
-The calendar follows the application's shared top-level plant scope (`S.dashPlant`/the locked Site Engineer plant) and does not add a second plant selector. It can display multiple plants and individual PM equipment work orders independently. It is available to O&M Head, Assignee, Site Engineer, and Administration accounts; the unapproved `Viewer` role is not granted calendar access. Administration can see the permitted issue/PM data but not washing records. Assignee records are additionally scoped to their assigned equipment types, and the backend rechecks scope for individual popups, not just for listing.
+The calendar follows the application's shared top-level plant scope (`S.dashPlant`/the locked Site Engineer plant). Its Plant filter is a control for that same scope (it calls `setPlantScope`), not a separate calendar-only scope; it is disabled for Site Engineers. Each day cell shows one chip per activity type (Site Issues, Washing, Preventive Maintenance) with its count; the chip or day opens a searchable summary with one collapsible list per type. It can display multiple plants and individual PM equipment work orders independently. It is available to O&M Head, Assignee, Site Engineer, and Administration accounts; the unapproved `Viewer` role is not granted calendar access. Administration can see the permitted issue/PM data but not washing records. Assignee records are additionally scoped to their assigned equipment types, and the backend rechecks scope for individual popups, not just for listing.
 
 ## Actual database mappings
 
@@ -27,6 +27,8 @@ The calendar follows the application's shared top-level plant scope (`S.dashPlan
 ## Routes and filtering
 
 `GET /api/operations-calendar` requires `start` and `end` (inclusive ISO dates), with a maximum 94-day span. Optional filters: `plant_id`, `activity_type` (`issue`, `pm`, `washing`), `equipment`, `subpart`, `engineer`, `assignee`, `status`, `severity`, `q`, `limit` (1–2000), `offset` (0–10000). Response: `events`, `has_more`, `next_offset`, `start`, `end`.
+
+`GET /api/operations-calendar/summary` takes the same range and filters (no `limit`/`offset`) and returns only `days` (`{date: {issue, pm, washing}}` counts) and `facets` (filter options, at most 150 per field). It runs the same permission-scoped, filtered queries but selects only the date and filter columns. Month and week views load this; a day's records load from the list endpoint (`start`=`end`=that day) when the day or a chip is opened, and are cached in the browser for 60 seconds (at most 60 days, cleared when the period's counts are reloaded). The day view loads its records directly.
 
 `GET /api/operations-calendar/{kind}/{UUID}` loads an authorised Issue, PM or actual Washing report, including real comments, review data and protected evidence URLs as available. `GET /api/operations-calendar/washing-cycle/{plant-UUID}/{YYYY-MM}/{cycle-number}` loads a scheduled cycle detail using the existing washing schedule/ledger service. Only the record's existing module handles any edit. Listing responses intentionally exclude full remarks/evidence. The frontend uses the API, not combined/synthetic localStorage operational data.
 

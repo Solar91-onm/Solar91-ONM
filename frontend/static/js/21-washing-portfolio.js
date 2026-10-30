@@ -14,7 +14,7 @@ function s91RouteHash(){
  if(S.view==="photos")return "/photos";
  if(S.view==="plant"&&S.plantId)return "/plant/"+encodeURIComponent(S.plantId);
  if(S.view==="plants")return S.plantsTab==="dashboard"?"/plants/dashboard":"/plants";
- if(S.view==="dashboard"||["plants","work","performance","reports","data","settings"].includes(S.view))return "/"+S.view;
+ if(S.view==="dashboard"||["plants","work","data","settings"].includes(S.view))return "/"+S.view;
  if(S.view==="om-module")return S.omTab==="scheduled"?"/preventive":S.omTab==="washing"?"/washing":"/"+(S.omTab||"issues");
  return "/dashboard";
 }
@@ -37,8 +37,8 @@ function s91ApplyRoute(initial){
    Object.assign(M26R,{q:r.params.get("q")||"",plant:r.params.get("plant")||"",type:r.params.get("type")||"",status:r.params.get("status")||"",maker:r.params.get("maker")||"",discom:r.params.get("discom")||"",inCharge:r.params.get("incharge")||"",warranty:r.params.get("warranty")||"",noInCharge:r.params.get("no_incharge")==="1",makerMissing:r.params.get("maker_missing")==="1",serialMissing:r.params.get("serial_missing")==="1",page:Math.max(1,parseInt(r.params.get("page")||"1",10)||1),pageSize:[25,50,100].includes(parseInt(r.params.get("size")||"50",10))?parseInt(r.params.get("size")||"50",10):50});
   }else if(["issues","handover","services","analytics","washing","preventive","calendar"].includes(p)){
    if(role==="Site Engineer"&&["handover","services","analytics"].includes(p)){S.view="dashboard"}else{S.view="om-module";S.omTab=p==="preventive"?"scheduled":p}
-  }else if(["dashboard","plants","work","performance","reports","data","settings"].includes(p)){
-   if(role==="Site Engineer"&&["plants","work","performance","reports","data","settings"].includes(p))S.view="dashboard";else S.view=p;
+  }else if(["dashboard","plants","work","data","settings"].includes(p)){
+   if(role==="Site Engineer"&&["plants","work","data","settings"].includes(p))S.view="dashboard";else S.view=p;
    if(S.view==="plants")S.plantsTab=seg[1]==="dashboard"?"dashboard":"table";
   }
   if(!initial){persist();render();if(S.view==="equipment"&&typeof m26EqLoadPage==="function")m26EqLoadPage(false)}

@@ -103,3 +103,26 @@ Storage downloads/uploads no longer hold a connection, which was the main avoida
   without a row is not implemented.
 - Ask Solar91 already meets the limits (≤ 40 scoped records, 501-row scan cap, 450 output tokens, 12 s timeout,
   `store: false`, opt-in `AI_ASSISTANT_ENABLED`); unchanged.
+
+## Follow-up — 2026-10-30
+
+Checked against: fetch only needed data, client caching, memory leaks, compression, server-side pagination, DOM work,
+IntersectionObserver use and streaming. Verified with the automated suite (559 tests) only; no browser profiling,
+staging or load test was run.
+
+| Item | Finding | Change |
+| --- | --- | --- |
+| Operations Calendar month/week | Loaded up to 1,500 full event rows to draw per-day counts; busy months could exceed it and undercount | `GET /api/operations-calendar/summary` returns per-day counts and filter options only; records load per day on open, 60 s client cache (`app/calendar/router.py`, `50-operations-calendar.js`) |
+| Opening an old PM work order from the calendar | Downloaded the full PM history (`history=all`) and replaced `S.tasks` with it | `/api/scheduled/tasks?work_order=` returns that one record with the same access rules |
+| Washing evidence thumbnails | Object URLs cached for the whole session, never released (memory grows with every report viewed) | Bounded to 120; oldest revoked (`26-washing-cycles.js`) |
+| Plant-link repair timer | Walked every issue and task every 8 s | Runs only when those lists change, or once a minute (`08-actions-exports-and-submission.js`) |
+| Compression | gzip level 6 already on all text/JSON | Unchanged; Brotli still not added (new dependency, small gain over gzip) |
+| IntersectionObserver | Used only for the photo gallery's next page; images use `loading="lazy"` | Unchanged — no other list needs infinite scroll |
+| Streaming | Spreadsheet exports are bounded (10,000 rows) and sent as `StreamingResponse`; `.xlsx` is a ZIP and cannot be emitted row by row | Unchanged. JSON streaming does not help the browser until it has the whole document; the fix for the bootstrap is paging, below |
+| Pagination | Tables page in the browser (`pageRows`, `listCtl`); server paging exists for photos, calendar, equipment, plants, audit, users | Unchanged |
+
+Still outstanding (largest cost): the sign-in bootstrap sends every issue, recent PM work and washing table, and the
+register screens filter in the browser. Moving the issue register, then PM, then washing to server-paged endpoints
+is the next step, screen by screen.
+
+The Reports and Performance pages (and the Extra Services Performance/Reports tabs) were removed in the same change.

@@ -34,7 +34,7 @@
       var lab=map[txt]||txt;
       d.style.display=allowed.some(function(x){return lab===x||lab.indexOf(x)===0})?"":"none";
     });
-    if(S.view==="performance"||S.view==="reports"||S.view==="work"||S.view==="plants"||S.view==="data"||S.view==="settings"){
+    if(S.view==="work"||S.view==="plants"||S.view==="data"||S.view==="settings"){
       S.view="dashboard";
     }
     if(S.view==="om-module"&&["handover","services","analytics"].indexOf(S.omTab)>=0){

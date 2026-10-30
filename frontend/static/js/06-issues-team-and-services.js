@@ -22,18 +22,6 @@ function reportRowsForHub(kind){
  const mk={};(S.issues||[]).forEach(t=>{const k=(t.equip||"—")+" / "+(t.maker||"unspecified");mk[k]=(mk[k]||0)+1});
  return{title:"Equipment / maker issue summary",cols:["Equipment / maker","Issues"],rows:Object.entries(mk).sort((a,b)=>b[1]-a[1])};
 }
-function renderReportsHub(){
- const kind=S.reportKind||"daily",rep=reportRowsForHub(kind);
- const tabs=[["daily","Daily O&M"],["weekly","Weekly O&M"],["monthly","Monthly O&M"],["open","Open issues"],["overdue","Overdue"],["work","Assignee workload"],["plants","Plant issues"],["equip","Equipment / maker"]];
- let h='<div class="ops-page ops-reports"><div class="ops-page-head"><div><div class="kpi-label">SOLAR OPERATIONS · REPORTING</div><h1>Reports</h1><p>Operational summaries and registers built from the current application data.</p></div><button class="btn o sm" onclick="window.print()">Print / PDF</button></div>';
- h+='<div class="ops-report-tabs" role="group" aria-label="Report type">'+tabs.map(([id,l])=>'<button type="button" class="pill sev-pill'+(kind===id?" active":"")+'" aria-pressed="'+(kind===id)+'" onclick="S.reportKind=\''+id+'\';render()">'+l+'</button>').join("")+'</div>';
- if(rep.sum&&rep.sum.length)h+='<div class="ops-report-metrics">'+rep.sum.map(([label,value])=>'<div class="ops-report-metric"><span>'+esc(String(label))+'</span><b>'+esc(String(value))+'</b></div>').join("")+'</div>';
- h+='<div class="panel no-stick ops-report-table" style="padding:0"><div class="ops-section-head"><div><div class="kpi-label">SELECTED REPORT</div><h2>'+esc(rep.title)+'</h2></div><span>'+rep.rows.length+' rows</span></div>';
- if(!rep.rows.length)h+=emptyState("Nothing to report","No matching records in the live dataset.");
- else h+='<div class="ops-table-scroll"><table class="dense"><thead><tr>'+rep.cols.map(c=>'<th>'+esc(c)+'</th>').join("")+'</tr></thead><tbody>'+rep.rows.map(r=>'<tr>'+r.map(c=>'<td>'+esc(String(c))+'</td>').join("")+'</tr>').join("")+'</tbody></table></div>';
- h+='</div></div>';
- return h;
-}
 
 /* ---------- TEAM & ACCESS (O&M Head assigns roles · Assignees get EQUIPMENT across plants · Site Engineers get ONE plant) ---------- */
 const TA_ROLES=["O&M Head","Assignee","Administration","Site Engineer","Viewer"];
@@ -394,11 +382,10 @@ function renderSettings(){
 }
 
 /* ---------------- 3. EXTRA SERVICES ---------------- */
-const EXT_TABS=[["requests","Requests"],["inventory","Inventory"],["performance","Performance"],["safety","Safety"],["documents","Documents"],["vendors","Vendors"],["rules","Notifications"],["roles","Roles"],["reports","Reports"],["mobile","Mobile"],["audit","Audit"],["contracts","SLA"],["weather","Weather"]];
+const EXT_TABS=[["requests","Requests"],["inventory","Inventory"],["safety","Safety"],["documents","Documents"],["vendors","Vendors"],["rules","Notifications"],["roles","Roles"],["mobile","Mobile"],["audit","Audit"],["contracts","SLA"],["weather","Weather"]];
 function serviceStatusRecords(sub){
  if(sub==="requests")return S.serviceRequests.map(x=>({status:x.status}));
  if(sub==="inventory")return S.inventory.map(x=>({status:x.qty<x.min?"Critical":"Available"}));
- if(sub==="performance")return S.plants.map(x=>({status:x.status}));
  if(sub==="safety")return S.ptw.map(x=>({status:x.status}));
  if(sub==="documents")return S.docs.map(x=>({status:!x.expires?"Available":dayDiff(TODAY,x.expires)<=30?"Due soon":"Compliant"}));
  if(sub==="vendors")return S.vendors.map(x=>{const v=vendorStats(x);return{status:v.onTime==null?"Available":v.onTime>=85?"On track":"Attention"}});
@@ -407,6 +394,7 @@ function serviceStatusRecords(sub){
  return [{status:"Active"}];
 }
 function renderServices(){
+ if(S.extSub==="performance"||S.extSub==="reports")S.extSub="requests";  // removed tabs, possibly still saved
  const sub=S.extSub;
  let h='<div style="display:flex;flex-direction:column;gap:16px"><div class="tabs">'+EXT_TABS.map(t=>'<div class="tab '+(sub===t[0]?"active":"")+'" onclick="S.extSub=\''+t[0]+'\';render()">'+t[1]+'</div>').join("")+'</div>'+statusCircleCards("Extra Services status",serviceStatusRecords(sub));
  if(sub==="requests"){
@@ -439,24 +427,6 @@ function renderServices(){
   h+='<table><thead><tr><th>When</th><th>Item</th><th>Qty</th><th>Linked record</th><th>By</th><th>Note</th></tr></thead><tbody>';
   lcM.rows.forEach(m=>{h+='<tr><td class="nowrap">'+m.at+'</td><td>'+esc(m.item)+'</td><td><b style="color:'+(m.qty<0?"var(--danger)":"var(--success)")+'">'+(m.qty>0?"+":"")+m.qty+'</b></td><td>'+esc(m.ref)+'</td><td>'+esc(m.by)+'</td><td style="font-size:12.5px;color:var(--muted-foreground)">'+esc(m.note)+'</td></tr>';});
   h+='</tbody></table>'+lcM.pager+'</div>';
- }
- if(sub==="performance"){
-  h+='<div class="bn-info banner"><b>Performance data</b> — The Excel DGR provides generation, capacity and PV Syst targets. PR, availability and alarm feeds are not in the workbook, so they show — until SCADA is connected. MTD vs PV Syst covers '+xlFmtD(XL_LAST.slice(0,7)+"-01")+' – '+xlFmtDY(XL_LAST)+'.</div>';
-  const lcQ=listCtl("perf",S.plants,{size:8,facet:p=>{const m=xlPlantMtd(p.id);return m&&m.pct!=null?(m.pct>=100?"≥ 100% of PV Syst":m.pct>=90?"90 – 99%":"< 90%"):"No PV Syst target"},facetLabel:"MTD vs PV Syst",text:p=>p.name+" "+p.id,ph:"Search plant or site code",pad:"0 0 12px"});h+='<div class="panel">'+lcQ.bar+'<div class="kgrid" style="grid-template-columns:repeat(4,1fr)">'+lcQ.rows.map(p=>{const m=xlPlantMtd(p.id);return '<div class="metric"><div style="font-size:12px;font-weight:600">'+esc(p.name)+'</div><div style="font-size:12.5px;color:var(--muted-foreground);margin:2px 0 8px">'+capStr(p.capacity)+' · '+esc(p.id)+'</div>'+
-   '<div class="col" style="gap:4px;font-size:12px"><div class="row between"><span class="muted">PR</span><b>'+xlPct(p.pr)+'</b></div>'+
-   '<div class="row between"><span class="muted">Availability</span><b>'+xlPct(p.availability)+'</b></div><div class="row between"><span class="muted">Alarms</span><b>'+(p.alarms||"—")+'</b></div><div class="row between"><span class="muted">MTD vs PV Syst</span><b>'+(m&&m.pct!=null?m.pct+"%":"—")+'</b></div></div></div>'}).join("")+'</div>'+lcQ.pager+'</div>';
-  const totPM=EQUIP_MTB.reduce((s,e)=>s+e.pm,0),totCM=EQUIP_MTB.reduce((s,e)=>s+e.cm,0);
-  const ratio=(totPM+totCM)?Math.round(100*totPM/(totPM+totCM)):null;
-  h+='<div class="panel"><h2 style="font-size:15px;font-weight:600">3.4 Preventive vs corrective analytics</h2><p style="font-size:12px;color:var(--muted-foreground);margin:3px 0 12px">Ratio of planned (Preventive Maintenance) vs unplanned (Issues) work — a key O&amp;M health indicator — plus MTBF / MTTR by equipment type</p>';
-  h+='<div class="kgrid" style="grid-template-columns:repeat(3,1fr);margin-bottom:14px">'+
-   '<div class="metric"><div class="k">PM : CM ratio</div><div class="v" style="color:'+(ratio!=null&&ratio>=70?"var(--success)":"var(--warning-strong)")+'">'+(ratio==null?'—':ratio+':'+(100-ratio))+'</div><div class="s">target ≥ 70:30</div></div>'+
-   '<div class="metric"><div class="k">PM hours (30d)</div><div class="v">'+totPM+'</div><div class="s">scheduled O&amp;M effort</div></div>'+
-   '<div class="metric"><div class="k">CM hours (30d)</div><div class="v">'+totCM+'</div><div class="s">issue-driven effort</div></div></div>';
-  h+='<table><thead><tr><th>Equipment type</th><th>MTBF</th><th>MTTR</th><th>Failures (90d)</th><th>PM hrs</th><th>CM hrs</th><th>CM share</th></tr></thead><tbody>';
-  EQUIP_MTB.forEach(e=>{const cm=Math.round(100*e.cm/(e.pm+e.cm));
-   h+='<tr><td style="font-weight:500">'+e.type+'</td><td><b>'+(e.mtbf>=1000?(e.mtbf/24).toFixed(0)+" d":e.mtbf+" h")+'</b></td><td><b>'+(e.mttr>=48?(e.mttr/24).toFixed(1)+" d":e.mttr+" h")+'</b></td><td>'+e.fl+'</td><td>'+e.pm+'</td><td>'+e.cm+'</td>'+
-   '<td style="min-width:130px"><div class="prog"><div style="width:'+cm+'%;background:'+(cm>50?"var(--danger)":cm>35?"var(--warning)":"var(--success)")+'"></div></div><div style="font-size:12px;color:var(--muted-foreground);margin-top:3px">'+cm+'% CM</div></td></tr>';});
-  h+='</tbody></table></div>';
  }
  if(sub==="safety"){
   const pend=S.ptw.filter(p=>p.status==="Pending Approval");
@@ -519,16 +489,6 @@ function renderServices(){
   h+='<table><thead><tr><th>Role</th><th>Handover</th><th>Preventive Maintenance</th><th>Washing</th><th>Issues</th><th>Documents</th><th>Scope</th></tr></thead><tbody>';
   ROLES.forEach(r=>{h+='<tr><td style="font-weight:600" class="nowrap">'+r.role+'</td><td>'+r.handover+'</td><td>'+r.sched+'</td><td>'+r.washing+'</td><td>'+r.issues+'</td><td>'+r.docs+'</td><td>'+badge(r.scope)+'</td></tr>';});
   h+='</tbody></table></div>';
- }
- if(sub==="reports"){
-  h+='<div class="panel"><h2 style="font-size:15px;font-weight:600">Reporting suite</h2><p style="font-size:12px;color:var(--muted-foreground);margin:3px 0 12px">Scheduled auto-reports emailed to stakeholders; client-facing templates match O&amp;M contract SLAs (useful for billing / penalty clauses)</p><div class="col" style="gap:10px">';
-  [["Daily operations snapshot","Daily 18:00","O&M Head, regional heads","Generation, PR, open issues, wash progress"],
-   ["Weekly client report — per plant","Weekly Mon 08:00","Client / asset owners","Wash compliance, PM adherence, issue summary with SLA status"],
-   ["Monthly O&M compliance pack","Monthly 1st","All clients","Scheduled compliance, washing, incidents, PR vs target"],
-   ["Handover status digest","Weekly Fri 16:00","O&M Head","Pending handovers, blocked items, escalations"]].forEach(r=>{
-   h+='<div class="row between wrap" style="border:1px solid var(--border);border-radius:10px;padding:12px 14px;gap:10px"><div><div style="font-weight:600;font-size:13px">'+r[0]+'</div><div style="font-size:12.5px;color:var(--muted-foreground)">'+r[1]+' → '+r[2]+' · '+r[3]+'</div></div>'+
-    '<button class="btn o sm" onclick="toast(\''+esc(r[0])+' — generated &amp; emailed to '+esc(r[2])+'.\')">Run now</button></div>';});
-  h+='</div></div>';
  }
  if(sub==="mobile"){
   h+='<div class="bn-info banner"><b>Offline-capable field app</b> — technicians log washing, complete Preventive Maintenance work and raise/update Site Issues in low-connectivity plant areas; everything syncs once back online.</div>';

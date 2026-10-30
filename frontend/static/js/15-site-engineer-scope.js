@@ -135,7 +135,7 @@
     if(S.washPlant !== p)  S.washPlant = p;
 
     /* Bounce off fleet-wide pages */
-    if(["work","performance","reports","data","settings"].indexOf(S.view) >= 0){
+    if(["work","data","settings"].indexOf(S.view) >= 0){
       S.view = "dashboard";
     }
     if(S.view === "om-module" && S.omTab === "handover"){
@@ -162,8 +162,6 @@
     /* Hide fleet-wide sidebar links */
     var hide = [
       "Work / Assignments",
-      "Performance",
-      "Reports",
       "Data / Imports",
       "Settings",
       "Project Handover",
@@ -421,7 +419,7 @@
     if(S.washPlant !== p)  S.washPlant = p;
 
     /* Bounce off fleet-wide views */
-    if(["work","performance","reports","data","settings"].indexOf(S.view) >= 0){
+    if(["work","data","settings"].indexOf(S.view) >= 0){
       S.view = "dashboard";
     }
     if(S.view === "om-module" && S.omTab === "handover"){
@@ -446,8 +444,6 @@
   var HIDE_LINKS = [
     "Plants",              /* hide the Plants module entirely */
     "Work / Assignments",
-    "Performance",
-    "Reports",
     "Data / Imports",
     "Settings",
     "Project Handover",

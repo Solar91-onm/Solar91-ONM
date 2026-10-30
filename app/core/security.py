@@ -249,11 +249,11 @@ def user_equipment_matches_record(
 
 ROLE_MODULES: dict[str, list[str]] = {
     "O&M Head": ["Command Center", "Plants", "Site Issues", "Preventive Maintenance", "Work / Assignments",
-                 "Performance", "Reports", "Data / Imports", "Settings", "Project Handover", "Extra Services",
+                 "Data / Imports", "Settings", "Project Handover", "Extra Services",
                  "Notifications", "Operations Calendar", "My Profile"],
     "Assignee": ["Command Center", "Plants", "Site Issues", "Preventive Maintenance", "Work / Assignments",
                  "Project Handover", "Extra Services", "Notifications", "Operations Calendar", "My Profile"],
-    "Administration": ["Command Center", "Reports", "Operations Calendar"],
+    "Administration": ["Command Center", "Operations Calendar"],
     "Site Engineer": ["Command Center", "My Plant", "Site Issues", "Preventive Maintenance", "Notifications", "Operations Calendar", "My Profile"],
     "Viewer": ["Notifications", "My Profile"],
 }

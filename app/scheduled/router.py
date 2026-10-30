@@ -5,7 +5,7 @@ import uuid
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import Response
 from sqlalchemy import and_, delete, func, or_, select
 from sqlalchemy.orm import Session
@@ -250,11 +250,15 @@ def _audit(db: Session, user: User, action: str, task: OMTask, metadata: dict | 
 
 
 @router.get("/tasks")
-def list_tasks(db: Annotated[Session, Depends(get_db)], user: Annotated[User, Depends(get_current_user)], history: str | None = None):
+def list_tasks(db: Annotated[Session, Depends(get_db)], user: Annotated[User, Depends(get_current_user)], history: str | None = None,
+               work_order: str | None = Query(None, max_length=80)):
     """PM work orders the user may see: all open work, and finished work from the recent history window
-    (app/scheduled/history.py). ``history=all`` adds every older finished record (exports and full reports)."""
-    since = None if (history or "").strip().lower() == "all" else history_since()
+    (app/scheduled/history.py). ``history=all`` adds every older finished record (exports and full reports).
+    ``work_order`` returns just that work order (any age, same access rules) for opening a single record."""
+    since = None if (history or "").strip().lower() == "all" or work_order else history_since()
     stmt = select(OMTask, Plant.plant_name).outerjoin(Plant, Plant.id == OMTask.plant_id)
+    if work_order:
+        stmt = stmt.where(OMTask.work_order_no == work_order.strip())
     if since is not None:
         stmt = stmt.where(recent_or_open(since))
     task_rows = db.execute(stmt.order_by(OMTask.due_on, OMTask.created_at.desc())).all()

@@ -59,3 +59,14 @@ def test_window_keeps_role_scope(client, db):
     # an Assignee without the Inverter type sees none of it, with or without full history
     assert client.get("/api/scheduled/tasks?history=all").json() == []
     assert client.get("/api/bootstrap").json()["state"]["tasks"] == []
+
+
+def test_single_work_order_lookup_reaches_old_history_and_keeps_scope(client, db):
+    login_user(client, db, role="O&M Head", name="Head", email="hist-head-one@example.com")
+    _tasks(db)
+    one = client.get("/api/scheduled/tasks", params={"work_order": "OLD-DONE"})
+    assert one.status_code == 200
+    assert [t["id"] for t in one.json()] == ["OLD-DONE"]  # outside the window, still only this record
+    assert client.get("/api/scheduled/tasks", params={"work_order": "MISSING"}).json() == []
+    login_user(client, db, role="Assignee", name="No Scope", email="hist-assignee-one@example.com")
+    assert client.get("/api/scheduled/tasks", params={"work_order": "OLD-DONE"}).json() == []

@@ -8,6 +8,13 @@
 .side-link,.side-sublink{min-height:38px;display:flex;align-items:center;white-space:normal;line-height:1.35}
 .side-sub{margin-left:16px}
 .side-sublink{font-size:13px;padding:8px 10px}
+/* Operations Calendar plant dropdown: search, All plants, scrollable plant list */
+.side-sublink[hidden]{display:none!important}
+.side-cal-search{width:calc(100% - 4px);margin:4px 0 4px;height:34px;padding:0 10px;border-radius:9px;border:1px solid var(--sidebar-border);background:rgba(255,255,255,.06);color:#fff;font:inherit;font-size:12.5px}
+.side-cal-search::placeholder{color:var(--sidebar-muted)}
+.side-cal-search:focus{outline:none;border-color:#22c55e;background:rgba(255,255,255,.1)}
+.side-cal-list{max-height:260px;overflow-y:auto;overscroll-behavior:contain;display:flex;flex-direction:column;gap:1px;scrollbar-width:thin}
+.side-cal-count{display:block;padding:4px 10px 2px;font-size:11px;color:var(--sidebar-muted)}
 .plp-switch{width:100%;max-width:100%;justify-content:stretch}
 .plp-switch button{flex:1;min-height:42px}
 /* Every chart/card and toolbar must be allowed to shrink, but never clip text. */
