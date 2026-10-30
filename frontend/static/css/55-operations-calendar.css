@@ -147,6 +147,13 @@
 .oc-group span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .oc-group b{order:2;min-width:22px;height:20px;padding:0 6px;border-radius:999px;display:grid;place-items:center;background:var(--oc-bg);font-size:11.5px;font-weight:800;font-variant-numeric:tabular-nums}
 .oc-group svg{order:3;flex-shrink:0;opacity:.6}
+/* solved-that-day count, carried / solved state on rows (green = resolved or completed on this day) */
+.oc-done-n{order:2;font-style:normal;height:20px;padding:0 6px;border-radius:999px;display:inline-grid;place-items:center;background:var(--oc-done-bg);color:var(--oc-done-fg);font-size:11px;font-weight:800;font-variant-numeric:tabular-nums;white-space:nowrap}
+.oc-sec>summary .oc-done-n{order:0}
+.oc-state{font-style:normal;flex-shrink:0;font-size:10.5px;font-weight:750;padding:2px 7px;border-radius:999px;white-space:nowrap;background:var(--t-bg);color:var(--t-fg)}
+.oc-state.ok{background:var(--oc-done-bar);color:#fff}
+.oc-event.is-done{--t-bg:var(--oc-done-bg);--t-fg:var(--oc-done-fg);--t-bar:var(--oc-done-bar);background:var(--oc-done-bg);border-color:transparent}
+.oc-event.is-done>span{color:var(--oc-done-fg)}
 .oc-grid.oc-week .oc-cell{min-height:160px}
 .oc-grid.oc-week .oc-day-head button{font-size:12px;padding:0 9px}
 

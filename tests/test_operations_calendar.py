@@ -1,9 +1,20 @@
 """Operations Calendar: real SQL date fields, roles, colours and plant isolation."""
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from uuid import uuid4
 
+import pytest
+
+from app.calendar import router as calendar_router
 from app.core.models import Issue, OMTask, Plant, UserEquipmentTypeAssignment, UserPlantAssignment, WashingDailyReport
 from tests.conftest import login_user
+
+TODAY = date(2026, 10, 30)
+
+
+@pytest.fixture(autouse=True)
+def fixed_today(monkeypatch):
+    """Open work repeats up to today, so the calendar's business date is pinned for these tests."""
+    monkeypatch.setattr(calendar_router, "business_today", lambda: TODAY)
 
 
 def plant(db, code):
@@ -122,7 +133,7 @@ def test_planned_washing_cycle_deadline_is_distinct_from_actual_report(client, d
         report_date=date(2026, 10, 29), job_status='Done', tables_cleaned=18,
         reported_by='Actual Engineer', review_status='Pending', cycle_completed=True))
     db.commit()
-    rows = fetch(client, plant_id=str(p.id)).json()['events']
+    rows = [x for x in fetch(client, plant_id=str(p.id)).json()['events'] if x['reference'].startswith('Cycle 1')]
     assert len(rows) == 2
     scheduled = next(x for x in rows if x.get('source') == 'cycle')
     actual = next(x for x in rows if x.get('source') != 'cycle')
@@ -147,8 +158,8 @@ def test_confirmed_washing_cycle_is_green_but_same_day_report_is_separate(client
         report_date=date(2026, 10, 29), job_status='Done', tables_cleaned=35,
         reported_by='Actual Engineer', review_status='Confirmed', cycle_completed=True))
     db.commit()
-    rows = fetch(client, plant_id=str(p.id)).json()['events']
-    assert len(rows) == 2 and all(x['tone'] == 'done' for x in rows)
+    rows = [x for x in fetch(client, plant_id=str(p.id)).json()['events'] if x['reference'].startswith('Cycle 1')]
+    assert len(rows) == 2 and all(x['tone'] == 'done' and x['done'] for x in rows)
     assert len({x['key'] for x in rows}) == 2
     assert next(x for x in rows if x.get('source') == 'cycle')['status'] == 'Completed'
 
@@ -168,10 +179,9 @@ def test_cycle_deadline_is_denied_to_unauthorised_site_engineer(client, db):
 
 
 def test_overdue_filter_uses_real_due_date_and_uncompleted_status(client, db):
-    from app.core.timeutil import business_today
     login_user(client, db)
     p = plant(db, 'CAL-OVERDUE')
-    due = business_today()
+    due = TODAY
     from datetime import timedelta
     late = due - timedelta(days=7)
     db.add_all([OMTask(work_order_no='LATE-01', plant_id=p.id, task_name='Service module',
@@ -192,15 +202,65 @@ def test_summary_counts_match_events_and_respect_scope(client, db):
     body = summary.json()
     events = fetch(client, start='2026-10-28', end='2026-10-30').json()['events']
     expected = {}
-    for e in events:
-        expected.setdefault(e['date'], {'issue': 0, 'pm': 0, 'washing': 0})[e['kind']] += 1
-    assert body['days'] == expected == {'2026-10-29': {'issue': 3, 'pm': 2, 'washing': 1}}
+    for e in events:  # every day from the record's date to its last day; solved ones also count on that day
+        day = date.fromisoformat(e['date'])
+        while day <= date.fromisoformat(e['until']):
+            row = expected.setdefault(day.isoformat(), dict.fromkeys(['issue', 'pm', 'washing', 'issue_done', 'pm_done', 'washing_done'], 0))
+            row[e['kind']] += 1
+            if e['done'] and day.isoformat() == e['until']: row[e['kind'] + '_done'] += 1
+            day += timedelta(days=1)
+    assert body['days'] == expected
+    assert body['days']['2026-10-29'] == {'issue': 3, 'pm': 2, 'washing': 1, 'issue_done': 1, 'pm_done': 1, 'washing_done': 0}
+    assert body['days']['2026-10-30'] == {'issue': 2, 'pm': 1, 'washing': 0, 'issue_done': 0, 'pm_done': 0, 'washing_done': 0}
     assert 'Inverter' in body['facets']['equipment'] and 'Ravi' in body['facets']['assignee']
     assert 'events' not in body  # counts only: records load per day
     filtered = client.get('/api/operations-calendar/summary', params={'start': '2026-10-29', 'end': '2026-10-29', 'severity': 'Critical'}).json()
-    assert filtered['days']['2026-10-29'] == {'issue': 2, 'pm': 0, 'washing': 0}
+    assert (filtered['days']['2026-10-29']['issue'], filtered['days']['2026-10-29']['pm']) == (2, 0)
     field = login_user(client, db, role='Site Engineer', name='Field', email='cal-summary-field@example.com')
     db.add(UserPlantAssignment(user_id=field.id, plant_id=a.id)); db.commit()
     scoped = client.get('/api/operations-calendar/summary', params={'start': '2026-10-29', 'end': '2026-10-29'}).json()
-    assert scoped['days']['2026-10-29'] == {'issue': 2, 'pm': 2, 'washing': 1}
+    assert {k: scoped['days']['2026-10-29'][k] for k in ('issue', 'issue_done', 'pm', 'washing')} == {'issue': 2, 'issue_done': 1, 'pm': 2, 'washing': 1}
     assert client.get('/api/operations-calendar/summary', params={'start': '2026-10-29', 'end': '2026-10-29', 'plant_id': str(b.id)}).status_code == 403
+
+
+def test_open_work_repeats_daily_until_solved_and_ends_green(client, db):
+    login_user(client, db)
+    p = plant(db, 'CAL-CARRY')
+    opened = datetime(2026, 10, 21, 4, 0, tzinfo=timezone.utc)
+    db.add_all([
+        Issue(ticket_no='CARRY-OPEN', plant_id=p.id, severity='Critical', status='In Progress', occurred_at=opened, description='Open', vertical='RMS'),
+        Issue(ticket_no='CARRY-FIXED', plant_id=p.id, severity='Medium', status='Resolved', occurred_at=opened, description='Fixed', vertical='VCB Panel', fixed_on=date(2026, 10, 25)),
+        OMTask(work_order_no='CARRY-PM', plant_id=p.id, task_name='Clean', task_type='Inverter', due_on=date(2026, 10, 22), status='Scheduled'),
+        OMTask(work_order_no='CARRY-PM-DONE', plant_id=p.id, task_name='Clean', task_type='Inverter', due_on=date(2026, 10, 22), status='Completed', actual_completed_on=date(2026, 10, 24)),
+    ]); db.commit()
+
+    def day(d):
+        return {r['reference']: r for r in fetch(client, d, d, plant_id=str(p.id)).json()['events'] if not r.get('source')}
+
+    assert set(day('2026-10-23')) == {'CARRY-OPEN', 'CARRY-FIXED', 'CARRY-PM', 'CARRY-PM-DONE'}
+    on_fix = day('2026-10-25')
+    assert on_fix['CARRY-FIXED']['until'] == '2026-10-25' and on_fix['CARRY-FIXED']['done'] is True
+    assert set(day('2026-10-26')) == {'CARRY-OPEN', 'CARRY-PM'}  # solved and completed work stops repeating
+    today = day('2026-10-30')
+    assert today['CARRY-OPEN']['date'] == '2026-10-21' and today['CARRY-OPEN']['until'] == '2026-10-30'
+    assert today['CARRY-PM']['until'] == '2026-10-30' and today['CARRY-PM']['done'] is False
+    assert day('2026-11-05') == {}  # open work is not projected past today
+    summary = client.get('/api/operations-calendar/summary', params={'start': '2026-10-20', 'end': '2026-11-02', 'plant_id': str(p.id)}).json()['days']
+    assert summary['2026-10-24']['pm'] == 2 and summary['2026-10-24']['pm_done'] == 1
+    assert summary['2026-10-25']['issue'] == 2 and summary['2026-10-25']['issue_done'] == 1
+    assert summary['2026-10-30']['issue'] == 1 and '2026-10-31' not in summary
+
+
+def test_missed_washing_cycle_repeats_until_next_cycle_is_due(client, db):
+    from app.core.models import WashingConfig
+    login_user(client, db)
+    p = plant(db, 'CAL-MISSED')
+    db.add(WashingConfig(plant_id=p.id, active=True, tables_per_cycle=40,
+        cycle_overrides={'2026-10': {'1': '2026-10-10', '2': '2026-10-20', '3': '2026-10-31'}}))
+    db.add(WashingDailyReport(plant_id=p.id, cycle_month='2026-10', cycle_no=1, report_date=date(2026, 10, 13),
+        job_status='Done', tables_cleaned=40, reported_by='Crew', review_status='Confirmed', cycle_completed=True))
+    db.commit()
+    cycles = {r['reference']: r for r in fetch(client, '2026-10-01', '2026-10-31', plant_id=str(p.id)).json()['events'] if r.get('source') == 'cycle'}
+    assert cycles['Cycle 1 · 2026-10']['until'] == '2026-10-13' and cycles['Cycle 1 · 2026-10']['done']
+    assert cycles['Cycle 2 · 2026-10']['until'] == '2026-10-30' and not cycles['Cycle 2 · 2026-10']['done']
+    assert cycles['Cycle 3 · 2026-10']['until'] == '2026-10-31'  # not yet due: its own date only

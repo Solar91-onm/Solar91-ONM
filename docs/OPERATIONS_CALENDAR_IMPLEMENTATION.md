@@ -24,6 +24,17 @@ The calendar follows the application's shared top-level plant scope (`S.dashPlan
 - Washing report confirmed with `job_status=Done` = green; rejected or `Not done` = amber; pending review = teal. A configured cycle deadline is green **only** after confirmed completion, amber if overdue and incomplete, teal otherwise.
 - Every event also has an `ISS`, `PM` or `WASH` label; no colour-only communication.
 
+## Open work carries forward
+
+Each event has `date` (its own date), `until` (last day it appears) and `done`:
+
+- **Site issue:** shows from the day it occurred on every day until it is Resolved or Closed (`fixed_on`, else `closed_on`); while open it repeats up to today. On its solved day it is `done` and shown green. A solved issue with neither date (older imports) appears on its own date only.
+- **PM work order:** shows from its due date until Completed (`actual_completed_on`), repeating while open (overdue) up to today. Completed early or on time: its due date only, green. Cancelled: its due date only.
+- **Washing cycle deadline:** a missed cycle repeats until a confirmed cycle-completing report (green on that report's date), or until the day before the next cycle falls due, which then carries the remaining tables. The previous month's cycles are checked so a missed cycle from late last month still shows. Daily washing reports stay on their own date (green when confirmed as done).
+- Open work is never projected past today.
+
+The list endpoint returns every event active on any day of the range; the summary counts each day an event spans (`issue`, `pm`, `washing`) plus those solved that day (`issue_done`, `pm_done`, `washing_done`). Rows show *Open Nd* / *Overdue Nd* on carried days and *Resolved* / *Completed* on the solved day; chips show the solved-that-day count with a green ✓.
+
 ## Routes and filtering
 
 `GET /api/operations-calendar` requires `start` and `end` (inclusive ISO dates), with a maximum 94-day span. Optional filters: `plant_id`, `activity_type` (`issue`, `pm`, `washing`), `equipment`, `subpart`, `engineer`, `assignee`, `status`, `severity`, `q`, `limit` (1–2000), `offset` (0–10000). Response: `events`, `has_more`, `next_offset`, `start`, `end`.

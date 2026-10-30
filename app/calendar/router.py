@@ -88,14 +88,41 @@ def _tone(kind: str, status: str | None, severity: str | None, when: date, job_s
     return "washing"
 
 
+ISSUE_SOLVED = ("resolved", "closed")
+PM_ENDED = ("completed", "cancelled", "canceled")
+
+
+def _until(anchor: date, open_: bool, solved_on: date | None = None) -> date:
+    """Last day an activity appears. Open work repeats on every day up to today; solved work ends on the day it
+    was solved (never before its own date); anything else (cancelled, upcoming) appears on its own date only."""
+    if open_:
+        return max(anchor, business_today())
+    return max(anchor, solved_on) if solved_on else anchor
+
+
+def _issue_span(occurred_at: datetime, status: str | None, fixed_on: date | None,
+                closed_on: date | None) -> tuple[date, bool]:
+    """(last day shown, solved). Solved = Resolved or Closed; its day is the fix date, else the closing date."""
+    anchor = date.fromisoformat(_issue_date(occurred_at))
+    solved = (status or "").strip().casefold() in ISSUE_SOLVED
+    return _until(anchor, not solved, (fixed_on or closed_on) if solved else None), solved
+
+
+def _pm_span(due_on: date, status: str | None, completed_on: date | None) -> tuple[date, bool]:
+    st = (status or "").strip().casefold()
+    done = st == "completed"
+    return _until(due_on, st not in PM_ENDED, (completed_on or due_on) if done else None), done
+
+
 def _plant_fields(plant: Plant):
     return {"plant_id": str(plant.id), "plant": plant.plant_name, "site_code": plant.site_code}
 
 
 def _event_issue(r: Issue, p: Plant, reporter: str | None = None) -> dict:
     day = _issue_date(r.occurred_at)
+    until, done = _issue_span(r.occurred_at, r.status, r.fixed_on, r.closed_on)
     return {"key": f"issue:{r.id}", "kind": "issue", "id": str(r.id), "reference": r.ticket_no,
-        "date": day, **_plant_fields(p), "title": r.vertical or r.equipment_ref or "Site issue",
+        "date": day, "until": until.isoformat(), "done": done, **_plant_fields(p), "title": r.vertical or r.equipment_ref or "Site issue",
         "equipment": r.vertical or r.equipment_ref, "subpart": r.subcategory,
         "assignee": r.assignee_text, "engineer": p.assigned_engineer,
         "reporter": reporter, "status": r.status, "severity": r.severity,
@@ -103,8 +130,9 @@ def _event_issue(r: Issue, p: Plant, reporter: str | None = None) -> dict:
 
 
 def _event_pm(r: OMTask, p: Plant) -> dict:
+    until, done = _pm_span(r.due_on, r.status, r.actual_completed_on)
     return {"key": f"pm:{r.id}", "kind": "pm", "id": str(r.id), "reference": r.work_order_no,
-        "date": r.due_on.isoformat(), **_plant_fields(p),
+        "date": r.due_on.isoformat(), "until": until.isoformat(), "done": done, **_plant_fields(p),
         "title": r.task_name, "equipment": r.task_type or r.equipment_ref,
         "subpart": r.equipment_ref, "unit": r.unit_no,
         "assignee": r.assignee_text, "engineer": p.assigned_engineer,
@@ -115,7 +143,9 @@ def _event_pm(r: OMTask, p: Plant) -> dict:
 def _event_wash(r: WashingDailyReport, p: Plant) -> dict:
     return {"key": f"washing:{r.id}", "kind": "washing", "id": str(r.id),
         "reference": f"Cycle {r.cycle_no} · {r.cycle_month}",
-        "date": r.report_date.isoformat(), **_plant_fields(p), "title": "Panel washing",
+        "date": r.report_date.isoformat(), "until": r.report_date.isoformat(),
+        "done": (r.review_status or "").casefold() == "confirmed" and (r.job_status or "").casefold() == "done",
+        **_plant_fields(p), "title": "Panel washing",
         "equipment": WASHING_TYPE, "subpart": None,
         "assignee": r.reported_by, "engineer": p.assigned_engineer,
         "status": r.review_status, "job_status": r.job_status, "severity": None,
@@ -135,11 +165,12 @@ def _calendar_months(start: date, end: date) -> list[date]:
 
 def _cycle_record(p: Plant, cfg: WashingConfig, due: date, start: date, month: str,
                   number: int, state: str, assignee: str | None, reports: int,
-                  confirmed: bool) -> dict:
+                  confirmed: bool, until: date | None = None) -> dict:
     label = f"Cycle {number} due"
     return {"key": f"washing-cycle:{p.id}:{month}:{number}",
         "kind": "washing", "source": "cycle", "id": f"{p.id}:{month}:{number}",
         "reference": f"Cycle {number} · {month}", "date": due.isoformat(),
+        "until": (until or due).isoformat(), "done": confirmed,
         **_plant_fields(p), "title": label, "equipment": WASHING_TYPE,
         "subpart": None, "assignee": assignee, "engineer": p.assigned_engineer,
         "status": state, "severity": None, "start_date": start.isoformat(),
@@ -162,9 +193,16 @@ def _get_data(db, user, start, end, plant_id=None, kinds=None, equipment=None, s
     counts: dict[str, dict[str, int]] = {}
     facets: dict[str, set[str]] = {name: set() for name in FACETS}
 
-    def tally(kind, day, **values):
-        if day is None: return
-        counts.setdefault(day, {"issue": 0, "pm": 0, "washing": 0})[kind] += 1
+    def tally(kind, anchor, until, done, **values):
+        """Count the activity on each displayed day from its date to its last day; solved work also counts as
+        ``<kind>_done`` on the day it was solved."""
+        day = max(anchor, start)
+        while day <= min(until, end):
+            row = counts.setdefault(day.isoformat(), {"issue": 0, "pm": 0, "washing": 0,
+                                                     "issue_done": 0, "pm_done": 0, "washing_done": 0})
+            row[kind] += 1
+            if done and day == until: row[kind + "_done"] += 1
+            day += timedelta(days=1)
         for name, value in values.items():
             if value: facets[name].add(value)
 
@@ -181,11 +219,18 @@ def _get_data(db, user, start, end, plant_id=None, kinds=None, equipment=None, s
     if plant_id: shared.append(Plant.id == plant_id)
     if engineer: shared.append(Plant.assigned_engineer.ilike(f"%{engineer}%"))
     search_text = f"%{search}%" if search else None
+    today = business_today()
     if "issue" in allowed_kinds:
         utc_from = datetime.combine(start, time.min, tzinfo=BUSINESS_TZ).astimezone(timezone.utc)
         utc_until = datetime.combine(end + timedelta(days=1), time.min, tzinfo=BUSINESS_TZ).astimezone(timezone.utc)
+        # An issue shows from the day it occurred until it is solved: open issues from before the period are
+        # included while the period reaches today, solved ones while their resolution date is in the period.
+        solved = func.lower(func.coalesce(Issue.status, "")).in_(ISSUE_SOLVED)
+        shown = [Issue.occurred_at >= utc_from,
+                 and_(solved, func.coalesce(Issue.fixed_on, Issue.closed_on) >= start)]
+        if today >= start: shown.append(~solved)
         query = (select(Issue, Plant).join(Plant, Plant.id == Issue.plant_id)
-            .where(*shared, Issue.deleted_at.is_(None), Issue.occurred_at >= utc_from, Issue.occurred_at < utc_until))
+            .where(*shared, Issue.deleted_at.is_(None), Issue.occurred_at < utc_until, or_(*shown)))
         if types is not None: query = query.where(_issue_auth(types))
         if equipment: query = query.where(or_(Issue.vertical.ilike(f"%{equipment}%"), Issue.equipment_ref.ilike(f"%{equipment}%")))
         if subpart: query = query.where(Issue.subcategory.ilike(f"%{subpart}%"))
@@ -194,16 +239,21 @@ def _get_data(db, user, start, end, plant_id=None, kinds=None, equipment=None, s
         if severity: query = query.where(func.lower(Issue.severity) == severity.casefold())
         if search_text: query = query.where(or_(Issue.ticket_no.ilike(search_text), Issue.description.ilike(search_text), Issue.vertical.ilike(search_text), Issue.subcategory.ilike(search_text), Issue.equipment_ref.ilike(search_text), Issue.assignee_text.ilike(search_text), Plant.plant_name.ilike(search_text), Plant.site_code.ilike(search_text), Plant.assigned_engineer.ilike(search_text)))
         if summary:
-            for when, vertical, ref, sub, who, st, sev, eng in db.execute(query.with_only_columns(
+            for when, vertical, ref, sub, who, st, sev, eng, fixed, closed in db.execute(query.with_only_columns(
                     Issue.occurred_at, Issue.vertical, Issue.equipment_ref, Issue.subcategory, Issue.assignee_text,
-                    Issue.status, Issue.severity, Plant.assigned_engineer)):
-                tally("issue", _issue_date(when), equipment=vertical or ref, subpart=sub, assignee=who,
-                      status=st, severity=sev, engineer=eng)
+                    Issue.status, Issue.severity, Plant.assigned_engineer, Issue.fixed_on, Issue.closed_on)):
+                until, done = _issue_span(when, st, fixed, closed)
+                tally("issue", date.fromisoformat(_issue_date(when)), until, done, equipment=vertical or ref,
+                      subpart=sub, assignee=who, status=st, severity=sev, engineer=eng)
         else:
             result.extend(_event_issue(r, p) for r, p in db.execute(query.order_by(Issue.occurred_at, Issue.id).limit(take)))
     if "pm" in allowed_kinds:
+        # Unfinished work orders repeat from their due date until completed; completed ones end on completion.
+        pm_status = func.lower(func.coalesce(OMTask.status, ""))
+        shown = [OMTask.due_on >= start, and_(pm_status == "completed", OMTask.actual_completed_on >= start)]
+        if today >= start: shown.append(pm_status.not_in(PM_ENDED))
         query = (select(OMTask, Plant).join(Plant, Plant.id == OMTask.plant_id)
-            .where(*shared, OMTask.due_on >= start, OMTask.due_on <= end))
+            .where(*shared, OMTask.due_on <= end, or_(*shown)))
         if types is not None: query = query.where(_pm_auth(types))
         if equipment: query = query.where(or_(OMTask.task_type.ilike(f"%{equipment}%"), OMTask.equipment_ref.ilike(f"%{equipment}%")))
         if subpart: query = query.where(OMTask.equipment_ref.ilike(f"%{subpart}%"))
@@ -217,10 +267,11 @@ def _get_data(db, user, start, end, plant_id=None, kinds=None, equipment=None, s
         if severity: query = query.where(False)  # PM has no severity column
         if search_text: query = query.where(or_(OMTask.work_order_no.ilike(search_text), OMTask.task_name.ilike(search_text), OMTask.task_type.ilike(search_text), OMTask.equipment_ref.ilike(search_text), OMTask.assignee_text.ilike(search_text), Plant.plant_name.ilike(search_text), Plant.site_code.ilike(search_text), Plant.assigned_engineer.ilike(search_text)))
         if summary:
-            for due, kind_, ref, who, st, eng in db.execute(query.with_only_columns(
+            for due, kind_, ref, who, st, eng, completed in db.execute(query.with_only_columns(
                     OMTask.due_on, OMTask.task_type, OMTask.equipment_ref, OMTask.assignee_text, OMTask.status,
-                    Plant.assigned_engineer)):
-                tally("pm", due.isoformat(), equipment=kind_ or ref, subpart=ref, assignee=who, status=st, engineer=eng)
+                    Plant.assigned_engineer, OMTask.actual_completed_on)):
+                until, done = _pm_span(due, st, completed)
+                tally("pm", due, until, done, equipment=kind_ or ref, subpart=ref, assignee=who, status=st, engineer=eng)
         else:
             result.extend(_event_pm(r, p) for r, p in db.execute(query.order_by(OMTask.due_on, OMTask.id).limit(take)))
     if "washing" in allowed_kinds and user.role != "Administration" and (types is None or WASHING_TYPE.casefold() in types):
@@ -233,10 +284,11 @@ def _get_data(db, user, start, end, plant_id=None, kinds=None, equipment=None, s
         if severity: query = query.where(False)
         if search_text: query = query.where(or_(WashingDailyReport.reported_by.ilike(search_text), WashingDailyReport.remarks.ilike(search_text), WashingDailyReport.job_status.ilike(search_text), Plant.plant_name.ilike(search_text), Plant.site_code.ilike(search_text), Plant.assigned_engineer.ilike(search_text)))
         if summary:
-            for day, who, st, eng in db.execute(query.with_only_columns(
+            for day, who, st, job, eng in db.execute(query.with_only_columns(
                     WashingDailyReport.report_date, WashingDailyReport.reported_by, WashingDailyReport.review_status,
-                    Plant.assigned_engineer)):
-                tally("washing", day.isoformat(), equipment=WASHING_TYPE, assignee=who, status=st, engineer=eng)
+                    WashingDailyReport.job_status, Plant.assigned_engineer)):
+                done = (st or "").casefold() == "confirmed" and (job or "").casefold() == "done"
+                tally("washing", day, day, done, equipment=WASHING_TYPE, assignee=who, status=st, engineer=eng)
         else:
             result.extend(_event_wash(r, p) for r, p in db.execute(query.order_by(WashingDailyReport.report_date, WashingDailyReport.id).limit(take)))
         # Scheduled cycle due dates are configured independently of daily reports.
@@ -244,7 +296,8 @@ def _get_data(db, user, start, end, plant_id=None, kinds=None, equipment=None, s
         # with a distinct key. Never synthesize a confirmed/completed report.
         if not subpart and not severity and (not equipment or equipment.casefold() in
             WASHING_TYPE.casefold() or equipment.casefold() in "panel washing cycle"):
-            months = _calendar_months(start, end)
+            # The previous month too: a missed cycle there can still be outstanding at the start of the period.
+            months = _calendar_months((start.replace(day=1) - timedelta(days=1)).replace(day=1), end)
             month_keys = [m.strftime("%Y-%m") for m in months]
             cycle_query = (select(WashingConfig, Plant, User.display_name)
                 .join(Plant, Plant.id == WashingConfig.plant_id)
@@ -257,22 +310,32 @@ def _get_data(db, user, start, end, plant_id=None, kinds=None, equipment=None, s
                 approved = case((and_(WashingDailyReport.cycle_completed.is_(True),
                     WashingDailyReport.review_status == "Confirmed"), 1), else_=0)
                 active_report = case((WashingDailyReport.review_status.in_(["Pending", "Confirmed"]), 1), else_=0)
+                completed_on = func.max(case((and_(WashingDailyReport.cycle_completed.is_(True),
+                    WashingDailyReport.review_status == "Confirmed"), WashingDailyReport.report_date), else_=None))
                 completed_query = (select(WashingDailyReport.plant_id, WashingDailyReport.cycle_month,
-                    WashingDailyReport.cycle_no, func.sum(approved), func.sum(active_report))
+                    WashingDailyReport.cycle_no, func.sum(approved), func.sum(active_report), completed_on)
                     .where(WashingDailyReport.plant_id.in_(authorized_ids),
                         WashingDailyReport.cycle_month.in_(month_keys))
                     .group_by(WashingDailyReport.plant_id, WashingDailyReport.cycle_month,
                         WashingDailyReport.cycle_no))
-                ledger = {(pid, mon, num): (bool(done), int(count or 0))
-                    for pid, mon, num, done, count in db.execute(completed_query)}
+                ledger = {(pid, mon, num): (bool(done), int(count or 0), finished)
+                    for pid, mon, num, done, count, finished in db.execute(completed_query)}
                 for cfg, p, display_name in configs:
                     for m in months:
                         month = m.strftime("%Y-%m")
                         starts = _cycle_start_dates(m, cfg.cycle_overrides)
                         dues = _cycle_due_dates(m, cfg.cycle_overrides)
+                        following = _cycle_due_dates(date(m.year + (m.month == 12), m.month % 12 + 1, 1),
+                                                     cfg.cycle_overrides)[0]
                         for n, (begin, due) in enumerate(zip(starts, dues), 1):
-                            if not start <= due <= end: continue
-                            confirmed, report_count = ledger.get((p.id, month, n), (False, 0))
+                            confirmed, report_count, finished = ledger.get((p.id, month, n), (False, 0, None))
+                            # A missed cycle stays outstanding until it is completed, or until the next cycle
+                            # falls due and takes over its remaining tables; a completed one ends on completion.
+                            next_due = dues[n] if n < len(dues) else following
+                            if isinstance(finished, str): finished = date.fromisoformat(finished)
+                            until = max(due, finished) if confirmed and finished else due if confirmed else (
+                                max(due, min(today, next_due - timedelta(days=1))))
+                            if due > end or until < start: continue
                             state = "Completed" if confirmed else "In progress" if report_count else (
                                 "Missed" if due < business_today() else "Upcoming")
                             if status:
@@ -287,11 +350,11 @@ def _get_data(db, user, start, end, plant_id=None, kinds=None, equipment=None, s
                                 search.casefold() in "washing" or search.casefold() in "cycle"):
                                 continue
                             if summary:
-                                tally("washing", due.isoformat(), equipment=WASHING_TYPE, assignee=display_name,
+                                tally("washing", due, until, confirmed, equipment=WASHING_TYPE, assignee=display_name,
                                       status=state, engineer=p.assigned_engineer)
                             else:
                                 result.append(_cycle_record(p, cfg, due, begin, month, n, state,
-                                    display_name, report_count, confirmed))
+                                    display_name, report_count, confirmed, until))
     if summary:
         return finish_summary()
     result.sort(key=lambda e: (e["date"], e["kind"], e["key"]))

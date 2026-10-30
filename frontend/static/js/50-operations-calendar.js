@@ -63,7 +63,7 @@
    photo:'<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="9" cy="10" r="1.7" fill="currentColor"/><path d="M4 17l5-5 4 4 3-3 4 4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>'
  };
  // Colour shows the activity type; each record's status is written on the record itself.
- const legends=()=>Object.entries(KINDS).map(([kind,name])=>'<span><i class="oc-key oc-k-'+kind+'"></i>'+h(name)+'</span>').join('')+'<span class="oc-legend-note">Click a day or a chip to open its entries</span>';
+ const legends=()=>Object.entries(KINDS).map(([kind,name])=>'<span><i class="oc-key oc-k-'+kind+'"></i>'+h(name)+'</span>').join('')+'<span><i class="oc-key oc-done"></i>Resolved / completed that day</span><span class="oc-legend-note">Open issues and overdue work repeat on each day until solved</span>';
  // Plant filter drives the portal's shared plant scope (setPlantScope), so every module stays on the same plant.
  const plantPicker=()=>{
    const locked=(S._roleLabel||S.currentRole)==="Site Engineer",cur=scope(),code=v=>typeof displayCode==="function"?displayCode(v):String(v||"");
@@ -89,20 +89,35 @@
       '<div class="oc-status" role="status" aria-live="polite">'+(loading?'Loading activities…':C.error?'<span class="oc-error">'+h(C.error)+' <button data-oc="retry">Retry</button></span>':C.hasMore?C.events.length+' activities loaded; more records available. <button type="button" data-oc="loadMore">'+(C.loadingMore?'Loading…':'Load more')+'</button>':total?total+' activities in the selected period.':'No matching activities in this period.')+'</div>'+
       (C.view==="day"?dayView(C.date):calendarGrid(start,end,now))+'</section>';
  }
- function filteredDays(){const map=new Map();for(const e of C.events){if(!map.has(e.date))map.set(e.date,[]);map.get(e.date).push(e)}return map}
  function badge(e){let label=e.kind==="issue"?"ISS":e.kind==="pm"?"PM":"WASH";return '<b class="oc-category">'+label+'</b>'}
  const cardTitle=e=>e.kind==="issue"?(e.severity?e.severity+' · ':'')+(e.equipment||e.title):e.kind==="pm"?e.equipment+(e.unit?' '+e.unit:'')+': '+e.title:e.title+(Number.isFinite(e.tables_cleaned)?' · '+e.tables_cleaned:'');
- function card(e,compact){
-   const title=cardTitle(e);
-   return '<button type="button" class="oc-event oc-k-'+h(e.kind)+'" data-oc-event="'+h(e.key)+'" title="'+h(e.reference+' · '+title+' · '+e.status)+'">'+badge(e)+'<span>'+h(title||e.title||e.reference)+'</span>'+(compact?'':'<small>'+h(e.plant)+(e.status?' · '+h(e.status):'')+'</small>')+'</button>';
+ // Open issues and overdue PM / washing repeat on every day from their date (e.date) to e.until; solved work ends
+ // on e.until, where it shows green. Older API rows without `until` behave as single-day records.
+ const lastDay=e=>e.until||e.date;
+ const activeOn=(e,day)=>e.date<=day&&day<=lastDay(e);
+ const doneOn=(e,day)=>!!e.done&&day===lastDay(e);
+ const daysBetween=(a,b)=>Math.round((parse(b)-parse(a))/864e5);
+ const DONE_WORD={issue:"Resolved",pm:"Completed",washing:"Completed"};
+ function dayState(e,day){
+   if(!day)return null;
+   if(doneOn(e,day))return {cls:"ok",text:DONE_WORD[e.kind],tip:DONE_WORD[e.kind]+" on "+fmt(day)};
+   if(day>e.date){const n=daysBetween(e.date,day),since=fmt(e.date);
+     return e.kind==="issue"?{cls:"late",text:"Open "+n+"d",tip:"Open since "+since}:{cls:"late",text:"Overdue "+n+"d",tip:"Due "+since+", not completed"}}
+   return null;
  }
- const haystack=e=>[e.reference,cardTitle(e),e.plant,e.site_code,e.status,e.severity,e.assignee,e.equipment,e.subpart].filter(Boolean).join(' ').toLowerCase();
- const byKind=entries=>Object.keys(KINDS).map(kind=>[kind,entries.filter(e=>e.kind===kind)]);
+ function card(e,compact,day){
+   const title=cardTitle(e),st=dayState(e,day);
+   return '<button type="button" class="oc-event oc-k-'+h(e.kind)+(st&&st.cls==="ok"?' is-done':'')+'" data-oc-event="'+h(e.key)+'" title="'+h(e.reference+' · '+title+' · '+e.status+(st?' · '+st.tip:''))+'">'+badge(e)+'<span>'+h(title||e.title||e.reference)+'</span>'+(compact?'':'<small>'+h(e.plant)+(e.status?' · '+h(e.status):'')+'</small>')+(st?'<em class="oc-state '+st.cls+'">'+h(st.text)+'</em>':'')+'</button>';
+ }
+ const haystack=(e,day)=>{const st=dayState(e,day);return [e.reference,cardTitle(e),e.plant,e.site_code,e.status,e.severity,e.assignee,e.equipment,e.subpart,st&&st.text,st&&st.cls==="late"?(e.kind==="issue"?"open":"overdue"):""].filter(Boolean).join(' ').toLowerCase()};
+ // Within a type: outstanding work first (oldest first), work solved that day last.
+ const byKind=(entries,day)=>Object.keys(KINDS).map(kind=>[kind,entries.filter(e=>e.kind===kind).sort((a,b)=>(doneOn(a,day)-doneOn(b,day))||a.date.localeCompare(b.date))]);
  const localSearch=label=>'<label class="oc-search oc-local"><span aria-hidden="true">'+ICON.search+'</span><input type="search" data-oc-local aria-label="'+h(label)+'" placeholder="Search plant, reference, status…" maxlength="120" enterkeyhint="search"></label>';
  // One dropdown per activity type; the count updates as the local search narrows the rows.
- function kindSection(kind,list,open,listClass){
-   return '<details class="oc-sec oc-k-'+kind+'" data-oc-sec'+(open&&list.length?' open':'')+'><summary><i class="oc-key"></i><b>'+h(KINDS[kind])+'</b><span class="oc-n" data-oc-n>'+list.length+'</span>'+ICON.caret+'</summary><div class="'+listClass+'">'+
-     (list.length?list.map(eventRow).join('')+'<p class="oc-empty oc-nomatch" hidden>No matching entries.</p>':'<p class="oc-empty">No '+h(KINDS[kind].toLowerCase())+' for this date.</p>')+'</div></details>';
+ function kindSection(kind,list,open,listClass,day){
+   const solved=list.filter(e=>doneOn(e,day)).length;
+   return '<details class="oc-sec oc-k-'+kind+'" data-oc-sec'+(open&&list.length?' open':'')+'><summary><i class="oc-key"></i><b>'+h(KINDS[kind])+'</b>'+(solved?'<em class="oc-done-n" title="'+solved+' '+h(DONE_WORD[kind].toLowerCase())+' on this day">✓ '+solved+'</em>':'')+'<span class="oc-n" data-oc-n>'+list.length+'</span>'+ICON.caret+'</summary><div class="'+listClass+'">'+
+     (list.length?list.map(e=>eventRow(e,day)).join('')+'<p class="oc-empty oc-nomatch" hidden>No matching entries.</p>':'<p class="oc-empty">No '+h(KINDS[kind].toLowerCase())+' for this date.</p>')+'</div></details>';
  }
  function localFilter(input){
    const box=input.closest('[data-oc-list]');if(!box)return;
@@ -120,15 +135,15 @@
    const headers=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map(w=>'<div class="oc-weekday">'+w+'</div>').join('');
    return '<div class="oc-scroll"><div class="oc-grid oc-'+C.view+'">'+headers+days.map(day=>{
      const counts=dayCounts(day),n=countTotal(counts),outside=C.view==="month"&&day.slice(0,7)!==C.date.slice(0,7),groups=Object.keys(KINDS).filter(k=>counts[k]).map(k=>[k,counts[k]]);
-     return '<div class="oc-cell'+(outside?' outside':'')+(day===now?' current':'')+(day===C.selected?' picked':'')+'" data-oc-day="'+day+'" tabindex="0" role="button" aria-label="View '+fmt(day)+' activities"><div class="oc-day-head"><button type="button" data-oc-summary="'+day+'" aria-label="View activities for '+fmt(day)+'">'+(C.view==="week"?fmt(day,{weekday:"short",day:"numeric",month:"short"}):Number(day.slice(8)))+'</button>'+(n?'<span class="oc-count">'+n+'</span>':'')+'</div><div class="oc-cards">'+groups.map(([kind,count])=>{const label=SHORT[kind][count===1?0:1];
-         return '<button type="button" class="oc-group oc-k-'+kind+'" data-oc-group="'+kind+'" data-oc-group-day="'+day+'" aria-haspopup="dialog" title="'+h(count+' '+KINDS[kind].toLowerCase()+' on '+fmt(day))+'"><b>'+count+'</b><span>'+h(label)+'</span>'+ICON.caret+'</button>'}).join('')+'</div>'+
+     return '<div class="oc-cell'+(outside?' outside':'')+(day===now?' current':'')+(day===C.selected?' picked':'')+'" data-oc-day="'+day+'" tabindex="0" role="button" aria-label="View '+fmt(day)+' activities"><div class="oc-day-head"><button type="button" data-oc-summary="'+day+'" aria-label="View activities for '+fmt(day)+'">'+(C.view==="week"?fmt(day,{weekday:"short",day:"numeric",month:"short"}):Number(day.slice(8)))+'</button>'+(n?'<span class="oc-count">'+n+'</span>':'')+'</div><div class="oc-cards">'+groups.map(([kind,count])=>{const label=SHORT[kind][count===1?0:1],solved=counts[kind+"_done"]||0;
+         return '<button type="button" class="oc-group oc-k-'+kind+'" data-oc-group="'+kind+'" data-oc-group-day="'+day+'" aria-haspopup="dialog" title="'+h(count+' '+KINDS[kind].toLowerCase()+' on '+fmt(day)+(solved?' · '+solved+' '+DONE_WORD[kind].toLowerCase()+' that day':''))+'">'+(solved?'<em class="oc-done-n">✓'+solved+'</em>':'')+'<b>'+count+'</b><span>'+h(label)+'</span>'+ICON.caret+'</button>'}).join('')+'</div>'+
        // Phone month grid: one coloured dot per activity type; tapping the day opens its summary sheet.
        (groups.length?'<div class="oc-dots" aria-hidden="true">'+groups.map(([kind])=>'<i class="oc-k-'+kind+'"></i>').join('')+'</div>':'')+'</div>';
    }).join('')+'</div></div>';
  }
- function dayView(day){const entries=filteredDays().get(day)||[];
+ function dayView(day){const entries=C.events.filter(e=>activeOn(e,day));
    return '<div class="oc-day-view" data-oc-list><div class="oc-day-title">'+h(fmt(day,{weekday:"long",day:"numeric",month:"long",year:"numeric"}))+'<span>'+entries.length+' activities</span></div>'+localSearch('Search this date')+
-     byKind(entries).map(([kind,list])=>kindSection(kind,list,true,'oc-day-list')).join('')+'</div>';
+     byKind(entries,day).map(([kind,list])=>kindSection(kind,list,true,'oc-day-list',day)).join('')+'</div>';
  }
  async function refresh(){
    if(!active())return;
@@ -203,16 +218,16 @@
    el.innerHTML='<div class="oc-pop-head"><b>'+h(title)+'</b><button type="button" class="oc-close" aria-label="Close popup" data-oc="close">×</button></div><div class="oc-pop-body">'+inner+'</div>';
    document.body.appendChild(el);C.overlay=el;place(el,anchor);el.querySelector('.oc-close').focus({preventScroll:true});return el;
  }
- function eventRow(e){return '<div class="oc-summary-row" data-oc-text="'+h(haystack(e))+'">'+card(e,false)+'</div>'}
+ function eventRow(e,day){return '<div class="oc-summary-row" data-oc-text="'+h(haystack(e,day))+'">'+card(e,false,day)+'</div>'}
  function summary(day,anchor,openKind){
    C.selected=day;
    document.querySelectorAll("#oc .oc-cell.picked").forEach(el=>el.classList.remove("picked"));
    const picked=document.querySelector("#oc [data-oc-day=\""+day+"\"]");if(picked)picked.classList.add("picked");
    const n=countTotal(dayCounts(day)),key=listQuery(day),hit=cached(key);
-   const content=(all,more)=>'<div data-oc-list><p class="oc-pop-sub">'+fmt(day,{weekday:"long",day:"numeric",month:"long",year:"numeric"})+' · '+all.length+(all.length===1?' activity':' activities')+'</p>'+
-     (all.length?localSearch('Search entries on this date')+byKind(all).map(([kind,list])=>kindSection(kind,list,kind===openKind,'oc-sec-list')).join(''):'<p class="oc-empty">No activities recorded for this date.</p>')+
+   const content=(rows,more)=>{const all=rows.filter(e=>activeOn(e,day));return '<div data-oc-list><p class="oc-pop-sub">'+fmt(day,{weekday:"long",day:"numeric",month:"long",year:"numeric"})+' · '+all.length+(all.length===1?' activity':' activities')+'</p>'+
+     (all.length?localSearch('Search entries on this date')+byKind(all,day).map(([kind,list])=>kindSection(kind,list,kind===openKind,'oc-sec-list',day)).join(''):'<p class="oc-empty">No activities recorded for this date.</p>')+
      (more?'<p class="oc-pop-note">Showing the first '+all.length+'. Open the day view to load the rest.</p>':'')+'</div>'+
-     '<div class="oc-pop-foot"><button data-oc-dayview="'+day+'">View all activities</button></div>';
+     '<div class="oc-pop-foot"><button data-oc-dayview="'+day+'">View all activities</button></div>'};
    if(!n||hit){const all=hit?hit.events:[];popover(anchor,'Daily summary',content(all,hit&&hit.hasMore),all.length?'oc-pop-tall':'');return}
    const pop=popover(anchor,'Daily summary','<p class="oc-loading">Loading '+n+' activities…</p>','oc-pop-tall'),token=C.detailNo;
    apiFetch('/api/operations-calendar?'+key).then(data=>{

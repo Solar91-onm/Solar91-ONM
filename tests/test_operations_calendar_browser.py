@@ -44,6 +44,8 @@ def test_calendar_floating_details_and_day_summary_in_real_browser(width):
                     equipment:'Inverter',subpart:'DC Input',status:tone==='done'?'Resolved':'Open',severity:'Critical',tone,reference:kind.toUpperCase()+'-'+id});
                 const rows=[entry('issue','one','critical'),entry('issue','two','done'),
                     entry('pm','three','scheduled'),entry('washing','four','washing'),entry('issue','five','medium')];
+                rows[1].done=true;rows[1].until='2026-10-29';          // resolved on this day: shown green
+                rows[4].date='2026-10-27';rows[4].until='2026-10-30';  // opened two days earlier, still open
                 window.calls=[];
                 window.apiFetch=async url=>{calls.push(url);return url.startsWith('/api/operations-calendar/summary?')?{days:{'2026-10-29':{issue:3,pm:1,washing:1}},facets:{equipment:['Inverter']}}
                     :url.startsWith('/api/operations-calendar?')?{events:rows,has_more:false}
@@ -66,7 +68,7 @@ def test_calendar_floating_details_and_day_summary_in_real_browser(width):
             assert day.locator('.oc-event').count() == 0
             assert day.locator('[data-oc-group="issue"]').text_content() == '3Site issues'
             assert day.locator('.oc-group.oc-k-washing').count() == 1
-            assert page.locator('.oc-legend .oc-key').count() == 3
+            assert page.locator('.oc-legend .oc-key').count() == 4  # three types + resolved/completed
             assert page.locator('[data-oc-plant] option').count() == 3
             assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')  # no sideways page scroll
             # Month grid loads counts only; no record list is fetched until a day is opened.
@@ -85,6 +87,11 @@ def test_calendar_floating_details_and_day_summary_in_real_browser(width):
                 page.locator('.oc-pop .oc-sec').first.wait_for()
                 assert page.locator('.oc-pop details[open]').count() == 1
                 assert page.locator('.oc-pop details.oc-k-issue').get_attribute('open') is not None
+            # Carried-over and solved-that-day issues are marked on the row.
+            assert page.locator('.oc-pop .oc-event.is-done').count() == 1
+            assert page.locator('.oc-pop [data-oc-event="issue:two"] .oc-state').inner_text() == 'Resolved'
+            assert page.locator('.oc-pop [data-oc-event="issue:five"] .oc-state').inner_text() == 'Open 2d'
+            assert page.locator('.oc-pop .oc-k-issue summary .oc-done-n').inner_text() == '✓ 1'
             # The popup's own search narrows rows and the per-type counts.
             page.locator('.oc-pop [data-oc-local]').fill('ISSUE-TWO')
             assert page.locator('.oc-pop .oc-k-issue [data-oc-n]').inner_text() == '1 / 3'
