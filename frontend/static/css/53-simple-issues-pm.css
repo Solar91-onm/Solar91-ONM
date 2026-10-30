@@ -1,20 +1,20 @@
 /* Solar91 Issue register and PM: calm, centered, touch-safe tables.
    Layout-only: business actions, status transitions and backend permissions are unchanged. */
 #app .m26-issues.si .si-tbl{background:var(--card,#fff)}
-/* column widths add up to ~980px: the whole register fits the main frame on laptops; tablets and phones scroll inside the table */
-#app .m26-issues.si .si-register{width:100%;min-width:960px;table-layout:fixed;border-collapse:separate;border-spacing:0}
+/* Nine issue columns; the whole register fits laptop frames while tablets and phones scroll inside the table. */
+#app .m26-issues.si .si-register{width:100%;min-width:1020px;table-layout:fixed;border-collapse:separate;border-spacing:0}
 #app .m26-issues.si .si-register th,#app .m26-issues.si .si-register td{padding:10px 6px;text-align:center;vertical-align:middle;border-bottom:1px solid var(--border,#e5ebe7);background:var(--card,#fff);overflow-wrap:anywhere;line-height:1.45}
 #app .m26-issues.si .si-register th{position:sticky;top:0;z-index:1;background:var(--secondary,#f4f7f5);font-size:11px;letter-spacing:.025em;text-transform:uppercase;color:var(--muted-foreground,#53675c);font-weight:750;white-space:normal}
-#app .m26-issues.si .si-register th.si-h-id{width:110px}
-#app .m26-issues.si .si-register th.si-h-eq{width:96px}
-#app .m26-issues.si .si-register th.si-h-sub{width:88px}
-#app .m26-issues.si .si-register th.si-h-ref{width:62px}
-#app .m26-issues.si .si-register th.si-h-problem{width:126px}
-#app .m26-issues.si .si-register th.si-h-plant{width:76px}
-#app .m26-issues.si .si-register th.si-h-company{width:84px}
-#app .m26-issues.si .si-register th.si-h-owner{width:88px}
-#app .m26-issues.si .si-register th.si-h-status{width:84px}
-#app .m26-issues.si .si-register th.si-h-action{width:128px}
+#app .m26-issues.si .si-register th.si-h-id{width:115px}
+#app .m26-issues.si .si-register th.si-h-eq{width:100px}
+#app .m26-issues.si .si-register th.si-h-sub{width:115px}
+#app .m26-issues.si .si-register th.si-h-ref,#app .m26-issues.si .si-register td.si-ref-cell{display:none!important}
+#app .m26-issues.si .si-register th.si-h-problem{width:150px}
+#app .m26-issues.si .si-register th.si-h-plant{width:85px}
+#app .m26-issues.si .si-register th.si-h-company{width:100px}
+#app .m26-issues.si .si-register th.si-h-owner{width:95px}
+#app .m26-issues.si .si-register th.si-h-status{width:95px}
+#app .m26-issues.si .si-register th.si-h-action{width:125px}
 #app .m26-issues.si .si-register tr.si-r.od,#app .m26-issues.si .si-register tr.si-r.od:hover{background:transparent}
 #app .m26-issues.si .si-register tr.si-r.od td,#app .m26-issues.si .si-register tr.si-r.od:hover td{background:var(--card,#fff)}
 #app .m26-issues.si .si-register tr.si-r:hover td,#app .m26-issues.si .si-register tr.si-g:hover td{background:var(--secondary,#f6f8f6)}

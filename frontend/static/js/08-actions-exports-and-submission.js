@@ -460,6 +460,11 @@ function showIssuePhotoSelection(input){
  if(files.length>10){input.value="";if(label)label.textContent="No photos selected";toast("Choose no more than 10 evidence photos.");return}
  if(label)label.textContent=files.length?files.length+" photo"+(files.length===1?"":"s")+" selected":"No photos selected";
 }
+function issueSubpartValue(value,description){
+ const sub=String(value||"").trim(),problem=String(description||"").trim();
+ const normalize=text=>text.normalize("NFKC").toLowerCase().replace(/[^a-z0-9]/g,"");
+ return sub&&normalize(sub)!==normalize(problem)?sub:null;
+}
 async function uploadIssuePhotos(ticket,input){
  const selected=Array.from(input&&input.files||[]);if(!selected.length)return[];
  if(selected.length>10){throw new Error("An issue can have no more than 10 evidence photos.")}
@@ -502,7 +507,7 @@ function createTicket(){
  if(!desc){toast("Issue details are required.");wizardGo("ticket",3);return}
  const tk={id:newTicketId(),plant:plant,
   vertical:document.getElementById("tk-vert").value,
-  sub:(document.getElementById("tk-sub").value||"").replace("(none)","")||null,
+  sub:issueSubpartValue((document.getElementById("tk-sub")||{}).value,desc),
   equip:pickedEquip("tk"),
   desc:desc,
   severity:document.getElementById("tk-sev").value,created:stampISO(),etc:(function(){const v=document.getElementById("tk-etc").value;const d=new Date(v);return v&&!isNaN(d.getTime())?v:addHoursISO(stampISO(),etcHrs(document.getElementById("tk-sev").value))})(),

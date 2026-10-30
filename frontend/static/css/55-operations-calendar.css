@@ -139,16 +139,16 @@
 .oc-dots{display:none}
 
 /* event chip */
-.oc-event{position:relative;display:flex;align-items:center;gap:8px;text-align:left;width:100%;min-width:0;border:1px solid var(--oc-line-soft);border-radius:9px;padding:4px 8px 4px 12px;line-height:1.25;min-height:24px;font-size:11.5px;font-weight:600;background:var(--oc-bg);color:var(--oc-ink-2);transition:background .12s,border-color .12s,box-shadow .12s}
-.oc-event::before{content:"";position:absolute;left:3px;top:4px;bottom:4px;width:3px;border-radius:3px;background:var(--t-bar,var(--oc-neutral-bar))}
-.oc-event:hover{background:var(--t-bg,var(--oc-sub));border-color:transparent}
+.oc-event{position:relative;display:flex;align-items:center;gap:8px;text-align:left;width:100%;min-width:0;border:1px solid color-mix(in srgb,var(--t-bar,var(--oc-neutral-bar)) 24%,var(--oc-line-soft));border-radius:10px;padding:5px 8px 5px 12px;line-height:1.25;min-height:26px;font-size:11.5px;font-weight:600;background:linear-gradient(112deg,color-mix(in srgb,var(--t-bg,var(--oc-sub)) 78%,var(--oc-bg)),var(--oc-bg) 82%);color:var(--oc-ink-2);box-shadow:0 1px 3px rgba(16,24,20,.035);transition:background .16s,border-color .16s,box-shadow .16s,transform .16s}
+.oc-event::before{content:"";position:absolute;left:3px;top:4px;bottom:4px;width:3px;border-radius:3px;background:linear-gradient(180deg,var(--t-bar,var(--oc-neutral-bar)),color-mix(in srgb,var(--t-bar,var(--oc-neutral-bar)) 58%,white))}
+.oc-event:hover{background:linear-gradient(112deg,var(--t-bg,var(--oc-sub)),var(--oc-bg));border-color:color-mix(in srgb,var(--t-bar,var(--oc-neutral-bar)) 42%,var(--oc-line));box-shadow:0 4px 12px rgba(16,24,20,.09);transform:translateY(-1px)}
 .oc-event>span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
 .oc-event small{color:var(--oc-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:32%;font-size:11px;font-weight:500}
-.oc-category{font-size:9px;font-weight:800;letter-spacing:.06em;flex:0 0 auto;color:var(--t-fg,var(--oc-muted));background:var(--t-bg,var(--oc-sub));padding:2px 6px;border-radius:5px}
+.oc-category{font-size:9px;font-weight:800;letter-spacing:.06em;flex:0 0 auto;color:var(--t-fg,var(--oc-muted));background:linear-gradient(135deg,var(--t-bg,var(--oc-sub)),color-mix(in srgb,var(--t-bg,var(--oc-sub)) 58%,var(--oc-bg)));border:1px solid color-mix(in srgb,var(--t-bar,var(--oc-neutral-bar)) 18%,transparent);padding:3px 6px;border-radius:6px}
 /* per-type day chip: "37 Washing ▾" opens that day's list with the type expanded */
-.oc-group{display:flex;align-items:center;gap:7px;width:100%;min-width:0;border:1px solid transparent;border-radius:9px;padding:4px 5px 4px 9px;min-height:28px;font-size:12px;font-weight:650;text-align:left;background:var(--t-bg);color:var(--t-fg);transition:border-color .12s,box-shadow .12s,transform .12s}
+.oc-group{display:flex;align-items:center;gap:7px;width:100%;min-width:0;border:1px solid color-mix(in srgb,var(--t-bar) 22%,transparent);border-radius:10px;padding:4px 5px 4px 9px;min-height:29px;font-size:12px;font-weight:650;text-align:left;background:linear-gradient(110deg,var(--t-bg),color-mix(in srgb,var(--t-bg) 70%,var(--oc-bg)));color:var(--t-fg);box-shadow:0 1px 3px rgba(16,24,20,.035);transition:border-color .14s,box-shadow .14s,transform .14s,filter .14s}
 .oc-group::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--t-bar);flex-shrink:0}
-.oc-group:hover{border-color:var(--t-bar);box-shadow:0 4px 12px rgba(16,24,20,.08);transform:translateY(-1px)}
+.oc-group:hover{border-color:var(--t-bar);box-shadow:0 5px 14px color-mix(in srgb,var(--t-bar) 18%,transparent);transform:translateY(-1px);filter:saturate(1.08)}
 .oc-group span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .oc-group b{order:2;min-width:22px;height:20px;padding:0 6px;border-radius:999px;display:grid;place-items:center;background:var(--oc-bg);font-size:11.5px;font-weight:800;font-variant-numeric:tabular-nums}
 .oc-group svg{order:3;flex-shrink:0;opacity:.6}
@@ -157,7 +157,7 @@
 .oc-sec>summary .oc-done-n{order:0}
 .oc-state{font-style:normal;flex-shrink:0;font-size:10.5px;font-weight:750;padding:2px 7px;border-radius:999px;white-space:nowrap;background:var(--t-bg);color:var(--t-fg)}
 .oc-state.ok{background:var(--oc-done-bar);color:#fff}
-.oc-event.is-done{--t-bg:var(--oc-done-bg);--t-fg:var(--oc-done-fg);--t-bar:var(--oc-done-bar);background:var(--oc-done-bg);border-color:transparent}
+.oc-event.is-done{--t-bg:var(--oc-done-bg);--t-fg:var(--oc-done-fg);--t-bar:var(--oc-done-bar);background:linear-gradient(112deg,var(--oc-done-bg),var(--oc-bg) 88%);border-color:color-mix(in srgb,var(--oc-done-bar) 26%,var(--oc-line-soft))}
 .oc-event.is-done>span{color:var(--oc-done-fg)}
 .oc-grid.oc-week .oc-cell{min-height:160px}
 .oc-grid.oc-week .oc-day-head button{font-size:12px;padding:0 9px}
@@ -169,10 +169,10 @@
 .oc-day-view .oc-local{margin:14px 0 4px}
 /* searchable per-type dropdowns, shared by the day view and the daily summary popup */
 .oc-local{max-width:none;margin:0 0 10px}
-.oc-sec{border:1px solid var(--oc-line);border-radius:12px;margin-top:8px;background:var(--oc-bg);overflow:hidden;transition:border-color .12s}
+.oc-sec{border:1px solid color-mix(in srgb,var(--t-bar) 22%,var(--oc-line));border-radius:12px;margin-top:8px;background:linear-gradient(135deg,color-mix(in srgb,var(--t-bg) 24%,var(--oc-bg)),var(--oc-bg) 46%);overflow:hidden;transition:border-color .12s,box-shadow .12s}
 .oc-sec[open]{border-color:color-mix(in srgb,var(--t-bar) 35%,var(--oc-line))}
 .oc-sec>summary{list-style:none;display:flex;align-items:center;gap:10px;padding:11px 13px;cursor:pointer;font-size:13px;color:var(--oc-ink);background:var(--oc-bg);user-select:none;transition:background .12s}
-.oc-sec>summary:hover,.oc-sec[open]>summary{background:var(--t-bg)}
+.oc-sec>summary:hover,.oc-sec[open]>summary{background:linear-gradient(105deg,var(--t-bg),color-mix(in srgb,var(--t-bg) 62%,var(--oc-bg)))}
 .oc-sec>summary::-webkit-details-marker{display:none}
 .oc-sec>summary b{flex:1;font-weight:700;color:var(--oc-ink)}
 .oc-sec>summary .oc-key{flex-shrink:0}

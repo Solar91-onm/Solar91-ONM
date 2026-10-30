@@ -120,12 +120,13 @@
   if(!t){S.modal=null;return ""}
   if(!canEdit(t)){S.modal=null;toast(t.status==="Closed"?"A closed ticket can only be edited by the O&M Head.":"Only the O&M Head or this ticket's Assignee can edit it.");return ""}
   const verts=typeof VERTICALS!=="undefined"?VERTICALS:[t.vertical];
+  const savedSub=typeof issueSubpartValue==="function"?issueSubpartValue(t.sub,t.desc):t.sub;
   const subs=["(none)"].concat((typeof SUBCATS!=="undefined"&&SUBCATS[t.vertical])||[]);
   const scopeNote=isHead()?"":'<p class="muted" style="font-size:12px;margin:0 0 10px">You can edit this ticket because it is assigned to you. Equipment changes must stay within your equipment types.</p>';
   const body='<div id="cc-edit-extra" hidden></div>'+scopeNote+
    '<div class="row" style="gap:12px"><div class="field" style="flex:1"><span class="lbl">Priority</span><select id="edit-tk-sev" class="inp">'+sevOpts(t.severity)+'</select></div>'+
    '<div class="field" style="flex:1"><span class="lbl">Issue type</span><select id="edit-tk-vert" class="inp">'+verts.map(v=>'<option'+(v===t.vertical?" selected":"")+'>'+text(v)+'</option>').join("")+'</select></div></div>'+
-   '<div class="row" style="gap:12px"><div class="field" style="flex:1"><span class="lbl">Sub-category</span><select id="edit-tk-sub" class="inp">'+subs.map(s=>'<option'+((t.sub||"(none)")===s?" selected":"")+'>'+text(s)+'</option>').join("")+'</select></div>'+
+   '<div class="row" style="gap:12px"><div class="field" style="flex:1"><span class="lbl">Subpart / fault area</span><select id="edit-tk-sub" class="inp">'+subs.map(s=>'<option'+((savedSub||"(none)")===s?" selected":"")+'>'+text(s)+'</option>').join("")+'</select></div>'+
    '<div class="field" style="flex:1"><span class="lbl">Subpart / unit ID</span><input id="edit-tk-equip" class="inp" value="'+text(t.equip&&t.equip!=="—"?t.equip:"")+'" placeholder="e.g. INV-03"/></div></div>'+
    '<div class="field"><span class="lbl">Description</span><textarea id="edit-tk-desc" class="txt" rows="3">'+text(t.desc)+'</textarea></div>'+
    '<div class="field"><span class="lbl">Maker / manufacturer</span><input id="edit-tk-maker" class="inp" value="'+text(t.maker||"")+'" placeholder="e.g. Sungrow"/></div>'+
@@ -172,7 +173,7 @@
   if(maker!==(t.maker||""))body.maker=maker;
   if(eq&&eq!==(t.equip||""))body.equipment_ref=eq;
   if(vert&&vert!==t.vertical)body.vertical=vert;
-  const sv=(sub==="(none)"||!sub)?null:sub;if(document.getElementById("edit-tk-sub")&&sv!==(t.sub||null))body.subcategory=sv;
+  const sv=(sub==="(none)"||!sub)?null:(typeof issueSubpartValue==="function"?issueSubpartValue(sub,desc):sub);if(document.getElementById("edit-tk-sub")&&sv!==(t.sub||null))body.subcategory=sv;
   const start=val("edit-tk-occurred"),etc=val("edit-tk-etc");
   if(/^\d{4}-\d{2}-\d{2}$/.test(start)&&start!==localDay(t.occurred||t.created))body.occurred_at=new Date(start+"T09:00").toISOString();
   if(etc&&etc!==localInput(t.etc)){const d=new Date(etc);if(isNaN(d.getTime())){toast("Enter a valid deadline.");return}body.etc_at=d.toISOString()}

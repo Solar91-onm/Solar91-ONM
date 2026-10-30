@@ -111,6 +111,7 @@ async function startSolar91App(){
     const photoInput=document.getElementById("tk-photos"),photoFiles=Array.from(photoInput&&photoInput.files||[]);
     if(photoFiles.length>10){toast("Choose no more than 10 evidence photos.");return}
     const sev=(document.getElementById("tk-sev")||{}).value||"Medium";
+    const subcategory=issueSubpartValue((document.getElementById("tk-sub")||{}).value,desc);
     const equipmentRef=((document.getElementById("tk-equip")||{}).value||"").trim();
     const units=(typeof s91TkSelectedUnits==="function"?s91TkSelectedUnits():[]).filter(e=>String(e.plant_id)===String(plantId));
     const registeredEquipment=(units.length===1?units[0]:null)||(!units.length&&(S.equipment||[]).find(e=>
@@ -120,7 +121,7 @@ async function startSolar91App(){
     const body={
       plant_id:plantId,equipment_id:registeredEquipment?registeredEquipment.id:null,equipment_ref:equipmentRef||null,
       unit_ids:units.map(e=>e.id),
-      vertical:(registeredEquipment&&registeredEquipment.equipment_type)||((document.getElementById("tk-vert")||{}).value||"Other"),description:desc,severity:sev,
+      vertical:(registeredEquipment&&registeredEquipment.equipment_type)||((document.getElementById("tk-vert")||{}).value||"Other"),subcategory,description:desc,severity:sev,
       assigned_to:((document.getElementById("tk-assignee")||{}).value||"")||null,
       occurred_at:s91LocalToUtc((document.getElementById("tk-occurred")||{}).value,"09:00"),
       etc_at:s91LocalToUtc((document.getElementById("tk-etc")||{}).value),

@@ -77,7 +77,7 @@ function calendarNavGroup(on){
  const plants=[...(S.plants||[])].sort((a,b)=>String(a.id||"").localeCompare(String(b.id||""),undefined,{numeric:true}));
  const item=(v,label,hay)=>'<div class="side-sublink'+(cur===v?" active":"")+'" data-cal-plant="'+esc(v)+'"'+(hay!=null?' data-cal-nav="'+esc(hay)+'"'+(q&&hay.indexOf(q)<0?' hidden':''):'')+' title="'+esc(label)+'" onclick="s91CalendarPlant(this.dataset.calPlant)">'+esc(label)+'</div>';
  const shown=plants.filter(p=>!q||((displayCode(p.id)||"")+" "+(p.site_code||"")+" "+p.name).toLowerCase().indexOf(q)>=0).length;
- return '<div class="side-link side-parent'+(on?" on":"")+'" aria-expanded="'+open+'" onclick="s91ToggleCalendarNav()">'+I.clipc(16)+'<span>Operations Calendar</span><i class="side-caret'+(open?" open":"")+'" aria-hidden="true"></i></div>'+
+ return '<div class="side-link side-parent'+(on?" on":"")+'" aria-expanded="'+open+'" onclick="s91ToggleCalendarNav()">'+I.clipc(16)+'<span>Operations Calendar</span></div>'+
   (open?'<div class="side-sub side-cal">'+
    '<input type="search" id="s91-cal-nav-q" class="side-cal-search" placeholder="Search plants…" aria-label="Search plants for the calendar" autocomplete="off" value="'+esc(S._calNavQ||"")+'" oninput="s91CalendarNavFilter(this.value)">'+
    item("all","All plants",null)+

@@ -10,22 +10,23 @@ Release date: 29 October 2026. Applies to the supplied source bundle; no hosted 
 - Dedicated Site Issues and Preventive Maintenance sidebar links were removed to reduce clutter; workflows remain reachable through the dashboard and direct routes.
 
 ## Site Issues (this revision)
-The default register is a **flat, searchable, filterable list** with a centered ten-column table:
+The default register is a **flat, searchable, filterable list** with a centered nine-column table:
 
 1. Issue ID (severity shown quietly beneath the ID)
 2. Equipment (existing issue equipment type)
 3. Subpart (existing issue subcategory)
-4. Subpart / unit ID (existing equipment or registered unit reference)
-5. Problem (issue description)
-6. Plant code (plant site code; name appears underneath)
-7. Supplier / maker (stored supplier, otherwise manufacturer)
-8. Assigned to (assignee or unassigned)
-9. Status (red/green/neutral indicator; deadline text underneath)
-10. Action (existing View/Assign/Reassign/Plant actions unchanged)
+4. Problem (issue description)
+5. Plant code (plant site code; name appears underneath)
+6. Supplier / maker (stored supplier, otherwise manufacturer)
+7. Assigned to (assignee or unassigned)
+8. Status (red/green/neutral indicator; deadline text underneath)
+9. Action (existing View/Assign/Reassign/Plant actions unchanged)
 
 No full-row overdue coloring; overdue is a small status indicator and subtitle. Optional grouping and existing board/sites views remain available. The table scrolls **within its container** on narrow mobile screens; each cell stays readable and all columns remain accessible. Existing batch assignment, search/filter, ticket conversation, permissions and server actions remain unchanged.
 
-**Data limitation:** The current API has `vertical`, `subcategory`, `equipment_ref`, `supplier`, `maker`, and `serial_number`, but no *separate nested subpart-ID field*. The fourth column therefore shows the stored unit/equipment reference; it **must not be treated as a verified subcomponent serial ID**. Adding independent subpart IDs and editable hierarchies requires a separate, reviewed schema/API/form upgrade.
+The Raise Issue form keeps the **Subpart / fault area** separate from **Issue details**: choose the affected equipment area in the former and describe the full observed problem in the latter. If a saved legacy subpart exactly repeats the problem text, the register leaves the redundant subpart cell blank; new and edited tickets do not save an exact duplicate.
+
+**Data limitation:** Equipment or unit references remain in the underlying issue records and issue details, but are no longer duplicated in the register as a separate column. The current API has no *separate nested subpart-ID field*; stored equipment references must not be treated as verified subcomponent serial IDs. Adding independent subpart IDs and editable hierarchies requires a separate, reviewed schema/API/form upgrade.
 
 ## Preventive Maintenance (this revision)
 - Centered, consistent table headings and cell values in PM work register and daily planner.
