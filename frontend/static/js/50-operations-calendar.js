@@ -63,7 +63,7 @@
    photo:'<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="9" cy="10" r="1.7" fill="currentColor"/><path d="M4 17l5-5 4 4 3-3 4 4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>'
  };
  // Colour shows the activity type; each record's status is written on the record itself.
- const legends=()=>Object.entries(KINDS).map(([kind,name])=>'<span><i class="oc-key oc-k-'+kind+'"></i>'+h(name)+'</span>').join('')+'<span><i class="oc-key oc-done"></i>Resolved / completed that day</span><span class="oc-legend-note">Open issues and overdue work repeat on each day until solved</span>';
+ const legends=()=>Object.entries(KINDS).map(([kind,name])=>'<span><i class="oc-key oc-k-'+kind+'"></i>'+h(name)+'</span>').join('')+'<span><i class="oc-key oc-done"></i>Resolved / completed that day</span><span><i class="oc-tier-key oc-t1"></i>Washing 1-2 days late</span><span><i class="oc-tier-key oc-t2"></i>3-6 days late</span><span><i class="oc-tier-key oc-t3"></i>7+ days late</span><span class="oc-legend-note">Open issues and overdue work repeat on each day until solved</span>';
  // Plant filter drives the portal's shared plant scope (setPlantScope), so every module stays on the same plant.
  const plantPicker=()=>{
    const locked=(S._roleLabel||S.currentRole)==="Site Engineer",cur=scope(),code=v=>typeof displayCode==="function"?displayCode(v):String(v||"");
@@ -98,16 +98,17 @@
  const doneOn=(e,day)=>!!e.done&&day===lastDay(e);
  const daysBetween=(a,b)=>Math.round((parse(b)-parse(a))/864e5);
  const DONE_WORD={issue:"Resolved",pm:"Completed",washing:"Completed"};
+ const lateTier=n=>n>=7?3:n>=3?2:n>=1?1:0;
  function dayState(e,day){
    if(!day)return null;
    if(doneOn(e,day))return {cls:"ok",text:DONE_WORD[e.kind],tip:DONE_WORD[e.kind]+" on "+fmt(day)};
    if(day>e.date){const n=daysBetween(e.date,day),since=fmt(e.date);
-     return e.kind==="issue"?{cls:"late",text:"Open "+n+"d",tip:"Open since "+since}:{cls:"late",text:"Overdue "+n+"d",tip:"Due "+since+", not completed"}}
+     return e.kind==="issue"?{cls:"late",text:"Open "+n+"d",tip:"Open since "+since}:{cls:"late",tier:e.kind==="washing"?lateTier(n):0,text:"Overdue "+n+"d",tip:"Due "+since+", not completed"}}
    return null;
  }
  function card(e,compact,day){
    const title=cardTitle(e),st=dayState(e,day);
-   return '<button type="button" class="oc-event oc-k-'+h(e.kind)+(st&&st.cls==="ok"?' is-done':'')+'" data-oc-event="'+h(e.key)+'" title="'+h(e.reference+' · '+title+' · '+e.status+(st?' · '+st.tip:''))+'">'+badge(e)+'<span>'+h(title||e.title||e.reference)+'</span>'+(compact?'':'<small>'+h(e.plant)+(e.status?' · '+h(e.status):'')+'</small>')+(st?'<em class="oc-state '+st.cls+'">'+h(st.text)+'</em>':'')+'</button>';
+   return '<button type="button" class="oc-event oc-k-'+h(e.kind)+ (st&&st.cls==="ok"?' is-done':'')+(st&&st.tier?' oc-t'+st.tier:'')+'" data-oc-event="'+h(e.key)+'" title="'+h(e.reference+' · '+title+' · '+e.status+(st?' · '+st.tip:''))+'">'+badge(e)+'<span>'+h(title||e.title||e.reference)+'</span>'+(compact?'':'<small>'+h(e.plant)+(e.status?' · '+h(e.status):'')+'</small>')+(st?'<em class="oc-state '+st.cls+'">'+h(st.text)+'</em>':'')+'</button>';
  }
  const haystack=(e,day)=>{const st=dayState(e,day);return [e.reference,cardTitle(e),e.plant,e.site_code,e.status,e.severity,e.assignee,e.equipment,e.subpart,st&&st.text,st&&st.cls==="late"?(e.kind==="issue"?"open":"overdue"):""].filter(Boolean).join(' ').toLowerCase()};
  // Within a type: outstanding work first (oldest first), work solved that day last.
@@ -136,7 +137,7 @@
    return '<div class="oc-scroll"><div class="oc-grid oc-'+C.view+'">'+headers+days.map(day=>{
      const counts=dayCounts(day),n=countTotal(counts),outside=C.view==="month"&&day.slice(0,7)!==C.date.slice(0,7),groups=Object.keys(KINDS).filter(k=>counts[k]).map(k=>[k,counts[k]]);
      return '<div class="oc-cell'+(outside?' outside':'')+(day===now?' current':'')+(day===C.selected?' picked':'')+'" data-oc-day="'+day+'" tabindex="0" role="button" aria-label="View '+fmt(day)+' activities"><div class="oc-day-head"><button type="button" data-oc-summary="'+day+'" aria-label="View activities for '+fmt(day)+'">'+(C.view==="week"?fmt(day,{weekday:"short",day:"numeric",month:"short"}):Number(day.slice(8)))+'</button>'+(n?'<span class="oc-count">'+n+'</span>':'')+'</div><div class="oc-cards">'+groups.map(([kind,count])=>{const label=SHORT[kind][count===1?0:1],solved=counts[kind+"_done"]||0;
-         return '<button type="button" class="oc-group oc-k-'+kind+'" data-oc-group="'+kind+'" data-oc-group-day="'+day+'" aria-haspopup="dialog" title="'+h(count+' '+KINDS[kind].toLowerCase()+' on '+fmt(day)+(solved?' · '+solved+' '+DONE_WORD[kind].toLowerCase()+' that day':''))+'">'+(solved?'<em class="oc-done-n">✓'+solved+'</em>':'')+'<b>'+count+'</b><span>'+h(label)+'</span>'+ICON.caret+'</button>'}).join('')+'</div>'+
+         return '<button type="button" class="oc-group oc-k-'+kind+(kind==="washing"&&(C.tiers||{})[day]?' oc-t'+C.tiers[day]:'')+'" data-oc-group="'+kind+'" data-oc-group-day="'+day+'" aria-haspopup="dialog" title="'+h(count+' '+KINDS[kind].toLowerCase()+' on '+fmt(day)+(solved?' · '+solved+' '+DONE_WORD[kind].toLowerCase()+' that day':''))+'">'+(solved?'<em class="oc-done-n">✓'+solved+'</em>':'')+'<b>'+count+'</b><span>'+h(label)+'</span>'+ICON.caret+'</button>'}).join('')+'</div>'+
        // Phone month grid: one coloured dot per activity type; tapping the day opens its summary sheet.
        (groups.length?'<div class="oc-dots" aria-hidden="true">'+groups.map(([kind])=>'<i class="oc-k-'+kind+'"></i>').join('')+'</div>':'')+'</div>';
    }).join('')+'</div></div>';
@@ -155,16 +156,16 @@
      if(daily){
        const data=cached(q)||await apiFetch("/api/operations-calendar?"+q).then(d=>{remember(q,d);return cached(q)});
        if(token!==C.requestNo||!active()||key!==(query()||"empty"))return;
-       C.events=data.events.slice();C.hasMore=data.hasMore;C.days={};facets(C.events);
+       C.events=data.events.slice();C.hasMore=data.hasMore;C.days={};C.tiers={};facets(C.events);
      }else{
        // Month and week: counts per day only; a day's records load when it is opened.
        const sq=new URLSearchParams(q);sq.delete("limit");
        const data=await apiFetch("/api/operations-calendar/summary?"+sq);
        if(token!==C.requestNo||!active()||key!==(query()||"empty"))return;
-       C.days=data.days||{};C.events=[];C.hasMore=false;C.dayCache.clear();mergeOptions(data.facets||{});
+       C.days=data.days||{};C.tiers=data.washing_tier||{};C.events=[];C.hasMore=false; C.dayCache.clear();mergeOptions(data.facets||{});
      }
      C.loadedKey=key;C.pendingKey="";render();
-   }catch(error){if(token!==C.requestNo||!active())return;C.events=[];C.days={};C.pendingKey="";C.loadedKey=key;C.error=error.message||"Calendar could not load";render()}
+   }catch(error){if(token!==C.requestNo||!active())return;C.events=[];C.days={};C.tiers={};C.pendingKey="";C.loadedKey=key;C.error=error.message||"Calendar could not load";render()}
  }
  async function loadMore(){
    if(!active()||!C.hasMore||C.loadingMore)return;

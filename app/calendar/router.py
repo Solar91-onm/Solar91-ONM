@@ -23,6 +23,22 @@ from app.scheduled.washing_cycles import _cycle_due_dates, _cycle_start_dates, m
 router = APIRouter(prefix="/api/operations-calendar", tags=["Operations Calendar"])
 MAX_DAYS = 93
 
+# How late an unfinished washing cycle is, measured from ITS OWN deadline. Same 1 / 3 / 7 day matrix the washing
+# overview uses (_overdue_info): 1-2 days late = tier 1 (amber), 3-6 = tier 2 (orange), 7+ = tier 3 (red).
+LATE_TIER_DAYS = (1, 3, 7)
+LATE_TONES = ("washing", "late", "late-high", "late-severe")
+# How many calendar months before the period an unfinished cycle can still be shown as outstanding.
+OUTSTANDING_LOOKBACK_MONTHS = 1
+
+
+def _late_tier(days_late: int) -> int:
+    return sum(1 for limit in LATE_TIER_DAYS if days_late >= limit)
+
+
+def _months_back(first_of_month: date, months: int) -> date:
+    index = first_of_month.year * 12 + first_of_month.month - 1 - months
+    return date(index // 12, index % 12 + 1, 1)
+
 
 def _allowed(db: Session, user: User, plant_id: UUID | None):
     if "issues.view" not in ROLE_PERMISSIONS.get(user.role, set()):
@@ -165,8 +181,10 @@ def _calendar_months(start: date, end: date) -> list[date]:
 
 def _cycle_record(p: Plant, cfg: WashingConfig, due: date, start: date, month: str,
                   number: int, state: str, assignee: str | None, reports: int,
-                  confirmed: bool, until: date | None = None) -> dict:
-    label = f"Cycle {number} due"
+                  confirmed: bool, until: date | None = None, blocked_by: int | None = None) -> dict:
+    label = f"Cycle {number} due" + (f" (after Cycle {blocked_by})" if blocked_by else "")
+    # Days late are always counted from this cycle's own deadline; an unfinished cycle is late up to today.
+    late_days = max(0, ((until or due) - due).days) if confirmed else max(0, (business_today() - due).days)
     return {"key": f"washing-cycle:{p.id}:{month}:{number}",
         "kind": "washing", "source": "cycle", "id": f"{p.id}:{month}:{number}",
         "reference": f"Cycle {number} · {month}", "date": due.isoformat(),
@@ -175,7 +193,9 @@ def _cycle_record(p: Plant, cfg: WashingConfig, due: date, start: date, month: s
         "subpart": None, "assignee": assignee, "engineer": p.assigned_engineer,
         "status": state, "severity": None, "start_date": start.isoformat(),
         "reports": reports, "cycle_no": number, "cycle_month": month,
-        "tone": "done" if confirmed else "overdue" if due < business_today() else "washing"}
+        "late_days": late_days, "late_tier": 0 if confirmed else _late_tier(late_days),
+        "blocked_by": blocked_by,
+        "tone": "done" if confirmed else LATE_TONES[_late_tier(late_days)]}
 
 
 FACETS = ("equipment", "subpart", "engineer", "assignee", "status", "severity")
@@ -192,8 +212,9 @@ def _get_data(db, user, start, end, plant_id=None, kinds=None, equipment=None, s
     types = user_scoped_equipment_types(db, user) if user.role == "Assignee" else None
     counts: dict[str, dict[str, int]] = {}
     facets: dict[str, set[str]] = {name: set() for name in FACETS}
+    tiers: dict[str, int] = {}   # day -> worst late tier among that day's unfinished washing cycles
 
-    def tally(kind, anchor, until, done, **values):
+    def tally(kind, anchor, until, done, tier_of=None, **values):
         """Count the activity on each displayed day from its date to its last day; solved work also counts as
         ``<kind>_done`` on the day it was solved."""
         day = max(anchor, start)
@@ -202,12 +223,16 @@ def _get_data(db, user, start, end, plant_id=None, kinds=None, equipment=None, s
                                                      "issue_done": 0, "pm_done": 0, "washing_done": 0})
             row[kind] += 1
             if done and day == until: row[kind + "_done"] += 1
+            if tier_of and not (done and day == until):
+                tier = tier_of(day)
+                if tier > tiers.get(day.isoformat(), 0): tiers[day.isoformat()] = tier
             day += timedelta(days=1)
         for name, value in values.items():
             if value: facets[name].add(value)
 
     def finish_summary():
-        return {"days": counts, "facets": {name: sorted(v, key=str.casefold)[:150] for name, v in facets.items()}}
+        return {"days": counts, "washing_tier": tiers,
+                "facets": {name: sorted(v, key=str.casefold)[:150] for name, v in facets.items()}}
 
     if (scope is not None and not scope) or (types is not None and not types):
         return finish_summary() if summary else ([], False)
@@ -297,7 +322,7 @@ def _get_data(db, user, start, end, plant_id=None, kinds=None, equipment=None, s
         if not subpart and not severity and (not equipment or equipment.casefold() in
             WASHING_TYPE.casefold() or equipment.casefold() in "panel washing cycle"):
             # The previous month too: a missed cycle there can still be outstanding at the start of the period.
-            months = _calendar_months((start.replace(day=1) - timedelta(days=1)).replace(day=1), end)
+            months = _calendar_months(_months_back(start.replace(day=1), OUTSTANDING_LOOKBACK_MONTHS), end)
             month_keys = [m.strftime("%Y-%m") for m in months]
             cycle_query = (select(WashingConfig, Plant, User.display_name)
                 .join(Plant, Plant.id == WashingConfig.plant_id)
@@ -325,16 +350,30 @@ def _get_data(db, user, start, end, plant_id=None, kinds=None, equipment=None, s
                         month = m.strftime("%Y-%m")
                         starts = _cycle_start_dates(m, cfg.cycle_overrides)
                         dues = _cycle_due_dates(m, cfg.cycle_overrides)
-                        following = _cycle_due_dates(date(m.year + (m.month == 12), m.month % 12 + 1, 1),
-                                                     cfg.cycle_overrides)[0]
+                        # An unfinished cycle sticks for the current month always. For an earlier month it sticks only
+                        # when the plant has washing reports in that month, so a plant that was set up later does not
+                        # show cycles from months before it existed in the programme.
+                        sticky = m >= today.replace(day=1) or any((p.id, month, k) in ledger for k in (1, 2, 3))
+                        open_cycle = None   # the first cycle of this month that is not completed
                         for n, (begin, due) in enumerate(zip(starts, dues), 1):
                             confirmed, report_count, finished = ledger.get((p.id, month, n), (False, 0, None))
-                            # A missed cycle stays outstanding until it is completed, or until the next cycle
-                            # falls due and takes over its remaining tables; a completed one ends on completion.
-                            next_due = dues[n] if n < len(dues) else following
                             if isinstance(finished, str): finished = date.fromisoformat(finished)
-                            until = max(due, finished) if confirmed and finished else due if confirmed else (
-                                max(due, min(today, next_due - timedelta(days=1))))
+                            blocked_by = None
+                            if confirmed:
+                                # a completed cycle ends on the day it was completed (never before its deadline)
+                                until = max(due, finished) if finished else due
+                            elif not sticky:
+                                until = due
+                            elif open_cycle is None:
+                                # STICKY: the first unfinished cycle stays on every day from its deadline until it is
+                                # completed. A reason, a remark or the next cycle's deadline never moves it on.
+                                open_cycle = n
+                                until = max(due, today)
+                            else:
+                                # a later cycle cannot be reached while an earlier one is open (cycles fill in order):
+                                # it is shown on its own deadline only, and not repeated daily.
+                                until = due
+                                blocked_by = open_cycle if due <= today else None
                             if due > end or until < start: continue
                             state = "Completed" if confirmed else "In progress" if report_count else (
                                 "Missed" if due < business_today() else "Upcoming")
@@ -350,11 +389,12 @@ def _get_data(db, user, start, end, plant_id=None, kinds=None, equipment=None, s
                                 search.casefold() in "washing" or search.casefold() in "cycle"):
                                 continue
                             if summary:
-                                tally("washing", due, until, confirmed, equipment=WASHING_TYPE, assignee=display_name,
-                                      status=state, engineer=p.assigned_engineer)
+                                tally("washing", due, until, confirmed,
+                                      tier_of=None if confirmed else (lambda day, due=due: _late_tier((day - due).days)),
+                                      equipment=WASHING_TYPE, assignee=display_name, status=state, engineer=p.assigned_engineer)
                             else:
                                 result.append(_cycle_record(p, cfg, due, begin, month, n, state,
-                                    display_name, report_count, confirmed, until))
+                                    display_name, report_count, confirmed, until, blocked_by))
     if summary:
         return finish_summary()
     result.sort(key=lambda e: (e["date"], e["kind"], e["key"]))
