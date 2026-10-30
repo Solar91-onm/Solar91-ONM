@@ -1,6 +1,7 @@
 """Server-side WebP pipeline: formats, orientation, alpha, metadata, limits, duplicates and rollback."""
 import io
 import uuid
+import warnings
 
 import pytest
 from fastapi import HTTPException
@@ -102,9 +103,18 @@ def test_invalid_or_mismatched_images_rejected(data, mime, code):
 
 def test_decompression_bomb_dimensions_rejected():
     data = encode(Image.new("1", (8000, 8000)), "PNG")  # 64 MP, tiny file
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")  # rejected by the size check, without Pillow's bomb warning
+        with pytest.raises(HTTPException) as e:
+            optimize_photo(data, "image/png", SETTINGS)
+    assert e.value.status_code == 413
+
+
+def test_decompression_bomb_beyond_twice_the_limit_rejected():
+    data = encode(Image.new("1", (9000, 9000)), "PNG")  # 81 MP: Pillow itself refuses to open it
     with pytest.raises(HTTPException) as e:
         optimize_photo(data, "image/png", SETTINGS)
-    assert e.value.status_code in (413, 415)
+    assert e.value.status_code == 415
 
 
 def test_animated_webp_rejected():

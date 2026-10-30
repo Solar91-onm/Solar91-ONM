@@ -13,6 +13,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from io import BytesIO
 
+import warnings
+
 from fastapi import HTTPException
 from PIL import Image, ImageOps, UnidentifiedImageError
 
@@ -74,7 +76,12 @@ def optimize_photo(data: bytes, mime: str, settings: PhotoSettings) -> Optimized
     if not header_matches(mime, data):
         raise HTTPException(415, "The selected file is not a valid JPEG, PNG, or WebP photo")
     try:
-        with Image.open(BytesIO(data)) as src:
+        with warnings.catch_warnings():
+            # Pillow warns while reading the header of an image between 1x and 2x MAX_PIXELS; the explicit
+            # check below rejects it with 413 before anything is decoded, so the warning is only log noise.
+            warnings.simplefilter("ignore", Image.DecompressionBombWarning)
+            src = Image.open(BytesIO(data))
+        with src:
             if src.format != _FORMATS[mime]:
                 raise HTTPException(415, "The photo content does not match its file type")
             if src.width * src.height > MAX_PIXELS:
