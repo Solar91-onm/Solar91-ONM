@@ -12,7 +12,7 @@
  const q=s=>String(s).replace(/\\/g,"\\\\").replace(/'/g,"\\'");
 
  const goodDay=v=>s91ValidDate(v);
- window.siSet=function(patch){patch=Object.assign({},patch);["from","to"].forEach(k=>{if(k in patch&&patch[k]&&!goodDay(patch[k]))patch[k]=""});Object.assign(F(),patch);S.tablePages.issues=1;render()};
+ window.siSet=function(patch){patch=Object.assign({},patch);["from","to"].forEach(k=>{if(k in patch&&patch[k]&&!goodDay(patch[k]))patch[k]=""});Object.assign(F(),patch);if("plant" in patch)s91SyncScope(patch.plant);S.tablePages.issues=1;render()};
  window.siToggle=function(k,v){const f=F();siSet({[k]:f[k]===v?"all":v})};
  window.siChip=function(id){const f=F();siSet({chip:f.chip===id?"all":id,queue:undefined})};
  window.siSort=function(k){siSet({sort:k})};

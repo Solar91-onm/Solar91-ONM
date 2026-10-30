@@ -1568,7 +1568,8 @@ function plantProject(p){if(!p)return"";return p.project||((XL_BY[p.id]&&XL_BY[p
 function plantHealth(p){return plantHealthOf(p,S.issues)}
 function plantEngineer(p){const counts={};(S.issues||[]).filter(t=>t.plant===p.name&&t.assignee).forEach(t=>counts[t.assignee]=(counts[t.assignee]||0)+1);const top=Object.entries(counts).sort((a,b)=>b[1]-a[1])[0];if(top)return top[0];const w=S.washMeta&&S.washMeta[p.name];return (w&&w.team&&w.team[0])||p.engineer||""}
 function plantLastActivity(p){const hits=(S.issues||[]).filter(t=>t.plant===p.name).map(t=>t.updated||t.created||"");const aud=(S.audit||[]).filter(a=>String(a.text||"").includes(p.name)).map(a=>a.at);return hits.concat(aud)[0]||""}
-function blankIssF(extra){return Object.assign({plant:"all",sev:"all",vert:"all",from:"",to:"",assignee:"all",status:"all",sort:"etc",q:"",site:"all",project:"all",district:"all",equip:"all",aging:"all",chip:"all",maker:"all",bucket:"all",health:"all"},extra||{})}
+function blankIssF(extra){let sp="all";try{sp=(S&&S.dashPlant)||"all"}catch(e){}
+ return Object.assign({plant:sp,sev:"all",vert:"all",from:"",to:"",assignee:"all",status:"all",sort:"etc",q:"",site:"all",project:"all",district:"all",equip:"all",aging:"all",chip:"all",maker:"all",bucket:"all",health:"all"},extra||{})}
 function emptyState(title,note){return '<div class="empty-box"><b>'+esc(title)+'</b>'+esc(note||"")+'</div>'}
 function equipmentAliases(e){
  return [e&&e.id,e&&e.equipment_code,e&&e.equipment_name,e&&e.serial_number].map(v=>String(v||"").trim().toLowerCase()).filter(Boolean);

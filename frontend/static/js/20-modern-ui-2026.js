@@ -83,7 +83,7 @@ function m26WashMap(){
 /* Washing: open on a plant that is already set up and show its data; ask for a new setup only when the person
    explicitly picks a plant that has no washing tables yet. */
 function m26WashPlants(){const have=new Set((S.washing||[]).map(t=>t.plant));return (S.plants||[]).map(p=>p.name).filter(n=>have.has(n))}
-function m26WashPick(name){S.washPlant=name;S.m26WashSetup=m26WashPlants().indexOf(name)<0;persist();render()}
+function m26WashPick(name){s91SyncScope(name);S.washPlant=name;S.m26WashSetup=m26WashPlants().indexOf(name)<0;persist();render()}
 function m26WashBar(done){
  const plants=S.plants||[];if(plants.length<2)return "";
  return '<div class="m26-washbar"><div><div class="k">Plant</div><select class="inp" onchange="m26WashPick(this.value)">'

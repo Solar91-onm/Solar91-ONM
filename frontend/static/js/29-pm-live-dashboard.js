@@ -8,7 +8,7 @@
   ["pm_promise_missed","Site promise missed"],["pm_no_followup","No follow-up on late job"],
   ["pm_weekly_summary","Weekly late-job summary"],["pm_daily_plan","Morning plan: today's plants & equipment"]
  ];
- const state=()=>{const f=S.pmLive||(S.pmLive={}),defaults={plant:"all",plantQuery:"",plantOpen:false,plantTab:"late",equipment:"all",week:"all",age:"all",status:"all",query:"",page:1,covShow:"all",covOpen:[],covCollapsed:true,day:TODAY,dayFrom:addDays(TODAY,-2),dayEquip:"all",dayQuery:"",dayStatus:"all",dayAll:false,focus:"all",person:"all",sort:"due",leadAll:false,view:"overview",calMonth:TODAY.slice(0,7),mxQuery:"",mxShow:"all",mxSort:"late",mxAll:false};Object.keys(defaults).forEach(key=>{if(f[key]===undefined)f[key]=defaults[key]});return f};
+ const state=()=>{const f=S.pmLive||(S.pmLive={}),defaults={plant:"all",plantQuery:"",plantOpen:false,plantTab:"late",equipment:"all",week:"all",age:"all",status:"all",query:"",page:1,covShow:"all",covOpen:[],covCollapsed:true,day:TODAY,dayFrom:addDays(TODAY,-2),dayEquip:"all",dayQuery:"",dayStatus:"all",dayAll:false,focus:"all",person:"all",sort:"due",leadAll:false,view:"overview",calMonth:TODAY.slice(0,7),mxQuery:"",mxShow:"all",mxSort:"late",mxAll:false};Object.keys(defaults).forEach(key=>{if(f[key]===undefined)f[key]=defaults[key]});if(f._scope!==S.dashPlant){f._scope=S.dashPlant;f.plant=S.dashPlant||"all"}return f};
  const repaint=()=>window.render();
  const escape=typeof esc==="function"?esc:value=>String(value==null?"":value);
  /* One page render reads the same derived data many times (coverage per register row, plant lookups per task).
@@ -719,11 +719,11 @@
    else if(target.dataset.pmlWeek!==undefined){const week=Number(target.dataset.pmlWeek);f.week=f.week===week?"all":week;f.page=1;glanceTo(f.week!=="all");repaint()}
    else if(target.dataset.pmlAge!==undefined){const ranges=[[1,2],[3,6],[7,13],[14,99999]],range=ranges[Number(target.dataset.pmlAge)];f.age=f.age&&f.age[0]===range[0]?"all":range;f.status=f.age==="all"?"all":"Overdue";f.page=1;glanceTo(f.age!=="all");repaint()}
    else if(target.dataset.pmlEquipment!==undefined){f.equipment=f.equipment===target.dataset.pmlEquipment?"all":target.dataset.pmlEquipment;f.page=1;glanceTo(f.equipment!=="all");repaint()}
-   else if(target.dataset.pmlPlant!==undefined){f.plant=target.dataset.pmlPlant;f.plantOpen=false;f.plantQuery="";f.page=1;if(target.closest(".gx-leader"))glanceTo(true,"pm-plant-focus");repaint()}
+   else if(target.dataset.pmlPlant!==undefined){f.plant=target.dataset.pmlPlant;s91SyncScope(f.plant);f.plantOpen=false;f.plantQuery="";f.page=1;if(target.closest(".gx-leader"))glanceTo(true,"pm-plant-focus");repaint()}
    else if(target.dataset.pmlCoverage!==undefined){f.equipment=f.equipment===target.dataset.pmlCoverage?"all":target.dataset.pmlCoverage;f.page=1;f.view="register";repaint();const list=document.querySelector(".pml-register");if(list)list.scrollIntoView({behavior:"smooth",block:"start"})}
    else if(target.dataset.pmlPlanttab!==undefined){f.plantTab=target.dataset.pmlPlanttab;repaint()}
    else if(target.dataset.pmlFocus!==undefined){f.focus=f.focus===target.dataset.pmlFocus?"all":target.dataset.pmlFocus;f.page=1;glanceTo(f.focus!=="all");repaint()}
-   else if(target.dataset.pmlSelectClear!==undefined){f[target.dataset.pmlSelectClear]="all";f.page=1;repaint()}
+   else if(target.dataset.pmlSelectClear!==undefined){f[target.dataset.pmlSelectClear]="all";if(target.dataset.pmlSelectClear==="plant")s91SyncScope("all");f.page=1;repaint()}
    else if(target.dataset.pmcCov!==undefined){f.covCollapsed=f.covCollapsed===false;repaint()}
    else if(target.dataset.pmcLeadall!==undefined){f.leadAll=!f.leadAll;repaint()}
    else if(target.dataset.pmcAssign!==undefined){event.stopPropagation();const overlay=target.closest(".pml-unit-drawer");if(overlay)overlay.remove();openAssign(target.dataset.pmcAssign)}
@@ -756,7 +756,7 @@
   });
   document.addEventListener("change",event=>{
    const key=event.target.dataset&&event.target.dataset.pmlSelect;if(!key)return;
-   const f=state();f[key]=event.target.value;f.page=1;if(key==="plant"){f.plantOpen=false;f.plantQuery="";}repaint();
+   const f=state();f[key]=event.target.value;f.page=1;if(key==="plant"){f.plantOpen=false;f.plantQuery="";s91SyncScope(f.plant);}repaint();
   });
  }
 
@@ -775,7 +775,7 @@
    else if(t.dataset.pmdEquip!==undefined){f.dayEquip=t.dataset.pmdEquip}
    else if(t.dataset.pmxType!==undefined){const set=new Set(f.covOpen||[]),k=t.dataset.pmxType;if(set.has(k))set.delete(k);else set.add(k);f.covOpen=[...set]}
    else if(t.dataset.pmdOverdue!==undefined){f.status="Overdue";f.page=1;f.view="register";repaint();const list=document.querySelector(".pml-register");if(list)list.scrollIntoView({behavior:"smooth",block:"start"});return}
-   else if(t.dataset.pmxJobs!==undefined){const [plant,type]=t.dataset.pmxJobs.split("|");f.equipment=type;f.plant=plant;f.page=1;f.view="register";repaint();const list=document.querySelector(".pml-register");if(list)list.scrollIntoView({behavior:"smooth",block:"start"});return}
+   else if(t.dataset.pmxJobs!==undefined){const [plant,type]=t.dataset.pmxJobs.split("|");f.equipment=type;f.plant=plant;s91SyncScope(f.plant);f.page=1;f.view="register";repaint();const list=document.querySelector(".pml-register");if(list)list.scrollIntoView({behavior:"smooth",block:"start"});return}
    repaint();
   });
   document.addEventListener("change",event=>{if(event.target.matches&&event.target.matches("[data-pmx-show]")){state().covShow=event.target.value;repaint()}});
@@ -790,7 +790,7 @@
    else if(t.dataset.pmcalToday!==undefined){f.calMonth=TODAY.slice(0,7);pickDay(TODAY)}
    else if(t.dataset.pmupDay!==undefined){f.view="schedule";pickDay(t.dataset.pmupDay);f.calMonth=t.dataset.pmupDay.slice(0,7);S._glanceScroll="pm-day-planner"}
    else if(t.dataset.pmmCell!==undefined){const [plant,type]=t.dataset.pmmCell.split("|");Object.assign(f,{plant,equipment:type,status:"all",week:"all",age:"all",focus:"all",person:"all",query:"",page:1,view:"register"})}
-   else if(t.dataset.pmmPlant!==undefined){f.plant=t.dataset.pmmPlant;f.page=1;f.view="overview"}
+   else if(t.dataset.pmmPlant!==undefined){f.plant=t.dataset.pmmPlant;s91SyncScope(f.plant);f.page=1;f.view="overview"}
    else if(t.dataset.pmmAll!==undefined)f.mxAll=!f.mxAll;
    else if(t.dataset.pmmShow!==undefined){f.mxShow=f.mxShow===t.dataset.pmmShow?"all":t.dataset.pmmShow;f.mxAll=false}
    else if(t.dataset.pmAddon!==undefined){addJobOn(t.dataset.pmAddon);return}

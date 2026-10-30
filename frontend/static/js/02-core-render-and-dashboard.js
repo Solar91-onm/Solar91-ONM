@@ -72,31 +72,34 @@ function sidebar(b){
 /* "Operations Calendar" opens a dropdown: All plants, then one entry per authorised plant, with a plant search.
    Choosing an entry sets the shared plant scope (setPlantScope) and opens the calendar for it.
    The search filters the rendered list in place, so typing never re-renders the page. */
+
 function calendarNavGroup(on){
- const open=S._calNavOpen!=null?S._calNavOpen:on,q=String(S._calNavQ||"").trim().toLowerCase(),cur=on?(S.dashPlant||"all"):"";
+ const open=S._calNavOpen===true,q=String(S._calNavQ||"").trim().toLowerCase(),cur=on?(S.dashPlant||"all"):"";
  const plants=[...(S.plants||[])].sort((a,b)=>String(a.id||"").localeCompare(String(b.id||""),undefined,{numeric:true}));
  const item=(v,label,hay)=>'<div class="side-sublink'+(cur===v?" active":"")+'" data-cal-plant="'+esc(v)+'"'+(hay!=null?' data-cal-nav="'+esc(hay)+'"'+(q&&hay.indexOf(q)<0?' hidden':''):'')+' title="'+esc(label)+'" onclick="s91CalendarPlant(this.dataset.calPlant)">'+esc(label)+'</div>';
  const shown=plants.filter(p=>!q||((displayCode(p.id)||"")+" "+(p.site_code||"")+" "+p.name).toLowerCase().indexOf(q)>=0).length;
- return '<div class="side-link side-parent'+(on?" on":"")+'" aria-expanded="'+open+'" onclick="s91ToggleCalendarNav()">'+I.clipc(16)+'<span>Operations Calendar</span></div>'+
+ return '<div class="side-link side-parent'+(on?" on":"")+'" aria-expanded="'+open+'" onclick="s91CalendarPlant(\'all\',true)">'+I.clipc(16)+'<span>Operations Calendar</span>'+
+  '<button type="button" class="side-caret-btn" aria-label="Show plant list" aria-expanded="'+open+'" onclick="event.stopPropagation();s91ToggleCalendarNav()"><i class="side-caret'+(open?" open":"")+'" aria-hidden="true"></i></button></div>'+
   (open?'<div class="side-sub side-cal">'+
    '<input type="search" id="s91-cal-nav-q" class="side-cal-search" placeholder="Search plants…" aria-label="Search plants for the calendar" autocomplete="off" value="'+esc(S._calNavQ||"")+'" oninput="s91CalendarNavFilter(this.value)">'+
    item("all","All plants",null)+
    '<div class="side-cal-list">'+plants.map(p=>{const code=displayCode(p.id)||p.site_code||"";return item(p.name,(code?code+" · ":"")+p.name,(code+" "+(p.site_code||"")+" "+p.name).toLowerCase())}).join('')+'</div>'+
    '<small class="side-cal-count" aria-live="polite">'+(q?shown+" of "+plants.length+" plants":plants.length+" plants")+'</small></div>':'');
 }
-function s91ToggleCalendarNav(){const on=S.view==="om-module"&&S.omTab==="calendar";S._calNavOpen=!(S._calNavOpen!=null?S._calNavOpen:on);render()}
+function s91ToggleCalendarNav(){S._calNavOpen=!(S._calNavOpen===true);render()}
 function s91CalendarNavFilter(v){
  S._calNavQ=v;const q=String(v||"").trim().toLowerCase();let shown=0,total=0;
  document.querySelectorAll(".side-cal [data-cal-nav]").forEach(el=>{total++;const ok=!q||el.dataset.calNav.indexOf(q)>=0;el.hidden=!ok;if(ok)shown++});
  const c=document.querySelector(".side-cal-count");if(c)c.textContent=q?shown+" of "+total+" plants":total+" plants";
 }
-function s91CalendarPlant(v){
- S._calNavOpen=true;
+
+function s91CalendarPlant(v,keepList){
+ if(!keepList)S._calNavOpen=true;
  if((S.dashPlant||"all")===v){goTab("calendar");return}
- // setPlantScope validates the plant against the user's portfolio, persists and renders.
  if(S.modal){S.modal=null;S.modalCtx=null}
  S.view="om-module";S.omTab="calendar";persistView();setPlantScope(v);
 }
+
 /* "Plants" opens a small dropdown with its two pages. The sub-items are not .side-link on purpose:
    role scripts hide every .side-link whose label is not a module name; the group hides with its parent. */
 function plantsNavGroup(on){
@@ -128,7 +131,7 @@ function topbar(crumb,notifs){
    if(r.type==="handover") return false;
    return true;
  }).slice(0,10):allResults;
- const scopePlant=isSE&&sePlant?sePlant:((S.view==="dashboard"||(S.view==="plants"&&S.plantsTab==="dashboard"))?(S.dashPlant||"all"):S.omTab==="washing"&&S.view!=="dashboard"?S.washPlant:S.omTab==="scheduled"&&S.schedScope!=="all"?S.schedScope:S.omTab==="issues"&&S.issF.plant!=="all"?S.issF.plant:"all");
+ const scopePlant=isSE&&sePlant?sePlant:(S.dashPlant||"all");
  const plantSelector=isSE&&sePlant
    ? '<select class="inp" style="width:168px" onchange="setPlantScope(this.value)" disabled title="Site Engineer — locked to '+esc(sePlant)+'"><option selected>'+esc(sePlant)+'</option></select>'
    : '<select class="inp" data-pp style="width:168px" aria-label="Choose plant code or name" onchange="setPlantScope(this.value)"><option value="all" '+(scopePlant==="all"?"selected":"")+'>All Plants</option>'+S.plants.map(p=>'<option value="'+esc(p.name)+'" '+(scopePlant===p.name?"selected":"")+'>'+esc(displayCode(p.id))+' · '+esc(p.name)+'</option>').join("")+'</select>';
@@ -153,6 +156,19 @@ function topbar(crumb,notifs){
   (S.userMenuOpen?'<div class="tb-user-menu" role="menu" style="position:absolute;right:0;top:calc(100% + 8px);min-width:220px;background:var(--card,#fff);border:1px solid var(--border);border-radius:12px;box-shadow:0 12px 32px rgba(15,23,42,.16);padding:6px;z-index:1000"><div style="padding:8px 10px 10px;border-bottom:1px solid var(--border);margin-bottom:6px"><div style="font-size:13px;font-weight:700">'+esc(authName)+'</div><div style="font-size:12px;color:var(--muted-foreground)">'+esc(authRole)+(AUTH_IDENTITY.email?' · '+esc(AUTH_IDENTITY.email):'')+'</div></div><button type="button" role="menuitem" onclick="window.s91AppSettings&&s91AppSettings()" style="display:block;width:100%;text-align:left;background:none;border:0;border-radius:8px;padding:9px 10px;font:inherit;font-size:13px;font-weight:600;color:inherit;cursor:pointer">App &amp; permissions</button><button type="button" role="menuitem" onclick="clerkSignOut()" style="display:block;width:100%;text-align:left;background:none;border:0;border-radius:8px;padding:9px 10px;font:inherit;font-size:13px;font-weight:600;color:var(--danger,#b91c1c);cursor:pointer">Log out</button></div>':'')+'</div>'+
   '</div></div>';
 }
+
+function s91SyncScope(v){
+ if((S._roleLabel||S.currentRole)==="Site Engineer")return S._sePlant||v;
+ const sel=(S.plants||[]).find(p=>p.name===v||p.id===v);
+ v=sel?sel.name:"all";
+ S.dashPlant=v;S.schedScope=v;S.washPlant=v;
+ S.plPulse=Object.assign(S.plPulse||{},{plant:v});
+ S.issF=Object.assign(S.issF||{},{plant:v});
+ if(S.pmLive){S.pmLive.plant=v;S.pmLive.page=1}
+ S.tablePages=Object.assign(S.tablePages||{},{issues:1,scheduled:1,washing:1,plants:1});
+ return v;
+}
+
 function setPlantScope(v){
  const isSE=(S._roleLabel||S.currentRole)==="Site Engineer";
  const locked=isSE?(S._sePlant||""):"";
@@ -163,12 +179,7 @@ function setPlantScope(v){
  const selected=(S.plants||[]).find(p=>p.name===v||p.id===v);
  if(v!=="all"&&!selected){toast("That plant is not available in your portfolio.");return}
  v=selected?selected.name:"all";
- S.dashPlant=v;
- S.plPulse=Object.assign(S.plPulse||{},{plant:v});
- S.schedScope=v;
- S.issF=Object.assign(S.issF||{},{plant:v});
- S.washPlant=v;
- S.tablePages=Object.assign(S.tablePages||{},{issues:1,scheduled:1,washing:1,plants:1});
+ v=s91SyncScope(v);
  persist();render();toast(v==="all"?"Scope cleared — showing all plants":"Scoped to "+v);
 }
 /* ---------- dashboard visualization helpers ---------- */

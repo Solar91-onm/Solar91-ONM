@@ -205,7 +205,8 @@
  function filtered(){
   const ui=S._washUi=S._washUi||{q:"",bucket:"all",show:"all",assignee:"all",region:"all",sort:"late",page:1,pageSize:12,selected:[]};
   const f=S.washF=Object.assign({q:"",bucket:"all",show:"all"},ui),q=(f.q||"").trim().toLowerCase(),head=isTeam(),rd=repDay();
-  const hit=p=>(!q||(p.plant+" "+p.site_code).toLowerCase().includes(q))&&(!f.plant||f.plant==="all"||p.plant_id===f.plant);
+  const scoped=p=>!S.dashPlant||S.dashPlant==="all"||p.plant===S.dashPlant;
+  const hit=p=>scoped(p)&&(!q||(p.plant+" "+p.site_code).toLowerCase().includes(q))&&(!f.plant||f.plant==="all"||p.plant_id===f.plant);
   /* glance filters: state = the plant's tile colour (donut slice), cyc = "<cycle no>:<state>" (cycle progress bar) */
   const stOk=p=>!f.state||f.state==="all"||(f.state==="late"?tileState(p).indexOf("late-")===0:tileState(p)===f.state);
   const cycOk=p=>{if(!f.cyc||f.cyc==="all")return true;const parts=String(f.cyc).split(":");return (p.cycles||[]).some(c=>String(c.cycle_no)===parts[0]&&(parts[1]==="Not started"?c.state!=="Completed"&&!cyStarted(c):parts[1]==="In progress"?cyStarted(c):c.state===parts[1]))};
