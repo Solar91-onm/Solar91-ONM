@@ -5,7 +5,20 @@
    No browser role selector is an authority mechanism.
    ================================================================ */
 (function(){
+ let engineerThemeActive=false,previousTheme;
  function role(){return AUTH_IDENTITY.role||"Viewer"}
+ function syncRoleTheme(currentRole){
+  const root=document.documentElement;
+  if(currentRole==="Site Engineer"&&!engineerThemeActive){
+   previousTheme=root.getAttribute("data-theme");
+   engineerThemeActive=true;
+   root.setAttribute("data-theme","light");
+  }else if(currentRole!=="Site Engineer"&&engineerThemeActive){
+   if(previousTheme===null)root.removeAttribute("data-theme");
+   else root.setAttribute("data-theme",previousTheme);
+   engineerThemeActive=false;
+  }
+ }
  function stripRolePicker(){
   const sel=document.getElementById('cc-role-switch');if(sel){const w=sel.parentElement;if(w)w.remove();else sel.remove()}
   document.querySelectorAll('.cc-proto-role-badge,#standalone-proto-pill').forEach(x=>x.remove());
@@ -21,6 +34,7 @@
   if(AUTH_IDENTITY.name)S.currentUser=AUTH_IDENTITY.name;
   stripRolePicker();
   const r=role(),allowed=modulesFor(r);
+  syncRoleTheme(r);
   if(r==='Site Engineer'&&(!S._sePlant)&&S.plants&&S.plants.length===1)S._sePlant=S.plants[0].name;
   document.querySelectorAll('.side-link').forEach(a=>{const sp=a.querySelector('span'),txt=(sp?sp.textContent:a.textContent||'').trim();a.style.display=allowed.indexOf(txt)>=0?'':'none'});
   if(r==='Site Engineer'){
