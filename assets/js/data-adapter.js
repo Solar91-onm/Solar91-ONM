@@ -121,6 +121,20 @@
     });
   }
 
+  function fetchPortfolioTrend(startDate, endDate, siteCodes) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(startDate)) ||
+        !/^\d{4}-\d{2}-\d{2}$/.test(String(endDate))) {
+      return Promise.reject(new Error("Overview trend requires a valid date range."));
+    }
+    const params = new URLSearchParams({
+      start_date: startDate,
+      end_date: endDate
+    });
+    (Array.isArray(siteCodes) ? siteCodes : siteCodes ? [siteCodes] : [])
+      .forEach(function (siteCode) { params.append("site_code", siteCode); });
+    return api().request("/api/portal/overview/trend?" + params.toString());
+  }
+
   function listPlants() {
     return api().plants();
   }
@@ -256,6 +270,7 @@
     fetchCalendarActivities,
     fetchPortfolio,
     fetchPortfolioRange,
+    fetchPortfolioTrend,
     aggregatePortfolio,
     classifyCondition,
     invalidate

@@ -110,6 +110,26 @@ def test_homepage_does_not_embed_production_tokens(client):
         assert secret not in page
 
 
+def test_overview_area_filter_and_operational_trend_controls_are_wired(client):
+    page = _page(client)
+    overview = (PORTAL_ASSETS / "js" / "overview.js").read_text(encoding="utf-8")
+    adapter = (PORTAL_ASSETS / "js" / "data-adapter.js").read_text(encoding="utf-8")
+    styles = (PORTAL_ASSETS / "css" / "components.css").read_text(encoding="utf-8")
+    overview_markup = page[page.index('data-tab-view="overview"'):page.index('data-tab-view="plants-table"')]
+
+    assert 'data-filter="district"' in overview_markup
+    assert "data-filter=\"period\"" not in overview_markup
+    assert "data-trend-metric" not in overview_markup
+    assert "data-trend-from" in overview_markup and "data-trend-to" in overview_markup
+    assert "districtsByKey" in overview and "(plant.district || \"\").trim()" in overview
+    assert 'filters.district !== "__all"' in overview
+    assert "renderTrendChart(trend)" in overview
+    assert "ep-overview-trend__bar--" in overview
+    assert 'item.axis === "percent"' in overview
+    assert "/api/portal/overview/trend?" in adapter
+    assert ".ep-overview-trend__svg" in styles
+
+
 # ── Asset & Warranty does not imply an inventory register ───────────────────
 
 def test_asset_warranty_view_is_present_without_invented_register_data(client):

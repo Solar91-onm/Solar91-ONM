@@ -2,8 +2,8 @@
 
 Why this module exists
 ----------------------
-The portal's Overview and Plants pages need, for every plant the signed-in user
-may see, the same handful of operational figures: open/closed/critical issue
+The portal's Overview and Plants pages need, for every plant in their respective
+role scope, the same handful of operational figures: open/closed/critical issue
 counts, Preventive Maintenance completion and Washing cycle compliance. Asking
 for those one plant at a time is 38 round trips for a 38-plant portfolio, so
 every figure here is produced by a **single grouped query across all visible
@@ -38,7 +38,7 @@ from app.core.models import (
     WashingDailyReport,
     WashingTable,
 )
-from app.core.security import has_portfolio_scope, user_scoped_plant_ids
+from app.core.security import user_scoped_plant_ids
 from app.core.timeutil import BUSINESS_TZ, business_today
 
 # ── Business rules (mirrored from the owning modules) ────────────────────────
@@ -81,6 +81,13 @@ def visible_plants(db: Session, user: User) -> list[Plant]:
             return []
         stmt = stmt.where(Plant.id.in_(allowed))
     return list(db.scalars(stmt))
+
+
+def overview_plants(db: Session, user: User) -> list[Plant]:
+    """Overview is portfolio-wide except for Site Engineers, who remain plant-scoped."""
+    if user.role not in {"O&M Head", "Assignee", "Administration"}:
+        return visible_plants(db, user)
+    return list(db.scalars(select(Plant).order_by(Plant.plant_name)))
 
 
 def _plant_ids(plants: list[Plant]) -> list[UUID]:
@@ -380,7 +387,7 @@ def portfolio(db: Session, user: User) -> dict[str, Any]:
     Bounded cost: five grouped queries plus the washing overview, regardless of
     how many plants the user can see.
     """
-    plants = visible_plants(db, user)
+    plants = overview_plants(db, user)
     ids = _plant_ids(plants)
     today = business_today()
 
@@ -410,13 +417,13 @@ def portfolio(db: Session, user: User) -> dict[str, Any]:
         "totals": aggregate(rows),
         "asOf": datetime.now(timezone.utc).isoformat(),
         "businessDate": today.isoformat(),
-        "scope": "portfolio" if has_portfolio_scope(user) else "assigned",
+        "scope": "assigned" if user.role == "Site Engineer" else "portfolio",
     }
 
 
 def portfolio_for_range(db: Session, user: User, start: date, end: date) -> dict[str, Any]:
     """Portfolio metrics for records due/reported in an inclusive business-date range."""
-    plants = visible_plants(db, user)
+    plants = overview_plants(db, user)
     plant_ids = _plant_ids(plants)
     if not plant_ids:
         return {"rows": [], "totals": aggregate([]), "startDate": start.isoformat(), "endDate": end.isoformat()}
@@ -563,6 +570,207 @@ def portfolio_for_range(db: Session, user: User, start: date, end: date) -> dict
         "totals": aggregate(rows),
         "startDate": start.isoformat(),
         "endDate": end.isoformat(),
+    }
+
+
+def _trend_buckets(start: date, end: date) -> tuple[str, list[date]]:
+    days = (end - start).days + 1
+    if days <= 31:
+        return "day", [start + timedelta(days=offset) for offset in range(days)]
+    if days <= 366:
+        count = (days + 6) // 7
+        return "week", [start + timedelta(days=offset * 7) for offset in range(count)]
+    buckets = []
+    current = start.replace(day=1)
+    while current <= end:
+        buckets.append(current)
+        current = (current.replace(day=28) + timedelta(days=4)).replace(day=1)
+    return "month", buckets
+
+
+def _trend_bucket_index(day: date, start: date, bucket: str) -> int:
+    if bucket == "day":
+        return (day - start).days
+    if bucket == "week":
+        return (day - start).days // 7
+    return (day.year - start.year) * 12 + day.month - start.month
+
+
+def _trend_day_expression(db: Session, column):
+    if db.bind and db.bind.dialect.name == "postgresql":
+        return func.date(column.op("AT TIME ZONE")("Asia/Kolkata"))
+    return func.date(column)
+
+
+def _trend_day(value: Any) -> date:
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    return date.fromisoformat(str(value)[:10])
+
+
+def _add_trend_value(values: list[int], day_value: Any, start: date, bucket: str, amount: int) -> None:
+    day = _trend_day(day_value)
+    index = _trend_bucket_index(day, start, bucket)
+    if 0 <= index < len(values):
+        values[index] += amount
+
+
+def portfolio_trend(
+    db: Session,
+    plant_ids: list[UUID],
+    start: date,
+    end: date,
+) -> dict[str, Any]:
+    """Return date buckets for PM/washing compliance and currently open issues."""
+    bucket, dates = _trend_buckets(start, end)
+    pm_expected = [0] * len(dates)
+    pm_on_time = [0] * len(dates)
+    washing_expected = [0] * len(dates)
+    washing_on_time = [0] * len(dates)
+    active_issues = [0] * len(dates)
+    if plant_ids:
+        due_day = func.coalesce(OMTask.planned_due_on, OMTask.due_on)
+        pm_rows = db.execute(
+            select(
+                due_day.label("event_day"),
+                func.count().label("expected"),
+                func.sum(case((
+                    (OMTask.status == "Completed") &
+                    OMTask.actual_completed_on.is_not(None) &
+                    (OMTask.actual_completed_on <= due_day),
+                    1,
+                ), else_=0)).label("on_time"),
+            )
+            .where(
+                OMTask.plant_id.in_(plant_ids),
+                OMTask.status != "Cancelled",
+                due_day >= start,
+                due_day <= end,
+            )
+            .group_by(due_day)
+        ).all()
+        for row in pm_rows:
+            index = _trend_bucket_index(_trend_day(row.event_day), start, bucket)
+            if 0 <= index < len(dates):
+                pm_expected[index] += int(row.expected or 0)
+                pm_on_time[index] += int(row.on_time or 0)
+
+        from app.scheduled.washing_cycles import _cycle_due_dates
+
+        config_rows = db.execute(
+            select(WashingConfig, Plant)
+            .join(Plant, Plant.id == WashingConfig.plant_id)
+            .where(WashingConfig.plant_id.in_(plant_ids))
+        ).all()
+        configs = {plant.id: config for config, plant in config_rows}
+        table_counts: dict[UUID, int] = {}
+        if configs:
+            for plant_id, count in db.execute(
+                select(WashingTable.plant_id, func.count(WashingTable.id))
+                .where(WashingTable.plant_id.in_(list(configs)))
+                .group_by(WashingTable.plant_id)
+            ).all():
+                table_counts[plant_id] = int(count or 0)
+
+        cycle_completions: dict[tuple[UUID, str, int], date] = {}
+        if configs:
+            completion_rows = db.execute(
+                select(
+                    WashingDailyReport.plant_id,
+                    WashingDailyReport.cycle_month,
+                    WashingDailyReport.cycle_no,
+                    func.min(WashingDailyReport.report_date).label("completed_on"),
+                )
+                .where(
+                    WashingDailyReport.plant_id.in_(list(configs)),
+                    WashingDailyReport.cycle_month >= start.strftime("%Y-%m"),
+                    WashingDailyReport.cycle_month <= end.strftime("%Y-%m"),
+                    WashingDailyReport.report_date <= end,
+                    WashingDailyReport.cycle_completed.is_(True),
+                    WashingDailyReport.review_status == "Confirmed",
+                )
+                .group_by(
+                    WashingDailyReport.plant_id,
+                    WashingDailyReport.cycle_month,
+                    WashingDailyReport.cycle_no,
+                )
+            ).all()
+            cycle_completions = {
+                (row.plant_id, row.cycle_month, row.cycle_no): row.completed_on
+                for row in completion_rows
+            }
+
+        month_cursor = start.replace(day=1)
+        while month_cursor <= end:
+            month_key = month_cursor.strftime("%Y-%m")
+            for plant_id, config in configs.items():
+                if not (config.tables_per_cycle or table_counts.get(plant_id, 0)):
+                    continue
+                for cycle_no, due_date in enumerate(_cycle_due_dates(month_cursor, config.cycle_overrides), 1):
+                    if not start <= due_date <= end:
+                        continue
+                    index = _trend_bucket_index(due_date, start, bucket)
+                    if 0 <= index < len(dates):
+                        washing_expected[index] += 1
+                        completed_on = cycle_completions.get((plant_id, month_key, cycle_no))
+                        if completed_on and completed_on <= due_date:
+                            washing_on_time[index] += 1
+            month_cursor = (month_cursor.replace(day=28) + timedelta(days=4)).replace(day=1)
+
+        issue_day = _trend_day_expression(db, Issue.occurred_at)
+        start_at = datetime.combine(start, time.min, tzinfo=BUSINESS_TZ)
+        end_at = datetime.combine(end + timedelta(days=1), time.min, tzinfo=BUSINESS_TZ)
+        issue_rows = db.execute(
+            select(issue_day.label("event_day"), func.count().label("count"))
+            .where(
+                Issue.plant_id.in_(plant_ids),
+                Issue.deleted_at.is_(None),
+                Issue.status.in_(ISSUE_OPEN_STATES),
+                Issue.occurred_at >= start_at,
+                Issue.occurred_at < end_at,
+            )
+            .group_by(issue_day)
+        ).all()
+        for row in issue_rows:
+            _add_trend_value(active_issues, row.event_day, start, bucket, int(row.count or 0))
+
+    def compliance(numerator: list[int], denominator: list[int]) -> list[int | None]:
+        return [
+            round(100 * complete / expected) if expected else None
+            for complete, expected in zip(numerator, denominator)
+        ]
+
+    labels = [
+        item.strftime("%d %b") if bucket != "month" else item.strftime("%b %Y")
+        for item in dates
+    ]
+    return {
+        "bucket": bucket,
+        "startDate": start.isoformat(),
+        "endDate": end.isoformat(),
+        "labels": labels,
+        "series": [
+            {
+                "key": "washing",
+                "label": "Washing compliance",
+                "axis": "percent",
+                "values": compliance(washing_on_time, washing_expected),
+            },
+            {
+                "key": "pm",
+                "label": "PM compliance",
+                "axis": "percent",
+                "values": compliance(pm_on_time, pm_expected),
+            },
+            {
+                "key": "issues",
+                "label": "Active site issues",
+                "axis": "count",
+                "values": active_issues,
+            },
+        ],
     }
 
 

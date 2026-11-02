@@ -224,18 +224,29 @@
                   </div>
                 </div>
               </div>
-              <label class="ep-filter">
-                <span class="ep-filter__label">Period</span>
-                <select class="ep-filter__select" data-filter="period" aria-label="Reporting period">
-                  <option value="current">Current snapshot</option>
-                </select>
-              </label>
             </div>
             <p class="ep-overview-range-status" data-overview-range-status role="status" aria-live="polite"></p>
 
-            <!-- Three big metrics — ALL inside one single frame -->
+            <!-- Metric cards and the date trend share one panel frame. -->
             <div class="ep-panel">
               <div class="ep-metrics" data-overview-metrics></div>
+              <section class="ep-overview-trend" aria-labelledby="overview-trend-title">
+              <div class="ep-overview-trend__head">
+                <div>
+                  <h2 id="overview-trend-title">Operational trends</h2>
+                  <p>Daily, weekly or monthly trends for the selected plant or plants. Compliance is shown as a percentage; the right axis shows currently open issues by reported date, not historical status.</p>
+                </div>
+                <div class="ep-overview-trend__filters" role="group" aria-label="Trend filters">
+                  <label><span>From</span><input type="date" data-trend-from aria-label="Trend from date" /></label>
+                  <label><span>To</span><input type="date" data-trend-to aria-label="Trend to date" /></label>
+                  <button type="button" class="ep-overview-trend__apply" data-trend-apply>Apply</button>
+                </div>
+              </div>
+              <p class="ep-overview-trend__status" data-overview-trend-status role="status" aria-live="polite"></p>
+              <div class="ep-overview-trend__chart" data-overview-trend-chart>
+                <p class="ep-overview-trend__empty">Choose a date range to view a trend.</p>
+              </div>
+              </section>
             </div>
 
           </section>

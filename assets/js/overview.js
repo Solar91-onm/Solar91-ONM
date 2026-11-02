@@ -16,16 +16,18 @@
   let activityCache = null;
   let rangeRequest = 0;
   let rangeKey = "";
+  let trendRequest = 0;
 
   let state = null;      // { allRows, rows, totals, sort }
   let searchTerm = "";
-  const filters = { plant: "__all", health: "__all", company: "__all", district: "__all", period: "current" };
+  const filters = { plant: "__all", health: "__all", company: "__all", district: "__all" };
 
   function applyFilters(rows) {
     return rows.filter(({ plant, profile }) => {
       if (filters.plant !== "__all" && plant.siteCode !== filters.plant) return false;
       if (filters.health !== "__all" && profile.derivedCondition !== filters.health) return false;
       if (filters.company !== "__all" && (plant.projectCompany || "") !== filters.company) return false;
+      if (filters.district !== "__all" && (plant.district || "") !== filters.district) return false;
       return true;
     });
   }
@@ -167,6 +169,7 @@
         }
         plantCombo.classList.remove("is-open");
         recomputeAndRender();
+        loadTrendFromControls();
       });
       document.addEventListener("click", (ev) => {
         if (!plantCombo.contains(ev.target)) plantCombo.classList.remove("is-open");
@@ -192,6 +195,23 @@
           companySel.appendChild(opt);
         });
     }
+    const districtSel = document.querySelector("[data-filter=\"district\"]");
+    if (districtSel && districtSel.options.length <= 1) {
+      const districtsByKey = new Map();
+      allRows.forEach(({ plant }) => {
+        const district = (plant.district || "").trim();
+        const key = district.toLocaleLowerCase();
+        if (district && !districtsByKey.has(key)) districtsByKey.set(key, district);
+      });
+      const districts = Array.from(districtsByKey.values())
+        .sort((a, b) => a.localeCompare(b));
+      districts.forEach((district) => {
+        const opt = document.createElement("option");
+        opt.value = district;
+        opt.textContent = district;
+        districtSel.appendChild(opt);
+      });
+    }
     document.querySelectorAll("[data-filter]").forEach((sel) => {
       sel.addEventListener("change", (ev) => {
         const filterName = sel.getAttribute("data-filter");
@@ -201,6 +221,7 @@
         }
         filters[filterName] = ev.target.value;
         recomputeAndRender();
+        if (filterName === "district" || filterName === "company") loadTrendFromControls();
       });
     });
 
@@ -220,6 +241,20 @@
         input.addEventListener("change", () => loadRange(fromDate.value, toDate.value));
       });
     }
+    const trendFrom = document.querySelector("[data-trend-from]");
+    const trendTo = document.querySelector("[data-trend-to]");
+    const trendApply = document.querySelector("[data-trend-apply]");
+    if (trendFrom && trendTo) {
+      trendFrom.max = today;
+      trendTo.max = today;
+      trendFrom.value = firstOfMonth;
+      trendTo.value = today;
+      [trendFrom, trendTo].forEach((input) => {
+        input.addEventListener("change", loadTrendFromControls);
+      });
+      if (trendApply) trendApply.addEventListener("click", loadTrendFromControls);
+      loadTrendFromControls();
+    }
     if (dateToggle) dateToggle.addEventListener("change", () => {
       const isRange = dateToggle.checked;
       if (quickView) quickView.style.display = isRange ? "none" : "";
@@ -228,6 +263,134 @@
       else loadQuickPeriod(document.querySelector('[data-filter="date"]').value);
     });
     loadQuickPeriod(document.querySelector('[data-filter="date"]').value);
+  }
+
+  function trendStatus(message, isError) {
+    const status = document.querySelector("[data-overview-trend-status]");
+    if (!status) return;
+    status.textContent = message;
+    status.classList.toggle("is-error", !!isError);
+  }
+
+  function renderTrendChart(trend) {
+    const host = document.querySelector("[data-overview-trend-chart]");
+    if (!host) return;
+    const series = trend.series || [];
+    if (!trend.labels.length || !series.length) {
+      host.innerHTML = '<p class="ep-overview-trend__empty">No trend data is available for this range.</p>';
+      return;
+    }
+
+    const width = 920;
+    const height = 300;
+    const left = 52;
+    const right = 48;
+    const top = 18;
+    const bottom = 42;
+    const plotWidth = width - left - right;
+    const plotHeight = height - top - bottom;
+    const issueSeries = series.find((item) => item.axis === "count");
+    const issueMax = Math.max(0, ...(issueSeries ? issueSeries.values : []));
+    const issueStep = Math.max(1, Math.ceil(issueMax / 4));
+    const issueAxisMax = issueStep * 4;
+    const bucketWidth = plotWidth / trend.labels.length;
+    const colors = { washing: "washing", pm: "pm", issues: "issues" };
+    const grid = [0, 25, 50, 75, 100].map((value, index) => {
+      const y = top + plotHeight - value * plotHeight / 100;
+      const issueValue = index * issueStep;
+      return '<g><line class="ep-overview-trend__grid" x1="' + left + '" y1="' + y +
+        '" x2="' + (width - right) + '" y2="' + y + '"></line><text class="ep-overview-trend__axis" x="' +
+        (left - 8) + '" y="' + (y + 4) + '" text-anchor="end">' + value + '%</text>' +
+        '<text class="ep-overview-trend__axis" x="' + (width - right + 8) + '" y="' + (y + 4) +
+        '" text-anchor="start">' + issueValue + '</text></g>';
+    }).join("");
+    const barWidth = Math.max(2, Math.min(18, bucketWidth * 0.22));
+    const barGap = Math.max(1, Math.min(5, bucketWidth * 0.045));
+    const groupWidth = barWidth * series.length + barGap * (series.length - 1);
+    const bars = series.map((item, seriesIndex) => {
+      const cls = colors[item.key] || "issues";
+      return item.values.map((value, bucketIndex) => {
+        if (value === null || value === undefined) return "";
+        const scaled = item.axis === "percent"
+          ? Math.max(0, Math.min(100, Number(value))) / 100
+          : Math.max(0, Number(value)) / issueAxisMax;
+        const barHeight = scaled * plotHeight;
+        const x = left + bucketIndex * bucketWidth + (bucketWidth - groupWidth) / 2 +
+          seriesIndex * (barWidth + barGap);
+        const y = top + plotHeight - barHeight;
+        return '<rect class="ep-overview-trend__bar ep-overview-trend__bar--' + cls +
+          '" x="' + x + '" y="' + y + '" width="' + barWidth + '" height="' + Math.max(barHeight, 0.8) +
+          '" rx="1"><title>' + fmt.escape(trend.labels[bucketIndex] + ": " + item.label + " " +
+            value + (item.axis === "percent" ? "%" : "")) + '</title></rect>';
+      }).join("");
+    }).join("");
+    const labelStep = Math.max(1, Math.ceil(trend.labels.length / 6));
+    const xIndices = trend.labels.map((_, index) => index)
+      .filter((index) => index % labelStep === 0 || index === trend.labels.length - 1);
+    const xLabels = xIndices.map((index) => '<text class="ep-overview-trend__x-label" x="' +
+      (left + index * bucketWidth + bucketWidth / 2) +
+      '" y="' + (height - 12) + '" text-anchor="' + (index === 0 ? "start" : index === trend.labels.length - 1 ? "end" : "middle") +
+      '">' + fmt.escape(trend.labels[index]) + '</text>').join("");
+    const legend = series.map((item) => {
+      const cls = colors[item.key] || "health";
+      return '<span class="ep-overview-trend__legend-item"><i class="ep-overview-trend__legend-mark ep-overview-trend__legend-mark--' +
+        cls + '"></i>' + fmt.escape(item.label) + '</span>';
+    }).join("");
+    host.innerHTML = '<svg class="ep-overview-trend__svg" viewBox="0 0 ' + width + " " + height +
+      '" role="img" aria-label="Washing compliance, PM compliance and active site issues from ' +
+      fmt.escape(trend.startDate) + " to " + fmt.escape(trend.endDate) +
+      '. Left axis: compliance percentage. Right axis: active issue count.">' + grid + bars + xLabels +
+      '<text class="ep-overview-trend__axis-label" x="' + left + '" y="12">Compliance (%)</text>' +
+      '<text class="ep-overview-trend__axis-label" x="' + (width - right) + '" y="12" text-anchor="end">Active issues</text>' +
+      '</svg><div class="ep-overview-trend__legend">' +
+      legend + '</div>';
+  }
+
+  function loadTrendFromControls() {
+    if (!state) return;
+    const startDate = document.querySelector("[data-trend-from]")?.value;
+    const endDate = document.querySelector("[data-trend-to]")?.value;
+    if (!startDate || !endDate || startDate > endDate) {
+      trendRequest += 1;
+      trendStatus("Choose a start date on or before the end date.", true);
+      return;
+    }
+    if (endDate > state.businessDate) {
+      trendRequest += 1;
+      trendStatus("The trend end date cannot be in the future.", true);
+      return;
+    }
+    const requestId = ++trendRequest;
+    const trendRows = state.allRows.filter(({ plant }) => {
+      if (filters.plant !== "__all" && plant.siteCode !== filters.plant) return false;
+      if (filters.company !== "__all" && (plant.projectCompany || "") !== filters.company) return false;
+      if (filters.district !== "__all" && (plant.district || "") !== filters.district) return false;
+      return true;
+    });
+    if (!trendRows.length) {
+      trendStatus("No plants match the selected filters.", false);
+      renderTrendChart({ labels: [], series: [] });
+      return;
+    }
+    const siteCodes = trendRows.length === state.allRows.length &&
+      filters.plant === "__all" && filters.company === "__all" && filters.district === "__all"
+      ? []
+      : trendRows.map(({ plant }) => plant.siteCode);
+    trendStatus("Loading trend…", false);
+    data.fetchPortfolioTrend(startDate, endDate, siteCodes).then((trend) => {
+      if (!state || requestId !== trendRequest) return;
+      renderTrendChart(trend);
+      const plantName = filters.plant !== "__all"
+        ? (trendRows[0].plant.displayName || filters.plant)
+        : trendRows.length === state.allRows.length ? "all plants" : trendRows.length + " filtered plants";
+      trendStatus("Showing washing compliance, PM compliance and active site issues for " + plantName +
+        " · " + trend.startDate + " to " + trend.endDate + ".", false);
+    }).catch((error) => {
+      if (requestId !== trendRequest) return;
+      trendStatus("Could not load trend: " + error.message, true);
+      const host = document.querySelector("[data-overview-trend-chart]");
+      if (host) host.innerHTML = '<p class="ep-overview-trend__empty">Trend could not be loaded.</p>';
+    });
   }
 
   // ─── Rendering helpers ───────────────────────────────────────────────

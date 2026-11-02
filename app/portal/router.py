@@ -1,7 +1,7 @@
 """Read-only portal endpoints that back the redesigned frontend.
 
-All routes require a signed-in user and are scoped server-side by
-``user_scoped_plant_ids``; the browser never decides which plants it may see.
+The server enforces each route's role and plant scope. Overview is portfolio-wide
+for permitted roles except Site Engineers, who remain plant-scoped.
 Writes stay on the existing module APIs (issues, scheduled, washing).
 """
 from __future__ import annotations
@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.models import Plant, User
-from app.core.security import get_current_user, user_scoped_plant_ids
+from app.core.security import get_current_user, require_permission, user_scoped_plant_ids
 from app.plants.codes import normalize_site_code
 from app.portal import service
 
@@ -22,6 +22,7 @@ router = APIRouter(prefix="/api/portal", tags=["Portal"])
 
 DB = Annotated[Session, Depends(get_db)]
 CurrentUser = Annotated[User, Depends(get_current_user)]
+OverviewUser = Annotated[User, Depends(require_permission("plants.view"))]
 
 
 def _plant_or_404(db: Session, user: User, site_code: str) -> Plant:
@@ -47,19 +48,19 @@ def list_plants(db: DB, user: CurrentUser):
 
 
 @router.get("/overview")
-def overview(db: DB, user: CurrentUser):
-    """Portfolio rows (plant + operational profile) and totals in one response."""
+def overview(db: DB, user: OverviewUser):
+    """Portfolio rows, except Site Engineers receive only their assigned plant."""
     return service.portfolio(db, user)
 
 
 @router.get("/overview/range")
 def overview_range(
     db: DB,
-    user: CurrentUser,
+    user: OverviewUser,
     start_date: date = Query(...),
     end_date: date = Query(...),
 ):
-    """Date-bounded portfolio metrics for Overview's quick periods and custom range."""
+    """Date-bounded Overview metrics, with Site Engineers restricted to assigned plants."""
     if start_date > end_date:
         raise HTTPException(422, "Start date must be on or before end date.")
     if end_date > service.business_today():
@@ -67,6 +68,34 @@ def overview_range(
     if (end_date - start_date).days > 3660:
         raise HTTPException(422, "Overview date ranges cannot exceed 10 years.")
     return service.portfolio_for_range(db, user, start_date, end_date)
+
+
+@router.get("/overview/trend")
+def overview_trend(
+    db: DB,
+    user: OverviewUser,
+    start_date: date = Query(...),
+    end_date: date = Query(...),
+    site_code: list[str] | None = Query(default=None),
+):
+    """Date-bucketed operational trend, restricted to the Overview plant scope."""
+    if start_date > end_date:
+        raise HTTPException(422, "Start date must be on or before end date.")
+    if end_date > service.business_today():
+        raise HTTPException(422, "End date cannot be in the future.")
+    if (end_date - start_date).days > 3660:
+        raise HTTPException(422, "Overview trend ranges cannot exceed 10 years.")
+
+    plants = service.overview_plants(db, user)
+    if site_code is not None:
+        requested = {normalize_site_code(code) for code in site_code}
+        selected = [plant for plant in plants if plant.site_code in requested]
+        if not requested or len(selected) != len(requested):
+            raise HTTPException(404, "Plant not found")
+        plant_ids = [plant.id for plant in selected]
+    else:
+        plant_ids = [plant.id for plant in plants]
+    return service.portfolio_trend(db, plant_ids, start_date, end_date)
 
 
 @router.get("/plants/{site_code}")
