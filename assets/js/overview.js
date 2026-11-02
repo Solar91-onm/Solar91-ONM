@@ -3,10 +3,18 @@
  * ─────────────────────────────────────────────────────────────────────
  * The portfolio-wide Overview tab.
  *
- * Keeps the DOM thin: four summary tiles up top, then full-width tables for
- * PM compliance, Washing compliance, a combined operational comparison, and
- * a compact Critical Issues panel. Nothing re-renders unless the data really
- * changes, so repeated tab switches are cheap.
+ * Three summary tiles — PM compliance, Washing compliance, Open site issues —
+ * and directly below them a grouped bar chart of the same three measures over
+ * time.
+ *
+ * ONE date control drives all four. The Range selector in the filter bar is
+ * the single source of truth: `applyRange` records the dates on `state` and
+ * then refreshes both the tiles and the chart from them. The chart has no
+ * dates of its own, so the two can never disagree.
+ *
+ * The plant / project / district filters narrow both as well: the tiles
+ * re-aggregate locally from the rows already loaded, the chart refetches for
+ * the matching site codes over the same range.
  */
 (function (global) {
   "use strict";
@@ -57,9 +65,13 @@
     status.classList.toggle("is-error", !!isError);
   }
 
-  function loadRange(startDate, endDate) {
+  /**
+   * The one date control. Records the range on `state`, then refreshes the
+   * tiles and the chart from it. Everything that changes the dates goes
+   * through here, so the two halves of the tab always agree.
+   */
+  function applyRange(startDate, endDate) {
     if (!state) return;
-    const requestId = ++rangeRequest;
     if (!startDate || !endDate || startDate > endDate) {
       rangeKey = "";
       rangeStatus("Choose a start date on or before the end date.", true);
@@ -70,9 +82,17 @@
       rangeStatus("The end date cannot be in the future.", true);
       return;
     }
+    state.rangeStart = startDate;
+    state.rangeEnd = endDate;
+    loadTrend(startDate, endDate);
+    loadRange(startDate, endDate);
+  }
+
+  function loadRange(startDate, endDate) {
+    if (!state) return;
+    const requestId = ++rangeRequest;
     const key = startDate + ":" + endDate;
     if (key === rangeKey) {
-      rangeRequest -= 1;
       return;
     }
     rangeKey = key;
@@ -110,7 +130,7 @@
     } else if (period === "all") {
       startDate = shiftDate(today, -3650);
     }
-    loadRange(startDate, period === "yesterday" ? shiftDate(today, -1) : today);
+    applyRange(startDate, period === "yesterday" ? shiftDate(today, -1) : today);
   }
 
   function recomputeAndRender() {
@@ -169,7 +189,7 @@
         }
         plantCombo.classList.remove("is-open");
         recomputeAndRender();
-        loadTrendFromControls();
+        reloadTrendForFilters();
       });
       document.addEventListener("click", (ev) => {
         if (!plantCombo.contains(ev.target)) plantCombo.classList.remove("is-open");
@@ -221,7 +241,7 @@
         }
         filters[filterName] = ev.target.value;
         recomputeAndRender();
-        if (filterName === "district" || filterName === "company") loadTrendFromControls();
+        if (filterName === "district" || filterName === "company") reloadTrendForFilters();
       });
     });
 
@@ -238,28 +258,25 @@
       fromDate.value = firstOfMonth;
       toDate.value = today;
       [fromDate, toDate].forEach((input) => {
-        input.addEventListener("change", () => loadRange(fromDate.value, toDate.value));
+        input.addEventListener("change", () => applyRange(fromDate.value, toDate.value));
       });
     }
-    const trendFrom = document.querySelector("[data-trend-from]");
-    const trendTo = document.querySelector("[data-trend-to]");
-    const trendApply = document.querySelector("[data-trend-apply]");
-    if (trendFrom && trendTo) {
-      trendFrom.max = today;
-      trendTo.max = today;
-      trendFrom.value = firstOfMonth;
-      trendTo.value = today;
-      [trendFrom, trendTo].forEach((input) => {
-        input.addEventListener("change", loadTrendFromControls);
-      });
-      if (trendApply) trendApply.addEventListener("click", loadTrendFromControls);
-      loadTrendFromControls();
-    }
+
+    // The chart used to carry its own title, description and From / To / Apply,
+    // which could disagree with the Range selector above. The Range selector now
+    // drives the chart too, so all of that is redundant — and dropping it is what
+    // lets the tiles and the chart share one screen without scrolling.
+    // The range status line above the tiles already states the active period.
+    [".ep-overview-trend__head", ".ep-overview-trend__status"].forEach((sel) => {
+      const el = document.querySelector(sel);
+      if (el) el.style.display = "none";
+    });
+
     if (dateToggle) dateToggle.addEventListener("change", () => {
       const isRange = dateToggle.checked;
       if (quickView) quickView.style.display = isRange ? "none" : "";
       if (rangeView) rangeView.style.display = isRange ? "" : "none";
-      if (isRange && fromDate && toDate) loadRange(fromDate.value, toDate.value);
+      if (isRange && fromDate && toDate) applyRange(fromDate.value, toDate.value);
       else loadQuickPeriod(document.querySelector('[data-filter="date"]').value);
     });
     loadQuickPeriod(document.querySelector('[data-filter="date"]').value);
@@ -281,12 +298,18 @@
       return;
     }
 
-    const width = 920;
-    const height = 300;
-    const left = 52;
-    const right = 48;
-    const top = 18;
-    const bottom = 42;
+    // A wide, shallow viewBox. The SVG is width:100% with a preserved aspect
+    // ratio, so the rendered height is containerWidth * height / width — a wider
+    // box means a shorter chart. Tuned so the three tiles and the chart fit on
+    // one laptop screen without scrolling.
+    // 1100 keeps the scale factor near 1:1 at laptop widths, so the 11px axis
+    // labels stay readable; a much wider box shrinks all the text with it.
+    const width = 1100;
+    const height = 220;
+    const left = 46;
+    const right = 44;
+    const top = 14;
+    const bottom = 34;
     const plotWidth = width - left - right;
     const plotHeight = height - top - bottom;
     const issueSeries = series.find((item) => item.axis === "count");
@@ -336,7 +359,9 @@
       return '<span class="ep-overview-trend__legend-item"><i class="ep-overview-trend__legend-mark ep-overview-trend__legend-mark--' +
         cls + '"></i>' + fmt.escape(item.label) + '</span>';
     }).join("");
-    host.innerHTML = '<svg class="ep-overview-trend__svg" viewBox="0 0 ' + width + " " + height +
+    // min-height:0 overrides the stylesheet's 220px floor, which would otherwise
+    // keep the chart taller than the viewBox needs.
+    host.innerHTML = '<svg class="ep-overview-trend__svg" style="min-height:0" viewBox="0 0 ' + width + " " + height +
       '" role="img" aria-label="Washing compliance, PM compliance and active site issues from ' +
       fmt.escape(trend.startDate) + " to " + fmt.escape(trend.endDate) +
       '. Left axis: compliance percentage. Right axis: active issue count.">' + grid + bars + xLabels +
@@ -346,10 +371,18 @@
       legend + '</div>';
   }
 
-  function loadTrendFromControls() {
+  /** Redraw the chart for the range already in state — used when a filter changes. */
+  function reloadTrendForFilters() {
+    if (!state || !state.rangeStart || !state.rangeEnd) return;
+    loadTrend(state.rangeStart, state.rangeEnd);
+  }
+
+  /**
+   * Draw the chart for an explicit range. The dates always come from
+   * `applyRange` (the Range selector), never from controls of its own.
+   */
+  function loadTrend(startDate, endDate) {
     if (!state) return;
-    const startDate = document.querySelector("[data-trend-from]")?.value;
-    const endDate = document.querySelector("[data-trend-to]")?.value;
     if (!startDate || !endDate || startDate > endDate) {
       trendRequest += 1;
       trendStatus("Choose a start date on or before the end date.", true);

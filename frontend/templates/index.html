@@ -196,7 +196,7 @@
                 </select>
               </label>
               <label class="ep-filter">
-                <span class="ep-filter__label">Area</span>
+                <span class="ep-filter__label">District</span>
                 <select class="ep-filter__select" data-filter="district" aria-label="Filter by district">
                   <option value="__all">All districts</option>
                 </select>
@@ -225,7 +225,15 @@
                 </div>
               </div>
             </div>
-            <p class="ep-overview-range-status" data-overview-range-status role="status" aria-live="polite"></p>
+            <label><span>Timeframe</span>
+  <select data-trend-preset aria-label="Trend timeframe">
+    <option value="7">Last 7 days</option>
+    <option value="30" selected>Last 30 days</option>
+    <option value="90">Last 90 days</option>
+    <option value="365">Last 12 months</option>
+    <option value="custom">Custom</option>
+  </select>
+</label>
 
             <!-- Metric cards and the date trend share one panel frame. -->
             <div class="ep-panel">

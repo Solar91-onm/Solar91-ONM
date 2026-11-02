@@ -228,7 +228,7 @@
 .ep-filterbar {
   display: flex;
   gap: var(--ep-s-3);
-  overflow-x: auto;
+  flex-wrap: wrap;
 }
 .ep-filterbar > .ep-filter { flex: 1 1 0; min-width: 130px; }
 .ep-filter {
