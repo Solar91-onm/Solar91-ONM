@@ -722,11 +722,59 @@
     return !!(user && ["O&M Head", "Assignee"].indexOf(user.role) !== -1);
   }
 
+  // ── Work categories: equipment, their parts, and each part's maintenance ──
+  // Loaded once from /api/categories. Migration 035 fills the equipment and its
+  // reportable faults; 036 fills pm_parts, which is what PM setup needs.
+  var PM_CATEGORIES = [];
+
+  function loadPMCategories(onReady) {
+    if (PM_CATEGORIES.length) { if (onReady) onReady(); return; }
+    var api = global.Solar91PortalAPI;
+    if (!api) return;
+    api.request("/api/categories").then(function (body) {
+      PM_CATEGORIES = (body && body.categories) || [];
+      if (onReady) onReady();
+    }).catch(function () {
+      PM_CATEGORIES = [];          // leave the fields as free text rather than blocking setup
+      if (onReady) onReady();
+    });
+  }
+
+  function pmCategory(name) {
+    var key = String(name || "").trim().toLowerCase();
+    if (!key) return null;
+    return PM_CATEGORIES.filter(function (row) {
+      return String(row.name || "").trim().toLowerCase() === key;
+    })[0] || null;
+  }
+
+  /** Part names for one equipment. */
+  function pmPartsFor(equipment) {
+    var row = pmCategory(equipment);
+    return ((row && row.pm_parts) || []).map(function (entry) { return entry.part; })
+      .filter(Boolean);
+  }
+
+  /** Maintenance tasks for one part; every task for the equipment when no part is chosen yet. */
+  function pmTasksFor(equipment, part) {
+    var row = pmCategory(equipment);
+    var parts = (row && row.pm_parts) || [];
+    var wanted = String(part || "").trim().toLowerCase();
+    var out = [];
+    parts.forEach(function (entry) {
+      if (wanted && String(entry.part || "").trim().toLowerCase() !== wanted) return;
+      (entry.tasks || []).forEach(function (task) {
+        if (task && out.indexOf(task) === -1) out.push(task);
+      });
+    });
+    return out;
+  }
+
   function newPMSetupItem() {
     return {
       equipment: "",
       part: "",
-      subpart: "",
+      partNumber: "",
       task: "",
       startDate: "",
       frequency: "Monthly",
@@ -742,15 +790,45 @@
           (required ? " required" : "") + ' value="' + escape(item[key]) + '"' +
           (type === "text" ? ' maxlength="255"' : "") + ' /></label>';
       };
+      // A datalist-backed input: it drops down the full list, filters as you type,
+      // and still accepts anything you type that is not on the list — so an
+      // equipment or part the category list does not cover yet is never a blocker.
+      var picker = function (key, label, options, required, hint) {
+        var listId = "pm-" + key + "-" + index;
+        return '<label><span>' + label + '</span>' +
+          '<input type="text" list="' + listId + '" autocomplete="off" maxlength="255"' +
+            ' data-pm-setup-index="' + index + '" data-pm-setup-field="' + key + '"' +
+            (required ? " required" : "") +
+            ' placeholder="' + (options.length ? "Search or pick…" : "Type a value") + '"' +
+            ' value="' + escape(item[key]) + '" />' +
+          '<datalist id="' + listId + '">' +
+            options.map(function (option) {
+              return '<option value="' + escape(option) + '"></option>';
+            }).join("") +
+          '</datalist>' +
+          (hint ? '<small class="ep-calendar__pm-setup-hint">' + escape(hint) + '</small>' : "") +
+        '</label>';
+      };
+
+      var partOptions = pmPartsFor(item.equipment);
+      var taskOptions = pmTasksFor(item.equipment, item.part);
+      var equipmentHint = PM_CATEGORIES.length
+        ? ""
+        : "No categories configured yet — type the equipment, or add the list in Settings → Categories.";
+      var partHint = item.equipment && !partOptions.length && PM_CATEGORIES.length
+        ? "No parts listed for this equipment yet."
+        : "";
+
       return '<fieldset class="ep-calendar__pm-setup-item"><legend>PM item ' +
         (index + 1) + '</legend>' +
         '<button type="button" class="ep-calendar__pm-setup-remove" data-calendar-action="remove-pm-item" data-pm-setup-index="' +
           index + '"' + (items.length === 1 ? " disabled" : "") + '>Remove</button>' +
         '<div class="ep-calendar__pm-setup-fields">' +
-          field("equipment", "Equipment", "text", true) +
-          field("part", "Part", "text", false) +
-          field("subpart", "Subpart", "text", false) +
-          field("task", "Maintenance task", "text", true) +
+          picker("equipment", "Equipment", PM_CATEGORIES.map(function (row) { return row.name; }),
+                 true, equipmentHint) +
+          picker("part", "Part", partOptions, false, partHint) +
+          field("partNumber", "Part number (optional)", "text", false) +
+          picker("task", "Maintenance task", taskOptions, true, "") +
           field("startDate", "First scheduled date", "date", true) +
           '<label><span>Frequency</span><select data-pm-setup-index="' + index +
             '" data-pm-setup-field="frequency">' +
@@ -799,7 +877,8 @@
               '<div class="ep-calendar__pm-setup-preview-items">' +
                 state.pmSetupItems.map(function (item) {
                   return '<article><h3>' + escape(item.equipment) + ' · ' + escape(item.task) + '</h3>' +
-                    '<p>' + escape([item.part, item.subpart].filter(Boolean).join(" · ") || "No part specified") + '</p>' +
+                    '<p>' + escape([item.part, item.partNumber && "Part no. " + item.partNumber]
+                      .filter(Boolean).join(" · ") || "No part specified") + '</p>' +
                     '<p>' + escape(item.startDate) + ' · ' + escape(item.frequency) + '</p>' +
                     (item.remarks ? '<p>' + escape(item.remarks) + '</p>' : "") +
                   '</article>';
@@ -1484,6 +1563,14 @@
         state.pmSetupPlant = context.plantCode || "";
         state.pmSetupItems = [newPMSetupItem()];
         renderView(host, state, context);
+        // Equipment, parts and tasks come from the category list; fetch it the
+        // first time the dialog is opened and redraw once it lands.
+        loadPMCategories(function () {
+          if (state.pmSetupOpen && !state.pmSetupPreview) {
+            syncPMSetupForm(host, state);
+            renderView(host, state, context);
+          }
+        });
         var firstEquipment = host.querySelector('[data-pm-setup-field="equipment"]');
         if (firstEquipment) firstEquipment.focus();
       } else if (action.dataset.calendarAction === "close-pm-setup") {
@@ -1712,7 +1799,24 @@
       else if (filter === "modal-plant") active.state.modalPlant = event.target.value;
       else if (filter === "modal-equipment") active.state.modalEquipment = event.target.value;
       else if (filter === "modal-status") active.state.modalStatus = event.target.value;
-      else return;
+      else {
+        // PM setup cascade: a new Equipment changes which Parts are offered, and
+        // a new Part changes which Maintenance tasks are offered. Clear the
+        // choices below the one that changed, then redraw so the lists match.
+        var field = event.target.dataset.pmSetupField;
+        if ((field === "equipment" || field === "part") && active.state.pmSetupOpen) {
+          syncPMSetupForm(host, active.state);
+          var item = active.state.pmSetupItems[Number(event.target.dataset.pmSetupIndex)];
+          if (item) {
+            if (field === "equipment") { item.part = ""; item.partNumber = ""; }
+            item.task = "";
+          }
+          refreshKeepingFocus(host, active.state, active.context,
+            '[data-pm-setup-index="' + event.target.dataset.pmSetupIndex +
+            '"][data-pm-setup-field="' + field + '"]');
+        }
+        return;
+      }
       if (filter.indexOf("modal-") === 0) active.state.detailEventIndex = null;
       renderView(host, active.state, active.context);
     });

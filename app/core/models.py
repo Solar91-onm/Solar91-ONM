@@ -654,6 +654,11 @@ class WorkCategory(Base, TimestampMixin):
     name: Mapped[str] = mapped_column(String(120), nullable=False, unique=True)
     code: Mapped[str | None] = mapped_column(String(60))
     sub_problems: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    # Preventive maintenance: the parts this equipment is made of and the work each
+    # part needs. One entry per part: {"part": "Cooling fan", "tasks": ["Clean fan", ...]}.
+    # Faults (sub_problems) are what gets reported; parts are what gets maintained.
+    # Migration 036.
+    pm_parts: Mapped[list[dict[str, Any]]] = mapped_column(JSON, nullable=False, default=list)
     default_units: Mapped[int | None] = mapped_column(Integer)
     area: Mapped[str | None] = mapped_column(String(60))      # "Plant side" / "GSS side", for the PM cycle
     notes: Mapped[str | None] = mapped_column(Text)

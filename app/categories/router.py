@@ -67,10 +67,31 @@ def _clean_sub_problems(values: list[str] | None) -> list[str]:
     return out
 
 
+def _clean_pm_parts(values: list[dict] | None) -> list[dict]:
+    """The PM parts list: [{"part": str, "tasks": [str, ...]}, ...].
+
+    Parts are de-duplicated by name and each part's tasks de-duplicated within it,
+    both case-insensitively and in the order given. A part with no name is dropped;
+    a part with no tasks is kept, since the task list can be filled in later.
+    """
+    out: list[dict] = []
+    seen: set[str] = set()
+    for entry in values or []:
+        if not isinstance(entry, dict):
+            continue
+        part = " ".join(str(entry.get("part") or "").split())
+        if not part or part.casefold() in seen:
+            continue
+        seen.add(part.casefold())
+        out.append({"part": part, "tasks": _clean_sub_problems(entry.get("tasks"))})
+    return out
+
+
 class CategoryIn(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     code: str | None = Field(default=None, max_length=60)
     sub_problems: list[str] = Field(default_factory=list, max_length=200)
+    pm_parts: list[dict] = Field(default_factory=list, max_length=300)
     default_units: int | None = Field(default=None, ge=0, le=100000)
     area: str | None = Field(default=None, max_length=60)
     notes: str | None = None
@@ -90,6 +111,7 @@ class CategoryUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=120)
     code: str | None = Field(default=None, max_length=60)
     sub_problems: list[str] | None = Field(default=None, max_length=200)
+    pm_parts: list[dict] | None = Field(default=None, max_length=300)
     default_units: int | None = Field(default=None, ge=0, le=100000)
     area: str | None = Field(default=None, max_length=60)
     notes: str | None = None
@@ -110,6 +132,7 @@ def _out(row: WorkCategory, used: dict[str, int] | None = None) -> dict:
         "name": row.name,
         "code": row.code,
         "sub_problems": row.sub_problems or [],
+        "pm_parts": row.pm_parts or [],
         "default_units": row.default_units,
         "area": row.area,
         "notes": row.notes,
@@ -156,6 +179,7 @@ def create_category(data: CategoryIn, db: DB, user: CurrentUser):
         raise HTTPException(409, f"A category called {data.name} already exists")
     row = WorkCategory(
         name=data.name, code=data.code, sub_problems=_clean_sub_problems(data.sub_problems),
+        pm_parts=_clean_pm_parts(data.pm_parts),
         default_units=data.default_units, area=data.area, notes=data.notes,
         sort_order=data.sort_order, active=data.active, created_by=user.id,
     )
@@ -183,6 +207,8 @@ def update_category(category_id: UUID, data: CategoryUpdate, db: DB, user: Curre
     payload = data.model_dump(exclude_unset=True)
     if "sub_problems" in payload:
         payload["sub_problems"] = _clean_sub_problems(payload["sub_problems"])
+    if "pm_parts" in payload:
+        payload["pm_parts"] = _clean_pm_parts(payload["pm_parts"])
     if "name" in payload and payload["name"]:
         payload["name"] = " ".join(payload["name"].split())
         if _name_clash(db, payload["name"], exclude_id=row.id):
@@ -247,6 +273,7 @@ def import_categories(data: CategoryImport, db: DB, user: CurrentUser):
         row = existing.get(item.name.casefold())
         values = dict(
             name=item.name, code=item.code, sub_problems=_clean_sub_problems(item.sub_problems),
+            pm_parts=_clean_pm_parts(item.pm_parts),
             default_units=item.default_units, area=item.area, notes=item.notes,
             sort_order=item.sort_order if item.sort_order != 100 else (index + 1) * 10,
             active=item.active,

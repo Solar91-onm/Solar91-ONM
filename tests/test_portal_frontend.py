@@ -311,8 +311,12 @@ def test_pm_calendar_setup_is_a_frontend_only_preview_for_plant_and_portfolio():
     styles = (PORTAL_ASSETS / "css" / "calendar.css").read_text(encoding="utf-8")
     assert 'data-calendar-action="open-pm-setup">Set up PM' in calendar
     assert 'var showPMSetupButton = context.type === "pm" && canManagePMSetup();' in calendar
-    for field in ("equipment", "part", "subpart", "task", "startDate"):
-        assert 'field("' + field + '"' in calendar
+    # Equipment, Part and Maintenance task are pickers built from the category
+    # list, so their attribute is assembled at runtime — see the picker test below.
+    for field in ("equipment", "part", "task"):
+        assert 'picker("' + field + '"' in calendar
+    assert 'field("partNumber"' in calendar
+    assert 'field("startDate"' in calendar
     assert 'data-pm-setup-field="frequency"' in calendar
     assert 'data-pm-setup-field="remarks"' in calendar
     assert "Add another PM item" in calendar
@@ -322,6 +326,40 @@ def test_pm_calendar_setup_is_a_frontend_only_preview_for_plant_and_portfolio():
     assert "/api/pm-plan/" not in calendar
     assert ".ep-calendar__pm-setup-fields" in styles
     assert ".ep-calendar__pm-setup-preview-items" in styles
+
+
+def test_pm_setup_equipment_part_and_task_are_pickers_driven_by_work_categories():
+    """Equipment, Part and Maintenance task come from the category list, and cascade.
+
+    Equipment is the category, Part comes from that category's pm_parts, and the
+    Maintenance task comes from the chosen part. Each is a datalist-backed input,
+    so it drops down, filters as you type, and still accepts a value that is not
+    on the list yet. Part number is free text: it belongs to the unit on site,
+    not to the category.
+    """
+    calendar = (PORTAL_ASSETS / "js" / "operations-calendar.js").read_text(encoding="utf-8")
+    styles = (PORTAL_ASSETS / "css" / "calendar.css").read_text(encoding="utf-8")
+
+    assert 'api.request("/api/categories")' in calendar, "the picker lists come from the API"
+    assert "function pmPartsFor(equipment)" in calendar
+    assert "function pmTasksFor(equipment, part)" in calendar
+
+    # the three cascading pickers, and part number left as a plain field
+    assert 'picker("equipment", "Equipment"' in calendar
+    assert 'picker("part", "Part"' in calendar
+    assert 'picker("task", "Maintenance task"' in calendar
+    assert 'field("partNumber", "Part number (optional)", "text", false)' in calendar
+
+    # a datalist, not a <select>: typing a value that is not listed still works
+    assert '<datalist id="' in calendar
+    assert 'list="' + "' + listId + '" in calendar
+
+    # changing the equipment clears the part and task below it
+    assert 'if (field === "equipment") { item.part = ""; item.partNumber = ""; }' in calendar
+    assert ".ep-calendar__pm-setup-hint" in styles
+
+    # "subpart" was a fault field borrowed from Site Issues; PM uses parts instead
+    assert "subpart" not in calendar
 
 
 def test_plant_pm_calendar_date_click_opens_summary_then_saved_job_detail():

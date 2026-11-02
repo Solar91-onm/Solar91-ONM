@@ -1066,6 +1066,13 @@
   font-weight: 600;
 }
 
+/* Guidance under a picker: no parts listed yet, no categories configured, ... */
+.ep-calendar__pm-setup-hint {
+  color: var(--ep-text-faint);
+  font-size: var(--ep-fs-xs);
+  font-weight: 500;
+}
+
 .ep-calendar__pm-setup-fields input,
 .ep-calendar__pm-setup-fields select,
 .ep-calendar__pm-setup-fields textarea {
