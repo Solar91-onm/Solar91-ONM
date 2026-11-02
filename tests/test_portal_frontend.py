@@ -341,10 +341,13 @@ def test_plant_washing_range_sheet_and_health_issue_wizard_are_wired():
 
 def test_portfolio_health_hides_hero_and_summary_and_calendar_has_nested_detail():
     issues = (PORTAL_ASSETS / "js" / "site-issues.js").read_text(encoding="utf-8")
-    assert 'if (!context.plantCode)' in issues
     assert "renderSummary" not in issues
     assert "renderPlantSnapshot" not in issues
     assert 'content = \'<section class="ep-issues__results">' in issues
+    header = issues[issues.index("function renderHeader"):issues.index("function renderFilters")]
+    assert "Site Issues" not in header
+    assert "Track reported issues across plants." not in header
+    assert 'data-issue-action="raise"' in header
     assert "renderHeader(context)" in issues
 
     calendar = (PORTAL_ASSETS / "js" / "operations-calendar.js").read_text(encoding="utf-8")

@@ -156,17 +156,9 @@
   }
 
   function renderHeader(context) {
-    if (!context.plantCode) {
-      return state.canRaise
-        ? '<div class="ep-issues__portfolio-actions"><button class="ep-issues__button ep-issues__button--primary" type="button" data-issue-action="raise">+ Raise issue</button></div>'
-        : "";
-    }
-    return '<header class="ep-issues__hero"><div><p class="ep-issues__eyebrow">Solar operations · Issue register</p>' +
-      '<h1>Site Issues</h1><p>Track reported issues across plants.</p></div>' +
-      '<div class="ep-issues__hero-actions"><span class="ep-issues__demo-tag">' +
-      "Live tickets" + '</span>' +
-      (state.canRaise ? '<button class="ep-issues__button ep-issues__button--primary" type="button" data-issue-action="raise">+ Raise issue</button>' : "") +
-      '</div></header>';
+    return state.canRaise
+      ? '<div class="ep-issues__portfolio-actions"><button class="ep-issues__button ep-issues__button--primary" type="button" data-issue-action="raise">+ Raise issue</button></div>'
+      : "";
   }
 
   function renderFilters(context, unfilteredRows) {
