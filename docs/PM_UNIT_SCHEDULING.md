@@ -1,5 +1,7 @@
 # PM unit scheduling (migration 016)
 
+The PM calendar's **Set up PM** dialog is currently a frontend-only form and preview. It does not create or persist schedules; use the existing PM planning workflows for saved tasks.
+
 - **Plant unit configuration** (`pm_unit_config`): per plant + equipment type -> number of units, max units maintained per day. O&M Head edits and views; Assignees may view and edit only their assigned equipment types. UI: Preventive Maintenance -> *Unit configuration*.
 - **Add PM task / Add PM template / Assign to plants** carry *Number of units*, *Max units per day*, *Units to maintain* (subset). Templates store only *units per day*; the plant setting wins. Resolution: request > plant config > Equipment Register > template default.
 - **Scheduling**: units 1..N go on consecutive calendar days, `units per day` per day from the first due date (10 at 2/day = 5 days). One task per unit; one assignee per plant.

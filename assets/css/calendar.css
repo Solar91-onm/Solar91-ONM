@@ -946,7 +946,8 @@
 }
 
 .ep-calendar__setup-form input,
-.ep-calendar__setup-form select {
+.ep-calendar__setup-form select,
+.ep-calendar__setup-form textarea {
   min-height: 40px;
   padding: 0 10px;
   border: 1px solid var(--ep-border);
@@ -958,7 +959,8 @@
 }
 
 .ep-calendar__setup-form input:focus,
-.ep-calendar__setup-form select:focus {
+.ep-calendar__setup-form select:focus,
+.ep-calendar__setup-form textarea:focus {
   outline: 2px solid var(--ep-accent-ring);
   outline-offset: 1px;
   border-color: var(--ep-accent);
@@ -981,6 +983,174 @@
 }
 
 .ep-calendar__setup-message { padding: 18px 20px; }
+
+.ep-calendar__pm-setup-modal .ep-calendar__dialog {
+  width: min(820px, 100%);
+  max-height: min(90vh, 820px);
+  padding: 0;
+}
+
+.ep-calendar__pm-setup-form {
+  gap: var(--ep-s-3);
+}
+
+.ep-calendar__pm-setup-notice,
+.ep-calendar__pm-setup-plant {
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: var(--ep-radius-sm);
+  background: var(--ep-bg-muted);
+  color: var(--ep-text-muted);
+  font-size: var(--ep-fs-sm);
+}
+
+.ep-calendar__pm-setup-plant {
+  color: var(--ep-text);
+  font-weight: 700;
+}
+
+.ep-calendar__pm-setup-plant-select {
+  display: grid;
+  gap: 6px;
+  color: var(--ep-text-muted);
+  font-size: var(--ep-fs-sm);
+  font-weight: 600;
+}
+
+.ep-calendar__pm-setup-plant-select select {
+  min-height: 40px;
+  padding: 0 10px;
+  border: 1px solid var(--ep-border);
+  border-radius: var(--ep-radius-sm);
+  background: var(--ep-bg);
+  color: var(--ep-text);
+  font: inherit;
+  font-weight: 400;
+}
+
+.ep-calendar__pm-setup-items {
+  display: grid;
+  gap: var(--ep-s-3);
+}
+
+.ep-calendar__pm-setup-item {
+  position: relative;
+  display: grid;
+  gap: var(--ep-s-3);
+  min-width: 0;
+  margin: 0;
+  padding: 16px;
+  border: 1px solid var(--ep-border);
+  border-radius: var(--ep-radius-md);
+}
+
+.ep-calendar__pm-setup-item legend {
+  padding: 0 6px;
+  color: var(--ep-text);
+  font-size: var(--ep-fs-sm);
+  font-weight: 700;
+}
+
+.ep-calendar__pm-setup-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--ep-s-3);
+}
+
+.ep-calendar__pm-setup-fields label {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+  color: var(--ep-text-muted);
+  font-size: var(--ep-fs-sm);
+  font-weight: 600;
+}
+
+.ep-calendar__pm-setup-fields input,
+.ep-calendar__pm-setup-fields select,
+.ep-calendar__pm-setup-fields textarea {
+  width: 100%;
+  min-width: 0;
+  min-height: 40px;
+  padding: 8px 10px;
+  border: 1px solid var(--ep-border);
+  border-radius: var(--ep-radius-sm);
+  background: var(--ep-bg);
+  color: var(--ep-text);
+  font: inherit;
+  font-weight: 400;
+}
+
+.ep-calendar__pm-setup-fields textarea {
+  min-height: 72px;
+  resize: vertical;
+}
+
+.ep-calendar__pm-setup-fields input:focus,
+.ep-calendar__pm-setup-fields select:focus,
+.ep-calendar__pm-setup-fields textarea:focus,
+.ep-calendar__pm-setup-plant-select select:focus {
+  outline: 2px solid var(--ep-accent-ring);
+  outline-offset: 1px;
+  border-color: var(--ep-accent);
+}
+
+.ep-calendar__pm-setup-remarks {
+  grid-column: 1 / -1;
+}
+
+.ep-calendar__pm-setup-remove {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  border: 0;
+  background: transparent;
+  color: var(--ep-text-muted);
+  font: inherit;
+  font-size: var(--ep-fs-xs);
+  cursor: pointer;
+}
+
+.ep-calendar__pm-setup-remove:disabled {
+  display: none;
+}
+
+.ep-calendar__pm-setup-add {
+  justify-self: start;
+}
+
+.ep-calendar__pm-setup-preview {
+  display: grid;
+  gap: var(--ep-s-3);
+  padding: 16px 20px 20px;
+}
+
+.ep-calendar__pm-setup-preview-items {
+  display: grid;
+  gap: var(--ep-s-2);
+}
+
+.ep-calendar__pm-setup-preview-items article {
+  padding: 14px;
+  border: 1px solid var(--ep-border);
+  border-radius: var(--ep-radius-md);
+}
+
+.ep-calendar__pm-setup-preview-items h3,
+.ep-calendar__pm-setup-preview-items p {
+  margin: 0;
+}
+
+.ep-calendar__pm-setup-preview-items h3 {
+  color: var(--ep-text);
+  font-size: var(--ep-fs-sm);
+}
+
+.ep-calendar__pm-setup-preview-items p {
+  margin-top: 6px;
+  color: var(--ep-text-muted);
+  font-size: var(--ep-fs-sm);
+}
 
 .ep-calendar__drawer {
   display: flex;
@@ -1353,6 +1523,8 @@
 
 @media (max-width: 760px) {
   .ep-calendar__head { align-items: flex-start;   }
+  .ep-calendar__pm-setup-modal .ep-calendar__dialog { max-height: calc(100dvh - 16px); }
+  .ep-calendar__pm-setup-fields { grid-template-columns: minmax(0, 1fr); }
   .ep-calendar__record-modal { padding: 8px; }
   .ep-calendar__record-modal .ep-calendar__dialog { max-height: calc(100dvh - 16px); }
   .ep-calendar__record-progress,

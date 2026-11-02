@@ -55,6 +55,13 @@
     return assigned.length ? assigned.join(", ") : "No plants assigned";
   }
 
+  function plantScopeSummary(person) {
+    if (person.role === "O&M Head" || person.role === "Administration") return "All plants";
+    if (person.role === "Viewer") return "No operational access";
+    var count = (person.plants || []).length;
+    return count ? count + (count === 1 ? " plant assigned" : " plants assigned") : "No plants assigned";
+  }
+
   function filteredUsers() {
     var term = filters.search.trim().toLowerCase();
     return users.filter(function (person) {
@@ -74,7 +81,7 @@
     var loginStatus = person.invited ? "Invite pending" : "Clerk account linked";
     var activeStatus = person.active ? "Enabled" : "Disabled";
     var actions = '<button type="button" class="ep-settings__button ep-settings__button--small" ' +
-      'data-settings-action="edit-access" data-user-id="' + escape(person.id) + '">Role &amp; plants</button>' +
+      'data-settings-action="edit-access" data-user-id="' + escape(person.id) + '">Access &amp; scope</button>' +
       '<button type="button" class="ep-settings__button ep-settings__button--small" ' +
       'data-settings-action="edit-profile" data-user-id="' + escape(person.id) + '">Edit details</button>';
     if (person.invited && person.active) {
@@ -93,7 +100,7 @@
           '</strong><span>' + escape(person.email || "No email address") + '</span></div>' +
       '</div>' +
       '<div class="ep-settings__role-cell"><strong class="ep-settings__role-label">' + escape(person.role) +
-        '</strong><span>' + escape(plantScope(person)) + '</span></div>' +
+        '</strong><span>' + escape(plantScopeSummary(person)) + '</span></div>' +
       '<div class="ep-settings__login-status">' + escape(loginStatus) + '</div>' +
       '<div class="ep-settings__status"><span class="ep-settings__status-pill' +
         (person.active ? "" : " is-removed") + '"><i></i>' + escape(activeStatus) + '</span></div>' +
@@ -128,7 +135,7 @@
           ? '<p class="ep-settings__empty" role="status">Loading real user accounts…</p>'
           : '<div class="ep-settings__table" role="table" aria-label="Login access accounts">' +
             '<div class="ep-settings__table-head" role="row">' +
-              '<span role="columnheader">Person</span><span role="columnheader">Role &amp; plant scope</span>' +
+              '<span role="columnheader">Person</span><span role="columnheader">Access summary</span>' +
               '<span role="columnheader">Login</span><span role="columnheader">Account</span><span role="columnheader">Actions</span>' +
             '</div>' +
             (list.length
@@ -174,6 +181,7 @@
     var role = person ? person.role : "Viewer";
     var selectedIds = person ? (person.plants || []).map(function (plant) { return String(plant.plant_id); }) : [];
     var selectedCodes = person ? (person.plants || []).map(function (plant) { return String(plant.site_code); }) : [];
+    var selectedWashingIds = person ? (person.washing_plant_ids || []).map(String) : [];
     var title = mode === "invite" ? "Invite a person" : (isProfile ? "Edit person details" : "Change role and plant scope");
     var plantsRequired = role === "Assignee" || role === "Site Engineer";
     var fields;
@@ -195,7 +203,12 @@
           '>' + selectedPlantOptions(plantList, mode === "invite" ? selectedCodes : selectedIds, mode === "invite") +
           '</select></label>' +
         '<p data-plant-help>' + (role === "Site Engineer" ? "Select exactly one plant." :
-          role === "Assignee" ? "Select one or more plants." : "Portfolio roles have access to all plants.") + '</p>';
+          role === "Assignee" ? "Select one or more plants." : "Portfolio roles have access to all plants.") + '</p>' +
+        '<label class="ep-settings__plant-field' + (role === "Assignee" ? "" : " is-hidden") + '" data-washing-field>' +
+          'Equipment scope · Washing<select name="washing_plants" multiple size="5" data-settings-washing-plants>' +
+          selectedPlantOptions(plantList, selectedWashingIds, false) + '</select></label>' +
+        '<p class="ep-settings__washing-help' + (role === "Assignee" ? "" : " is-hidden") +
+          '" data-washing-help>Assign Washing responsibility for plants with Washing set up. Selected plants are also included in the person’s plant access.</p>';
     }
     return '<div class="ep-settings__modal" data-settings-modal>' +
       '<button class="ep-settings__backdrop" type="button" data-settings-action="close" aria-label="Close dialog"></button>' +
@@ -245,8 +258,12 @@
     if (!roleSelect || !plantField || !plantSelect) return;
     var role = roleSelect.value;
     var needsPlants = role === "Assignee" || role === "Site Engineer";
+    var washingField = form.querySelector("[data-washing-field]");
+    var washingHelp = form.querySelector("[data-washing-help]");
     plantField.classList.toggle("is-hidden", !needsPlants);
     plantSelect.required = needsPlants;
+    if (washingField) washingField.classList.toggle("is-hidden", role !== "Assignee");
+    if (washingHelp) washingHelp.classList.toggle("is-hidden", role !== "Assignee");
     if (help) {
       help.textContent = role === "Site Engineer" ? "Select exactly one plant." :
         role === "Assignee" ? "Select one or more plants." : "Portfolio roles have access to all plants.";
@@ -352,11 +369,15 @@
         var plantIds = role === "Assignee" || role === "Site Engineer"
           ? Array.from(plantSelect.selectedOptions).map(function (option) { return option.value; })
           : [];
+        var washingSelect = form.querySelector("[data-settings-washing-plants]");
+        var washingPlantIds = role === "Assignee" && washingSelect
+          ? Array.from(washingSelect.selectedOptions).map(function (option) { return option.value; })
+          : [];
         request = api().request("/api/users/" + encodeURIComponent(form.dataset.userId) + "/access", {
           method: "PUT",
-          body: { role: role, plant_ids: plantIds }
+          body: { role: role, plant_ids: plantIds, washing_plant_ids: washingPlantIds }
         }).then(function () {
-          statusMessage = "Role and plant access saved.";
+          statusMessage = "Role, plant access, and Washing scope saved.";
         });
       } else {
         var profile = {

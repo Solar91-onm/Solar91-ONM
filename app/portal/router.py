@@ -6,6 +6,7 @@ Writes stay on the existing module APIs (issues, scheduled, washing).
 """
 from __future__ import annotations
 
+from datetime import date
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -49,6 +50,23 @@ def list_plants(db: DB, user: CurrentUser):
 def overview(db: DB, user: CurrentUser):
     """Portfolio rows (plant + operational profile) and totals in one response."""
     return service.portfolio(db, user)
+
+
+@router.get("/overview/range")
+def overview_range(
+    db: DB,
+    user: CurrentUser,
+    start_date: date = Query(...),
+    end_date: date = Query(...),
+):
+    """Date-bounded portfolio metrics for Overview's quick periods and custom range."""
+    if start_date > end_date:
+        raise HTTPException(422, "Start date must be on or before end date.")
+    if end_date > service.business_today():
+        raise HTTPException(422, "End date cannot be in the future.")
+    if (end_date - start_date).days > 3660:
+        raise HTTPException(422, "Overview date ranges cannot exceed 10 years.")
+    return service.portfolio_for_range(db, user, start_date, end_date)
 
 
 @router.get("/plants/{site_code}")

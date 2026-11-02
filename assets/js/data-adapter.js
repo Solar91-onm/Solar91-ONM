@@ -103,6 +103,24 @@
     return portfolioPromise;
   }
 
+  function fetchPortfolioRange(startDate, endDate) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(startDate)) ||
+        !/^\d{4}-\d{2}-\d{2}$/.test(String(endDate))) {
+      return Promise.reject(new Error("Overview date range requires valid start and end dates."));
+    }
+    return api().request(
+      "/api/portal/overview/range?start_date=" + encodeURIComponent(startDate) +
+      "&end_date=" + encodeURIComponent(endDate)
+    ).then(function (body) {
+      return {
+        rows: (body.rows || []).map(normalizeRow),
+        totals: body.totals || {},
+        startDate: body.startDate,
+        endDate: body.endDate
+      };
+    });
+  }
+
   function listPlants() {
     return api().plants();
   }
@@ -237,6 +255,7 @@
     fetchActivity,
     fetchCalendarActivities,
     fetchPortfolio,
+    fetchPortfolioRange,
     aggregatePortfolio,
     classifyCondition,
     invalidate

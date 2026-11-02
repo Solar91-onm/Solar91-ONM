@@ -4,8 +4,8 @@
  * Every entry is a saved record read through the role-scoped portal API:
  * PM entries are om_tasks rows on their due date, washing entries are
  * washing_daily_reports rows. A plant's Washing page additionally loads the
- * full cycle summary from the washing module. Calendar entries are read-only;
- * washing setup and reporting use their existing dedicated workflows.
+ * full cycle summary from the washing module. Calendar entries are read-only.
+ * The PM setup dialog is a front-end-only preview and does not create schedules.
  */
 (function (global) {
   "use strict";
@@ -80,6 +80,10 @@
         setupLoading: false,
         setupSaving: false,
         setupError: "",
+        pmSetupOpen: false,
+        pmSetupPreview: false,
+        pmSetupPlant: "",
+        pmSetupItems: [],
         washingReports: [],
         recordOpen: false,
         recordCycle: 1,
@@ -713,6 +717,124 @@
     return !!(user && ["O&M Head", "Assignee", "Site Engineer"].indexOf(user.role) !== -1);
   }
 
+  function canManagePMSetup() {
+    var user = global.Solar91PortalAPI && global.Solar91PortalAPI.currentUser();
+    return !!(user && ["O&M Head", "Assignee"].indexOf(user.role) !== -1);
+  }
+
+  function newPMSetupItem() {
+    return {
+      equipment: "",
+      part: "",
+      subpart: "",
+      task: "",
+      startDate: "",
+      frequency: "Monthly",
+      remarks: ""
+    };
+  }
+
+  function renderPMSetupItems(items) {
+    return items.map(function (item, index) {
+      var field = function (key, label, type, required) {
+        return '<label><span>' + label + '</span><input type="' + type +
+          '" data-pm-setup-index="' + index + '" data-pm-setup-field="' + key + '"' +
+          (required ? " required" : "") + ' value="' + escape(item[key]) + '"' +
+          (type === "text" ? ' maxlength="255"' : "") + ' /></label>';
+      };
+      return '<fieldset class="ep-calendar__pm-setup-item"><legend>PM item ' +
+        (index + 1) + '</legend>' +
+        '<button type="button" class="ep-calendar__pm-setup-remove" data-calendar-action="remove-pm-item" data-pm-setup-index="' +
+          index + '"' + (items.length === 1 ? " disabled" : "") + '>Remove</button>' +
+        '<div class="ep-calendar__pm-setup-fields">' +
+          field("equipment", "Equipment", "text", true) +
+          field("part", "Part", "text", false) +
+          field("subpart", "Subpart", "text", false) +
+          field("task", "Maintenance task", "text", true) +
+          field("startDate", "First scheduled date", "date", true) +
+          '<label><span>Frequency</span><select data-pm-setup-index="' + index +
+            '" data-pm-setup-field="frequency">' +
+            ["Daily", "Weekly", "Monthly", "Quarterly", "Half-yearly", "Annual"].map(function (frequency) {
+              return '<option value="' + frequency + '"' +
+                (item.frequency === frequency ? " selected" : "") + ">" + frequency + "</option>";
+            }).join("") +
+          '</select></label>' +
+          '<label class="ep-calendar__pm-setup-remarks"><span>Remarks</span>' +
+            '<textarea data-pm-setup-index="' + index + '" data-pm-setup-field="remarks" maxlength="500">' +
+              escape(item.remarks) + '</textarea></label>' +
+        '</div></fieldset>';
+    }).join("");
+  }
+
+  function pmSetupPlantName(state, context) {
+    var code = context.plantCode || state.pmSetupPlant;
+    var plant = state.plants.find(function (item) { return item.siteCode === code; });
+    return plant ? plantLabel(plant) : code;
+  }
+
+  function renderPMSetupModal(state, context) {
+    if (!state.pmSetupOpen) return "";
+    var plantSelector = context.plantCode
+      ? '<p class="ep-calendar__pm-setup-plant">' + escape(pmSetupPlantName(state, context) || context.plantCode) + '</p>'
+      : '<label class="ep-calendar__pm-setup-plant-select"><span>Plant</span><select name="plant_code" required>' +
+        '<option value="">Choose a plant</option>' +
+        state.plants.map(function (plant) {
+          return '<option value="' + escape(plant.siteCode) + '"' +
+            (plant.siteCode === state.pmSetupPlant ? " selected" : "") + ">" +
+            escape(plantLabel(plant)) + " (" + escape(plant.displayCode) + ")</option>";
+        }).join("") +
+        '</select></label>';
+
+    return '<div class="ep-calendar__modal ep-calendar__setup-modal ep-calendar__pm-setup-modal" data-pm-setup-modal>' +
+      '<button class="ep-calendar__backdrop" type="button" data-calendar-action="close-pm-setup" aria-label="Close PM setup"></button>' +
+      '<section class="ep-calendar__dialog" role="dialog" aria-modal="true" aria-labelledby="pm-setup-title">' +
+        '<header class="ep-calendar__dialog-head"><div>' +
+          '<h2 id="pm-setup-title" tabindex="-1">Set up PM</h2>' +
+          '<p>' + (state.pmSetupPreview ? "Review the proposed schedule" : "Add equipment and maintenance details") + '</p>' +
+        '</div><button type="button" class="ep-calendar__close" data-calendar-action="close-pm-setup" aria-label="Close">×</button></header>' +
+        (state.pmSetupPreview
+          ? '<div class="ep-calendar__pm-setup-preview">' +
+              '<p class="ep-calendar__pm-setup-notice" role="status">Frontend preview only. Nothing is saved or scheduled yet.</p>' +
+              '<p class="ep-calendar__pm-setup-plant">' + escape(pmSetupPlantName(state, context) || "Choose a plant") + '</p>' +
+              '<div class="ep-calendar__pm-setup-preview-items">' +
+                state.pmSetupItems.map(function (item) {
+                  return '<article><h3>' + escape(item.equipment) + ' · ' + escape(item.task) + '</h3>' +
+                    '<p>' + escape([item.part, item.subpart].filter(Boolean).join(" · ") || "No part specified") + '</p>' +
+                    '<p>' + escape(item.startDate) + ' · ' + escape(item.frequency) + '</p>' +
+                    (item.remarks ? '<p>' + escape(item.remarks) + '</p>' : "") +
+                  '</article>';
+                }).join("") +
+              '</div><footer class="ep-calendar__setup-actions">' +
+                '<button type="button" class="ep-calendar__close-button" data-calendar-action="edit-pm-setup">Edit details</button>' +
+                '<button type="button" class="ep-calendar__setup-submit" data-calendar-action="close-pm-setup">Close preview</button>' +
+              '</footer></div>'
+          : '<form class="ep-calendar__setup-form ep-calendar__pm-setup-form" data-pm-setup-form>' +
+              plantSelector +
+              '<p class="ep-calendar__pm-setup-notice" role="status">Frontend preview only. Nothing is saved or scheduled yet.</p>' +
+              '<div class="ep-calendar__pm-setup-items">' + renderPMSetupItems(state.pmSetupItems) + '</div>' +
+              '<button type="button" class="ep-calendar__close-button ep-calendar__pm-setup-add" data-calendar-action="add-pm-item">Add another PM item</button>' +
+              '<footer class="ep-calendar__setup-actions">' +
+                '<button type="button" class="ep-calendar__close-button" data-calendar-action="close-pm-setup">Cancel</button>' +
+                '<button type="submit" class="ep-calendar__setup-submit">Preview setup</button>' +
+              '</footer></form>') +
+      '</section>' +
+    '</div>';
+  }
+
+  function syncPMSetupForm(host, state) {
+    var form = host.querySelector("[data-pm-setup-form]");
+    if (!form) return;
+    var plant = form.querySelector('[name="plant_code"]');
+    if (plant) state.pmSetupPlant = plant.value;
+    form.querySelectorAll("[data-pm-setup-index][data-pm-setup-field]").forEach(function (input) {
+      var index = Number(input.dataset.pmSetupIndex);
+      var field = input.dataset.pmSetupField;
+      if (state.pmSetupItems[index] && Object.prototype.hasOwnProperty.call(state.pmSetupItems[index], field)) {
+        state.pmSetupItems[index][field] = input.value;
+      }
+    });
+  }
+
   function dateRange(start, end) {
     var dates = [];
     var current = new Date(start + "T12:00:00");
@@ -974,6 +1096,7 @@
       context.plantCode && canManageWashing();
     var showRecordButton = state.liveWashing && state.washingPlant &&
       context.plantCode && canRecordWashing();
+    var showPMSetupButton = context.type === "pm" && canManagePMSetup();
     host.innerHTML = '<div class="ep-calendar">' +
       '<header class="ep-calendar__head"><div><p class="ep-calendar__eyebrow">' +
         (context.plantCode ? "Plant view" : "Views") + '</p><h1>' + escape(typeLabel) +
@@ -987,6 +1110,9 @@
             : "") +
           (showSetupButton
             ? '<button type="button" class="ep-calendar__setup-button" data-calendar-action="open-setup">Set up washing</button>'
+            : "") +
+          (showPMSetupButton
+            ? '<button type="button" class="ep-calendar__setup-button" data-calendar-action="open-pm-setup">Set up PM</button>'
             : "") +
         '</div></header>' +
         renderToolbar(state, context) +
@@ -1010,6 +1136,7 @@
       '</p>' +
       renderModal(state, context) +
       renderEventDetail(state, context) +
+      renderPMSetupModal(state, context) +
       renderSetupModal(state) +
       renderRecordModal(state) +
     '</div>';
@@ -1350,6 +1477,33 @@
         renderView(host, state, context);
       } else if (action.dataset.calendarAction === "retry") {
         loadEvents(host, state, context);
+      } else if (action.dataset.calendarAction === "open-pm-setup") {
+        if (!canManagePMSetup()) return;
+        state.pmSetupOpen = true;
+        state.pmSetupPreview = false;
+        state.pmSetupPlant = context.plantCode || "";
+        state.pmSetupItems = [newPMSetupItem()];
+        renderView(host, state, context);
+        var firstEquipment = host.querySelector('[data-pm-setup-field="equipment"]');
+        if (firstEquipment) firstEquipment.focus();
+      } else if (action.dataset.calendarAction === "close-pm-setup") {
+        state.pmSetupOpen = false;
+        state.pmSetupPreview = false;
+        renderView(host, state, context);
+      } else if (action.dataset.calendarAction === "edit-pm-setup") {
+        state.pmSetupPreview = false;
+        renderView(host, state, context);
+      } else if (action.dataset.calendarAction === "add-pm-item") {
+        syncPMSetupForm(host, state);
+        state.pmSetupItems.push(newPMSetupItem());
+        renderView(host, state, context);
+        var newEquipment = host.querySelector('[data-pm-setup-index="' +
+          (state.pmSetupItems.length - 1) + '"][data-pm-setup-field="equipment"]');
+        if (newEquipment) newEquipment.focus();
+      } else if (action.dataset.calendarAction === "remove-pm-item") {
+        syncPMSetupForm(host, state);
+        state.pmSetupItems.splice(Number(action.dataset.pmSetupIndex), 1);
+        renderView(host, state, context);
       } else if (action.dataset.calendarAction === "open-setup") {
         if (!canManageWashing() || !state.washingSetup) return;
         state.setupOpen = true;
@@ -1448,6 +1602,16 @@
     });
 
     host.addEventListener("submit", function (event) {
+      var pmForm = event.target.closest("[data-pm-setup-form]");
+      if (pmForm && active && active.host === host) {
+        event.preventDefault();
+        syncPMSetupForm(host, active.state);
+        active.state.pmSetupPreview = true;
+        renderView(host, active.state, active.context);
+        var previewTitle = host.querySelector("#pm-setup-title");
+        if (previewTitle) previewTitle.focus();
+        return;
+      }
       var form = event.target.closest("[data-calendar-setup-form]");
       if (!form || !active || active.host !== host) return;
       event.preventDefault();
@@ -1556,7 +1720,7 @@
     host.addEventListener("keydown", function (event) {
       if (event.key === "Escape" && active && active.host === host &&
           (active.state.detailEventIndex !== null || active.state.modalDate ||
-            active.state.setupOpen || active.state.recordOpen)) {
+            active.state.setupOpen || active.state.recordOpen || active.state.pmSetupOpen)) {
         if (active.state.setupSaving || active.state.recordSaving) return;
         if (active.state.detailEventIndex !== null) {
           active.state.detailEventIndex = null;
@@ -1564,6 +1728,8 @@
           active.state.modalDate = "";
           active.state.setupOpen = false;
           active.state.recordOpen = false;
+          active.state.pmSetupOpen = false;
+          active.state.pmSetupPreview = false;
         }
         renderView(host, active.state, active.context);
       }

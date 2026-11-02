@@ -21,7 +21,7 @@ no records rather than a zero, because a zero reads as "nothing is wrong".
 """
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from typing import Any
 from uuid import UUID
 
@@ -35,9 +35,11 @@ from app.core.models import (
     User,
     UserPlantAssignment,
     WashingConfig,
+    WashingDailyReport,
+    WashingTable,
 )
 from app.core.security import has_portfolio_scope, user_scoped_plant_ids
-from app.core.timeutil import business_today
+from app.core.timeutil import BUSINESS_TZ, business_today
 
 # ── Business rules (mirrored from the owning modules) ────────────────────────
 
@@ -249,25 +251,46 @@ def build_profile(
 
     washing_block = dict(_EMPTY_BLOCK)
     if washing:
-        completed = int(washing.get("cycles_this_month") or 0)
-        target = int(washing.get("monthly_target") or 3)
-        overdue_days = int(washing.get("overdue_days") or 0)
-        washing_block = {
-            "completed": completed,
-            "pending": max(0, target - completed),
-            "overdue": 1 if overdue_days > 0 else 0,
-            # _cycle_compliance in app/scheduled/washing_cycles.py is authoritative.
-            "compliancePercent": washing.get("cycle_compliance_percent"),
-            "currentCycle": washing.get("current_cycle"),
-            "monthlyTarget": target,
-            "overdueDays": overdue_days,
-            "overdueBucket": washing.get("overdue_bucket"),
-            "tableCount": washing.get("table_count"),
-            "assignee": washing.get("assignee_name") or "",
-            "thresholdPercent": washing.get("compliance_threshold_percent"),
-            "lastReportDate": washing.get("last_report_date"),
-            "active": bool(washing.get("active", True)),
-        }
+        if "cycles_this_month" not in washing:
+            completed = int(washing.get("completed") or 0)
+            pending = int(washing.get("pending") or 0)
+            overdue = int(washing.get("overdue") or 0)
+            target = completed + pending + overdue
+            washing_block = {
+                "completed": completed,
+                "pending": pending,
+                "overdue": overdue,
+                "compliancePercent": _percent(completed, target),
+                "currentCycle": None,
+                "monthlyTarget": target,
+                "overdueDays": None,
+                "overdueBucket": None,
+                "tableCount": None,
+                "assignee": washing.get("assignee_name") or "",
+                "thresholdPercent": None,
+                "lastReportDate": None,
+                "active": True,
+            }
+        else:
+            completed = int(washing.get("cycles_this_month") or 0)
+            target = int(washing.get("monthly_target") or 3)
+            overdue_days = int(washing.get("overdue_days") or 0)
+            washing_block = {
+                "completed": completed,
+                "pending": max(0, target - completed),
+                "overdue": 1 if overdue_days > 0 else 0,
+                # _cycle_compliance in app/scheduled/washing_cycles.py is authoritative.
+                "compliancePercent": washing.get("cycle_compliance_percent"),
+                "currentCycle": washing.get("current_cycle"),
+                "monthlyTarget": target,
+                "overdueDays": overdue_days,
+                "overdueBucket": washing.get("overdue_bucket"),
+                "tableCount": washing.get("table_count"),
+                "assignee": washing.get("assignee_name") or "",
+                "thresholdPercent": washing.get("compliance_threshold_percent"),
+                "lastReportDate": washing.get("last_report_date"),
+                "active": bool(washing.get("active", True)),
+            }
 
     profile = {
         "siteCode": plant.site_code,
@@ -388,6 +411,158 @@ def portfolio(db: Session, user: User) -> dict[str, Any]:
         "asOf": datetime.now(timezone.utc).isoformat(),
         "businessDate": today.isoformat(),
         "scope": "portfolio" if has_portfolio_scope(user) else "assigned",
+    }
+
+
+def portfolio_for_range(db: Session, user: User, start: date, end: date) -> dict[str, Any]:
+    """Portfolio metrics for records due/reported in an inclusive business-date range."""
+    plants = visible_plants(db, user)
+    plant_ids = _plant_ids(plants)
+    if not plant_ids:
+        return {"rows": [], "totals": aggregate([]), "startDate": start.isoformat(), "endDate": end.isoformat()}
+
+    start_at = datetime.combine(start, time.min, tzinfo=BUSINESS_TZ)
+    end_at = datetime.combine(end + timedelta(days=1), time.min, tzinfo=BUSINESS_TZ)
+    is_open_issue = Issue.status.in_(ISSUE_OPEN_STATES)
+    issue_rows = db.execute(
+        select(
+            Issue.plant_id,
+            func.count().label("total"),
+            func.sum(case((is_open_issue, 1), else_=0)).label("open"),
+            func.sum(case((Issue.status.in_(ISSUE_CLOSED_STATES), 1), else_=0)).label("closed"),
+            func.sum(case((is_open_issue & Issue.severity.in_(SEVERITY_CRITICAL), 1), else_=0)).label("critical"),
+            func.sum(case((is_open_issue & Issue.severity.in_(SEVERITY_MEDIUM), 1), else_=0)).label("medium"),
+        )
+        .where(
+            Issue.plant_id.in_(plant_ids),
+            Issue.deleted_at.is_(None),
+            Issue.occurred_at >= start_at,
+            Issue.occurred_at < end_at,
+        )
+        .group_by(Issue.plant_id)
+    ).all()
+    issue_counts = {
+        row.plant_id: {
+            "total": int(row.total or 0),
+            "openIssues": int(row.open or 0),
+            "closedIssues": int(row.closed or 0),
+            "criticalIssues": int(row.critical or 0),
+            "mediumIssues": int(row.medium or 0),
+        }
+        for row in issue_rows
+    }
+
+    due = func.coalesce(OMTask.planned_due_on, OMTask.due_on)
+    task_rows = db.execute(
+        select(
+            OMTask.plant_id,
+            func.sum(case((OMTask.status.in_(PM_DONE_STATES), 1), else_=0)).label("completed"),
+            func.sum(case((OMTask.status.in_(PM_OPEN_STATES) & (due >= end), 1), else_=0)).label("pending"),
+            func.sum(case((OMTask.status.in_(PM_OPEN_STATES) & (due < end), 1), else_=0)).label("overdue"),
+        )
+        .where(OMTask.plant_id.in_(plant_ids), due >= start, due <= end)
+        .group_by(OMTask.plant_id)
+    ).all()
+    pm_counts = {
+        row.plant_id: {
+            "completed": int(row.completed or 0),
+            "pending": int(row.pending or 0),
+            "overdue": int(row.overdue or 0),
+            "compliancePercent": _percent(
+                int(row.completed or 0),
+                int(row.completed or 0) + int(row.pending or 0) + int(row.overdue or 0),
+            ),
+        }
+        for row in task_rows
+    }
+
+    washing_counts: dict[UUID, dict[str, int]] = {}
+    if user.role in {"O&M Head", "Assignee", "Site Engineer"}:
+        from app.scheduled.washing_cycles import _cycle_due_dates
+
+        config_rows = db.execute(
+            select(WashingConfig, Plant)
+            .join(Plant, Plant.id == WashingConfig.plant_id)
+            .where(WashingConfig.plant_id.in_(plant_ids))
+        ).all()
+        configs = {plant.id: config for config, plant in config_rows}
+        table_counts: dict[UUID, int] = {}
+        if configs:
+            for plant_id, table_count in db.execute(
+                select(WashingTable.plant_id, func.count(WashingTable.id))
+                .where(WashingTable.plant_id.in_(list(configs)))
+                .group_by(WashingTable.plant_id)
+            ).all():
+                table_counts[plant_id] = int(table_count or 0)
+
+        first_month = start.strftime("%Y-%m")
+        last_month = end.strftime("%Y-%m")
+        completed_cycles = {}
+        if configs:
+            completion_rows = db.execute(
+                select(
+                    WashingDailyReport.plant_id,
+                    WashingDailyReport.cycle_month,
+                    WashingDailyReport.cycle_no,
+                    func.min(WashingDailyReport.report_date),
+                )
+                .where(
+                    WashingDailyReport.plant_id.in_(list(configs)),
+                    WashingDailyReport.cycle_month >= first_month,
+                    WashingDailyReport.cycle_month <= last_month,
+                    WashingDailyReport.report_date <= end,
+                    WashingDailyReport.cycle_completed.is_(True),
+                    WashingDailyReport.review_status == "Confirmed",
+                )
+                .group_by(
+                    WashingDailyReport.plant_id,
+                    WashingDailyReport.cycle_month,
+                    WashingDailyReport.cycle_no,
+                )
+            ).all()
+            completed_cycles = {
+                (plant_id, cycle_month, cycle_no): completed_on
+                for plant_id, cycle_month, cycle_no, completed_on in completion_rows
+            }
+
+        cursor = start.replace(day=1)
+        while cursor <= end:
+            month_key = cursor.strftime("%Y-%m")
+            for plant_id, config in configs.items():
+                if not (config.tables_per_cycle or table_counts.get(plant_id, 0)):
+                    continue
+                counts = washing_counts.setdefault(plant_id, {"completed": 0, "pending": 0, "overdue": 0})
+                for cycle_no, due_date in enumerate(_cycle_due_dates(cursor, config.cycle_overrides), 1):
+                    if not start <= due_date <= end:
+                        continue
+                    if completed_cycles.get((plant_id, month_key, cycle_no)):
+                        counts["completed"] += 1
+                    elif due_date < end:
+                        counts["overdue"] += 1
+                    else:
+                        counts["pending"] += 1
+            cursor = (cursor.replace(day=28) + timedelta(days=4)).replace(day=1)
+
+    engineers = site_engineers_by_plant(db, plant_ids)
+    washers = washing_assignees_by_plant(db, plant_ids)
+    rows = []
+    for plant in plants:
+        profile = build_profile(
+            plant,
+            issue_counts.get(plant.id, {"openIssues": 0, "closedIssues": 0, "criticalIssues": 0, "mediumIssues": 0}),
+            pm_counts.get(plant.id),
+            washing_counts.get(plant.id),
+            None,
+        )
+        rows.append({
+            "plant": plant_out(plant, engineers.get(plant.id, []), washers.get(plant.id, "")),
+            "profile": profile,
+        })
+    return {
+        "rows": rows,
+        "totals": aggregate(rows),
+        "startDate": start.isoformat(),
+        "endDate": end.isoformat(),
     }
 
 

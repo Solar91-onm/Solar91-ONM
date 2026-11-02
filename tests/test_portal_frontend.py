@@ -64,6 +64,9 @@ def test_login_access_uses_real_users_and_hides_categories_from_settings(client)
     assert "Arun Demo" not in settings and "Demo invite" not in settings
     assert "Solar91PortalCategories" not in settings
     assert "data-categories-host" not in settings
+    assert "Equipment scope · Washing" in settings
+    assert "washing_plant_ids" in settings
+    assert "Role &amp; plant assignments" not in settings
 
 
 def test_login_access_sidebar_icon_and_toggle_are_sized_and_scoped():
@@ -203,6 +206,9 @@ def test_plant_table_uses_balanced_shared_columns_and_numeric_spv_label():
     assert "function spvNumber(plant)" in (
         PORTAL_ASSETS / "js" / "plants-table.js"
     ).read_text(encoding="utf-8")
+    assert '{ key: "assignee",  label: "Assignee" }' in (
+        PORTAL_ASSETS / "js" / "plants-table.js"
+    ).read_text(encoding="utf-8")
 
     script = """
       global.window = global;
@@ -278,6 +284,24 @@ def test_plant_pm_calendar_shows_job_hover_card_for_scheduled_dates():
     assert "ep-calendar__pm-tip-job" in styles
     assert "/assets/js/operations-calendar.js" in page
     assert "/assets/css/calendar.css" in page
+
+
+def test_pm_calendar_setup_is_a_frontend_only_preview_for_plant_and_portfolio():
+    calendar = (PORTAL_ASSETS / "js" / "operations-calendar.js").read_text(encoding="utf-8")
+    styles = (PORTAL_ASSETS / "css" / "calendar.css").read_text(encoding="utf-8")
+    assert 'data-calendar-action="open-pm-setup">Set up PM' in calendar
+    assert 'var showPMSetupButton = context.type === "pm" && canManagePMSetup();' in calendar
+    for field in ("equipment", "part", "subpart", "task", "startDate"):
+        assert 'field("' + field + '"' in calendar
+    assert 'data-pm-setup-field="frequency"' in calendar
+    assert 'data-pm-setup-field="remarks"' in calendar
+    assert "Add another PM item" in calendar
+    assert "Preview setup" in calendar
+    assert "Frontend preview only. Nothing is saved or scheduled yet." in calendar
+    assert "renderPMSetupModal(state, context)" in calendar
+    assert "/api/pm-plan/" not in calendar
+    assert ".ep-calendar__pm-setup-fields" in styles
+    assert ".ep-calendar__pm-setup-preview-items" in styles
 
 
 def test_plant_pm_calendar_date_click_opens_summary_then_saved_job_detail():

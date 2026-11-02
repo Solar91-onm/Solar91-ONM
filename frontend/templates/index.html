@@ -218,11 +218,9 @@
                 </div>
                 <div data-date-range-view style="display:none;">
                   <div class="ep-date-range">
-                    <select class="ep-filter__select ep-filter__select--compact" data-date-from-year aria-label="From year"></select>
-                    <select class="ep-filter__select ep-filter__select--compact" data-date-from-month aria-label="From month"></select>
+                    <label><span>From</span><input class="ep-filter__select ep-filter__select--compact" type="date" data-date-from aria-label="From date" /></label>
                     <span class="ep-date-sep">–</span>
-                    <select class="ep-filter__select ep-filter__select--compact" data-date-to-year aria-label="To year"></select>
-                    <select class="ep-filter__select ep-filter__select--compact" data-date-to-month aria-label="To month"></select>
+                    <label><span>To</span><input class="ep-filter__select ep-filter__select--compact" type="date" data-date-to aria-label="To date" /></label>
                   </div>
                 </div>
               </div>
@@ -233,6 +231,7 @@
                 </select>
               </label>
             </div>
+            <p class="ep-overview-range-status" data-overview-range-status role="status" aria-live="polite"></p>
 
             <!-- Three big metrics — ALL inside one single frame -->
             <div class="ep-panel">

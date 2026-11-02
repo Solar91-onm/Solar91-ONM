@@ -9,7 +9,7 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.core.models import AuditLog, Plant, User, UserPlantAssignment
+from app.core.models import AuditLog, Plant, User, UserPlantAssignment, WashingConfig
 from app.core.security import require_csrf, require_permission
 
 router = APIRouter(prefix="/api/users", tags=["Users"])
@@ -21,9 +21,10 @@ class RoleUpdate(BaseModel):
 
 
 class AccessUpdate(BaseModel):
-    """Atomic role and scope change. Scope is plants for every non-portfolio role."""
+    """Atomic role, plant and (where applicable) per-plant washing assignment."""
     role: str
     plant_ids: list[UUID] = Field(default_factory=list, max_length=500)
+    washing_plant_ids: list[UUID] = Field(default_factory=list, max_length=500)
     is_active: bool | None = None
 
 
@@ -81,10 +82,21 @@ def list_users(
     by_user: dict[UUID, list[dict]] = {}
     for uid, pid, code, name in rows:
         by_user.setdefault(uid, []).append({"plant_id": str(pid), "site_code": code, "plant_name": name})
+    washing_rows = db.execute(
+        select(WashingConfig.assigned_user_id, WashingConfig.plant_id)
+        .join(Plant, Plant.id == WashingConfig.plant_id)
+        .where(WashingConfig.assigned_user_id.is_not(None))
+        .order_by(Plant.site_code)
+    ).all()
+    washing_by_user: dict[UUID, list[str]] = {}
+    for uid, plant_id in washing_rows:
+        if uid is not None:
+            washing_by_user.setdefault(uid, []).append(str(plant_id))
     result = []
     for u in db.scalars(select(User).order_by(User.display_name)):
         item = out(u)
         item["plants"] = by_user.get(u.id, [])
+        item["washing_plant_ids"] = washing_by_user.get(u.id, [])
         item["created_at"] = u.created_at.isoformat() if getattr(u, "created_at", None) else None
         item["is_self"] = u.id == user.id
         result.append(item)
@@ -103,17 +115,25 @@ def update_access(
     if not target:
         raise HTTPException(404, "User not found")
     unique_ids = list(dict.fromkeys(data.plant_ids))
+    washing_ids = list(dict.fromkeys(data.washing_plant_ids))
+    if washing_ids and data.role != "Assignee":
+        raise HTTPException(422, "Washing scope can only be assigned to an Assignee")
+    if data.role == "Assignee":
+        unique_ids = list(dict.fromkeys(unique_ids + washing_ids))
     _validate_access(data.role, unique_ids)
     # Portfolio roles see every plant; keeping per-plant rows for them would only confuse.
     if data.role in PORTFOLIO_ROLES:
         unique_ids = []
-    if unique_ids:
-        valid = set(db.scalars(select(Plant.id).where(Plant.id.in_(unique_ids))))
-        missing = [str(x) for x in unique_ids if x not in valid]
+    all_requested_ids = list(dict.fromkeys(unique_ids + washing_ids))
+    if all_requested_ids:
+        valid = set(db.scalars(select(Plant.id).where(Plant.id.in_(all_requested_ids))))
+        missing = [str(x) for x in all_requested_ids if x not in valid]
         if missing:
             raise HTTPException(422, detail={"message": "Unknown plant assignment", "plant_ids": missing})
 
     new_active = target.is_active if data.is_active is None else data.is_active
+    if washing_ids and not new_active:
+        raise HTTPException(422, "Washing scope can only be assigned to an active Assignee")
     # Lock-out protection: the portal must always keep at least one active O&M Head.
     losing_head = target.role == "O&M Head" and (data.role != "O&M Head" or not new_active)
     if losing_head and _active_head_count(db, exclude_id=target.id) == 0:
@@ -123,13 +143,51 @@ def update_access(
 
     before_ids = [str(x) for x in db.scalars(
         select(UserPlantAssignment.plant_id).where(UserPlantAssignment.user_id == user_id))]
-    before = {"role": target.role, "active": target.is_active, "plant_ids": before_ids}
+    washing_configs = list(db.scalars(
+        select(WashingConfig)
+        .where(
+            (WashingConfig.assigned_user_id == target.id)
+            | WashingConfig.plant_id.in_(washing_ids)
+        )
+        .with_for_update()
+    ))
+    config_by_plant = {config.plant_id: config for config in washing_configs}
+    unconfigured = [str(plant_id) for plant_id in washing_ids if plant_id not in config_by_plant]
+    if unconfigured:
+        raise HTTPException(
+            422,
+            detail={
+                "message": "Set up Washing for each selected plant before assigning its Washing responsibility.",
+                "plant_ids": unconfigured,
+            },
+        )
+    before_washing_ids = [
+        str(config.plant_id) for config in washing_configs
+        if config.assigned_user_id == target.id
+    ]
+    before = {
+        "role": target.role,
+        "active": target.is_active,
+        "plant_ids": before_ids,
+        "washing_plant_ids": before_washing_ids,
+    }
     target.role = data.role
     target.is_active = new_active
     db.execute(delete(UserPlantAssignment).where(UserPlantAssignment.user_id == user_id))
     for pid in unique_ids:
         db.add(UserPlantAssignment(user_id=user_id, plant_id=pid, assignment_role=data.role))
-    after = {"role": target.role, "active": target.is_active, "plant_ids": [str(x) for x in unique_ids]}
+    selected_washing_ids = set(washing_ids)
+    for config in washing_configs:
+        if config.assigned_user_id == target.id and config.plant_id not in selected_washing_ids:
+            config.assigned_user_id = None
+    for plant_id in washing_ids:
+        config_by_plant[plant_id].assigned_user_id = target.id
+    after = {
+        "role": target.role,
+        "active": target.is_active,
+        "plant_ids": [str(x) for x in unique_ids],
+        "washing_plant_ids": [str(x) for x in washing_ids],
+    }
     db.add(AuditLog(
         user_id=user.id, actor_name=user.display_name, action="Changed user access",
         module="Users", entity_type="user", entity_id=str(target.id),

@@ -109,7 +109,7 @@
     { key: "district",  label: "District" },
     { key: "discom",    label: "Discom" },
     { key: "engineer",  label: "Site Engineer" },
-    { key: "assignee",  label: "Washing assignee" },
+    { key: "assignee",  label: "Assignee" },
     { key: "cod",       label: "COD",           align: "num" },
     { key: "location",  label: "Location" },
     { key: "activity",  label: "Last Activity" },

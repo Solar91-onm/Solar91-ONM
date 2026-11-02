@@ -14,6 +14,8 @@
   const data = global.Solar91PortalData;
   const fmt = global.Solar91PortalFormat;
   let activityCache = null;
+  let rangeRequest = 0;
+  let rangeKey = "";
 
   let state = null;      // { allRows, rows, totals, sort }
   let searchTerm = "";
@@ -28,8 +30,89 @@
     });
   }
 
+  function dateValue(value) {
+    const parts = String(value || "").split("-").map(Number);
+    if (parts.length !== 3 || parts.some((part) => !Number.isInteger(part))) return null;
+    return new Date(parts[0], parts[1] - 1, parts[2]);
+  }
+
+  function dateString(value) {
+    return value.getFullYear() + "-" + String(value.getMonth() + 1).padStart(2, "0") +
+      "-" + String(value.getDate()).padStart(2, "0");
+  }
+
+  function shiftDate(value, days) {
+    const shifted = dateValue(value);
+    if (!shifted) return "";
+    shifted.setDate(shifted.getDate() + days);
+    return dateString(shifted);
+  }
+
+  function rangeStatus(message, isError) {
+    const status = document.querySelector("[data-overview-range-status]");
+    if (!status) return;
+    status.textContent = message;
+    status.classList.toggle("is-error", !!isError);
+  }
+
+  function loadRange(startDate, endDate) {
+    if (!state) return;
+    const requestId = ++rangeRequest;
+    if (!startDate || !endDate || startDate > endDate) {
+      rangeKey = "";
+      rangeStatus("Choose a start date on or before the end date.", true);
+      return;
+    }
+    if (endDate > state.businessDate) {
+      rangeKey = "";
+      rangeStatus("The end date cannot be in the future.", true);
+      return;
+    }
+    const key = startDate + ":" + endDate;
+    if (key === rangeKey) {
+      rangeRequest -= 1;
+      return;
+    }
+    rangeKey = key;
+    rangeStatus("Loading operational results for " + startDate + " to " + endDate + "…", false);
+    data.fetchPortfolioRange(startDate, endDate).then((portfolio) => {
+      if (!state || requestId !== rangeRequest) return;
+      state.periodRows = portfolio.rows;
+      const filtered = applyFilters(state.periodRows);
+      state.rows = filtered;
+      state.totals = data.aggregatePortfolio(filtered);
+      rangeStatus("Showing results from " + startDate + " to " + endDate + ".", false);
+      render();
+    }).catch((error) => {
+      if (requestId !== rangeRequest) return;
+      rangeKey = "";
+      rangeStatus("Could not load results for this date range: " + error.message, true);
+    });
+  }
+
+  function loadQuickPeriod(period) {
+    if (!state) return;
+    const today = state.businessDate;
+    const todayDate = dateValue(today);
+    if (!todayDate) {
+      rangeStatus("The business date is unavailable; reload the page and try again.", true);
+      return;
+    }
+    let startDate = today;
+    if (period === "yesterday") {
+      startDate = shiftDate(today, -1);
+    } else if (period === "week") {
+      startDate = shiftDate(today, -((todayDate.getDay() + 6) % 7));
+    } else if (period === "month") {
+      startDate = today.slice(0, 8) + "01";
+    } else if (period === "all") {
+      startDate = shiftDate(today, -3650);
+    }
+    loadRange(startDate, period === "yesterday" ? shiftDate(today, -1) : today);
+  }
+
   function recomputeAndRender() {
-    const filtered = applyFilters(state.allRows);
+    const filtered = applyFilters(state.periodRows || state.allRows);
     state.rows = filtered;
     state.totals = data.aggregatePortfolio(filtered);
     render();
@@ -111,54 +194,40 @@
     }
     document.querySelectorAll("[data-filter]").forEach((sel) => {
       sel.addEventListener("change", (ev) => {
-        filters[sel.getAttribute("data-filter")] = ev.target.value;
+        const filterName = sel.getAttribute("data-filter");
+        if (filterName === "date") {
+          loadQuickPeriod(ev.target.value);
+          return;
+        }
+        filters[filterName] = ev.target.value;
         recomputeAndRender();
       });
     });
 
-    // Date toggle: quick (Today/Week/Month) vs range (Year+Month — Year+Month)
-    const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
-    const now = new Date();
-    const curYear = now.getFullYear();
-    const curMonth = now.getMonth();
-
-    function fillYearMonth(yearSel, monthSel, setYear, setMonth) {
-      if (!yearSel || !monthSel) return;
-      for (let y = curYear; y >= curYear - 3; y--) {
-        const opt = document.createElement("option");
-        opt.value = y; opt.textContent = y;
-        yearSel.appendChild(opt);
-      }
-      yearSel.value = setYear;
-      MONTHS.forEach((m, i) => {
-        const opt = document.createElement("option");
-        opt.value = i; opt.textContent = m;
-        monthSel.appendChild(opt);
-      });
-      monthSel.value = setMonth;
-    }
-
-    fillYearMonth(
-      document.querySelector("[data-date-from-year]"),
-      document.querySelector("[data-date-from-month]"),
-      curYear, curMonth
-    );
-    fillYearMonth(
-      document.querySelector("[data-date-to-year]"),
-      document.querySelector("[data-date-to-month]"),
-      curYear, curMonth
-    );
-
+    const fromDate = document.querySelector("[data-date-from]");
+    const toDate = document.querySelector("[data-date-to]");
     const dateToggle = document.querySelector("[data-date-toggle] input");
     const quickView = document.querySelector("[data-date-quick-view]");
     const rangeView = document.querySelector("[data-date-range-view]");
-    if (dateToggle) {
-      dateToggle.addEventListener("change", () => {
-        const isRange = dateToggle.checked;
-        if (quickView) quickView.style.display = isRange ? "none" : "";
-        if (rangeView) rangeView.style.display = isRange ? "" : "none";
+    const today = state.businessDate;
+    const firstOfMonth = today.slice(0, 8) + "01";
+    if (fromDate && toDate) {
+      fromDate.max = today;
+      toDate.max = today;
+      fromDate.value = firstOfMonth;
+      toDate.value = today;
+      [fromDate, toDate].forEach((input) => {
+        input.addEventListener("change", () => loadRange(fromDate.value, toDate.value));
       });
     }
+    if (dateToggle) dateToggle.addEventListener("change", () => {
+      const isRange = dateToggle.checked;
+      if (quickView) quickView.style.display = isRange ? "none" : "";
+      if (rangeView) rangeView.style.display = isRange ? "" : "none";
+      if (isRange && fromDate && toDate) loadRange(fromDate.value, toDate.value);
+      else loadQuickPeriod(document.querySelector('[data-filter="date"]').value);
+    });
+    loadQuickPeriod(document.querySelector('[data-filter="date"]').value);
   }
 
   // ─── Rendering helpers ───────────────────────────────────────────────
@@ -523,8 +592,10 @@
     data.fetchPortfolio().then((portfolio) => {
       state = {
         allRows: portfolio.rows,
+        periodRows: portfolio.rows,
         rows: portfolio.rows,
         totals: portfolio.totals,
+        businessDate: portfolio.businessDate,
         sort: { column: "health", dir: "asc" }
       };
       populateFilterOptions(portfolio.rows);
