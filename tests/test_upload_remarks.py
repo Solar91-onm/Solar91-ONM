@@ -7,7 +7,7 @@ import openpyxl
 from openpyxl import load_workbook
 
 from app.core.models import Issue, IssueHistory, OMTask, Plant, WashingConfig
-from tests.conftest import login_user
+from tests.conftest import seed_work_categories, login_user
 
 
 def _plant(db, code, name):
@@ -20,9 +20,10 @@ def _plant(db, code, name):
 
 def test_issue_upload_remarks_become_the_first_ticket_message(client, db):
     _plant(db, "REM01", "Remarks Plant")
+    seed_work_categories(db)
     login_user(client, db, role="O&M Head", name="Remarks Head", email="remarks-head@example.com")
     template = load_workbook(BytesIO(client.get("/api/issues/import/template").content))
-    assert template["Site issues"].cell(1, 13).value == "Remarks"
+    assert template["Site issues"].cell(1, 11).value == "Remarks"
 
     text = ("Site code,Issue category,Description,Severity,Remarks\n"
             "REM01,Inverter,INV-02 tripping,Medium,Vendor called; spare expected Friday\n"

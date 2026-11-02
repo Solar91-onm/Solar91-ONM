@@ -1,14 +1,15 @@
 """Work Radar and live search must remain truthful, scoped, and non-mutating."""
 from datetime import date, datetime, timedelta
+from tests.conftest import grant_assignee_plants
 from uuid import UUID
 from zoneinfo import ZoneInfo
 from app.core.timeutil import business_today
-from app.core.models import User, UserEquipmentTypeAssignment, UserPlantAssignment, WashingConfig, WashingTable, WashingDailyReport, Equipment, Issue, OMTask
+from app.core.models import Issue, OMTask, User, UserPlantAssignment, WashingConfig, WashingDailyReport, WashingTable
 from tests import conftest
 from tests.test_field_desk import fixture_data
 
 
-def test_washing_worklist_distinguishes_tables_from_equipment(client, db):
+def test_washing_worklist_distinguishes_tables_from_other_work(client, db):
     head, engineer, plants = fixture_data(client, db)
     today = business_today()
     for i, p in enumerate(plants):
@@ -22,7 +23,7 @@ def test_washing_worklist_distinguishes_tables_from_equipment(client, db):
     assert response.status_code == 200
     rows=response.json()['washing']
     assert len(rows)==1 and rows[0]['table']=='ARRAY-0'
-    assert rows[0]['equipment']=='Solar panel table'
+    assert rows[0]['category']=='Modules cleaning'
     assert rows[0]['overdue_days']==1
     assert response.json()['summary']['washing_overdue']==1
     conftest._CURRENT_USER=db.get(User,head.id)
@@ -30,18 +31,14 @@ def test_washing_worklist_distinguishes_tables_from_equipment(client, db):
     worker = User(auth_provider='test',external_subject='washer-assignee',email='washing@solar91.test',display_name='Washing worker',role='Assignee',is_active=True)
     db.add(worker);db.commit()
     conftest._CURRENT_USER=worker
-    assert client.get('/api/field/overview').json()['washing']==[]
-    db.add(UserEquipmentTypeAssignment(user_id=worker.id,equipment_type='Modules cleaning'));db.commit()
+    assert client.get('/api/field/overview').json()['washing']==[]   # no plant assigned yet
+    grant_assignee_plants(db, worker.id);db.commit()
     conftest._CURRENT_USER=db.get(User,worker.id)
     assert len(client.get('/api/field/overview').json()['washing'])==2
 
 
-def test_live_search_scopes_plant_and_equipment(client, db):
+def test_live_search_scopes_plant_records(client, db):
     head, engineer, plants=fixture_data(client, db)
-    db.add_all([
-        Equipment(plant_id=UUID(plants[0]['id']), equipment_name='Inv alpha',equipment_code='INV-0001',equipment_type='Inverter'),
-        Equipment(plant_id=UUID(plants[1]['id']), equipment_name='Inv beta',equipment_code='INV-0002',equipment_type='Inverter'),
-    ]);db.commit()
     from app.field.router import run_operational_search
     conftest._CURRENT_USER=db.get(User,engineer.id)
     assert client.get('/api/field/search',params={'q':'Inverter'}).status_code==403  # no Ask Solar91 for Site Engineers
@@ -49,20 +46,23 @@ def test_live_search_scopes_plant_and_equipment(client, db):
     res=run_operational_search(db,engineer,'Inverter')
     assert res['records'] and all(row['plant']=='Field FE01' for row in res['records'])
     assert all('secret' not in row for row in res['records'])
-    assert run_operational_search(db,engineer,'INV-0002')['records']==[]
+    # the other plant's records never appear, whatever is searched for
+    for term in ('Inverter','Inspect','FE02','module'):
+        assert all(row.get('site_code')!='FE02' for row in run_operational_search(db,engineer,term)['records'])
     conftest._CURRENT_USER=db.get(User,head.id)
-    assert any(row['id']=='INV-0002' for row in client.get('/api/field/search',params={'q':'INV-0002'}).json()['records'])
+    # the O&M Head sees both plants' work
+    head_records=client.get('/api/field/search',params={'q':'Inverter'}).json()['records']
+    assert {row['plant'] for row in head_records} >= {'Field FE01','Field FE02'}
     viewer=User(auth_provider='test',external_subject='unapproved',email='unapproved@solar91.test',display_name='Unapproved',role='Viewer',is_active=True)
     db.add(viewer);db.commit();conftest._CURRENT_USER=viewer
     assert client.get('/api/field/search',params={'q':'inverter'}).status_code==403
 
 
-def test_asset_pages_no_longer_reference_work_radar(client, db):
+def test_retired_frontend_bundles_are_not_referenced(client, db):
+    """The portal replaced the layered bundle; none of its files may still be linked."""
     page=client.get('/').text
-    assert '37-work-radar.js' not in page
-    assert '37-work-radar.css' not in page
-    assert '36-field-desk.js' not in page
-    assert '36-field-desk.css' not in page
+    for retired in ('37-work-radar','36-field-desk','20-modern-ui-2026','00-auth-data-and-imports'):
+        assert retired not in page
 
 
 def test_assistant_is_live_role_scoped_and_read_only(client, db, monkeypatch):
@@ -71,12 +71,13 @@ def test_assistant_is_live_role_scoped_and_read_only(client, db, monkeypatch):
     head, engineer, plants=fixture_data(client,db)
     conftest._CURRENT_USER=db.get(User,engineer.id)
     assert client.post('/api/field/ask',json={'question':'Inspect combiner'}).status_code==403  # no Ask Solar91 for Site Engineers
-    module_worker=User(auth_provider='test',external_subject='ask-module',email='ask-module@solar91.test',display_name='Module worker',role='Assignee',is_active=True)
-    db.add(module_worker);db.commit()
-    db.add(UserEquipmentTypeAssignment(user_id=module_worker.id,equipment_type='Module'));db.commit()
-    conftest._CURRENT_USER=db.get(User,module_worker.id)
-    scoped=client.post('/api/field/ask',json={'question':'Inspect combiner'}).json()
-    assert not any('combiner' in str(x.get('title','')).lower() for x in scoped['records'])  # inverter issues are outside a Module scope
+    other_plant_worker=User(auth_provider='test',external_subject='ask-module',email='ask-module@solar91.test',display_name='Other plant worker',role='Assignee',is_active=True)
+    db.add(other_plant_worker);db.commit()
+    # Assigned only to FE02, so FE01's records must not reach them.
+    grant_assignee_plants(db, other_plant_worker.id, UUID(plants[1]['id']));db.commit()
+    conftest._CURRENT_USER=db.get(User,other_plant_worker.id)
+    scoped=client.post('/api/field/ask',json={'question':'Inspect combiner at FE01'}).json()
+    assert all(x.get('site_code')!='FE01' for x in scoped['records'])  # FE01 is outside their plant scope
     conftest._CURRENT_USER=db.get(User,head.id)
     before=db.query(__import__('app.core.models',fromlist=['Issue']).Issue).count()
     response=client.post('/api/field/ask',json={'question':'Inspect combiner at FE01','recent_questions':['Show issues']})
@@ -111,12 +112,11 @@ def test_assistant_exact_overdue_issue_count_is_scoped_and_bounded(client, db):
     assert data['total']==503
     assert data['summary']=={'label':'Overdue open issues','value':503}
     assert len(data['records'])==20 and data['limited'] is True
-    module_worker=User(auth_provider='test',external_subject='ask-overdue-module',email='ask-overdue@solar91.test',display_name='Module worker',role='Assignee',is_active=True)
-    db.add(module_worker);db.commit()
-    db.add(UserEquipmentTypeAssignment(user_id=module_worker.id,equipment_type='Module'));db.commit()
-    conftest._CURRENT_USER=db.get(User,module_worker.id)
+    unassigned_worker=User(auth_provider='test',external_subject='ask-overdue-module',email='ask-overdue@solar91.test',display_name='Unassigned worker',role='Assignee',is_active=True)
+    db.add(unassigned_worker);db.commit()
+    conftest._CURRENT_USER=db.get(User,unassigned_worker.id)
     scoped=client.post('/api/field/ask',json={'question':'How many overdue issues?'}).json()
-    assert scoped['total']==0 and scoped['records']==[]  # every overdue issue is an inverter issue
+    assert scoped['total']==0 and scoped['records']==[]  # no plant assigned: pending access, sees nothing
 
 
 def test_assistant_washing_counts_are_date_accurate_and_permission_scoped(client, db):
@@ -210,7 +210,7 @@ def test_assistant_my_assigned_work_uses_authenticated_assignment_ids(client, db
     assignee=User(auth_provider='test',external_subject='assistant-assignee',email='assistant-assignee@example.test',
                   display_name='Inverter Assignee',role='Assignee',is_active=True)
     db.add(assignee);db.commit();db.refresh(assignee)
-    db.add(UserEquipmentTypeAssignment(user_id=assignee.id,equipment_type='Inverter'))
+    grant_assignee_plants(db, assignee.id)
     issue=Issue(ticket_no='ASK-ME-ISSUE',plant_id=UUID(plants[0]['id']),description='Assigned issue',severity='High',
                 status='In Progress',vertical='Inverter',assigned_to=assignee.id,assignee_text=assignee.display_name)
     db.add(issue)

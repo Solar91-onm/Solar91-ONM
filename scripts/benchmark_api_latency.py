@@ -50,8 +50,8 @@ def main() -> int:
         from sqlalchemy import func, select
         from fastapi.testclient import TestClient
         from app.core.database import Base, SessionLocal, engine
-        from app.core.models import Issue, OMTask, Plant, User, UserEquipmentTypeAssignment
-        from app.core.security import WASHING_TYPE, get_current_user
+        from app.core.models import Issue, OMTask, Plant, User, UserPlantAssignment
+        from app.core.security import get_current_user
         from app.main import app as fastapi_app
         from generate_scale_fixture import seed_synthetic_data
         import app.core.models as _models  # noqa: F401
@@ -64,9 +64,10 @@ def main() -> int:
                 counts = seed_synthetic_data(db, args.scale, args.prefix)
             user = db.scalar(select(User).where(User.external_subject == f"{args.prefix}-assignee"))
             assert user is not None
+            # Assignee scope is plant-based: give the benchmark user every seeded plant.
             db.add_all([
-                UserEquipmentTypeAssignment(user_id=user.id, equipment_type="Inverter"),
-                UserEquipmentTypeAssignment(user_id=user.id, equipment_type=WASHING_TYPE),
+                UserPlantAssignment(user_id=user.id, plant_id=plant_id, assignment_role="Assignee")
+                for plant_id in db.scalars(select(Plant.id))
             ])
             db.commit()
             user_id = user.id
@@ -84,7 +85,7 @@ def main() -> int:
             ("bootstrap_lite", "/api/bootstrap?lite=1"),
             ("state_collections_issues", "/api/state/collections?keys=issues"),
             # what 34-live-refresh.js fetches when the issue pulse changes (it used to fetch bootstrap_lite)
-            ("live_refresh_issues", "/api/state/collections?keys=plants,events,issues,equipment"),
+            ("live_refresh_issues", "/api/state/collections?keys=plants,events,issues"),
             ("field_overview", "/api/field/overview?limit=15"),
             ("issue_list", "/api/issues?limit=50"),
             ("issue_pulse", "/api/issues/pulse"),

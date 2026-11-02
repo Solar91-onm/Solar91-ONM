@@ -5,6 +5,7 @@ identity dependency override, is guarded by an explicit environment flag,
 and uses an isolated SQLite database. No external Supabase credentials needed.
 """
 import os
+from tests.conftest import grant_assignee_plants
 if os.environ.get("SOLAR91_E2E_TEST_MODE") != "1":
     raise RuntimeError("Test-only server: set SOLAR91_E2E_TEST_MODE=1")
 if not os.environ.get("DATABASE_URL", "").startswith("sqlite:///"):
@@ -15,7 +16,7 @@ from sqlalchemy import select
 from datetime import date, timedelta
 from app.core.timeutil import business_today
 from app.core.database import Base, SessionLocal, engine
-from app.core.models import User, UserEquipmentTypeAssignment, Plant, UserPlantAssignment, Issue, OMTask
+from app.core.models import Issue, OMTask, Plant, User, UserPlantAssignment
 from app.core.security import get_current_user
 from app.main import app
 
@@ -30,7 +31,7 @@ with SessionLocal() as db:
         user=User(auth_provider="test",external_subject="e2e:assignee",
                   email="assignee@example.invalid",display_name="QA Assignee",role="Assignee",is_active=True)
         db.add(user);db.flush()
-        db.add(UserEquipmentTypeAssignment(user_id=user.id,equipment_type="Inverter"))
+        grant_assignee_plants(db, user.id)
         db.commit()
 
 # Dedicated synthetic Site Engineer with one demo plant and server-persisted issue/PM.

@@ -14,7 +14,7 @@ from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from app.core.database import Base, SessionLocal, engine
-from app.core.models import User
+from app.core.models import Plant, User, UserPlantAssignment, WorkCategory
 from app.core.security import get_current_user
 from app.main import app
 
@@ -69,6 +69,45 @@ def client():
     # verified cryptographically. It exists to exercise the production write-auth rule.
     with TestClient(app, headers={"Authorization": "Bearer test-access-token"}) as c:
         yield c
+
+
+def grant_assignee_plants(db, user_id, *plant_ids) -> None:
+    """Give an Assignee their plant scope.
+
+    Replaces the removed ``UserEquipmentTypeAssignment``: an Assignee used to be scoped
+    by equipment type, which exposed every plant. Scope is now explicit plant rows, so
+    with no ``plant_ids`` this assigns every plant that currently exists — the same
+    visibility the equipment-type setup produced.
+    """
+    from sqlalchemy import select
+    ids = list(plant_ids) or list(db.scalars(select(Plant.id)))
+    existing = set(db.scalars(
+        select(UserPlantAssignment.plant_id).where(UserPlantAssignment.user_id == user_id)
+    ))
+    for plant_id in ids:
+        if plant_id not in existing:
+            db.add(UserPlantAssignment(user_id=user_id, plant_id=plant_id, assignment_role="Assignee"))
+    db.commit()
+
+
+DEFAULT_CATEGORIES = ("Inverter", "Module", "Transformer", "Vegetation", "Modules cleaning")
+
+
+def seed_work_categories(db, *names, sub_problems=None) -> list[str]:
+    """Configure work categories for a test.
+
+    The ``work_categories`` table ships empty (the old hard-coded list was removed with
+    the asset register), so any test that raises an issue by category or imports a
+    spreadsheet has to say which categories exist.
+    """
+    from sqlalchemy import select
+    wanted = list(names) or list(DEFAULT_CATEGORIES)
+    existing = {(n or "").casefold() for n in db.scalars(select(WorkCategory.name))}
+    for order, name in enumerate(wanted, start=1):
+        if name.casefold() not in existing:
+            db.add(WorkCategory(name=name, sub_problems=list(sub_problems or []), sort_order=order * 10))
+    db.commit()
+    return wanted
 
 
 def login_user(client: TestClient, db, *, role='O&M Head', name='Test User', email='test@example.com') -> User:

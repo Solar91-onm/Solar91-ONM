@@ -4,6 +4,11 @@
 -- (unit workload planning, editable maintenance scope, plant washing cycles).
 -- Safe to run more than once. It does NOT change or delete any existing data.
 -- Includes per-collection legacy-state sync revisions for performance Step 1.
+--
+-- NOTE: removing the equipment register is a separate, ONE-TIME, destructive
+-- migration and is deliberately NOT in this file. Run it once, on its own:
+--     database/migrations/032_remove_equipment_register.sql
+-- See database/SUPABASE_CHANGES_FOR_THIS_RELEASE.md for the order of steps.
 -- ============================================================================
 
 -- PM unit-level scheduling: per-plant unit counts / daily capacity, unit fields on PM tasks.

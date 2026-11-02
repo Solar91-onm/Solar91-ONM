@@ -29,8 +29,6 @@ def validate_issue_severity(value: Any) -> Any:
 class IssueCreate(BaseModel):
     ticket_no: str | None = Field(default=None, min_length=1, max_length=80)
     plant_id: UUID | None = None
-    equipment_id: UUID | None = None
-    equipment_ref: str | None = None
     vertical: str | None = None
     subcategory: str | None = None
     description: str = Field(min_length=1)
@@ -38,13 +36,8 @@ class IssueCreate(BaseModel):
     assigned_to: UUID | None = None
     occurred_at: datetime | None = None
     etc_at: datetime | None = None
-    maker: str | None = None
-    supplier: str | None = None
-    serial_number: str | None = None
     impact: str | None = None
     photo_count: int = 0
-    # One ticket can cover several registered units of the same plant (e.g. four inverters with the same fault).
-    unit_ids: list[UUID] = Field(default_factory=list, max_length=500)
 
     @field_validator("severity", mode="before")
     @classmethod
@@ -53,15 +46,12 @@ class IssueCreate(BaseModel):
 
 
 class IssueUpdate(BaseModel):
-    equipment_id: UUID | None = None
-    equipment_ref: str | None = None
     vertical: str | None = None
     subcategory: str | None = None
     description: str | None = None
     severity: str | None = None
     occurred_at: datetime | None = None
     etc_at: datetime | None = None
-    maker: str | None = None
     impact: str | None = None
     change_reason: str | None = Field(default=None, max_length=500)
 
@@ -203,8 +193,6 @@ class IssueOut(BaseModel):
     id: UUID
     ticket_no: str
     plant_id: UUID | None
-    equipment_id: UUID | None
-    equipment_ref: str | None
     vertical: str | None
     subcategory: str | None
     description: str
@@ -218,7 +206,6 @@ class IssueOut(BaseModel):
     closed_on: date | None = None
     assignee_text: str | None
     assigned_to: UUID | None
-    maker: str | None
     impact: str | None
     photo_count: int
     vendor: dict[str, Any] | None
@@ -234,7 +221,4 @@ class IssueOut(BaseModel):
     def normalize_legacy_severity(cls, value: Any) -> Any:
         return normalize_issue_severity(value)
 
-    supplier: str | None = None
-    serial_number: str | None = None
     evidence: list[dict[str, Any]] = Field(default_factory=list)
-    units: list[dict[str, Any]] = Field(default_factory=list)

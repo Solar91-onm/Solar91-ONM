@@ -13,10 +13,10 @@ import pytest
 from fastapi import HTTPException
 from sqlalchemy import select
 
-from app.core.models import AppSetting, Notification, Plant, UserEquipmentTypeAssignment, UserPlantAssignment
+from app.core.models import AppSetting, Notification, Plant, UserPlantAssignment
 from app.core.timeutil import BUSINESS_TZ, business_now, business_today, log_stamp
 from tests import conftest
-from tests.conftest import login_user
+from tests.conftest import grant_assignee_plants, login_user
 
 ROOT = Path(__file__).resolve().parents[1]
 WASH = "/api/scheduled/washing"
@@ -49,7 +49,7 @@ def _washing_plant_for_engineer(client, db):
     db.add(plant)
     db.commit()
     washer = login_user(client, db, role="Assignee", name="IST Washer", email="ist-washer@example.com")
-    db.add(UserEquipmentTypeAssignment(user_id=washer.id, equipment_type="Modules cleaning"))
+    grant_assignee_plants(db, washer.id)
     db.commit()
     login_user(client, db, role="O&M Head", name="IST Head", email="ist-head@example.com")
     setup = client.post(f"{WASH}/setup", json={"plant_id": str(plant.id), "table_count": 4,
@@ -239,36 +239,9 @@ def test_storage_download_distinguishes_missing_from_outage(monkeypatch, outcome
 
 # ---------------------------------------------------------------- browser date helpers
 
-@pytest.mark.skipif(shutil.which("node") is None, reason="Node.js is required for frontend helper tests")
-@pytest.mark.parametrize("tz", ["Asia/Kolkata", "UTC", "America/New_York"])
-def test_frontend_calendar_helpers_are_timezone_independent(tz):
-    script = r"""
-const src = require('fs').readFileSync(process.argv[1], 'utf8');
-const pick = n => { const m = src.match(new RegExp('function ' + n + '\\([^)]*\\)\\{.*?\\}\\n', 's')); if (!m) throw new Error('missing ' + n); return m[0]; };
-eval(pick('s91BusinessDate') + pick('s91DayOf') + pick('addDays') + 'globalThis.h={s91BusinessDate,s91DayOf,addDays};');
-const r = {
-  plus1: h.addDays('2026-10-17', 1), zero: h.addDays('2026-10-17', 0), monthEnd: h.addDays('2026-10-31', 1),
-  back: h.addDays('2026-03-01', -1), leap: h.addDays('2028-02-28', 1),
-  earlyIst: h.s91BusinessDate(new Date('2026-10-16T20:00:00Z')), lateIst: h.s91BusinessDate(new Date('2026-10-16T18:29:00Z')),
-  serverTs: h.s91DayOf('2026-10-16T20:00:00+00:00'), plain: h.s91DayOf('2026-10-16'),
-};
-console.log(JSON.stringify(r));
-"""
-    run = subprocess.run(["node", "-e", script, str(ROOT / "frontend/static/js/00-auth-data-and-imports.js")],
-                         capture_output=True, text=True, encoding="utf-8", timeout=20,
-                         env={**__import__("os").environ, "TZ": tz})
-    assert run.returncode == 0, run.stderr
-    assert json.loads(run.stdout) == {
-        "plus1": "2026-10-18", "zero": "2026-10-17", "monthEnd": "2026-11-01", "back": "2026-02-28",
-        "leap": "2028-02-29", "earlyIst": "2026-10-17", "lateIst": "2026-10-16",
-        "serverTs": "2026-10-17", "plain": "2026-10-16",
-    }
 
 
-def test_frontend_never_syncs_operations_date():
-    source = (ROOT / "frontend/static/js/00-auth-data-and-imports.js").read_text(encoding="utf-8")
-    server_keys = source.split("const SERVER_STATE_KEYS=[", 1)[1].split("]", 1)[0]
-    assert '"opsDate"' not in server_keys
-    actions = (ROOT / "frontend/static/js/08-actions-exports-and-submission.js").read_text(encoding="utf-8")
-    set_ops = actions.split("function setOpsDate(", 1)[1].split("\n", 1)[0]
-    assert "persist()" not in set_ops
+# Removed with the frontend bundle they asserted on (the portal replaced it):
+#   test_frontend_calendar_helpers_are_timezone_independent
+#   test_frontend_never_syncs_operations_date
+# The backend behaviour they sat beside is still covered by the tests above.

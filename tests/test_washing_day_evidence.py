@@ -6,13 +6,12 @@ from pathlib import Path
 from app.core.timeutil import business_today
 from app.core.models import (
     Plant,
-    UserEquipmentTypeAssignment,
     UserPlantAssignment,
     WashingHistory,
     WashingTable,
 )
 from tests import conftest
-from tests.conftest import login_user
+from tests.conftest import grant_assignee_plants, login_user
 from tests.test_washing_cycles import BASE, _plant, _setup_cycle_users, _stub_washing_storage
 
 PNG = b"\x89PNG\r\n\x1a\n" + b"0" * 64
@@ -74,7 +73,7 @@ def test_head_can_add_evidence_and_confirm_but_unassigned_assignee_cannot(client
     plant = _plant(db)
     head, assignee = _setup_cycle_users(client, db, plant)
     other = login_user(client, db, role="Assignee", name="Other Assignee", email="other-assignee@example.com")
-    db.add(UserEquipmentTypeAssignment(user_id=other.id, equipment_type="Modules cleaning"))
+    grant_assignee_plants(db, other.id)
     db.commit()
     _engineer(client, db, plant)
     report = client.post(f"{BASE}/daily-reports", json={"plant_id": str(plant.id), "job_status": "Done", "tables_cleaned": 1}).json()
@@ -117,19 +116,6 @@ def test_bootstrap_lite_keeps_scope_and_full_bootstrap_keeps_washing(client, db)
     # a screen that needs washing can still fetch exactly that collection on demand
     on_demand = client.get("/api/state/collections?keys=washing").json()
     assert len(on_demand["state"]["washing"]) == 1
-
-
-def test_frontend_wiring_for_day_reports_and_lite_pm_refresh():
-    washing = (ROOT / "frontend/static/js/26-washing-cycles.js").read_text(encoding="utf-8")
-    assert "window.washReportForDay=" in washing and "washReportForDay(" in washing
-    assert "canDayReport=isField()" in washing
-    actions = (ROOT / "frontend/static/js/08-actions-exports-and-submission.js").read_text(encoding="utf-8")
-    start = actions.index("async function completeTask()")
-    body = actions[start:actions.index("function reassignTask()", start)]
-    assert "/api/bootstrap?lite=1" in body and "washing:S.washing" in body
-    live = (ROOT / "frontend/static/js/34-live-refresh.js").read_text(encoding="utf-8")
-    # live refresh reads only the changed collections, never washing or the whole bootstrap
-    assert "/api/state/collections?keys=" in live and "/api/bootstrap" not in live and '"washing"' not in live
 
 
 def test_overview_sends_recent_reports_by_default_and_full_window_on_request(client, db):
@@ -188,3 +174,8 @@ def test_bootstrap_washing_is_scoped_to_the_engineers_plant_and_empty_for_viewer
     assert [r["id"] for r in rows] == ["WT-A"]
     login_user(client, db, role="Viewer", name="Viewer", email="viewer-washing@example.com")
     assert client.get("/api/bootstrap").json()["state"]["washing"] == []
+
+
+# Removed with the frontend bundle they asserted on (the portal replaced it):
+#   test_frontend_wiring_for_day_reports_and_lite_pm_refresh
+# The backend behaviour they sat beside is still covered by the tests above.

@@ -1,0 +1,589 @@
+"""Read-only portfolio aggregation for the portal frontend.
+
+Why this module exists
+----------------------
+The portal's Overview and Plants pages need, for every plant the signed-in user
+may see, the same handful of operational figures: open/closed/critical issue
+counts, Preventive Maintenance completion and Washing cycle compliance. Asking
+for those one plant at a time is 38 round trips for a 38-plant portfolio, so
+every figure here is produced by a **single grouped query across all visible
+plants** and then joined in memory.
+
+Business rules are not re-invented. They are imported or mirrored from the
+modules that own them, and the source is named at each definition:
+
+* issue open/closed state sets and severity storage — ``app/issues``
+* PM status set and the overdue rule                 — ``app/scheduled/router.py``
+* washing cycles, target and compliance              — ``app/scheduled/washing_cycles.py``
+
+Missing data stays ``None``. The portal shows "Not available" for a plant with
+no records rather than a zero, because a zero reads as "nothing is wrong".
+"""
+from __future__ import annotations
+
+from datetime import date, datetime, timedelta, timezone
+from typing import Any
+from uuid import UUID
+
+from sqlalchemy import case, func, or_, select
+from sqlalchemy.orm import Session
+
+from app.core.models import (
+    Issue,
+    OMTask,
+    Plant,
+    User,
+    UserPlantAssignment,
+    WashingConfig,
+)
+from app.core.security import has_portfolio_scope, user_scoped_plant_ids
+from app.core.timeutil import business_today
+
+# ── Business rules (mirrored from the owning modules) ────────────────────────
+
+# app/issues/service.py — every state that is not Resolved/Closed is open work.
+ISSUE_OPEN_STATES = (
+    "Open", "Assigned", "Acknowledged", "In Progress", "Pending Vendor", "Pending Parts/Vendor",
+)
+ISSUE_CLOSED_STATES = ("Resolved", "Closed")
+
+# app/issues/schemas.py :: SEVERITY_STORED_AS — two levels, each with a legacy alias.
+SEVERITY_CRITICAL = ("Critical", "High")
+SEVERITY_MEDIUM = ("Medium", "Low")
+
+# app/scheduled/router.py — the PM status set and what counts as still-open work.
+PM_OPEN_STATES = ("Scheduled", "In Progress")
+PM_DONE_STATES = ("Completed",)
+PM_CLOSED_STATES = ("Completed", "Cancelled")
+
+# Presentation thresholds for the health chip. The portal never overrides a
+# record's own state; these only classify the aggregate for the summary tiles.
+HEALTH_THRESHOLDS = {
+    "critical_if_open_critical_issues_at_least": 1,
+    "attention_if_open_issues_at_least": 2,
+    "attention_if_pm_compliance_below": 80,
+    "attention_if_washing_compliance_below": 80,
+}
+
+ACTIVITY_WINDOW_DAYS = 45
+
+
+# ── Scope ───────────────────────────────────────────────────────────────────
+
+def visible_plants(db: Session, user: User) -> list[Plant]:
+    """Plants this user may see, ordered by name. Server-side scope only."""
+    allowed = user_scoped_plant_ids(db, user)
+    stmt = select(Plant).order_by(Plant.plant_name)
+    if allowed is not None:
+        if not allowed:
+            return []
+        stmt = stmt.where(Plant.id.in_(allowed))
+    return list(db.scalars(stmt))
+
+
+def _plant_ids(plants: list[Plant]) -> list[UUID]:
+    return [plant.id for plant in plants]
+
+
+# ── Per-metric grouped queries ──────────────────────────────────────────────
+
+def _issue_counts(db: Session, plant_ids: list[UUID]) -> dict[UUID, dict[str, int]]:
+    """Issue counts per plant in one grouped query."""
+    if not plant_ids:
+        return {}
+    is_open = Issue.status.in_(ISSUE_OPEN_STATES)
+    rows = db.execute(
+        select(
+            Issue.plant_id,
+            func.count().label("total"),
+            func.sum(case((is_open, 1), else_=0)).label("open"),
+            func.sum(case((Issue.status.in_(ISSUE_CLOSED_STATES), 1), else_=0)).label("closed"),
+            func.sum(case((is_open & Issue.severity.in_(SEVERITY_CRITICAL), 1), else_=0)).label("critical"),
+            func.sum(case((is_open & Issue.severity.in_(SEVERITY_MEDIUM), 1), else_=0)).label("medium"),
+        )
+        .where(Issue.plant_id.in_(plant_ids))
+        .group_by(Issue.plant_id)
+    ).all()
+    return {
+        row.plant_id: {
+            "total": int(row.total or 0),
+            "openIssues": int(row.open or 0),
+            "closedIssues": int(row.closed or 0),
+            "criticalIssues": int(row.critical or 0),
+            "mediumIssues": int(row.medium or 0),
+        }
+        for row in rows
+    }
+
+
+def _pm_counts(db: Session, plant_ids: list[UUID], today: date) -> dict[UUID, dict[str, int]]:
+    """Preventive Maintenance counts per plant.
+
+    Overdue mirrors app/scheduled/router.py: the planned date wins when a unit
+    has been rolled, and a Completed or Cancelled job is never overdue.
+    """
+    if not plant_ids:
+        return {}
+    due = func.coalesce(OMTask.planned_due_on, OMTask.due_on)
+    still_open = OMTask.status.in_(PM_OPEN_STATES)
+    rows = db.execute(
+        select(
+            OMTask.plant_id,
+            func.count().label("total"),
+            func.sum(case((OMTask.status.in_(PM_DONE_STATES), 1), else_=0)).label("completed"),
+            func.sum(case((still_open & (due >= today), 1), else_=0)).label("pending"),
+            func.sum(case((still_open & (due < today), 1), else_=0)).label("overdue"),
+            func.sum(case((still_open & due.is_(None), 1), else_=0)).label("undated"),
+            func.sum(case((OMTask.status == "Cancelled", 1), else_=0)).label("cancelled"),
+        )
+        .where(OMTask.plant_id.in_(plant_ids))
+        .group_by(OMTask.plant_id)
+    ).all()
+    out: dict[UUID, dict[str, int]] = {}
+    for row in rows:
+        completed = int(row.completed or 0)
+        pending = int(row.pending or 0) + int(row.undated or 0)
+        overdue = int(row.overdue or 0)
+        out[row.plant_id] = {
+            "completed": completed,
+            "pending": pending,
+            "overdue": overdue,
+            "cancelled": int(row.cancelled or 0),
+            # app/scheduled: compliance divides by live work, never by plan size.
+            "compliancePercent": _percent(completed, completed + pending + overdue),
+        }
+    return out
+
+
+def _washing_rows(db: Session, user: User) -> dict[str, dict[str, Any]]:
+    """Live washing figures per plant, straight from the module that owns them."""
+    from app.scheduled.washing_cycles import get_overview
+
+    try:
+        overview = get_overview(db, user)
+    except Exception:  # washing not configured yet must not take the Overview down
+        return {}
+    return {row["plant_id"]: row for row in overview.get("plants", [])}
+
+
+def _last_activity(db: Session, plant_ids: list[UUID]) -> dict[UUID, datetime]:
+    """Most recent operational write per plant (issue update or PM completion)."""
+    if not plant_ids:
+        return {}
+    latest: dict[UUID, datetime] = {}
+    issue_rows = db.execute(
+        select(Issue.plant_id, func.max(Issue.updated_at))
+        .where(Issue.plant_id.in_(plant_ids))
+        .group_by(Issue.plant_id)
+    ).all()
+    for plant_id, at in issue_rows:
+        if at:
+            latest[plant_id] = at
+    task_rows = db.execute(
+        select(OMTask.plant_id, func.max(OMTask.updated_at))
+        .where(OMTask.plant_id.in_(plant_ids))
+        .group_by(OMTask.plant_id)
+    ).all()
+    for plant_id, at in task_rows:
+        if at and (plant_id not in latest or at > latest[plant_id]):
+            latest[plant_id] = at
+    return latest
+
+
+def _percent(part: int, whole: int) -> int | None:
+    """Rounded percentage, or None when there is nothing to measure."""
+    if not whole:
+        return None
+    return round(100 * part / whole)
+
+
+# ── Profiles ────────────────────────────────────────────────────────────────
+
+def classify_condition(profile: dict[str, Any]) -> str:
+    """healthy | attention | critical | unknown — for the health chip only."""
+    if profile.get("condition") == "unknown":
+        return "unknown"
+    t = HEALTH_THRESHOLDS
+    if (profile.get("criticalIssues") or 0) >= t["critical_if_open_critical_issues_at_least"]:
+        return "critical"
+    if (profile.get("openIssues") or 0) >= t["attention_if_open_issues_at_least"]:
+        return "attention"
+    pm_pct = (profile.get("pm") or {}).get("compliancePercent")
+    wash_pct = (profile.get("washing") or {}).get("compliancePercent")
+    if pm_pct is not None and pm_pct < t["attention_if_pm_compliance_below"]:
+        return "attention"
+    if wash_pct is not None and wash_pct < t["attention_if_washing_compliance_below"]:
+        return "attention"
+    return "healthy"
+
+
+_EMPTY_BLOCK = {"completed": None, "pending": None, "overdue": None, "compliancePercent": None}
+
+
+def build_profile(
+    plant: Plant,
+    issues: dict[str, int] | None,
+    pm: dict[str, int] | None,
+    washing: dict[str, Any] | None,
+    last_at: datetime | None,
+) -> dict[str, Any]:
+    """One plant's operational profile. No record ⇒ None, never 0."""
+    has_any = bool(issues or pm or washing)
+    if not has_any:
+        return {
+            "siteCode": plant.site_code,
+            "condition": "unknown",
+            "derivedCondition": "unknown",
+            "openIssues": None, "closedIssues": None,
+            "criticalIssues": None, "mediumIssues": None,
+            "pm": dict(_EMPTY_BLOCK),
+            "washing": dict(_EMPTY_BLOCK),
+            "lastReportAt": None,
+            "source": "database",
+            "note": (
+                "Not yet commissioned — no operational records"
+                if plant.status and plant.status.lower() != "active"
+                else "No operational records for this plant yet"
+            ),
+        }
+
+    washing_block = dict(_EMPTY_BLOCK)
+    if washing:
+        completed = int(washing.get("cycles_this_month") or 0)
+        target = int(washing.get("monthly_target") or 3)
+        overdue_days = int(washing.get("overdue_days") or 0)
+        washing_block = {
+            "completed": completed,
+            "pending": max(0, target - completed),
+            "overdue": 1 if overdue_days > 0 else 0,
+            # _cycle_compliance in app/scheduled/washing_cycles.py is authoritative.
+            "compliancePercent": washing.get("cycle_compliance_percent"),
+            "currentCycle": washing.get("current_cycle"),
+            "monthlyTarget": target,
+            "overdueDays": overdue_days,
+            "overdueBucket": washing.get("overdue_bucket"),
+            "tableCount": washing.get("table_count"),
+            "assignee": washing.get("assignee_name") or "",
+            "thresholdPercent": washing.get("compliance_threshold_percent"),
+            "lastReportDate": washing.get("last_report_date"),
+            "active": bool(washing.get("active", True)),
+        }
+
+    profile = {
+        "siteCode": plant.site_code,
+        "condition": "known",
+        "openIssues": (issues or {}).get("openIssues", 0),
+        "closedIssues": (issues or {}).get("closedIssues", 0),
+        "criticalIssues": (issues or {}).get("criticalIssues", 0),
+        "mediumIssues": (issues or {}).get("mediumIssues", 0),
+        "pm": {
+            "completed": (pm or {}).get("completed", 0),
+            "pending": (pm or {}).get("pending", 0),
+            "overdue": (pm or {}).get("overdue", 0),
+            "compliancePercent": (pm or {}).get("compliancePercent"),
+        } if pm else dict(_EMPTY_BLOCK),
+        "washing": washing_block,
+        "lastReportAt": last_at.isoformat() if last_at else None,
+        "source": "database",
+    }
+    profile["derivedCondition"] = classify_condition(profile)
+    return profile
+
+
+def plant_out(plant: Plant, engineers: list[str], washing_assignee: str) -> dict[str, Any]:
+    """A plant record as the portal reads it: stored columns, nothing invented."""
+    return {
+        "id": str(plant.id),
+        "site_code": plant.site_code,
+        "display_code": plant.site_code,
+        "plant_name": plant.plant_name,
+        "project_company": plant.project_company,
+        "district": plant.district,
+        "discom": plant.discom,
+        "location": plant.location,
+        "latitude": float(plant.latitude) if plant.latitude is not None else None,
+        "longitude": float(plant.longitude) if plant.longitude is not None else None,
+        "dc_capacity_kw": float(plant.dc_capacity_kw) if plant.dc_capacity_kw is not None else None,
+        "ac_capacity_kw": float(plant.ac_capacity_kw) if plant.ac_capacity_kw is not None else None,
+        "commissioned_on": plant.commissioned_on.isoformat() if plant.commissioned_on else None,
+        "status": plant.status,
+        "assigned_engineer": plant.assigned_engineer,
+        "site_engineers": engineers,
+        "washing_assignee": washing_assignee,
+        "custom_fields": plant.custom_fields or {},
+        "created_at": plant.created_at.isoformat() if getattr(plant, "created_at", None) else None,
+        "updated_at": plant.updated_at.isoformat() if getattr(plant, "updated_at", None) else None,
+    }
+
+
+def site_engineers_by_plant(db: Session, plant_ids: list[UUID]) -> dict[UUID, list[str]]:
+    """Assigned Site Engineers per plant, from the assignment table (not free text)."""
+    if not plant_ids:
+        return {}
+    rows = db.execute(
+        select(UserPlantAssignment.plant_id, User.display_name)
+        .join(User, User.id == UserPlantAssignment.user_id)
+        .where(
+            UserPlantAssignment.plant_id.in_(plant_ids),
+            User.is_active.is_(True),
+            User.role == "Site Engineer",
+        )
+    ).all()
+    out: dict[UUID, list[str]] = {}
+    for plant_id, name in rows:
+        if name:
+            out.setdefault(plant_id, []).append(name)
+    for names in out.values():
+        names.sort()
+    return out
+
+
+def washing_assignees_by_plant(db: Session, plant_ids: list[UUID]) -> dict[UUID, str]:
+    if not plant_ids:
+        return {}
+    rows = db.execute(
+        select(WashingConfig.plant_id, User.display_name)
+        .join(User, User.id == WashingConfig.assigned_user_id)
+        .where(WashingConfig.plant_id.in_(plant_ids))
+    ).all()
+    return {plant_id: name or "" for plant_id, name in rows}
+
+
+# ── Portfolio ───────────────────────────────────────────────────────────────
+
+def portfolio(db: Session, user: User) -> dict[str, Any]:
+    """Every visible plant with its profile, plus portfolio totals.
+
+    Bounded cost: five grouped queries plus the washing overview, regardless of
+    how many plants the user can see.
+    """
+    plants = visible_plants(db, user)
+    ids = _plant_ids(plants)
+    today = business_today()
+
+    issues = _issue_counts(db, ids)
+    pm = _pm_counts(db, ids, today)
+    washing = _washing_rows(db, user)
+    last_at = _last_activity(db, ids)
+    engineers = site_engineers_by_plant(db, ids)
+    wash_assignees = washing_assignees_by_plant(db, ids)
+
+    rows = []
+    for plant in plants:
+        profile = build_profile(
+            plant,
+            issues.get(plant.id),
+            pm.get(plant.id),
+            washing.get(str(plant.id)),
+            last_at.get(plant.id),
+        )
+        rows.append({
+            "plant": plant_out(plant, engineers.get(plant.id, []), wash_assignees.get(plant.id, "")),
+            "profile": profile,
+        })
+
+    return {
+        "rows": rows,
+        "totals": aggregate(rows),
+        "asOf": datetime.now(timezone.utc).isoformat(),
+        "businessDate": today.isoformat(),
+        "scope": "portfolio" if has_portfolio_scope(user) else "assigned",
+    }
+
+
+def aggregate(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """Portfolio totals. A plant with no records counts as unknown, not as zero."""
+    totals = {
+        "totalPlants": len(rows),
+        "healthyPlants": 0, "attentionPlants": 0, "criticalPlants": 0, "unknownPlants": 0,
+        "openIssues": 0, "closedIssues": 0, "criticalIssues": 0, "mediumIssues": 0,
+        "plantsWithOpenIssues": 0,
+        "pmCompleted": 0, "pmPending": 0, "pmOverdue": 0,
+        "washingCompleted": 0, "washingPending": 0, "washingOverdue": 0,
+        "dcCapacityMw": 0.0, "acCapacityMw": 0.0,
+        "commissionedPlants": 0,
+    }
+    for row in rows:
+        plant, profile = row["plant"], row["profile"]
+        condition = profile.get("derivedCondition") or "unknown"
+        totals[{
+            "healthy": "healthyPlants", "attention": "attentionPlants",
+            "critical": "criticalPlants",
+        }.get(condition, "unknownPlants")] += 1
+
+        for key in ("openIssues", "closedIssues", "criticalIssues", "mediumIssues"):
+            value = profile.get(key)
+            if isinstance(value, int):
+                totals[key] += value
+        if (profile.get("openIssues") or 0) > 0:
+            totals["plantsWithOpenIssues"] += 1
+
+        for block, prefix in (("pm", "pm"), ("washing", "washing")):
+            data = profile.get(block) or {}
+            for field, suffix in (("completed", "Completed"), ("pending", "Pending"), ("overdue", "Overdue")):
+                value = data.get(field)
+                if isinstance(value, int):
+                    totals[prefix + suffix] += value
+
+        if plant.get("dc_capacity_kw"):
+            totals["dcCapacityMw"] += plant["dc_capacity_kw"] / 1000
+        if plant.get("ac_capacity_kw"):
+            totals["acCapacityMw"] += plant["ac_capacity_kw"] / 1000
+        if plant.get("commissioned_on"):
+            totals["commissionedPlants"] += 1
+
+    pm_total = totals["pmCompleted"] + totals["pmPending"] + totals["pmOverdue"]
+    totals["pmCompliancePercent"] = _percent(totals["pmCompleted"], pm_total)
+    wash_total = totals["washingCompleted"] + totals["washingPending"] + totals["washingOverdue"]
+    totals["washingCompliancePercent"] = _percent(totals["washingCompleted"], wash_total)
+    totals["dcCapacityMw"] = round(totals["dcCapacityMw"], 2)
+    totals["acCapacityMw"] = round(totals["acCapacityMw"], 2)
+    return totals
+
+
+# ── Activity feed ───────────────────────────────────────────────────────────
+
+def activity(db: Session, user: User, plant_ids: list[UUID], limit: int = 25) -> list[dict[str, Any]]:
+    """Recent real events: issue opens/closes and PM completions. Bounded."""
+    if not plant_ids:
+        return []
+    limit = max(1, min(int(limit), 100))
+    since = business_today() - timedelta(days=ACTIVITY_WINDOW_DAYS)
+    codes = dict(db.execute(select(Plant.id, Plant.site_code).where(Plant.id.in_(plant_ids))).all())
+    names = dict(db.execute(select(Plant.id, Plant.plant_name).where(Plant.id.in_(plant_ids))).all())
+
+    events: list[dict[str, Any]] = []
+
+    issue_rows = db.execute(
+        select(Issue.plant_id, Issue.ticket_no, Issue.status, Issue.severity,
+               Issue.description, Issue.updated_at, Issue.vertical)
+        .where(Issue.plant_id.in_(plant_ids), Issue.updated_at.is_not(None))
+        .order_by(Issue.updated_at.desc())
+        .limit(limit * 2)
+    ).all()
+    for row in issue_rows:
+        closed = row.status in ISSUE_CLOSED_STATES
+        events.append({
+            "kind": "issue.closed" if closed else "issue.opened",
+            "title": f"{row.ticket_no} — {(row.description or '').strip()[:90] or 'Site issue'}",
+            "status": row.status,
+            "severity": "Critical" if row.severity in SEVERITY_CRITICAL else "Medium",
+            "category": row.vertical or "",
+            "at": row.updated_at.isoformat() if row.updated_at else None,
+            "plantSiteCode": codes.get(row.plant_id),
+            "plantName": names.get(row.plant_id),
+            "source": "database",
+        })
+
+    task_rows = db.execute(
+        select(OMTask.plant_id, OMTask.work_order_no, OMTask.task_name, OMTask.status,
+               OMTask.actual_completed_on, OMTask.updated_at)
+        .where(
+            OMTask.plant_id.in_(plant_ids),
+            or_(OMTask.actual_completed_on >= since, OMTask.status.in_(PM_OPEN_STATES)),
+        )
+        .order_by(OMTask.updated_at.desc())
+        .limit(limit * 2)
+    ).all()
+    for row in task_rows:
+        events.append({
+            "kind": "pm.completed" if row.status == "Completed" else "pm.scheduled",
+            "title": f"{row.work_order_no} — {row.task_name}",
+            "status": row.status,
+            "severity": None,
+            "category": "Preventive Maintenance",
+            "at": row.updated_at.isoformat() if row.updated_at else None,
+            "plantSiteCode": codes.get(row.plant_id),
+            "plantName": names.get(row.plant_id),
+            "source": "database",
+        })
+
+    events = [e for e in events if e["at"]]
+    events.sort(key=lambda e: e["at"], reverse=True)
+    return events[:limit]
+
+
+# ── Calendar ────────────────────────────────────────────────────────────────
+
+def calendar(db: Session, user: User, kind: str, month: str, plant_ids: list[UUID]) -> list[dict[str, Any]]:
+    """Dated PM or Washing entries for one month — real records only."""
+    if kind not in {"pm", "washing"}:
+        raise ValueError("Calendar activity requires kind=pm or kind=washing")
+    try:
+        year_s, month_s = month.split("-")
+        year, month_no = int(year_s), int(month_s)
+        first = date(year, month_no, 1)
+    except (ValueError, AttributeError):
+        raise ValueError("Calendar activity requires a YYYY-MM month")
+    last = date(year + (month_no == 12), (month_no % 12) + 1, 1) - timedelta(days=1)
+    if not plant_ids:
+        return []
+
+    codes = dict(db.execute(select(Plant.id, Plant.site_code).where(Plant.id.in_(plant_ids))).all())
+    names = dict(db.execute(select(Plant.id, Plant.plant_name).where(Plant.id.in_(plant_ids))).all())
+    today = business_today()
+
+    if kind == "pm":
+        due = func.coalesce(OMTask.planned_due_on, OMTask.due_on)
+        rows = db.execute(
+            select(OMTask.id, OMTask.plant_id, OMTask.work_order_no, OMTask.task_name,
+                   OMTask.status, due.label("due_on"), OMTask.actual_completed_on,
+                   OMTask.assignee_text, OMTask.unit_no, OMTask.total_units)
+            .where(OMTask.plant_id.in_(plant_ids), due >= first, due <= last)
+            .order_by(due)
+            .limit(4000)
+        ).all()
+        out = []
+        for row in rows:
+            overdue = (
+                row.due_on and row.due_on < today and row.status not in PM_CLOSED_STATES
+            )
+            status = "Overdue" if overdue else row.status
+            out.append({
+                "id": str(row.id),
+                "kind": "pm.overdue" if overdue else ("pm.completed" if row.status == "Completed" else "pm.scheduled"),
+                "title": row.task_name + (f" · unit {row.unit_no}/{row.total_units}" if row.unit_no and row.total_units else ""),
+                "reference": row.work_order_no,
+                "status": status,
+                "assignee": row.assignee_text or "",
+                "date": row.due_on.isoformat(),
+                "completedOn": row.actual_completed_on.isoformat() if row.actual_completed_on else None,
+                "plantSiteCode": codes.get(row.plant_id),
+                "plantName": names.get(row.plant_id),
+                "source": "database",
+            })
+        return out
+
+    from app.core.models import WashingDailyReport
+
+    rows = db.execute(
+        select(WashingDailyReport.id, WashingDailyReport.plant_id, WashingDailyReport.report_date,
+               WashingDailyReport.job_status, WashingDailyReport.cycle_no, WashingDailyReport.tables_cleaned,
+               WashingDailyReport.review_status, WashingDailyReport.reported_by,
+               WashingDailyReport.exception_reason, WashingDailyReport.cycle_completed)
+        .where(
+            WashingDailyReport.plant_id.in_(plant_ids),
+            WashingDailyReport.report_date >= first,
+            WashingDailyReport.report_date <= last,
+        )
+        .order_by(WashingDailyReport.report_date)
+        .limit(4000)
+    ).all()
+    return [
+        {
+            "id": str(row.id),
+            "kind": "washing.excused" if row.exception_reason else (
+                "washing.done" if row.cycle_completed else "washing.reported"
+            ),
+            "title": f"Cycle {row.cycle_no} · {row.tables_cleaned} tables cleaned",
+            "reference": f"Cycle {row.cycle_no}",
+            "status": row.review_status or row.job_status,
+            "assignee": row.reported_by or "",
+            "date": row.report_date.isoformat(),
+            "exceptionReason": row.exception_reason,
+            "plantSiteCode": codes.get(row.plant_id),
+            "plantName": names.get(row.plant_id),
+            "source": "database",
+        }
+        for row in rows
+    ]

@@ -347,7 +347,7 @@ def import_setup(db: Session, user: User, filename: str, content: bytes, *, dry_
             if config is None:
                 config = WashingConfig(plant_id=item["plant"].id, team=[], frequency_days=14)
             if item["assignee"]:
-                _ensure_washing_assignee(db, user, item["assignee"])
+                _ensure_washing_assignee(db, user, item["assignee"], item["plant"].id)
                 config.assigned_user_id = item["assignee"].id
             config.compliance_threshold_percent = item["threshold"]
             config.active = item["active"]

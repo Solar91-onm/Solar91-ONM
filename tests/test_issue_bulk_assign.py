@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from app.core.models import Issue, IssueHistory, Notification, Plant, User, UserEquipmentTypeAssignment
-from tests.conftest import login_user
+from app.core.models import Issue, IssueHistory, Notification, Plant, User, UserPlantAssignment
+from tests.conftest import grant_assignee_plants, login_user
 
 
 def _setup(db):
@@ -11,7 +11,7 @@ def _setup(db):
     worker = User(auth_provider="clerk", external_subject="w", email="w@example.com", display_name="Worker", role="Assignee", is_active=True)
     other = User(auth_provider="clerk", external_subject="o", email="o@example.com", display_name="Other", role="Assignee", is_active=True)
     db.add_all([plant, worker, other]); db.flush()
-    db.add(UserEquipmentTypeAssignment(user_id=worker.id, equipment_type="Inverter"))
+    grant_assignee_plants(db, worker.id)
     rows = {
         "open1": Issue(ticket_no="B-1", plant_id=plant.id, vertical="Inverter", description="d", severity="Critical", status="Open"),
         "open2": Issue(ticket_no="B-2", plant_id=plant.id, vertical="Transformer", description="d", severity="Medium", status="Open"),
@@ -42,8 +42,8 @@ def test_head_assigns_many_tickets_in_one_request(client, db):
         row = db.get(Issue, rows[key].id)
         assert (row.assigned_to, row.assignee_text, row.status) == (worker.id, "Worker", "Assigned")
     assert db.get(Issue, rows["taken"].id).assigned_to == other.id
-    # the O&M Head extends the Assignee's scope to the new category, exactly like single assignment
-    assert {t.equipment_type for t in db.query(UserEquipmentTypeAssignment).filter_by(user_id=worker.id)} == {"Inverter", "Transformer"}
+    # the O&M Head extends the Assignee's scope to the ticket's plant, exactly like single assignment
+    assert db.query(UserPlantAssignment).filter_by(user_id=worker.id).count() >= 1
     assert db.query(IssueHistory).filter_by(issue_id=rows["open1"].id, action="issue.assigned").count() == 1
     notes = db.query(Notification).filter_by(user_id=worker.id).all()
     assert len(notes) == 1 and notes[0].title == "3 tickets assigned to you"

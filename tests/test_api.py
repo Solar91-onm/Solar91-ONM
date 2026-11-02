@@ -3,8 +3,8 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta
 from uuid import UUID
 
-from app.core.models import Equipment, InventoryItem, InventoryMovement, Issue, Plant, User, UserEquipmentAssignment, UserEquipmentTypeAssignment, UserPlantAssignment, WashingConfig, WashingTable
-from tests.conftest import login_user
+from app.core.models import InventoryItem, InventoryMovement, Issue, Plant, User, UserPlantAssignment, WashingConfig, WashingTable
+from tests.conftest import grant_assignee_plants, login_user
 
 
 def test_authentication_protects_bootstrap(client):
@@ -17,17 +17,13 @@ def test_legacy_session_cookie_does_not_authenticate(client):
     assert response.status_code == 401
 
 
-def test_head_can_create_update_delete_plant_and_equipment(client, db):
+def test_head_can_create_update_delete_plant(client, db):
     login_user(client, db)
     plant = client.post('/api/plants', json={'site_code':'QA01','plant_name':'QA Plant','district':'Jaipur'})
     assert plant.status_code == 201, plant.text
     plant_id = plant.json()['id']
     patched = client.patch(f'/api/plants/{plant_id}', json={'district':'Dausa'})
     assert patched.status_code == 200 and patched.json()['district'] == 'Dausa'
-    equipment = client.post('/api/equipment', json={'plant_id':plant_id,'equipment_code':'INV-01','equipment_name':'Inverter 1','equipment_type':'Inverter','metadata':{}})
-    assert equipment.status_code == 201, equipment.text
-    assert equipment.json()['plant_id'] == plant_id
-    assert client.delete(f"/api/equipment/{equipment.json()['id']}").status_code == 204
     assert client.delete(f'/api/plants/{plant_id}').status_code == 204
 
 
@@ -43,25 +39,27 @@ def test_site_engineer_is_plant_scoped_and_cannot_manage_plants(client, db):
     assert denied.status_code == 403
 
 
-def test_assignee_issue_list_is_scoped_by_equipment_type_across_plants(client, db):
-    plant_a = Plant(site_code='EQ-A', plant_name='Equipment Plant A')
-    plant_b = Plant(site_code='EQ-B', plant_name='Equipment Plant B')
-    db.add_all([plant_a, plant_b]); db.commit()
-    db.refresh(plant_a); db.refresh(plant_b)
-    user = login_user(client, db, role='Assignee', name='Inverter Owner', email='equipment@example.com')
-    db.add(UserEquipmentTypeAssignment(user_id=user.id, equipment_type='Inverter'))
+def test_assignee_issue_list_is_scoped_to_their_assigned_plants(client, db):
+    """An Assignee sees every category at their plants, and nothing at other plants."""
+    assigned = Plant(site_code='EQ-A', plant_name='Assigned Plant A')
+    elsewhere = Plant(site_code='EQ-B', plant_name='Unassigned Plant B')
+    db.add_all([assigned, elsewhere]); db.commit()
+    db.refresh(assigned); db.refresh(elsewhere)
+    user = login_user(client, db, role='Assignee', name='Plant Owner', email='equipment@example.com')
+    grant_assignee_plants(db, user.id, assigned.id)
     db.add_all([
-        Issue(ticket_no='T-INV-A', plant_id=plant_a.id, vertical='Inverter', description='Inverter fault A', severity='High'),
-        Issue(ticket_no='T-INV-B', plant_id=plant_b.id, vertical='inverter', description='Inverter fault B', severity='Low'),
-        Issue(ticket_no='T-TR-A', plant_id=plant_a.id, vertical='Transformer', description='Transformer oil', severity='High'),
-        Issue(ticket_no='T-NONE', plant_id=plant_b.id, description='No type', severity='Low'),
+        Issue(ticket_no='T-INV-A', plant_id=assigned.id, vertical='Inverter', description='Inverter fault A', severity='High'),
+        Issue(ticket_no='T-TR-A', plant_id=assigned.id, vertical='Transformer', description='Transformer oil', severity='High'),
+        Issue(ticket_no='T-INV-B', plant_id=elsewhere.id, vertical='inverter', description='Inverter fault B', severity='Low'),
+        Issue(ticket_no='T-NONE', plant_id=elsewhere.id, description='No category', severity='Low'),
     ])
     db.commit()
-    assert {row['ticket_no'] for row in client.get('/api/issues').json()} == {'T-INV-A', 'T-INV-B'}
-    denied = client.post('/api/issues', json={'ticket_no': 'T-NEW', 'plant_id': str(plant_a.id), 'vertical': 'Transformer',
+    # Both categories at the assigned plant; nothing from the other plant.
+    assert {row['ticket_no'] for row in client.get('/api/issues').json()} == {'T-INV-A', 'T-TR-A'}
+    denied = client.post('/api/issues', json={'ticket_no': 'T-NEW', 'plant_id': str(elsewhere.id), 'vertical': 'Transformer',
                                               'description': 'x', 'severity': 'Low'})
     assert denied.status_code == 403
-    ok = client.post('/api/issues', json={'ticket_no': 'T-NEW2', 'plant_id': str(plant_b.id), 'vertical': 'Inverter',
+    ok = client.post('/api/issues', json={'ticket_no': 'T-NEW2', 'plant_id': str(assigned.id), 'vertical': 'Inverter',
                                           'description': 'x', 'severity': 'Low'})
     assert ok.status_code == 201, ok.text
 
@@ -70,9 +68,8 @@ def test_assignee_bootstrap_issue_scope_query_count_stays_flat_as_issues_grow(cl
     plant=Plant(site_code='EQ-BATCH',plant_name='Batched Scope Plant')
     user=login_user(client,db,role='Assignee',name='Batched Owner',email='batch-scope@example.com')
     db.add(plant);db.flush()
-    equipment=Equipment(plant_id=plant.id,equipment_code='INV-BATCH',equipment_name='Batched inverter',equipment_type='Inverter',status='active')
-    db.add(equipment);db.add(UserEquipmentTypeAssignment(user_id=user.id,equipment_type='Inverter'));db.flush()
-    db.add(Issue(ticket_no='EQ-BATCH-000',plant_id=plant.id,equipment_id=equipment.id,equipment_ref='INV-BATCH',
+    db.commit();db.refresh(plant);grant_assignee_plants(db, user.id, plant.id)
+    db.add(Issue(ticket_no='EQ-BATCH-000',plant_id=plant.id,vertical='Inverter',
                  description='Synthetic scope check',severity='Medium'))
     db.commit()
 
@@ -84,8 +81,8 @@ def test_assignee_bootstrap_issue_scope_query_count_stays_flat_as_issues_grow(cl
         return int(response.headers['server-timing'].split('desc="')[1].split()[0])
 
     small_count=bootstrap_query_count()
-    db.add_all([Issue(ticket_no=f'EQ-BATCH-{n:03d}',plant_id=plant.id,equipment_id=equipment.id,
-                      equipment_ref='INV-BATCH',description='Synthetic scope check',severity='Medium') for n in range(1,13)])
+    db.add_all([Issue(ticket_no=f'EQ-BATCH-{n:03d}',plant_id=plant.id,vertical='Inverter',
+                      description='Synthetic scope check',severity='Medium') for n in range(1,13)])
     db.commit()
     assert bootstrap_query_count()==small_count
 
@@ -96,7 +93,7 @@ def test_issue_workflow_assignment_scope_and_close_permission(client, db):
     engineer = login_user(client, db, role='Site Engineer', name='Engineer One', email='one@example.com')
     db.add(UserPlantAssignment(user_id=engineer.id, plant_id=plant.id, assignment_role='Site Engineer')); db.commit()
     created = client.post('/api/issues', json={
-        'ticket_no':'TKT-QA-001','plant_id':str(plant.id),'description':'Inverter alarm','severity':'High','equipment_ref':'INV-01'
+        'ticket_no':'TKT-QA-001','plant_id':str(plant.id),'description':'Inverter alarm','severity':'High','vertical':'Inverter'
     })
     assert created.status_code == 201, created.text
     issue_id = created.json()['id']
@@ -187,16 +184,15 @@ def test_issue_create_assigns_assignee_and_returns_intake_fields(client, db):
         email='intake-assignee@example.com', display_name='Inverter Assignee', role='Assignee',
     )
     db.add(assignee); db.flush()
-    db.add(UserEquipmentTypeAssignment(user_id=assignee.id, equipment_type='Inverter')); db.commit()
+    grant_assignee_plants(db, assignee.id); db.commit()
 
     options = client.get('/api/issues/assignees')
     assert options.status_code == 200
-    assert {'id':str(assignee.id),'name':'Inverter Assignee','equipment_types':['Inverter']} in options.json()
+    assert {'id':str(assignee.id),'name':'Inverter Assignee','plants':['INTAKE01']} in options.json()
 
     response = client.post('/api/issues', json={
         'plant_id':plant['id'],'vertical':'Inverter','description':'Intake details',
-        'severity':'Medium','assigned_to':str(assignee.id),'supplier':'Example Supplier',
-        'serial_number':'INV-serial-123',
+        'severity':'Medium','assigned_to':str(assignee.id),'subcategory':'Fan fault',
     })
     assert response.status_code == 201, response.text
     issue = response.json()
@@ -204,8 +200,8 @@ def test_issue_create_assigns_assignee_and_returns_intake_fields(client, db):
     assert issue['status'] == 'Assigned'
     assert issue['assigned_to'] == str(assignee.id)
     assert issue['assignee_text'] == 'Inverter Assignee'
-    assert issue['supplier'] == 'Example Supplier'
-    assert issue['serial_number'] == 'INV-serial-123'
+    assert issue['vertical'] == 'Inverter'
+    assert issue['subcategory'] == 'Fan fault'
 
 
 def test_issue_create_rejects_non_assignee_target(client, db):
@@ -292,12 +288,6 @@ def test_issue_assign_reassign_and_close_as_head(client, db):
     closed = client.post(f"/api/issues/{issue['id']}/close", json={'note':'verified','closure':{'rootCause':'test'}})
     assert closed.status_code == 200 and closed.json()['status'] == 'Closed'
 
-
-def test_equipment_requires_existing_plant(client, db):
-    import uuid
-    login_user(client, db)
-    response = client.post('/api/equipment', json={'plant_id':str(uuid.uuid4()),'equipment_code':'X','equipment_name':'Unknown Plant Equipment','metadata':{}})
-    assert response.status_code == 404
 
 
 def test_duplicate_plant_returns_conflict(client, db):
@@ -425,7 +415,7 @@ def test_site_engineer_scope_uses_explicit_assignment_not_legacy_engineer_text(c
     assert plants.json() == []
 
 
-def test_site_engineer_cannot_create_issue_for_another_plant_or_equipment(client, db):
+def test_site_engineer_cannot_create_issue_for_another_plant(client, db):
     own = Plant(site_code='SCOPE01', plant_name='Scoped Plant')
     other = Plant(site_code='SCOPE02', plant_name='Other Plant')
     db.add_all([own, other]); db.commit(); db.refresh(own); db.refresh(other)
@@ -436,21 +426,13 @@ def test_site_engineer_cannot_create_issue_for_another_plant_or_equipment(client
     # Cross-plant request is rejected even when the request body is otherwise valid.
     denied = client.post('/api/issues', json={
         'plant_id': str(other.id), 'description': 'Cross plant issue', 'severity': 'High',
-        'equipment_ref': 'INV-OUTSIDE',
+        'vertical': 'Inverter',
     })
     assert denied.status_code == 403, denied.text
 
-    from app.core.models import Equipment
-    outside = Equipment(plant_id=other.id, equipment_code='INV-OTHER', equipment_name='Other plant inverter', equipment_type='Inverter')
-    db.add(outside); db.commit(); db.refresh(outside)
-    same_plant_mismatch = client.post('/api/issues', json={
-        'plant_id': str(own.id), 'equipment_id': str(outside.id), 'description': 'Mismatched equipment', 'severity': 'Medium',
-    })
-    assert same_plant_mismatch.status_code == 422, same_plant_mismatch.text
-
     created = client.post('/api/issues', json={
         'plant_id': str(own.id), 'description': 'Inverter fault at assigned plant',
-        'severity': 'High', 'equipment_ref': 'INV-OWN',
+        'severity': 'High', 'vertical': 'Inverter',
     })
     assert created.status_code == 201, created.text
     assert created.json()['plant_id'] == str(own.id)
@@ -517,16 +499,14 @@ def test_issue_domain_mutations_create_user_notifications_and_server_ticket(clie
     assert db.query(Notification).filter(Notification.user_id == head.id, Notification.event_type == 'issue_status_changed').count() == 2
 
 
-def test_issue_filters_support_equipment_site_date_and_project_number(client, db):
+def test_issue_filters_support_category_site_date_and_project_number(client, db):
     login_user(client, db)
     plant = Plant(site_code='FILTER02', plant_name='Filter Plant 2', custom_fields={'projectNumber': 'PRJ-9021'})
     db.add(plant); db.commit(); db.refresh(plant)
-    from app.core.models import Equipment, Issue
-    eq = Equipment(plant_id=plant.id, equipment_code='INV-9021', equipment_name='Inverter 9021', equipment_type='Inverter')
-    db.add(eq); db.commit(); db.refresh(eq)
-    db.add(Issue(ticket_no='TKT-FLT-9021', plant_id=plant.id, equipment_id=eq.id, equipment_ref='INV-9021', description='Date scoped issue', severity='High', occurred_at=datetime(2026, 9, 20), legacy_payload={'projectNumber':'PRJ-9021'}))
+    from app.core.models import Issue
+    db.add(Issue(ticket_no='TKT-FLT-9021', plant_id=plant.id, vertical='Inverter', description='Date scoped issue', severity='High', occurred_at=datetime(2026, 9, 20), legacy_payload={'projectNumber':'PRJ-9021'}))
     db.commit()
-    assert len(client.get('/api/issues?equipment=9021').json()) == 1
+    assert len(client.get('/api/issues?vertical=Inverter').json()) == 1
     assert len(client.get('/api/issues?site_code=FILTER02').json()) == 1
     assert len(client.get('/api/issues?occurred_from=2026-09-19&occurred_to=2026-09-21').json()) == 1
     assert len(client.get('/api/issues?project_number=9021').json()) == 1
@@ -569,7 +549,7 @@ def test_assignee_can_read_only_scoped_extra_services(client, db):
     other = Plant(site_code='SVC02', plant_name='Service Other')
     db.add_all([own, other]); db.commit(); db.refresh(own); db.refresh(other)
     user = login_user(client, db, role='Assignee', name='Service Assignee', email='service-assignee@example.com')
-    db.add(UserEquipmentTypeAssignment(user_id=user.id, equipment_type='Inverter')); db.commit()
+    grant_assignee_plants(db, user.id); db.commit()
     from app.core.models import InventoryItem
     db.add_all([
         InventoryItem(legacy_id='INV-OWN', plant_id=own.id, item_name='Own Stock', payload={'id':'INV-OWN','plant':'Service Own'}),

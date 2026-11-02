@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 from app.auth.emails import canonical_email, is_gmail_family
 from app.core.config import get_settings
 from app.core.database import get_db
-from app.core.models import AuditLog, Equipment, Issue, OMTask, Plant, User, UserEquipmentAssignment, UserEquipmentTypeAssignment, UserPlantAssignment
+from app.core.models import AuditLog, Issue, OMTask, Plant, User, UserPlantAssignment
 from app.core.security import require_csrf, require_permission
 from app.plants.codes import normalize_site_code, plant_code_index
 from app.users.router import PORTFOLIO_ROLES, _active_head_count, out
@@ -43,9 +43,6 @@ HEADER_ALIASES = {
     "email": {"email", "email id", "e-mail", "mail", "email address"},
     "role": {"role", "designation", "access", "access level"},
     "plants": {"plants", "plant", "site code", "site codes", "sites", "plant code", "plant codes", "assigned plants"},
-    "equipment": {"equipment", "equipment id", "equipment ids", "equipment code", "equipment codes",
-                  "asset", "asset id", "asset code", "assets", "assigned equipment",
-                  "equipment type", "equipment types", "type", "types"},
 }
 
 
@@ -54,7 +51,6 @@ class InviteIn(BaseModel):
     email: str = Field(max_length=240)
     role: str
     plants: list[str] = Field(default_factory=list, max_length=500)  # site codes or plant names
-    equipment: list[str] = Field(default_factory=list, max_length=2000)  # equipment TYPES, e.g. "Inverter"
 
 
 class ProfileIn(BaseModel):
@@ -100,26 +96,9 @@ def _resolve_plants(tokens: list[str], index) -> list:
     return found
 
 
-def _resolve_types(tokens: list[str]) -> list[str]:
-    """Match tokens to the portal's equipment types (case-insensitive)."""
-    from app.core.security import EQUIPMENT_TYPES
-    by_key = {t.casefold(): t for t in EQUIPMENT_TYPES}
-    found: list[str] = []
-    missing: list[str] = []
-    for token in tokens:
-        match = by_key.get(token.strip().casefold())
-        if match is None:
-            missing.append(token.strip())
-        elif match not in found:
-            found.append(match)
-    if missing:
-        raise ValueError("Unknown equipment type: " + ", ".join(missing))
-    return found
-
-
 def _upsert_person(
     db: Session, actor: User, index, *, name: str, email: str, role: str,
-    plant_tokens: list[str], equipment_tokens: list[str],
+    plant_tokens: list[str],
 ):
     """Create or update one person. Raises ValueError BEFORE changing anything if the row is invalid."""
     email = (email or "").strip()
@@ -128,16 +107,14 @@ def _upsert_person(
         raise ValueError("Invalid email address")
     if role not in {"O&M Head", "Assignee", "Administration", "Site Engineer", "Viewer"}:
         raise ValueError("Unknown role")
-    if role == "Assignee" and plant_tokens:
-        raise ValueError("Assignees are assigned equipment types, not plants")
-    plants = _resolve_plants(plant_tokens, index) if role == "Site Engineer" else []
+    # Scope is plants for every non-portfolio role.
+    plants = _resolve_plants(plant_tokens, index) if role in {"Site Engineer", "Assignee"} else []
     if role in PORTFOLIO_ROLES or role == "Viewer":
         _resolve_plants(plant_tokens, index)  # still reject typos, but ignore the result
     if role == "Site Engineer" and len(plants) != 1:
         raise ValueError("A Site Engineer needs exactly one plant")
-    if role != "Assignee" and equipment_tokens:
-        raise ValueError("Equipment assignments are only valid for Assignees")
-    equipment = _resolve_types(equipment_tokens) if role == "Assignee" else []
+    if role == "Assignee" and not plants:
+        raise ValueError("An Assignee needs at least one plant")
 
     existing = db.scalar(select(User).where(func.lower(User.email) == key))
     if existing is None and is_gmail_family(email):
@@ -155,8 +132,7 @@ def _upsert_person(
         if existing.role == "O&M Head" and role != "O&M Head" and _active_head_count(db, exclude_id=existing.id) == 0:
             raise ValueError("At least one active O&M Head is required")
         before = {"role": existing.role,
-                  "plant_ids": [str(x) for x in db.scalars(select(UserPlantAssignment.plant_id).where(UserPlantAssignment.user_id == existing.id))],
-                  "equipment_types": sorted(db.scalars(select(UserEquipmentTypeAssignment.equipment_type).where(UserEquipmentTypeAssignment.user_id == existing.id)))}
+                  "plant_ids": [str(x) for x in db.scalars(select(UserPlantAssignment.plant_id).where(UserPlantAssignment.user_id == existing.id))]}
         user = existing
         user.role = role
         if (user.external_subject or "").startswith(INVITE_PREFIX) and name:
@@ -173,18 +149,13 @@ def _upsert_person(
         status = "created"
 
     db.execute(delete(UserPlantAssignment).where(UserPlantAssignment.user_id == user.id))
-    db.execute(delete(UserEquipmentAssignment).where(UserEquipmentAssignment.user_id == user.id))
-    db.execute(delete(UserEquipmentTypeAssignment).where(UserEquipmentTypeAssignment.user_id == user.id))
     for p in plants:
         db.add(UserPlantAssignment(user_id=user.id, plant_id=p.id, assignment_role=role))
-    for item in equipment:
-        db.add(UserEquipmentTypeAssignment(user_id=user.id, equipment_type=item))
     db.add(AuditLog(
         user_id=actor.id, actor_name=actor.display_name,
         action="Pre-registered user" if status == "created" else "Changed user access",
         module="Users", entity_type="user", entity_id=str(user.id),
-        before_state=before, after_state={"role": role, "plant_ids": [str(p.id) for p in plants],
-                                          "equipment_types": list(equipment)},
+        before_state=before, after_state={"role": role, "plant_ids": [str(p.id) for p in plants]},
         metadata_json={"target_email": email, "via": "invite/import"},
     ))
     return status, user
@@ -192,8 +163,8 @@ def _upsert_person(
 
 def _scope_text(db: Session, user: User) -> str:
     if user.role == "Assignee":
-        types = sorted(db.scalars(select(UserEquipmentTypeAssignment.equipment_type).where(UserEquipmentTypeAssignment.user_id == user.id)))
-        return (", ".join(types) + " \u2014 in every plant") if types else "Equipment to be assigned by your O&M Head"
+        names = list(db.scalars(select(Plant.plant_name).join(UserPlantAssignment, UserPlantAssignment.plant_id == Plant.id).where(UserPlantAssignment.user_id == user.id)))
+        return ", ".join(names) if names else "Plants to be assigned by your O&M Head"
     if user.role == "Site Engineer":
         names = list(db.scalars(select(Plant.plant_name).join(UserPlantAssignment, UserPlantAssignment.plant_id == Plant.id).where(UserPlantAssignment.user_id == user.id)))
         return names[0] if names else "Your plant"
@@ -335,7 +306,7 @@ def invite_person(
     role = _role(data.role) or data.role
     try:
         status, user = _upsert_person(db, actor, _plant_index(db), name=data.name, email=data.email,
-                                          role=role, plant_tokens=data.plants, equipment_tokens=data.equipment)
+                                          role=role, plant_tokens=data.plants)
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
     db.commit()
@@ -413,7 +384,7 @@ async def import_people(
         try:
             status, _ = _upsert_person(db, actor, index, name=str(cell(row, "name") or ""), email=email,
                                        role=role, plant_tokens=_tokens(cell(row, "plants")),
-                                       equipment_tokens=_tokens(cell(row, "equipment")))
+                                       )
         except ValueError as exc:
             errors.append({"row": n, "email": email, "error": str(exc)})
             continue

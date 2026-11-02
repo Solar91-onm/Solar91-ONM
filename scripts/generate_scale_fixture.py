@@ -17,7 +17,6 @@ from uuid import uuid4
 
 BASE_PROFILE = {
     "plants": 5,
-    "equipment_per_plant": 2,
     "issues_per_plant": 20,
     "pm_tasks_per_plant": 15,
     "washing_tables_per_plant": 10,
@@ -33,7 +32,7 @@ def seed_synthetic_data(db, scale: int, prefix: str = "LT") -> dict[str, int]:
         raise ValueError("scale must be 1, 5, or 10")
 
     from app.core.models import (
-        Equipment, Handover, HandoverItem, Issue, OMTask, Plant, User,
+        Handover, HandoverItem, Issue, OMTask, Plant, User,
         WashingConfig, WashingDailyReport, WashingHistory, WashingTable,
     )
 
@@ -50,7 +49,7 @@ def seed_synthetic_data(db, scale: int, prefix: str = "LT") -> dict[str, int]:
     db.add(user)
     db.flush()
     counts = {key: 0 for key in (
-        "plants", "equipment", "issues", "pm_tasks", "washing_tables",
+        "plants", "issues", "pm_tasks", "washing_tables",
         "washing_history", "washing_reports", "handovers", "handover_items",
     )}
 
@@ -65,29 +64,11 @@ def seed_synthetic_data(db, scale: int, prefix: str = "LT") -> dict[str, int]:
         db.flush()
         counts["plants"] += 1
         db.add(WashingConfig(plant_id=plant.id, team=[user.display_name], assigned_user_id=user.id))
-        equipment = [
-            Equipment(
-                plant_id=plant.id,
-                equipment_code=f"{prefix}-{plant_no:05d}-INV-{n:02d}",
-                equipment_name=f"Inverter {n:02d}",
-                equipment_type="Inverter",
-                status="active",
-                quantity=1,
-                in_charge_user_id=user.id,
-            )
-            for n in range(1, BASE_PROFILE["equipment_per_plant"] + 1)
-        ]
-        db.add_all(equipment)
-        db.flush()
-        counts["equipment"] += len(equipment)
-
         issues = []
         for n in range(BASE_PROFILE["issues_per_plant"] * scale):
             issues.append(Issue(
                 ticket_no=f"{prefix}-{plant_no:05d}-ISS-{n:06d}",
                 plant_id=plant.id,
-                equipment_id=equipment[n % len(equipment)].id,
-                equipment_ref=equipment[n % len(equipment)].equipment_code,
                 description=f"Synthetic inverter observation {n % 7}",
                 severity=("Critical", "High", "Medium", "Low")[n % 4],
                 status=("Open", "Assigned", "In Progress", "Resolved")[n % 4],
@@ -105,7 +86,6 @@ def seed_synthetic_data(db, scale: int, prefix: str = "LT") -> dict[str, int]:
                 plant_id=plant.id,
                 task_name=f"Synthetic preventive check {n % 5}",
                 task_type="Inverter",
-                equipment_ref=equipment[n % len(equipment)].equipment_code,
                 due_on=today + timedelta(days=(n % 31) - 15),
                 assignee_text=user.display_name,
                 assignee_user_id=user.id,

@@ -13,8 +13,8 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.core.database import get_db, release_connection
-from app.core.models import Issue, IssueHistory, OMTask, User, UserEquipmentTypeAssignment
-from app.core.security import ensure_equipment_scope, ensure_plant_scope, has_portfolio_scope, equipment_scope_matches, get_current_user, is_head, require_csrf, require_permission, text_is_current_user, user_scoped_equipment_types, user_scoped_plant_ids
+from app.core.models import Issue, IssueHistory, OMTask, Plant, User, UserPlantAssignment
+from app.core.security import ensure_plant_scope, has_portfolio_scope, get_current_user, is_head, require_csrf, require_permission, text_is_current_user, user_scoped_plant_ids
 from app.issues import importer as issue_importer
 from app.issues.deadlines import deadline_settings, save_deadline_hours
 from app.issues.repository import IssueRepository
@@ -28,16 +28,17 @@ PLANT_TIMEZONE=timezone(timedelta(hours=5,minutes=30))
 @router.get("/assignees")
 def list_issue_assignees(db:Annotated[Session,Depends(get_db)],user:Annotated[User,Depends(require_permission("issues.create"))]):
     rows=list(db.scalars(select(User).where(User.role=="Assignee",User.is_active.is_(True)).order_by(User.display_name)))
-    type_rows=db.execute(
-        select(UserEquipmentTypeAssignment.user_id,UserEquipmentTypeAssignment.equipment_type)
-        .join(User,User.id==UserEquipmentTypeAssignment.user_id)
+    plant_rows=db.execute(
+        select(UserPlantAssignment.user_id,Plant.site_code)
+        .join(User,User.id==UserPlantAssignment.user_id)
+        .join(Plant,Plant.id==UserPlantAssignment.plant_id)
         .where(User.role=="Assignee",User.is_active.is_(True))
-        .order_by(UserEquipmentTypeAssignment.equipment_type)
+        .order_by(Plant.site_code)
     ).all()
     by_user:dict[UUID,list[str]]={}
-    for user_id,equipment_type in type_rows:
-        by_user.setdefault(user_id,[]).append(equipment_type)
-    return [{"id":str(row.id),"name":row.display_name,"equipment_types":by_user.get(row.id,[])} for row in rows]
+    for user_id,site_code in plant_rows:
+        by_user.setdefault(user_id,[]).append(site_code)
+    return [{"id":str(row.id),"name":row.display_name,"plants":by_user.get(row.id,[])} for row in rows]
 
 @router.get("/deadlines")
 def get_issue_deadlines(db:Annotated[Session,Depends(get_db)],user:Annotated[User,Depends(get_current_user)]):
@@ -74,16 +75,12 @@ def issues_pulse(db:Annotated[Session,Depends(get_db)],user:Annotated[User,Depen
     The browser re-fetches its data only when ``count``, ``latest`` or ``tasks`` differ from the last pulse.
     ``tasks`` fingerprints the PM work orders in the same scope (count and last change), so a job created or changed
     by someone else also reaches open browsers; it costs no extra round trip (sub-queries of the same statement).
-    O&M Head / Administration and Assignees need no scope lookup first (an Assignee with any equipment type sees
-    every plant, checked inside the same query); a Site Engineer's plant is looked up as before.
+    O&M Head / Administration need no scope lookup; every other role is resolved to its assigned plants.
     """
     tasks=select(func.count(OMTask.id)).scalar_subquery(),select(func.max(OMTask.updated_at)).scalar_subquery()
     stmt=select(func.count(Issue.id),func.max(Issue.updated_at),*tasks).where(Issue.deleted_at.is_(None))
     if has_portfolio_scope(user):
         key:object="all"
-    elif user.role=="Assignee":
-        key=("assignee",user.id)
-        stmt=stmt.where(select(UserEquipmentTypeAssignment.user_id).where(UserEquipmentTypeAssignment.user_id==user.id).exists())
     else:
         plant_scope=user_scoped_plant_ids(db,user)
         if not plant_scope:
@@ -105,11 +102,10 @@ def issues_pulse(db:Annotated[Session,Depends(get_db)],user:Annotated[User,Depen
     return out
 
 @router.get("",response_model=list[IssueOut])
-def list_issues(db:Annotated[Session,Depends(get_db)],user:Annotated[User,Depends(get_current_user)],plant_id:UUID|None=None,status:str|None=None,severity:str|None=None,assignee:str|None=None,vertical:str|None=None,maker:str|None=None,equipment:str|None=None,site_code:str|None=None,project_number:str|None=None,occurred_from:datetime|None=None,occurred_to:datetime|None=None,q:str|None=None,offset:int=0,limit:int=Query(50,le=200)):
+def list_issues(db:Annotated[Session,Depends(get_db)],user:Annotated[User,Depends(get_current_user)],plant_id:UUID|None=None,status:str|None=None,severity:str|None=None,assignee:str|None=None,vertical:str|None=None,site_code:str|None=None,project_number:str|None=None,occurred_from:datetime|None=None,occurred_to:datetime|None=None,q:str|None=None,offset:int=0,limit:int=Query(50,le=200)):
     plant_scope=user_scoped_plant_ids(db,user)
-    equipment_scope=user_scoped_equipment_types(db,user) if user.role == "Assignee" else None
     severity = normalize_issue_severity(severity)
-    return IssueRepository(db).list(plant_id=plant_id,status=status,severity=severity,assignee=assignee,vertical=vertical,maker=maker,equipment=equipment,site_code=site_code,project_number=project_number,occurred_from=occurred_from,occurred_to=occurred_to,q=q,allowed_plant_ids=plant_scope,allowed_equipment_types=equipment_scope,offset=offset,limit=limit)
+    return IssueRepository(db).list(plant_id=plant_id,status=status,severity=severity,assignee=assignee,vertical=vertical,site_code=site_code,project_number=project_number,occurred_from=occurred_from,occurred_to=occurred_to,q=q,allowed_plant_ids=plant_scope,offset=offset,limit=limit)
 
 @router.get("/deleted", response_model=list[IssueOut])
 def list_deleted_issues(db:Annotated[Session,Depends(get_db)],user:Annotated[User,Depends(require_permission("issues.manage"))],limit:int=Query(100,ge=1,le=200)):
@@ -291,11 +287,8 @@ def create_issue(data:IssueCreate,db:Annotated[Session,Depends(get_db)],user:Ann
         else:
             raise HTTPException(422, "A plant is required for scoped issue creation")
     if plant_id:
-        if user.role == "Assignee":
-            ensure_equipment_scope(db,user,plant_id,data.equipment_id,data.equipment_ref,data.vertical)
-        else:
-            ensure_plant_scope(db,user,plant_id)
-    # The Assignee is validated (and, for the O&M Head, given the equipment scope) inside IssueService.create.
+        ensure_plant_scope(db,user,plant_id)
+    # The Assignee is validated (and, for the O&M Head, given the plant scope) inside IssueService.create.
     if plant_id != data.plant_id:
         data = data.model_copy(update={"plant_id": plant_id})
     return IssueService(db).create(data,user)
@@ -309,11 +302,6 @@ def update_issue(issue_id:UUID,data:IssueUpdate,db:Annotated[Session,Depends(get
         row=_require_issue_workflow_scope(db,user,issue_id)
         if row.status=="Closed":
             raise HTTPException(409,"A closed ticket can only be edited by the O&M Head")
-        changes=data.model_dump(exclude_unset=True)
-        if any(key in changes for key in ("equipment_id","equipment_ref","vertical")):
-            # Moving the ticket to other equipment must keep it inside the Assignee's own equipment scope.
-            ensure_equipment_scope(db,user,row.plant_id,changes.get("equipment_id",row.equipment_id),
-                                   changes.get("equipment_ref",row.equipment_ref),changes.get("vertical",row.vertical))
     return IssueService(db).update(issue_id,data,user)
 
 @router.patch("/{issue_id}/dates",response_model=IssueOut,dependencies=[Depends(require_csrf)])
@@ -345,10 +333,7 @@ def _require_issue_action_scope(db:Session,user:User,issue_id:UUID):
     row=IssueRepository(db).by_id(issue_id)
     if not row: return
     if user.role=="O&M Head": return
-    if user.role == "Assignee":
-        ensure_equipment_scope(db,user,row.plant_id,row.equipment_id,row.equipment_ref,row.vertical)
-    else:
-        ensure_plant_scope(db,user,row.plant_id)
+    ensure_plant_scope(db,user,row.plant_id)
 
 def _require_issue_workflow_role(user:User):
     if user.role not in {"O&M Head","Assignee"}:

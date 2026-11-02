@@ -12,16 +12,17 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import inspect as sa_inspect, text
 from fastapi.encoders import jsonable_encoder
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.audit.router import router as audit_router
 from app.calendar.router import router as calendar_router
+from app.categories.router import router as categories_router
 from app.field.router import router as field_router
 from app.auth.router import router as auth_router
-from app.core.assets import asset_hash, build_info, version_static_urls
+from app.core.assets import asset_hash_for_url, build_info, version_static_urls
 from app.core.compression import TextGZipMiddleware
 from app.core.config import get_settings
 from app.imports.router import router as imports_router
@@ -31,6 +32,7 @@ from app.operations.router import router as operations_router
 from app.plants.router import router as plants_router
 from app.photos.router import router as photos_router
 from app.pmplan.router import router as pmplan_router
+from app.portal.router import router as portal_router
 from app.scada.router import router as scada_router
 from app.scheduled.router import router as scheduled_router
 from app.scheduled.washing_cycles import invalidate_overview_cache
@@ -124,11 +126,12 @@ async def security_headers(request: Request, call_next):
     response.headers.setdefault("X-Frame-Options", "DENY")
     response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
     response.headers.setdefault("Permissions-Policy", "camera=(self), microphone=(), geolocation=()")
-    if request.url.path.startswith("/static/"):
-        # The portal page links every asset as /static/...?v=<content hash>. A request carrying the current
-        # hash can be cached for a year (a changed file gets a new URL); anything else is revalidated.
+    if request.url.path.startswith(("/assets/", "/static/")):
+        # The portal page links every asset as /assets/...?v=<content hash> (and /static/... for the
+        # sign-in panel and PWA files). A request carrying the current hash can be cached for a year
+        # (a changed file gets a new URL); anything else is revalidated.
         version = request.query_params.get("v")
-        current = asset_hash(request.url.path[len("/static/"):]) if version else None
+        current = asset_hash_for_url(request.url.path) if version else None
         response.headers.setdefault(
             "Cache-Control",
             "public, max-age=31536000, immutable" if version and version == current else "public, max-age=0, must-revalidate",
@@ -287,6 +290,10 @@ async def _start_pm_daily_job_loop():
 STATIC=BASE/"frontend"/"static"; TEMPLATES=BASE/"frontend"/"templates"
 if STATIC.is_dir():
     app.mount("/static",StaticFiles(directory=STATIC),name="static")
+# The portal design system (CSS/JS/images) is the application frontend; it is served from /assets.
+PORTAL_ASSETS=BASE/"assets"
+if PORTAL_ASSETS.is_dir():
+    app.mount("/assets",StaticFiles(directory=PORTAL_ASSETS),name="portal-assets")
 templates=Jinja2Templates(directory=TEMPLATES)
 
 app.include_router(auth_router)
@@ -303,6 +310,8 @@ app.include_router(audit_router)
 app.include_router(scada_router)
 app.include_router(scheduled_router)
 app.include_router(pmplan_router)
+app.include_router(portal_router)
+app.include_router(categories_router)
 app.include_router(users_router)
 app.include_router(users_invites_router)
 
@@ -317,6 +326,11 @@ def index(request:Request):
         build_id=(info["commit_short"] or "local") + "." + info["frontend_bundle"],
     )
     return HTMLResponse(version_static_urls(html))
+
+@app.get("/portal",include_in_schema=False)
+def standalone_portal():
+    """The portal redesign is now the application itself. Keep old bookmarks working."""
+    return RedirectResponse("/",status_code=308)
 
 @app.get("/health",tags=["System"])
 def health(): return {"status":"ok","app":settings.app_name,"environment":settings.app_env}

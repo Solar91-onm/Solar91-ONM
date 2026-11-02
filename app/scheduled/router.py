@@ -7,14 +7,14 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import Response
-from sqlalchemy import and_, delete, func, or_, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from app.core.timeutil import business_today, log_stamp, utc_now
 from app.core.config import get_settings
 from app.core.database import get_db, release_connection
-from app.core.models import AuditLog, Equipment, Issue, OMTask, PMAlertLog, PMDueChange, PMFollowUp, Plant, User, WashingHistory, WashingTable, WashingConfig, Permit, StateRevision
-from app.core.security import WASHING_TYPE, equipment_scope_matches, get_current_user, require_csrf, require_permission, user_scoped_equipment_types, user_scoped_plant_ids, resolve_equipment_id
+from app.core.models import AuditLog, Issue, OMTask, PMAlertLog, PMDueChange, PMFollowUp, Plant, User, WashingHistory, WashingTable, WashingConfig, Permit, StateRevision
+from app.core.security import get_current_user, require_csrf, require_permission, user_scoped_plant_ids
 from app.plants.codes import find_plant_by_code, normalize_site_code
 from app.pmplan.units import distribute, next_cycle_id
 from app.scheduled.schemas import PMFollowUpCreate, ProblemTaskCreate, TaskCompletion, TaskIssueLink, TaskReassign, TaskScheduleEdit, TaskUnitPlanEdit, WashingCycleDateRequest, WashingCycleScheduleRequest, WashingDailyReportRequest, WashingExcusedReasonRequest, WashingExcusedReasonsRequest, WashingReportReviewRequest, WashingReportUpdateRequest, WashingSetupRequest, WashingSheetRequest, WashingBulkConfirmRequest
@@ -61,10 +61,6 @@ def _task(db: Session, work_order_no: str, *, for_update: bool = False) -> OMTas
 def _ensure_washing_scope(db: Session, user: User, table: WashingTable) -> None:
     if user.role == "O&M Head":
         return
-    if user.role == "Assignee":
-        if equipment_scope_matches(db,user,table.plant_id,None,None,WASHING_TYPE):
-            return
-        raise HTTPException(403, "Panel washing is outside your assigned equipment types")
     allowed = user_scoped_plant_ids(db, user) or set()
     if table.plant_id not in allowed:
         raise HTTPException(403, "This washing table is outside your assigned scope")
@@ -73,112 +69,24 @@ def _ensure_washing_scope(db: Session, user: User, table: WashingTable) -> None:
 def _can_view_task(db: Session, user: User, task: OMTask) -> bool:
     if user.role in {"O&M Head", "Administration"}:
         return True
-    if user.role == "Site Engineer":
+    if user.role in {"Site Engineer", "Assignee"}:
         allowed = user_scoped_plant_ids(db, user) or set()
         return task.plant_id in allowed
-    if user.role == "Assignee":
-        return equipment_scope_matches(db,user,task.plant_id,None,task.equipment_ref,task.task_type)
     return False
 
 
 def _can_execute_task(db: Session, user: User, task: OMTask) -> bool:
     if user.role == "O&M Head":
         return True
-    if user.role == "Site Engineer":
+    if user.role in {"Site Engineer", "Assignee"}:
         allowed = user_scoped_plant_ids(db, user) or set()
         return task.plant_id in allowed
-    if user.role == "Assignee":
-        return equipment_scope_matches(db,user,task.plant_id,None,task.equipment_ref,task.task_type)
     return False
 
 
-def _task_list_lookups(db: Session, tasks: list[OMTask], allowed_types: set[str] | None = None) -> dict:
+def _task_list_lookups(db: Session, tasks: list[OMTask]) -> dict:
     """Load list serialization lookups in batches instead of issuing queries per task."""
-    plant_names: dict[uuid.UUID, str] = {}
-    plant_ids = {task.plant_id for task in tasks if task.plant_id}
-    equipment_ids: set[uuid.UUID] = set()
-    equipment_refs: set[str] = set()
-    for task in tasks:
-        reference = (task.equipment_ref or "").strip()
-        if not reference:
-            continue
-        equipment_refs.add(reference.casefold())
-        try:
-            equipment_ids.add(uuid.UUID(reference))
-        except ValueError:
-            pass
-
-    predicates = []
-    if plant_ids:
-        predicates.append(Equipment.plant_id.in_(plant_ids))
-    if equipment_ids:
-        predicates.append(Equipment.id.in_(equipment_ids))
-    equipment_rows = []
-    if predicates and tasks:
-        equipment_stmt = select(
-            Equipment.id, Equipment.plant_id, Equipment.equipment_code, Equipment.equipment_name,
-            Equipment.equipment_type, Equipment.quantity, Equipment.status,
-        ).where(or_(*predicates))
-        if allowed_types is not None:
-            type_filter = func.lower(Equipment.equipment_type).in_(allowed_types) if allowed_types else None
-            reference_filter = []
-            if equipment_ids:
-                reference_filter.append(Equipment.id.in_(equipment_ids))
-            if plant_ids and equipment_refs:
-                reference_filter.append(and_(
-                    Equipment.plant_id.in_(plant_ids),
-                    or_(
-                        func.lower(Equipment.equipment_code).in_(equipment_refs),
-                        func.lower(Equipment.equipment_name).in_(equipment_refs),
-                    ),
-                ))
-            if type_filter is not None:
-                reference_filter.append(and_(Equipment.plant_id.in_(plant_ids), type_filter))
-            equipment_stmt = equipment_stmt.where(or_(*reference_filter)) if reference_filter else equipment_stmt.where(False)
-        equipment_rows = db.execute(equipment_stmt).all()
-
-    equipment_by_id = {}
-    codes_by_plant: dict[tuple[uuid.UUID, str], list[uuid.UUID]] = {}
-    names_by_plant: dict[tuple[uuid.UUID, str], list[uuid.UUID]] = {}
-    quantities: dict[tuple[uuid.UUID, str], int] = {}
-    for row in equipment_rows:
-        if row.status != "inactive":
-            equipment_by_id[row.id] = row
-        # Preserve the existing task quantity aggregate, which includes inactive inventory.
-        if row.equipment_code and row.status is not None and row.status != "inactive":
-            codes_by_plant.setdefault((row.plant_id, row.equipment_code.lower()), []).append(row.id)
-        if row.equipment_name and row.status is not None and row.status != "inactive":
-            names_by_plant.setdefault((row.plant_id, row.equipment_name.lower()), []).append(row.id)
-        if row.equipment_type:
-            key = (row.plant_id, row.equipment_type.lower())
-            quantities[key] = quantities.get(key, 0) + (row.quantity or 0)
-
-    equipment_id_by_task: dict[uuid.UUID, uuid.UUID | None] = {}
-    for task in tasks:
-        reference = (task.equipment_ref or "").strip()
-        resolved = None
-        if reference:
-            try:
-                candidate = equipment_by_id.get(uuid.UUID(reference))
-            except ValueError:
-                candidate = None
-            if candidate and (task.plant_id is None or candidate.plant_id == task.plant_id):
-                resolved = candidate.id
-            elif task.plant_id is not None:
-                code_matches = codes_by_plant.get((task.plant_id, reference.casefold()), [])
-                if code_matches:
-                    resolved = code_matches[0] if len(code_matches) == 1 else None
-                else:
-                    name_matches = names_by_plant.get((task.plant_id, reference.casefold()), [])
-                    resolved = name_matches[0] if len(name_matches) == 1 else None
-        equipment_id_by_task[task.id] = resolved
-
-    return {
-        "plant_names": plant_names,
-        "equipment_by_id": equipment_by_id,
-        "equipment_ids": equipment_id_by_task,
-        "quantities": quantities,
-    }
+    return {"plant_names": {}}
 
 
 def _task_out(
@@ -194,15 +102,8 @@ def _task_out(
             select(PMFollowUp).where(PMFollowUp.task_id == task.id)
             .order_by(PMFollowUp.at.desc(), PMFollowUp.id.desc()).limit(1)
         )
+    # Unit count: what the job records, else its PM cycle's unit plan.
     quantity = task.quantity if task.quantity is not None else task.total_units
-    if quantity is None and task.plant_id and task.task_type and lookups is not None:
-        quantity = lookups["quantities"].get((task.plant_id, task.task_type.casefold()))
-    elif quantity is None and task.plant_id and task.task_type:
-        quantity = db.scalar(select(func.sum(Equipment.quantity)).where(
-            Equipment.plant_id == task.plant_id,
-            func.lower(Equipment.equipment_type) == task.task_type.casefold(),
-            Equipment.status != "inactive",
-        ))
     due_date = task.planned_due_on or task.due_on
     days_late = max(0, (business_today() - due_date).days) if (
         due_date and due_date < business_today() and task.status not in {"Completed", "Cancelled"}
@@ -214,18 +115,12 @@ def _task_out(
         if kind in {"before", "after"}:
             clean["url"] = f"/api/scheduled/tasks/{task.work_order_no}/evidence/{kind}"
         evidence.append(clean)
-    equipment_id = (
-        lookups["equipment_ids"].get(task.id)
-        if lookups is not None
-        else resolve_equipment_id(db, task.plant_id, None, task.equipment_ref)
-    )
     return {
         "id": task.work_order_no, "db_id": str(task.id),
         "plant": lookups["plant_names"].get(task.plant_id, "") if lookups is not None else plant.plant_name if plant else "",
         "plant_id": str(task.plant_id) if task.plant_id else None, "name": task.task_name,
-        "equipmentId": str(equipment_id) if equipment_id else None,
         "type": task.task_type, "problem": task.problem, "problemSource": task.problem_source,
-        "equip": task.equipment_ref, "freq": task.frequency, "due": task.due_on.isoformat() if task.due_on else None,
+        "freq": task.frequency, "due": task.due_on.isoformat() if task.due_on else None,
         "start": task.start_on.isoformat() if task.start_on else None,
         "assignee": task.assignee_text, "assigneeUserId": str(task.assignee_user_id) if task.assignee_user_id else None, "status": task.status, "sop": task.sop, "safety": task.safety,
         "tools": task.tools, "duration": task.duration, "completion": task.completion,
@@ -265,34 +160,16 @@ def list_tasks(db: Annotated[Session, Depends(get_db)], user: Annotated[User, De
     rows = [row[0] for row in task_rows]
     plant_names = {task.plant_id: name for task, name in task_rows if task.plant_id and name}
 
-    allowed_types = None
     list_lookups = None
     if user.role in {"O&M Head", "Administration"}:
         visible = rows
-    elif user.role == "Site Engineer":
+    elif user.role in {"Site Engineer", "Assignee"}:
         allowed_plants = user_scoped_plant_ids(db, user) or set()
         visible = [task for task in rows if task.plant_id in allowed_plants]
-    elif user.role == "Assignee":
-        allowed_types = user_scoped_equipment_types(db, user) or set()
-        candidates = [
-            task for task in rows
-            if not (task.task_type or "").strip() or (task.task_type or "").strip().casefold() in allowed_types
-        ]
-        list_lookups = _task_list_lookups(db, candidates, allowed_types)
-        visible = []
-        for task in candidates:
-            task_type = (task.task_type or "").strip().casefold()
-            if task_type in allowed_types:
-                visible.append(task)
-                continue
-            equipment_id = list_lookups["equipment_ids"].get(task.id)
-            equipment = list_lookups["equipment_by_id"].get(equipment_id)
-            if equipment and (equipment.equipment_type or "").strip().casefold() in allowed_types:
-                visible.append(task)
     else:
         visible = []
 
-    lookups = list_lookups if list_lookups is not None else _task_list_lookups(db, visible, allowed_types)
+    lookups = list_lookups if list_lookups is not None else _task_list_lookups(db, visible)
     lookups["plant_names"] = plant_names
     latest: dict[uuid.UUID, PMFollowUp] = {}
     if visible:
@@ -319,7 +196,7 @@ def _require_pm_follow_up_access(db: Session, user: User, task: OMTask) -> None:
         return
     if user.role == "Assignee" and (
         task.assignee_user_id == user.id
-        or equipment_scope_matches(db,user,task.plant_id,None,task.equipment_ref,task.task_type)
+        or task.plant_id in (user_scoped_plant_ids(db, user) or set())
     ):
         return
     raise HTTPException(403,"Only the O&M Head or an assigned/in-scope Assignee can access follow-ups")
@@ -408,9 +285,8 @@ def create_problem_task(payload: ProblemTaskCreate, db: Annotated[Session, Depen
     if user.role not in CREATOR_ROLES:
         raise HTTPException(403, "Only O&M Head and Assignee/O&M Team can create Preventive Maintenance tasks")
     plant = _plant(db, payload.plant_id)
-    if user.role == "Assignee":
-        if not equipment_scope_matches(db,user,plant.id,None,payload.equipment_ref,payload.asset):
-            raise HTTPException(403, "This equipment is outside your assigned scope")
+    if user.role == "Assignee" and plant.id not in (user_scoped_plant_ids(db, user) or set()):
+        raise HTTPException(403, "This plant is outside your assigned scope")
     assigned_user = None
     if payload.assignee:
         assigned_user = db.scalar(select(User).where(
@@ -418,19 +294,14 @@ def create_problem_task(payload: ProblemTaskCreate, db: Annotated[Session, Depen
             (User.display_name.ilike(payload.assignee.strip())) | (User.email.ilike(payload.assignee.strip()))
         ))
     _require_assignee_role(assigned_user)
-    if assigned_user and assigned_user.role == "Assignee" and not equipment_scope_matches(
-        db, assigned_user, plant.id, None, payload.equipment_ref, payload.asset
+    if assigned_user and assigned_user.role == "Assignee" and plant.id not in (
+        user_scoped_plant_ids(db, assigned_user) or set()
     ):
-        raise HTTPException(422, "The selected Assignee is not assigned to this equipment type")
+        raise HTTPException(422, "The selected Assignee is not assigned to this plant")
     task = OMTask(
         work_order_no="WO-" + uuid.uuid4().hex[:10].upper(), plant_id=plant.id,
         task_name=payload.task_name, task_type=payload.asset, problem=payload.problem,
-        problem_source="Site Issues problem library", equipment_ref=payload.equipment_ref,
-        quantity=db.scalar(select(func.sum(Equipment.quantity)).where(
-            Equipment.plant_id==plant.id,
-            func.lower(Equipment.equipment_type)==payload.asset.casefold(),
-            Equipment.status!="inactive",
-        )),
+        problem_source="Site Issues problem library",
         frequency=payload.frequency, due_on=payload.due_on, assignee_text=payload.assignee,
         assignee_user_id=assigned_user.id if assigned_user else None,
         status="Scheduled", sop=payload.sop, safety=payload.safety, tools=payload.tools,
@@ -439,7 +310,7 @@ def create_problem_task(payload: ProblemTaskCreate, db: Annotated[Session, Depen
         legacy_payload={"problem": payload.problem, "problemSource": "Site Issues problem library"}, created_by=user.id,
     )
     db.add(task); db.flush(); _audit(db, user, "Created problem-based scheduled task", task, {"asset": payload.asset, "problem": payload.problem})
-    from app.notifications.service import create_notification, equipment_responsible_users, notify_users
+    from app.notifications.service import create_notification, plant_responsible_users, notify_users
     if assigned_user:
         create_notification(
             db, user_id=assigned_user.id, event_type="task_assigned",
@@ -449,7 +320,7 @@ def create_problem_task(payload: ProblemTaskCreate, db: Annotated[Session, Depen
             dedupe_key=f"task-created:{task.id}:{assigned_user.id}",
         )
     else:
-        responsible=equipment_responsible_users(db,plant_id=plant.id,equipment_ref=payload.equipment_ref,equipment_type=payload.asset)
+        responsible=plant_responsible_users(db,plant_id=plant.id)
         notify_users(db,responsible,event_type="task_assigned",title=f"Task assigned — {task.work_order_no}",
                      message=f"{plant.plant_name} · {task.task_name}",target_type="task",target_id=task.work_order_no,
                      dedupe_key=f"task-owner:{task.id}")
@@ -670,7 +541,7 @@ def complete_task(work_order_no: str, payload: TaskCompletion, db: Annotated[Ses
     linked_issue = None
     if payload.anomaly:
         linked_issue = next_issue_ticket_no(db)
-        issue = Issue(ticket_no=linked_issue, plant_id=task.plant_id, equipment_ref=task.equipment_ref, vertical=task.task_type or "Other", description=f'From Preventive Maintenance task "{task.task_name}": {payload.remarks or "problem found during execution"}', severity="Critical", status="Open", occurred_at=utc_now(), assignee_text=task.assignee_text, photo_count=2, source_task=task.work_order_no, legacy_payload={"evidence":[{**dict(e),"url":f"/api/scheduled/tasks/{task.work_order_no}/evidence/{e.get('kind')}"} for e in (task.evidence or [])]}, created_by=user.id)
+        issue = Issue(ticket_no=linked_issue, plant_id=task.plant_id, vertical=task.task_type or "Other", description=f'From Preventive Maintenance task "{task.task_name}": {payload.remarks or "problem found during execution"}', severity="Critical", status="Open", occurred_at=utc_now(), assignee_text=task.assignee_text, photo_count=2, source_task=task.work_order_no, legacy_payload={"evidence":[{**dict(e),"url":f"/api/scheduled/tasks/{task.work_order_no}/evidence/{e.get('kind')}"} for e in (task.evidence or [])]}, created_by=user.id)
         db.add(issue); task.linked_issue = linked_issue
     # Unit tasks repeat from their ORIGINAL planned day so the unit-by-day pattern holds even after a missed unit was rolled.
     cadence_base = (task.planned_due_on or task.due_on) if task.unit_no else task.due_on
@@ -685,7 +556,7 @@ def complete_task(work_order_no: str, payload: TaskCompletion, db: Annotated[Ses
         exists_query = exists_query.where(OMTask.unit_no == task.unit_no) if task.unit_no is not None else exists_query.where(OMTask.unit_no.is_(None))
         exists = db.scalar(exists_query)
         if not exists:
-            db.add(OMTask(work_order_no="WO-"+uuid.uuid4().hex[:10].upper(), plant_id=task.plant_id, task_name=task.task_name, task_type=task.task_type, problem=task.problem, problem_source=task.problem_source, equipment_ref=task.equipment_ref, frequency=task.frequency, due_on=next_due, unit_no=task.unit_no, total_units=task.total_units, cycle_id=next_cycle_id(task.cycle_id), cycle_day=task.cycle_day, planned_due_on=next_due if task.unit_no else None, assignee_text=task.assignee_text, assignee_user_id=task.assignee_user_id, status="Scheduled", sop=task.sop, safety=task.safety, tools=task.tools, duration=task.duration, completion=None, evidence=[], recurrence_parent_no=task.work_order_no, log=[{"at":log_stamp(),"text":f"Auto-generated next occurrence; due {next_due.isoformat()}","actor":"System"}], legacy_payload={"recurrenceOf":task.work_order_no}, created_by=user.id))
+            db.add(OMTask(work_order_no="WO-"+uuid.uuid4().hex[:10].upper(), plant_id=task.plant_id, task_name=task.task_name, task_type=task.task_type, problem=task.problem, problem_source=task.problem_source, frequency=task.frequency, due_on=next_due, unit_no=task.unit_no, total_units=task.total_units, cycle_id=next_cycle_id(task.cycle_id), cycle_day=task.cycle_day, planned_due_on=next_due if task.unit_no else None, assignee_text=task.assignee_text, assignee_user_id=task.assignee_user_id, status="Scheduled", sop=task.sop, safety=task.safety, tools=task.tools, duration=task.duration, completion=None, evidence=[], recurrence_parent_no=task.work_order_no, log=[{"at":log_stamp(),"text":f"Auto-generated next occurrence; due {next_due.isoformat()}","actor":"System"}], legacy_payload={"recurrenceOf":task.work_order_no}, created_by=user.id))
     _audit(db, user, "Completed scheduled task", task, {"delay_days":delay,"linked_issue":linked_issue})
     from app.notifications.service import create_notification, users_with_role
     if user.role == "Site Engineer":
@@ -1001,7 +872,7 @@ def log_washing_exception(legacy_id: str, payload: dict, db: Annotated[Session, 
 @router.delete("/tasks/{work_order_no}", dependencies=[Depends(require_csrf)])
 def delete_task(work_order_no: str, db: Annotated[Session, Depends(get_db)], user: Annotated[User, Depends(require_permission("tasks.manage"))],
                 similar: bool = False):
-    """Delete an open PM task (O&M Head). similar=true also deletes the other open tasks with the same name + equipment type.
+    """Delete an open PM task (O&M Head). similar=true also deletes the other open tasks with the same name + work category.
     Completed tasks are history and are never deleted."""
     task = _task(db, work_order_no)
     if task.status == "Completed":
@@ -1024,12 +895,12 @@ def delete_task(work_order_no: str, db: Annotated[Session, Depends(get_db)], use
 def edit_task_schedule(work_order_no: str, payload: TaskScheduleEdit, db: Annotated[Session, Depends(get_db)], user: Annotated[User, Depends(get_current_user)]):
     """Change name / frequency / due date / assignee / how-to / safety / duration of an open task.
     With apply_to_similar the same change is applied to every other open task with the same name and
-    equipment type (other plants / units); their due dates move by the same number of days."""
+    work category (other plants / units); their due dates move by the same number of days."""
     task = _task(db, work_order_no)
     is_head = user.role == "O&M Head"
-    in_scope = lambda t: user.role == "Assignee" and equipment_scope_matches(db, user, t.plant_id, None, t.equipment_ref, t.task_type)
+    in_scope = lambda t: user.role == "Assignee" and t.plant_id in (user_scoped_plant_ids(db, user) or set())
     if not is_head and not in_scope(task):
-        raise HTTPException(403, "Only the O&M Head or the Assignee for this equipment type can change a task's schedule")
+        raise HTTPException(403, "Only the O&M Head or an Assignee for this plant can change a task's schedule")
     if not is_head:
         # an Assignee may move the start date and deadline only; everything else stays with the O&M Head
         locked = payload.model_fields_set - {"start_on", "due_on", "reason", "apply_to_similar"}
@@ -1081,9 +952,6 @@ def edit_task_schedule(work_order_no: str, payload: TaskScheduleEdit, db: Annota
         is_main = t.id == task.id
         if new_name and new_name != t.task_name:
             notes.append(f"name → {new_name}"); t.task_name = new_name
-        if is_main and "equipment_ref" in payload.model_fields_set and payload.equipment_ref != t.equipment_ref:
-            t.equipment_ref=(payload.equipment_ref or "").strip() or None
-            notes.append("equipment updated")
         if payload.frequency and payload.frequency != t.frequency:
             notes.append(f"frequency {t.frequency or DASH} → {payload.frequency}"); t.frequency = payload.frequency
         if payload.due_on:
@@ -1105,9 +973,9 @@ def edit_task_schedule(work_order_no: str, payload: TaskScheduleEdit, db: Annota
             t.quantity=payload.quantity
             notes.append(f"quantity → {payload.quantity if payload.quantity is not None else DASH}")
         if who and who != (t.assignee_text or ""):
-            if target_user and target_user.role == "Assignee" and not equipment_scope_matches(db, target_user, t.plant_id, None, t.equipment_ref, t.task_type):
+            if target_user and target_user.role == "Assignee" and t.plant_id not in (user_scoped_plant_ids(db, target_user) or set()):
                 if is_main:
-                    raise HTTPException(422, "The selected Assignee is not assigned to this equipment type")
+                    raise HTTPException(422, "The selected Assignee is not assigned to this plant")
             else:
                 notes.append(f"assignee {t.assignee_text or DASH} → {who}"); t.assignee_text = who
                 t.assignee_user_id = target_user.id if target_user else None
@@ -1184,17 +1052,15 @@ def link_task_issue(
 def edit_task_unit_plan(work_order_no: str, payload: TaskUnitPlanEdit, db: Annotated[Session, Depends(get_db)], user: Annotated[User, Depends(get_current_user)]):
     task = _task(db, work_order_no)
     if user.role != "O&M Head" and not (
-        user.role == "Assignee" and equipment_scope_matches(
-            db, user, task.plant_id, None, task.equipment_ref, task.task_type
-        )
+        user.role == "Assignee" and task.plant_id in (user_scoped_plant_ids(db, user) or set())
     ):
-        raise HTTPException(403, "Only the O&M Head or an Assignee for this equipment type can change its unit plan")
+        raise HTTPException(403, "Only the O&M Head or an Assignee for this plant can change its unit plan")
     if task.status != "Scheduled":
         raise HTTPException(409, "Only scheduled tasks can have their unit plan changed")
     if payload.units_per_day > payload.total_units:
         raise HTTPException(422, "Units per day cannot exceed the number of units")
     if not task.plant_id or not task.task_type:
-        raise HTTPException(422, "This task needs a plant and equipment type before units can be configured")
+        raise HTTPException(422, "This task needs a plant and work category before units can be configured")
 
     cycle_id = task.cycle_id or uuid.uuid4().hex
     group = list(db.scalars(select(OMTask).where(OMTask.cycle_id == cycle_id))) if task.cycle_id else [task]
@@ -1229,7 +1095,7 @@ def edit_task_unit_plan(work_order_no: str, payload: TaskUnitPlanEdit, db: Annot
             row = OMTask(
                 work_order_no="WO-" + uuid.uuid4().hex[:10].upper(),
                 plant_id=task.plant_id, task_name=task.task_name, task_type=task.task_type,
-                problem=task.problem, problem_source=task.problem_source, equipment_ref=None,
+                problem=task.problem, problem_source=task.problem_source,
                 frequency=task.frequency, assignee_text=task.assignee_text, assignee_user_id=task.assignee_user_id,
                 status="Scheduled", sop=task.sop, safety=task.safety, tools=task.tools, duration=task.duration,
                 completion=None, evidence=[], log=[], legacy_payload={"created_by_unit_plan_edit": True},
@@ -1277,10 +1143,10 @@ def reassign_task(work_order_no: str, payload: TaskReassign, db: Annotated[Sessi
             (User.display_name.ilike(payload.assignee.strip())) | (User.email.ilike(payload.assignee.strip()))
         ))
     _require_assignee_role(target)
-    if target and target.role == "Assignee" and not equipment_scope_matches(
-        db,target,task.plant_id,None,task.equipment_ref,task.task_type
+    if target and target.role == "Assignee" and task.plant_id not in (
+        user_scoped_plant_ids(db, target) or set()
     ):
-        raise HTTPException(422, "The selected Assignee is not assigned to this equipment type")
+        raise HTTPException(422, "The selected Assignee is not assigned to this plant")
     task.assignee_text = payload.assignee
     task.assignee_user_id = target.id if target else None
     task.log = [{"at":log_stamp(),"text":f"Reassigned to {payload.assignee}","actor":user.display_name}, *(task.log or [])]

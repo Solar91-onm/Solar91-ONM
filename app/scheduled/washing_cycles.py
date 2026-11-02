@@ -12,8 +12,8 @@ from sqlalchemy.orm import Session
 
 from app.core.timeutil import BUSINESS_TZ, business_today
 from app.core.config import get_settings
-from app.core.models import AppSetting, AuditLog, Notification, Plant, User, UserEquipmentTypeAssignment, WashingConfig, WashingDailyReport, WashingHistory, WashingTable
-from app.core.security import WASHING_TYPE, assignee_has_type, user_scoped_plant_ids
+from app.core.models import AppSetting, AuditLog, Notification, Plant, User, UserPlantAssignment, WashingConfig, WashingDailyReport, WashingHistory, WashingTable
+from app.core.security import user_scoped_plant_ids
 from app.notifications.service import notify_users, users_with_role
 from app.scheduled.schemas import (
     WashingCycleDateRequest,
@@ -296,20 +296,26 @@ def _plant_for_id(db: Session, plant_id: UUID) -> Plant:
 
 
 def _is_washing_manager(db: Session, user: User) -> bool:
-    """O&M team = O&M Head, or any active Assignee holding the Modules cleaning scope (several Assignees allowed).
+    """O&M team = O&M Head, or any active Assignee (several Assignees allowed).
+
     They may manage portfolio setup, compliance and ranking across plants. Daily report review is
     restricted separately to the configured Assignee for that plant or an O&M Head.
-    Site Engineers are never managers: they only report the tables they cleaned on their own plant."""
+    Site Engineers are never managers: they only report the tables they cleaned on their own plant.
+
+    Washing used to be gated on the "Modules cleaning" equipment type; with the asset
+    register removed, any active Assignee is part of the O&M washing team and the
+    per-plant checks below still apply.
+    """
     if user.role == "O&M Head":
         return True
-    return user.role == "Assignee" and bool(user.is_active) and assignee_has_type(db, user, WASHING_TYPE)
+    return user.role == "Assignee" and bool(user.is_active)
 
 
 def _can_review_washing(user: User, config: WashingConfig | None) -> bool:
     """Only the O&M Head or the configured, active washing assignee can approve this plant.
 
-    Other Assignees with Modules cleaning scope retain portfolio visibility but cannot
-    approve a report on a plant that was assigned to a different person.
+    Other Assignees retain portfolio visibility but cannot approve a report on a plant
+    that was assigned to a different person.
     """
     return bool(user.is_active and (
         user.role == "O&M Head" or
@@ -347,7 +353,7 @@ def _wash_recipients(db: Session, config: WashingConfig, extra_user_ids: list[UU
     are left out, which is used for performance alerts that Site Engineers must never receive."""
     users = users_with_role(db, {"O&M Head"})
     for assignee in users_with_role(db, {"Assignee"}):
-        if assignee.is_active and assignee_has_type(db, assignee, WASHING_TYPE):
+        if assignee.is_active:
             users.append(assignee)
     if managers_only:
         return users
@@ -483,19 +489,31 @@ def _set_table_count(db: Session, plant: Plant, table_count: int) -> int:
     return len(tables)
 
 
-def _ensure_washing_assignee(db: Session, user: User, assignee: User) -> None:
+def _ensure_washing_assignee(db: Session, user: User, assignee: User, plant_id: UUID | None = None) -> None:
+    """The washing assignee must be an active Assignee scoped to the plant.
+
+    Washing scope used to be the "Modules cleaning" equipment type across every
+    plant. It is now the plant assignment, so setting someone up for a plant's
+    washing grants them that plant if they do not have it yet.
+    """
     if not assignee.is_active or assignee.role != "Assignee":
         raise HTTPException(422, "Choose an active Assignee")
-    if not assignee_has_type(db, assignee, WASHING_TYPE):
-        db.add(UserEquipmentTypeAssignment(user_id=assignee.id, equipment_type=WASHING_TYPE))
+    if plant_id is None:
+        return
+    already = db.scalar(select(UserPlantAssignment.plant_id).where(
+        UserPlantAssignment.user_id == assignee.id, UserPlantAssignment.plant_id == plant_id,
+    ))
+    if already is None:
+        db.add(UserPlantAssignment(user_id=assignee.id, plant_id=plant_id, assignment_role="Assignee"))
+        plant = db.get(Plant, plant_id)
         db.add(AuditLog(
             user_id=user.id,
             actor_name=user.display_name,
-            action="Equipment scope added while setting up plant washing",
+            action="Plant scope added while setting up plant washing",
             module="Washing",
             entity_type="user",
             entity_id=str(assignee.id),
-            metadata_json={"equipment_type": WASHING_TYPE, "assignee": assignee.display_name},
+            metadata_json={"plant": plant.site_code if plant else str(plant_id), "assignee": assignee.display_name},
         ))
 
 
@@ -506,7 +524,7 @@ def setup_plant(db: Session, user: User, payload: WashingSetupRequest) -> dict:
     assignee = db.get(User, payload.assignee_user_id)
     if not assignee:
         raise HTTPException(422, "Choose an active Assignee")
-    _ensure_washing_assignee(db, user, assignee)
+    _ensure_washing_assignee(db, user, assignee, plant.id)
 
     config = db.scalar(select(WashingConfig).where(WashingConfig.plant_id == plant.id).with_for_update())
     if not config:
@@ -545,9 +563,7 @@ def list_assignees(db: Session, user: User) -> list[dict]:
     users = db.execute(
         select(User.id, User.display_name).where(User.role == "Assignee", User.is_active.is_(True)).order_by(User.display_name)
     ).all()
-    scoped = set(db.scalars(
-        select(UserEquipmentTypeAssignment.user_id).where(func.lower(UserEquipmentTypeAssignment.equipment_type) == WASHING_TYPE.casefold())
-    ))
+    scoped = set(db.scalars(select(UserPlantAssignment.user_id)))
     return [{"id": str(user_id), "name": name, "has_washing_scope": user_id in scoped} for user_id, name in users]
 
 

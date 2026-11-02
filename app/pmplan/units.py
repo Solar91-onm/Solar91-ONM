@@ -1,7 +1,7 @@
 """Unit-level Preventive Maintenance scheduling.
 
 Rules (agreed workflow):
-  * A plant + equipment type has N units and a daily capacity (units that can be maintained per day).
+  * A plant + work category has N units and a daily capacity (units that can be maintained per day).
   * Units are numbered 1..N and scheduled on consecutive calendar days, `capacity` units per day,
     starting at the first due date (e.g. 10 inverters at 2/day = 5 days: 1-2, 3-4, 5-6, 7-8, 9-10).
   * Each unit then recurs on its own due date by the task frequency (completing unit 3 creates next

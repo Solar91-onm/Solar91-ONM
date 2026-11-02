@@ -437,7 +437,7 @@ def daily_plan_text(tasks: list[OMTask], plants: dict[UUID, Plant]) -> tuple[str
         plant = plants.get(task.plant_id) if task.plant_id else None
         name = plant.plant_name if plant else "Unassigned plant"
         kinds = by_plant.setdefault(name, {})
-        kind = task.task_type or "Equipment"
+        kind = task.task_type or "Maintenance"
         kinds[kind] = kinds.get(kind, 0) + _units(task)
     total = sum(sum(kinds.values()) for kinds in by_plant.values())
     title = f"Today's PM plan · {len(by_plant)} plant{'s' if len(by_plant) != 1 else ''} · {total} unit{'s' if total != 1 else ''}"
@@ -450,7 +450,7 @@ def daily_plan_text(tasks: list[OMTask], plants: dict[UUID, Plant]) -> tuple[str
 
 
 def send_pm_daily_plan(db: Session, today: date, now: datetime | None = None) -> int:
-    """One morning message per person: which plants and equipment are on today's PM plan.
+    """One morning message per person: which plants and categories are on today's PM plan.
 
     Assignees get their own jobs, Site Engineers the jobs at their plants, the O&M Head the whole portfolio.
     Each person can switch it off (or add email) under PM alerts. Deduplicated per person per day."""

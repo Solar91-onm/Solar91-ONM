@@ -121,8 +121,6 @@ def main():
                 assert plant["site_code"]=="BROWSER01",plant
                 edited=page.evaluate('''async id=>await apiFetch("/api/plants/"+id,{method:"PATCH",body:{district:"Ajmer"}})''',plant["id"])
                 assert edited["district"]=="Ajmer",edited
-                equipment=page.evaluate('''async id=>await apiFetch("/api/equipment",{method:"POST",body:{plant_id:id,equipment_name:"QA Inverter 1",equipment_code:"INV-E2E",equipment_type:"Inverter"}})''',plant["id"])
-                assert equipment["equipment_code"]=="INV-E2E",equipment
                 load();page.wait_for_selector(".shell",timeout=20000)
                 assert page.evaluate('S.plants.some(p=>p.id==="BROWSER01")')
                 assert page.evaluate('S.plants.find(p=>p.id==="BROWSER01").district')=="Ajmer"
@@ -161,7 +159,7 @@ def main():
                 # The register shows one centered column per field. The existing ticket actions remain usable.
                 cols=page.locator('.si-register thead th').all_text_contents()
                 cols=[label.strip() for label in cols if label.strip()]
-                assert cols==["Issue ID","Equipment","Subpart","Subpart / unit ID","Problem","Plant code","Supplier / maker","Assigned to","Status","Action"],cols
+                assert cols==["Issue ID","Category","Subpart","Problem","Plant code","Assigned to","Status","Action"],cols
                 assert page.evaluate('getComputedStyle(document.querySelector(".si-register thead th.si-h-id")).textAlign')=="center"
                 assert page.locator('.si-register tbody tr[data-act="issue"] .si-status').count()>=1
                 assert page.locator('.si-register tbody tr[data-act="issue"] .oi-row-actions').count()>=1

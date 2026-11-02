@@ -2,14 +2,21 @@ from __future__ import annotations
 
 from datetime import date
 
-from app.core.models import Issue, IssueHistory, Plant, User, UserEquipmentTypeAssignment
+from app.core.models import Issue, IssueHistory, Plant, User, UserPlantAssignment
 from tests import conftest
-from tests.conftest import login_user
+from tests.conftest import grant_assignee_plants, login_user
+
+
+def _plant(db):
+    plant = db.query(Plant).first()
+    if plant is None:
+        plant = Plant(site_code="SB01", plant_name="Step Plant")
+        db.add(plant); db.commit(); db.refresh(plant)
+    return plant
 
 
 def _ticket(db, status="Assigned", assignee=None, **extra):
-    plant = db.query(Plant).first() or Plant(site_code="SB01", plant_name="Step Plant")
-    db.add(plant); db.flush()
+    plant = _plant(db)
     row = Issue(ticket_no=f"SB-{db.query(Issue).count() + 1}", plant_id=plant.id, vertical="Inverter", description="d",
                 severity="Critical", status=status, assigned_to=assignee.id if assignee else None,
                 assignee_text=assignee.display_name if assignee else None, **extra)
@@ -18,8 +25,10 @@ def _ticket(db, status="Assigned", assignee=None, **extra):
 
 
 def _assignee(db, name="Pranjal Dave"):
+    # The plant has to exist first: an Assignee's scope is the plants they are assigned.
+    plant = _plant(db)
     u = User(auth_provider="clerk", external_subject=name, email=f"{name.split()[0].lower()}@example.com", display_name=name, role="Assignee", is_active=True)
-    db.add(u); db.flush(); db.add(UserEquipmentTypeAssignment(user_id=u.id, equipment_type="Inverter")); db.commit(); db.refresh(u)
+    db.add(u); db.flush(); grant_assignee_plants(db, u.id, plant.id); db.commit(); db.refresh(u)
     return u
 
 

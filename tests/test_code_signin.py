@@ -3,7 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-AUTH = (ROOT / "frontend/static/js/00-auth-data-and-imports.js").read_text(encoding="utf8")
+# The sign-in panel now lives in its own file; its behaviour is unchanged.
+AUTH = (ROOT / "frontend/static/js/auth-gate.js").read_text(encoding="utf8")
 
 
 def test_password_signin_is_removed():

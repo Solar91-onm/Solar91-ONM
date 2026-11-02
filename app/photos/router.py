@@ -28,7 +28,7 @@ from app.photos.imaging import PhotoSettings, header_matches, optimize_photo
 from app.storage.service import SupabaseStorage
 
 router = APIRouter(prefix="/api/photos", tags=["Photo Intelligence"])
-CATEGORIES = {"issue", "pm", "washing", "inventory", "equipment", "safety", "other"}
+CATEGORIES = {"issue", "pm", "washing", "inventory", "safety", "other"}
 LINK_TYPES = {"issue", "pm", "washing", "inventory"}
 EXTENSIONS = {"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp"}
 MAX_FILES = 10
@@ -86,7 +86,7 @@ def _row(photo: SitePhoto, plant: Plant) -> dict:
             "uploader": photo.uploader_name, "uploadedAt": iso.isoformat(),
             "expiresAt": None, "status": "processed", "issue": issue,
             "linkType": photo.link_type, "linkId": photo.link_id,
-            "equipmentId": photo.link_id if photo.link_type == "inventory" else "",
+            "inventoryId": photo.link_id if photo.link_type == "inventory" else "",
             "fileName": photo.file_name, "fileSize": photo.size_bytes, "previewUrl": None}
 
 

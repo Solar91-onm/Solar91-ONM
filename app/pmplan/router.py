@@ -5,8 +5,8 @@ One code path builds tasks (`_plan_tasks` + `_create_tasks`) for all three entry
   * POST /api/pm-plan/templates/{id}/apply  - run a saved template on chosen plants
   * POST /api/pm-plan/import                - Excel plan (dry_run first, then commit)
 
-A task is created per plant, and per equipment unit when `per_unit` is on. Units come from the
-Equipment Register (a row with quantity N counts as N units); if the register has none, the
+A task is created per plant, and per unit when `per_unit` is on. Unit counts come from the
+plant's PM unit configuration (`pm_unit_config`); if a plant has none configured, the
 sheet's "No. of units" is used; otherwise one task per plant.
 """
 from __future__ import annotations
@@ -20,13 +20,13 @@ from typing import Annotated, Any, Literal
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from openpyxl import load_workbook
 from pydantic import BaseModel, Field, field_validator
-from sqlalchemy import case, func, select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.timeutil import business_today, log_stamp
 from app.core.database import get_db
-from app.core.models import AuditLog, Equipment, OMTask, NotificationPreference, PMScopeConfig, PMTemplate, PMUnitConfig, Plant, User
-from app.core.security import equipment_scope_matches, get_current_user, require_csrf, user_scoped_plant_ids
+from app.core.models import AuditLog, OMTask, NotificationPreference, PMScopeConfig, PMTemplate, PMUnitConfig, Plant, User
+from app.core.security import get_current_user, require_csrf, user_scoped_plant_ids
 from app.plants.codes import find_plant_by_code
 from app.pmplan.alerts import PM_ALERT_EVENTS, PM_TEAM_RECIPIENT_MODES, default_pm_preferences, get_pm_preferences
 from app.pmplan.cycle import (CYCLE, CYCLE_DAYS, NAMED_TYPES, NOT_IN_PM, ONE_JOB_TYPES, chained_window, in_pm, one_job,
@@ -38,7 +38,7 @@ router = APIRouter(prefix="/api/pm-plan", tags=["Preventive Maintenance plan"])
 
 SAFETY_OPTIONS = ["—", "PTW required", "LOTO required", "PTW + LOTO required"]
 PLANNER_ROLES = {"O&M Head"}          # templates, apply, Excel import
-CREATOR_ROLES = {"O&M Head", "Assignee"}  # quick add (Assignee: own equipment types only)
+CREATOR_ROLES = {"O&M Head", "Assignee"}  # quick add (Assignee: own plants only)
 TEMPLATE_WRITERS = {"O&M Head"}
 MAX_TASKS_PER_CALL = 2000
 _ASSET_BY_LOWER = {a.casefold(): a for a in ALLOWED_ASSETS}
@@ -86,7 +86,7 @@ class TemplateIn(BaseModel):
     def _type(cls, v: str) -> str:
         key = (v or "").strip().casefold()
         if key not in _ASSET_BY_LOWER:
-            raise ValueError("Unsupported equipment type")
+            raise ValueError("Unsupported work category")
         if not in_pm(key):
             raise ValueError(_not_in_pm_text(_ASSET_BY_LOWER[key]))
         return _ASSET_BY_LOWER[key]
@@ -121,7 +121,7 @@ class ApplyIn(BaseModel):
     unit_numbers: list[int] | None = None                              # subset of units to maintain this cycle
     spread_days: int | None = Field(default=None, ge=1, le=366)        # finish every unit within N days; each plant paces its own units
     save_unit_config: bool = False                                     # O&M Head: store total/per-day as the plant default
-    follow_cycle: bool = False                                         # start_date is the 30-day PM cycle start; dates come from the equipment's phase
+    follow_cycle: bool = False                                         # start_date is the 30-day PM cycle start; dates come from the category's phase
     dry_run: bool = False
 
 
@@ -179,18 +179,6 @@ def _resolve_plants(db: Session, values: list[str]) -> list[Plant]:
     return list(found.values())
 
 
-def _register_refs(db: Session, plant: Plant, equipment_type: str) -> list[str]:
-    rows = db.scalars(select(Equipment).where(
-        Equipment.plant_id == plant.id, func.lower(Equipment.equipment_type) == equipment_type.casefold(),
-        Equipment.status != "inactive").order_by(Equipment.equipment_code, Equipment.equipment_name))
-    refs: list[str] = []
-    for eq in rows:
-        base = eq.equipment_code or eq.equipment_name
-        n = eq.quantity or 1
-        refs.extend([base] if n <= 1 else [f"{base}-{i:02d}" for i in range(1, n + 1)])
-    return refs
-
-
 def _plant_config(db: Session, plant: Plant, equipment_type: str) -> PMUnitConfig | None:
     return db.scalar(select(PMUnitConfig).where(
         PMUnitConfig.plant_id == plant.id, func.lower(PMUnitConfig.equipment_type) == equipment_type.casefold()))
@@ -200,7 +188,7 @@ def _units_for(db: Session, plant: Plant, tpl: dict[str, Any], per_unit: bool, u
                plan: dict[str, Any] | None = None) -> list[dict[str, Any]]:
     """Units to schedule for one plant: [{ref, unit_no, total, day}].
 
-    Total units: request override > plant configuration > Equipment Register > legacy hint.
+    Total units: request override > plant configuration > legacy hint.
     Units per day: request override > plant configuration > template default > everything on day 1.
     ACCB Panel and Miscellaneous (ONE_JOB_TYPES) are always one unit: ACCB-1 + ACCB-2 is one job.
     """
@@ -209,9 +197,8 @@ def _units_for(db: Session, plant: Plant, tpl: dict[str, Any], per_unit: bool, u
     if not per_unit:
         return [{"ref": None, "unit_no": None, "total": None, "day": None, "due_day": plan.get("phase_days")}]
     cfg = _plant_config(db, plant, etype)
-    refs = _register_refs(db, plant, etype)
-    total = plan.get("total_units") or (cfg.total_units if cfg else None) or len(refs) or units_hint or 0
-    if total <= 1 and not refs and not (cfg or plan.get("total_units")):
+    total = plan.get("total_units") or (cfg.total_units if cfg else None) or units_hint or 0
+    if total <= 1 and not (cfg or plan.get("total_units")):
         return [{"ref": None, "unit_no": None, "total": None, "day": None,     # nothing known: one task, as before
                  "due_day": plan.get("phase_days")}]
     if one_job(etype):
@@ -279,14 +266,14 @@ def _plan_tasks(db: Session, user: User, plants: list[Plant], tpl: dict[str, Any
         # One assignee looks after every unit of the equipment at a plant; several assignees share plants.
         who, who_user = people[plant_idx % len(people)] if people else (None, None)
         cycle_id = uuid.uuid4().hex[:8]
-        if user.role == "Assignee" and not equipment_scope_matches(db, user, plant.id, None, None, tpl["equipment_type"]):
-            raise HTTPException(403, f"{tpl['equipment_type']} is outside your assigned equipment types")
+        if user.role == "Assignee" and plant.id not in (user_scoped_plant_ids(db, user) or set()):
+            raise HTTPException(403, f"{plant.plant_name} is outside your assigned plants")
         for p_name, p_user in people:
             if p_user and p_user.role != "Assignee":
                 raise HTTPException(422, f"PM work can only be assigned to a user with the Assignee role ({p_name} is {p_user.role})")
-            if p_user and p_user.role == "Assignee" and not equipment_scope_matches(
-                    db, p_user, plant.id, None, None, tpl["equipment_type"]):
-                raise HTTPException(422, f"{p_name} is not assigned to {tpl['equipment_type']}")
+            if p_user and p_user.role == "Assignee" and plant.id not in (
+                    user_scoped_plant_ids(db, p_user) or set()):
+                raise HTTPException(422, f"{p_name} is not assigned to {plant.plant_name}")
         for u in _units_for(db, plant, tpl, per_unit, units_hint, plan):
             ref = u["ref"]
             name = base_name
@@ -321,15 +308,12 @@ def _create_tasks(db: Session, user: User, tpl: dict[str, Any], items: list[dict
         wo = "WO-" + uuid.uuid4().hex[:10].upper()
         who_user: User | None = it["assignee_user"]
         if it["plant"].id not in quantity_by_plant:
-            quantity_by_plant[it["plant"].id] = db.scalar(select(func.sum(Equipment.quantity)).where(
-                Equipment.plant_id == it["plant"].id,
-                func.lower(Equipment.equipment_type) == tpl["equipment_type"].casefold(),
-                Equipment.status != "inactive",
-            ))
+            cfg = _plant_config(db, it["plant"], tpl["equipment_type"])
+            quantity_by_plant[it["plant"].id] = cfg.total_units if cfg else None
         registered_quantity = quantity_by_plant[it["plant"].id]
         db.add(OMTask(
             work_order_no=wo, plant_id=it["plant"].id, task_name=it["name"], task_type=tpl["equipment_type"],
-            equipment_ref=it["ref"], frequency=tpl["frequency"], due_on=due, start_on=job_start, assignee_text=it["assignee"],
+            frequency=tpl["frequency"], due_on=due, start_on=job_start, assignee_text=it["assignee"],
             quantity=it.get("total_units") if it.get("unit_no") is not None else registered_quantity,
             unit_no=it.get("unit_no"), total_units=it.get("total_units"), cycle_id=it.get("cycle_id"),
             cycle_day=it.get("day"), planned_due_on=due if it.get("unit_no") else None,
@@ -477,16 +461,13 @@ def _asks_all_plants(values: list[str]) -> bool:
 
 
 def _equipped_plants(db: Session, plants: list[Plant], equipment_type: str) -> tuple[list[Plant], list[Plant]]:
-    """For an "All plants" job, keep only plants that have this equipment (Equipment Register or saved unit counts).
+    """For an "All plants" job, keep only plants with a saved unit count for this category.
 
-    If no plant has the equipment recorded anywhere, every plant is kept, as before, so a portfolio without a
-    register still gets its jobs."""
+    If no plant has a unit count configured, every plant is kept, as before, so a portfolio
+    without any unit configuration still gets its jobs."""
     kind = equipment_type.casefold()
-    registered = {pid for (pid,) in db.execute(select(Equipment.plant_id).where(
-        func.lower(Equipment.equipment_type) == kind, Equipment.status != "inactive").distinct())}
-    configured = {pid for (pid,) in db.execute(select(PMUnitConfig.plant_id).where(
+    have = {pid for (pid,) in db.execute(select(PMUnitConfig.plant_id).where(
         func.lower(PMUnitConfig.equipment_type) == kind, PMUnitConfig.total_units > 0))}
-    have = registered | configured
     if not have:
         return plants, []
     return [p for p in plants if p.id in have], [p for p in plants if p.id not in have]
@@ -701,7 +682,7 @@ class UnitConfigIn(BaseModel):
     def _type(cls, v: str) -> str:
         key = (v or "").strip().casefold()
         if key not in _ASSET_BY_LOWER:
-            raise ValueError("Unsupported equipment type")
+            raise ValueError("Unsupported work category")
         if not in_pm(key):
             raise ValueError(_not_in_pm_text(_ASSET_BY_LOWER[key]))
         return _ASSET_BY_LOWER[key]
@@ -719,29 +700,20 @@ def list_unit_config(db: Annotated[Session, Depends(get_db)], user: Annotated[Us
     _require(user, CREATOR_ROLES, "Unit configuration is available to the O&M Head and Assignees")
     plants = {p.id: p for p in db.scalars(select(Plant))}
     allowed = user_scoped_plant_ids(db, user)
-    def visible(pid: Any, equipment_type: str) -> bool:
-        if allowed is not None and pid not in allowed:
-            return False
-        return user.role != "Assignee" or equipment_scope_matches(db, user, pid, None, None, equipment_type)
+    def visible(pid: Any) -> bool:
+        return allowed is None or pid in allowed
     configs = [_config_out(c, plants.get(c.plant_id)) for c in db.scalars(select(PMUnitConfig))
-               if visible(c.plant_id, c.equipment_type)]
-    qty = func.coalesce(Equipment.quantity, 1)
-    critical = func.sum(case((func.lower(func.coalesce(Equipment.criticality, "")) == "high", qty), else_=0))
-    faulty = func.sum(case((func.lower(func.coalesce(Equipment.status, "")) == "fault", qty), else_=0))
-    register = [{"plant_id": str(pid), "equipment_type": et, "units": int(n or 0), "critical": int(c or 0), "faulty": int(f or 0)}
-                for pid, et, n, c, f in db.execute(
-        select(Equipment.plant_id, Equipment.equipment_type, func.sum(qty), critical, faulty)
-        .where(Equipment.status != "inactive").group_by(Equipment.plant_id, Equipment.equipment_type))
-        if et and visible(pid, et)]
-    return {"configs": sorted(configs, key=lambda c: (c["plant"], c["equipment_type"])), "register": register}
+               if visible(c.plant_id)]
+    # The per-asset register is gone: the saved unit counts are the only source of unit numbers.
+    return {"configs": sorted(configs, key=lambda c: (c["plant"], c["equipment_type"])), "register": []}
 
 
 @router.put("/unit-config", dependencies=[Depends(require_csrf)])
 def save_unit_config(payload: UnitConfigIn, db: Annotated[Session, Depends(get_db)], user: Annotated[User, Depends(get_current_user)]):
     _require(user, {"O&M Head", "Assignee"}, "Only the O&M Head or an Assignee can edit plant unit configuration")
     plant = _resolve_plants(db, [payload.plant])[0]
-    if user.role == "Assignee" and not equipment_scope_matches(db, user, plant.id, None, None, payload.equipment_type):
-        raise HTTPException(403, f"{payload.equipment_type} is outside your assigned equipment types")
+    if user.role == "Assignee" and plant.id not in (user_scoped_plant_ids(db, user) or set()):
+        raise HTTPException(403, f"{plant.plant_name} is outside your assigned plants")
     row = _save_config(db, user, plant, payload.equipment_type, payload.total_units, payload.units_per_day)
     db.add(AuditLog(user_id=user.id, actor_name=user.display_name, action="Saved PM unit configuration", module="Scheduled O&M",
                     metadata_json={"plant": plant.plant_name, "equipment_type": payload.equipment_type,
@@ -756,8 +728,8 @@ def delete_unit_config(config_id: uuid.UUID, db: Annotated[Session, Depends(get_
     row = db.get(PMUnitConfig, config_id)
     if not row:
         raise HTTPException(404, "Configuration not found")
-    if user.role == "Assignee" and not equipment_scope_matches(db, user, row.plant_id, None, None, row.equipment_type):
-        raise HTTPException(403, f"{row.equipment_type} is outside your assigned equipment types")
+    if user.role == "Assignee" and row.plant_id not in (user_scoped_plant_ids(db, user) or set()):
+        raise HTTPException(403, "This plant is outside your assigned plants")
     db.delete(row)      # tasks already scheduled keep their unit numbers
     db.commit()
 

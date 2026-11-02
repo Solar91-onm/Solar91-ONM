@@ -7,7 +7,7 @@ import uuid
 from uuid import UUID
 
 from fastapi import HTTPException
-from sqlalchemy import delete, func, or_, select
+from sqlalchemy import delete, or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
@@ -15,10 +15,10 @@ from sqlalchemy.orm import Session
 from app.core.timeutil import business_today, log_stamp, utc_now
 from app.core.models import (
     AppSetting, AuditLog, Document, Handover, HandoverItem, Incident, InventoryItem, InventoryMovement,
-    Equipment, Issue, Notification, NotificationRule, OfflineQueueItem, OMTask, Permit, Plant, SLAContract,
+    Issue, Notification, NotificationRule, OfflineQueueItem, OMTask, Permit, Plant, SLAContract,
     ServiceRequest, StateCollectionRevision, StateRevision, User, Vendor, WashingConfig, WashingHistory, WashingTable,
 )
-from app.core.security import WASHING_TYPE, assignee_has_type, equipment_scope_matches, has_portfolio_scope, is_head, resolve_equipment_id, text_is_current_user, user_scoped_equipment_ids, user_scoped_equipment_types, user_scoped_plant_ids
+from app.core.security import has_portfolio_scope, is_head, user_scoped_plant_ids
 from app.core.config import get_settings
 from app.issues.schemas import normalize_issue_severity
 from app.plants.codes import normalize_site_code, plant_code_index
@@ -160,38 +160,6 @@ def load_state(db:Session,user:User,include_washing:bool=True,only:set[str]|None
         return only is None or key in only
     plants,by_name,by_code=_plant_maps(db); name_by_id={p.id:p.plant_name for p in plants}
     state:dict[str,Any]={"plants":[_plant_legacy(p) for p in plants]}
-    # issues (Assignee scope) and PM tasks (equipment matching) are resolved against the equipment register
-    equipment_rows=list(db.scalars(select(Equipment).order_by(Equipment.equipment_name))) if want("equipment") or want("issues") or want("tasks") else []
-    user_ids={e.in_charge_user_id for e in equipment_rows if e.in_charge_user_id}
-    users_by_id={u.id:u for u in db.scalars(select(User).where(User.id.in_(user_ids)))} if user_ids else {}
-    equipment=[]
-    equipment_by_id={e.id:e for e in equipment_rows}
-    equipment_codes=defaultdict(set)
-    equipment_names=defaultdict(set)
-    for e in equipment_rows:
-        if e.status!="inactive":
-            if e.equipment_code:
-                equipment_codes[(e.plant_id,e.equipment_code.casefold())].add(e.id)
-            if e.equipment_name:
-                equipment_names[(e.plant_id,e.equipment_name.casefold())].add(e.id)
-    for e in equipment_rows:
-        in_charge=users_by_id.get(e.in_charge_user_id)
-        equipment.append({
-            "id":str(e.id),"plant_id":str(e.plant_id),"equipment_code":e.equipment_code,"equipment_name":e.equipment_name,
-            "equipment_type":e.equipment_type,"maker":e.maker,"model":e.model,"serial_number":e.serial_number,"status":e.status,
-            "discom":e.discom,"feeder_or_gss":e.feeder_or_gss,"rating":e.rating,
-            "capacity_kw":float(e.capacity_kw) if e.capacity_kw is not None else None,"quantity":e.quantity or 1,
-            "location_in_plant":e.location_in_plant,"manufacture_year":e.manufacture_year,
-            "commissioned_on":e.commissioned_on.isoformat() if e.commissioned_on else None,
-            "warranty_start":e.warranty_start.isoformat() if e.warranty_start else None,"warranty_end":e.warranty_end.isoformat() if e.warranty_end else None,
-            "amc_vendor":e.amc_vendor,"amc_end":e.amc_end.isoformat() if e.amc_end else None,"supplier":e.supplier,
-            "purchase_order_no":e.purchase_order_no,"criticality":e.criticality,"notes":e.notes,
-            "in_charge_user_id":str(e.in_charge_user_id) if e.in_charge_user_id else None,"in_charge_name":in_charge.display_name if in_charge else None,
-            "last_service_on":e.last_service_on.isoformat() if e.last_service_on else None,"next_service_due":e.next_service_due.isoformat() if e.next_service_due else None,
-            "metadata":e.metadata_json or {},
-        })
-    state["equipment"]=equipment
-
     issues=[]
     issue_query=select(Issue).where(Issue.deleted_at.is_(None))
     closed_days=int(getattr(get_settings(),"bootstrap_closed_issue_days",0) or 0)
@@ -205,7 +173,7 @@ def load_state(db:Session,user:User,include_washing:bool=True,only:set[str]|None
     issue_iterator=issue_rows if issue_rows is not None else issue_result
     for x in issue_iterator:
         r=dict(x.legacy_payload or {})
-        r.update({"id":x.ticket_no,"dbId":str(x.id),"plant":name_by_id.get(x.plant_id,r.get("plant") or "") or "","equipmentId":str(x.equipment_id) if x.equipment_id else None,"vertical":x.vertical,"sub":x.subcategory,"equip":x.equipment_ref or "—","desc":x.description,"severity":normalize_issue_severity(x.severity),"status":x.status,"occurred":x.occurred_at.isoformat() if x.occurred_at else r.get("occurred"),"created":x.created_at.isoformat() if x.created_at else r.get("created"),"updated":x.updated_at.isoformat() if x.updated_at else r.get("updated"),"etc":x.etc_at.isoformat() if x.etc_at else r.get("etc"),"assignee":x.assignee_text,"assignedTo":str(x.assigned_to) if x.assigned_to else None,"maker":x.maker or "","supplier":x.supplier,"serialNumber":x.serial_number,"evidence":x.evidence,"units":x.units,"impact":x.impact,"photos":x.photo_count,"vendor":x.vendor,"closure":x.closure,"sourceTask":x.source_task,"reopenedFrom":x.reopened_from,"reopenCount":x.reopen_count})
+        r.update({"id":x.ticket_no,"dbId":str(x.id),"plant":name_by_id.get(x.plant_id,r.get("plant") or "") or "","vertical":x.vertical,"sub":x.subcategory,"desc":x.description,"severity":normalize_issue_severity(x.severity),"status":x.status,"occurred":x.occurred_at.isoformat() if x.occurred_at else r.get("occurred"),"created":x.created_at.isoformat() if x.created_at else r.get("created"),"updated":x.updated_at.isoformat() if x.updated_at else r.get("updated"),"etc":x.etc_at.isoformat() if x.etc_at else r.get("etc"),"assignee":x.assignee_text,"assignedTo":str(x.assigned_to) if x.assigned_to else None,"evidence":x.evidence,"impact":x.impact,"photos":x.photo_count,"vendor":x.vendor,"closure":x.closure,"sourceTask":x.source_task,"reopenedFrom":x.reopened_from,"reopenCount":x.reopen_count})
         issues.append(r)
     state["issues"]=issues
 
@@ -239,21 +207,7 @@ def load_state(db:Session,user:User,include_washing:bool=True,only:set[str]|None
             if kind in {"before","after"}:
                 clean["url"]=f"/api/scheduled/tasks/{t.work_order_no}/evidence/{kind}"
                 ev.append(clean)
-        equipment_ref=(t.equipment_ref or "").strip()
-        equipment_id=None
-        try:
-            candidate=equipment_by_id.get(UUID(equipment_ref))
-        except ValueError:
-            candidate=None
-        if candidate and candidate.status!="inactive" and (t.plant_id is None or candidate.plant_id==t.plant_id):
-            equipment_id=candidate.id
-        elif t.plant_id and equipment_ref:
-            matches=equipment_codes.get((t.plant_id,equipment_ref.casefold()),set())
-            if not matches:
-                matches=equipment_names.get((t.plant_id,equipment_ref.casefold()),set())
-            if len(matches)==1:
-                equipment_id=next(iter(matches))
-        r.update({"id":t.work_order_no,"plant":name_by_id.get(t.plant_id,r.get("plant") or "") or "","equipmentId":str(equipment_id) if equipment_id else None,"name":t.task_name or "","type":t.task_type or "","problem":t.problem,"problemSource":t.problem_source,"equip":t.equipment_ref,"freq":t.frequency,"due":t.due_on.isoformat() if t.due_on else None,"start":t.start_on.isoformat() if t.start_on else None,"assignee":t.assignee_text,"assigneeUserId":str(t.assignee_user_id) if t.assignee_user_id else None,"status":t.status,"sop":t.sop,"safety":t.safety,"tools":t.tools,"duration":t.duration,"completion":t.completion,"actualCompleted":t.actual_completed_on.isoformat() if t.actual_completed_on else None,"delayDays":t.delay_days,"problemFound":t.problem_found,"recurrenceOf":t.recurrence_parent_no,"linkedIssue":t.linked_issue,"evidence":ev,"log":t.log or []}); tasks.append(r)
+        r.update({"id":t.work_order_no,"plant":name_by_id.get(t.plant_id,r.get("plant") or "") or "","name":t.task_name or "","type":t.task_type or "","problem":t.problem,"problemSource":t.problem_source,"freq":t.frequency,"due":t.due_on.isoformat() if t.due_on else None,"start":t.start_on.isoformat() if t.start_on else None,"assignee":t.assignee_text,"assigneeUserId":str(t.assignee_user_id) if t.assignee_user_id else None,"status":t.status,"sop":t.sop,"safety":t.safety,"tools":t.tools,"duration":t.duration,"completion":t.completion,"actualCompleted":t.actual_completed_on.isoformat() if t.actual_completed_on else None,"delayDays":t.delay_days,"problemFound":t.problem_found,"recurrenceOf":t.recurrence_parent_no,"linkedIssue":t.linked_issue,"evidence":ev,"log":t.log or []}); tasks.append(r)
     state["tasks"]=tasks
     # The browser labels counts of finished PM work with this (None = full history loaded).
     state["tasksHistoryFrom"]=pm_since.isoformat() if pm_since else None
@@ -317,10 +271,6 @@ def load_state(db:Session,user:User,include_washing:bool=True,only:set[str]|None
 
 
 
-def _scope_equipment_type(value:str|None)->str:
-    return (value or "").strip().casefold()
-
-
 def _scope_state(db:Session,user:User,state:dict[str,Any],issue_rows:list[Issue]|None=None)->dict[str,Any]:
     """Server-side least-privilege projection for the rev14 production role model."""
     if has_portfolio_scope(user):
@@ -333,98 +283,30 @@ def _scope_state(db:Session,user:User,state:dict[str,Any],issue_rows:list[Issue]
         return state
 
     allowed_ids=user_scoped_plant_ids(db,user) or set()
-    equipment_types=user_scoped_equipment_types(db,user) or set() if user.role=="Assignee" else set()
-    if user.role=="Assignee":
-        allowed_equipment_ids=set(db.scalars(
-            select(Equipment.id).where(
-                func.lower(func.trim(func.coalesce(Equipment.equipment_type,""))).in_(equipment_types),
-                Equipment.status!="inactive",
-            )
-        )) if equipment_types else set()
-    else:
-        allowed_equipment_ids=None
     allowed_ids_str={str(x) for x in allowed_ids}
     allowed_plants=[p for p in state.get("plants",[]) if str(p.get("dbId")) in allowed_ids_str]
     allowed_names={str(p.get("name") or "") for p in allowed_plants}
     allowed_codes={str(p.get("id") or "") for p in allowed_plants}
     state["plants"]=allowed_plants
-    allowed_equipment_ids=allowed_equipment_ids or set()
-    allowed_equipment_ids_str={str(x) for x in allowed_equipment_ids}
-    all_equipment_rows=state.get("equipment",[]) or []
-    state["equipment"]=[e for e in all_equipment_rows if
-                        (str(e.get("id")) in allowed_equipment_ids_str if user.role=="Assignee"
-                         else str(e.get("plant_id")) in allowed_ids_str)]
 
     issue_by_ticket={x.ticket_no:x for x in (issue_rows if issue_rows is not None else db.scalars(select(Issue).where(Issue.deleted_at.is_(None))))} if state.get("issues") else {}
-    equipment_rows=all_equipment_rows
-    equipment_by_id={str(e.get("id")):e for e in equipment_rows if e.get("id")}
-    equipment_codes:dict[tuple[str,str],list[dict]]={}
-    equipment_names:dict[tuple[str,str],list[dict]]={}
-    for equipment in equipment_rows:
-        if equipment.get("status") is None or equipment.get("status")=="inactive":
-            continue
-        plant_id=str(equipment.get("plant_id") or "")
-        if equipment.get("equipment_code"):
-            equipment_codes.setdefault((plant_id,str(equipment["equipment_code"]).lower()),[]).append(equipment)
-        if equipment.get("equipment_name"):
-            equipment_names.setdefault((plant_id,str(equipment["equipment_name"]).lower()),[]).append(equipment)
-
-    def issue_matches_assignee_scope(row:Issue)->bool:
-        vertical=_scope_equipment_type(row.vertical)
-        if vertical:
-            return vertical in equipment_types
-        if not equipment_types:
-            return False
-        plant_id=str(row.plant_id or "")
-        equipment=equipment_by_id.get(str(row.equipment_id)) if row.equipment_id else None
-        if equipment and (equipment.get("status")=="inactive" or
-                (row.plant_id is not None and str(equipment.get("plant_id"))!=plant_id)):
-            equipment=None
-        reference=(row.equipment_ref or "").strip()
-        if equipment is None and reference:
-            try:
-                candidate=equipment_by_id.get(str(UUID(reference)))
-            except ValueError:
-                candidate=None
-            if candidate and candidate.get("status")!="inactive" and str(candidate.get("plant_id"))==plant_id:
-                equipment=candidate
-            elif row.plant_id is not None:
-                code_matches=equipment_codes.get((plant_id,reference.lower()),[])
-                if code_matches:
-                    equipment=code_matches[0] if len(code_matches)==1 else None
-                    if equipment is None:
-                        return False
-                else:
-                    name_matches=equipment_names.get((plant_id,reference.lower()),[])
-                    equipment=name_matches[0] if len(name_matches)==1 else None
-        return _scope_equipment_type((equipment or {}).get("equipment_type")) in equipment_types
 
     filtered=[]
     for r in state.get("issues",[]):
         row=issue_by_ticket.get(str(r.get("id") or ""))
         if not row: continue
-        if user.role=="Assignee":
-            ok=issue_matches_assignee_scope(row)
-        else: # Site Engineer and Viewer
-            ok=row.plant_id in allowed_ids
-        if ok: filtered.append(r)
+        # Every scoped role (Assignee, Site Engineer, Viewer) is limited to its assigned plants.
+        if row.plant_id in allowed_ids: filtered.append(r)
     state["issues"]=filtered
 
-    if user.role=="Assignee":
-        state["tasks"]=[t for t in state.get("tasks",[]) if _scope_equipment_type(t.get("type")) in equipment_types]
-    elif user.role=="Site Engineer":
+    if user.role in {"Assignee","Site Engineer"}:
         state["tasks"]=[t for t in state.get("tasks",[]) if t.get("plant") in allowed_names or t.get("plant") in allowed_codes]
     else:
         state["tasks"]=[]
 
     if user.role in {"Assignee","Site Engineer"}:
         state["washing"]=[w for w in state.get("washing",[]) if w.get("plant") in allowed_names or w.get("plant") in allowed_codes]
-        if user.role=="Assignee":
-            if _scope_equipment_type(WASHING_TYPE) not in equipment_types: state["washing"]=[]
-            allowed_wash_plants={w.get("plant") for w in state["washing"]}
-            state["washMeta"]={k:v for k,v in (state.get("washMeta") or {}).items() if k in allowed_wash_plants}
-        else:
-            state["washMeta"]={k:v for k,v in (state.get("washMeta") or {}).items() if k in allowed_names or k in allowed_codes}
+        state["washMeta"]={k:v for k,v in (state.get("washMeta") or {}).items() if k in allowed_names or k in allowed_codes}
     else:
         state["washing"]=[]; state["washMeta"]={}
 
@@ -440,8 +322,6 @@ def _scope_state(db:Session,user:User,state:dict[str,Any],issue_rows:list[Issue]
 def _sync_state_scoped(db:Session,state:dict[str,Any],expected_revision:int|None,user:User)->int:
     """Compatibility sync for non-admin roles. Only role-appropriate deltas can reach persistent data."""
     allowed_ids=user_scoped_plant_ids(db,user) or set()
-    allowed_equipment_ids=user_scoped_equipment_ids(db,user) if user.role=="Assignee" else set()
-    allowed_equipment_ids=allowed_equipment_ids or set()
     plants,by_name,by_code=_plant_maps(db)
     changed=False
 
@@ -451,28 +331,15 @@ def _sync_state_scoped(db:Session,state:dict[str,Any],expected_revision:int|None
             if not no:
                 continue
             p=by_name.get(r.get("plant")) or by_code.get(normalize_site_code(r.get("plant")))
-            equipment_id=resolve_equipment_id(
-                db,p.id,_uuid_or_none(r.get("equipmentId")),r.get("equip")
-            ) if p else None
             existing=db.scalar(select(Issue).where(Issue.ticket_no==no))
             if existing:
                 continue   # existing tickets change only through /api/issues (workflow, assignment, evidence); a browser copy must never overwrite them
-            elif user.role=="Assignee" and p and assignee_has_type(db,user,r.get("vertical")):
+            if p and p.id in allowed_ids:
                 x=Issue(
-                    ticket_no=no,plant_id=p.id,equipment_id=equipment_id,
-                    equipment_ref=r.get("equip"),vertical=r.get("vertical"),
+                    ticket_no=no,plant_id=p.id,vertical=r.get("vertical"),
                     subcategory=r.get("sub"),description=r.get("desc") or "Issue",severity=normalize_issue_severity(r.get("severity") or "Medium"),
                     status="Open",occurred_at=_dt(r.get("occurred")),etc_at=_dt(r.get("etc")),assignee_text=r.get("assignee"),
-                    maker=r.get("maker") or None,impact=r.get("impact"),photo_count=int(r.get("photos") or 0),
-                    legacy_payload=r,created_by=user.id,
-                )
-                db.add(x); changed=True
-            elif user.role=="Site Engineer" and p and p.id in allowed_ids:
-                x=Issue(
-                    ticket_no=no,plant_id=p.id,equipment_ref=r.get("equip"),vertical=r.get("vertical"),
-                    subcategory=r.get("sub"),description=r.get("desc") or "Issue",severity=normalize_issue_severity(r.get("severity") or "Medium"),
-                    status="Open",occurred_at=_dt(r.get("occurred")),etc_at=_dt(r.get("etc")),assignee_text=r.get("assignee"),
-                    maker=r.get("maker") or None,impact=r.get("impact"),photo_count=int(r.get("photos") or 0),
+                    impact=r.get("impact"),photo_count=int(r.get("photos") or 0),
                     legacy_payload=r,created_by=user.id,
                 )
                 db.add(x); changed=True
@@ -485,9 +352,7 @@ def _sync_state_scoped(db:Session,state:dict[str,Any],expected_revision:int|None
                 continue
             if t.unit_no is not None:
                 continue
-            task_allowed=(assignee_has_type(db,user,t.task_type)
-                          if user.role=="Assignee" else t.plant_id in allowed_ids)
-            if not task_allowed:
+            if t.plant_id not in allowed_ids:
                 continue
             requested=r.get("status") or t.status
             was_completed=t.status=="Completed"
@@ -512,7 +377,7 @@ def _sync_state_scoped(db:Session,state:dict[str,Any],expected_revision:int|None
             if requested=="Completed" and not was_completed:
                 next_due=_recurrence_due(t.due_on,t.frequency)
                 if next_due and not db.scalar(select(OMTask.id).where(OMTask.plant_id==t.plant_id,OMTask.task_name==t.task_name,OMTask.due_on==next_due,OMTask.status!="Completed")):
-                    nxt=OMTask(work_order_no="WO-"+uuid.uuid4().hex[:10].upper(),plant_id=t.plant_id,task_name=t.task_name,task_type=t.task_type,problem=t.problem,problem_source=t.problem_source,equipment_ref=t.equipment_ref,frequency=t.frequency,due_on=next_due,assignee_text=t.assignee_text,assignee_user_id=t.assignee_user_id,status="Scheduled",sop=t.sop,safety=t.safety,tools=t.tools,duration=t.duration,completion=None,evidence=[],problem_found=False,recurrence_parent_no=t.work_order_no,linked_issue=None,log=[{"at":log_stamp(),"text":f"Next occurrence auto-generated from recurrence rule ({t.frequency or 'Monthly'}) — due {next_due.isoformat()}","actor":"System"}],legacy_payload={"recurrenceOf":t.work_order_no},created_by=user.id)
+                    nxt=OMTask(work_order_no="WO-"+uuid.uuid4().hex[:10].upper(),plant_id=t.plant_id,task_name=t.task_name,task_type=t.task_type,problem=t.problem,problem_source=t.problem_source,frequency=t.frequency,due_on=next_due,assignee_text=t.assignee_text,assignee_user_id=t.assignee_user_id,status="Scheduled",sop=t.sop,safety=t.safety,tools=t.tools,duration=t.duration,completion=None,evidence=[],problem_found=False,recurrence_parent_no=t.work_order_no,linked_issue=None,log=[{"at":log_stamp(),"text":f"Next occurrence auto-generated from recurrence rule ({t.frequency or 'Monthly'}) — due {next_due.isoformat()}","actor":"System"}],legacy_payload={"recurrenceOf":t.work_order_no},created_by=user.id)
                     db.add(nxt)
 
         # Washing reports are written only through the reviewed daily-report workflow.
@@ -615,7 +480,7 @@ def _sync_state_head(db:Session,state:dict[str,Any],expected_revision:int|None,u
             continue   # existing tickets change only through /api/issues; a stale browser copy must never undo an Acknowledge, assignment or closure
         severity=normalize_issue_severity(r.get("severity") or "Medium")
         x=db.scalar(select(Issue).where(Issue.ticket_no==no)) or Issue(ticket_no=no,description=r.get("desc") or "Issue",severity=severity,created_by=user.id)
-        p=by_name.get(r.get("plant")) or by_code.get(normalize_site_code(r.get("plant"))); x.plant_id=p.id if p else None; x.equipment_ref=r.get("equip"); x.vertical=r.get("vertical"); x.subcategory=r.get("sub"); x.description=r.get("desc") or x.description; x.severity=severity or x.severity; x.status=r.get("status") or "Open"; x.occurred_at=_dt(r.get("occurred")); x.etc_at=_dt(r.get("etc")); x.assignee_text=r.get("assignee"); x.maker=r.get("maker") or None; x.impact=r.get("impact"); x.photo_count=int(r.get("photos") or 0); x.vendor=r.get("vendor"); x.closure=r.get("closure"); x.source_task=r.get("sourceTask"); x.reopened_from=r.get("reopenedFrom"); x.reopen_count=int(r.get("reopenCount") or 0); x.legacy_payload=r; db.add(x)
+        p=by_name.get(r.get("plant")) or by_code.get(normalize_site_code(r.get("plant"))); x.plant_id=p.id if p else None; x.vertical=r.get("vertical"); x.subcategory=r.get("sub"); x.description=r.get("desc") or x.description; x.severity=severity or x.severity; x.status=r.get("status") or "Open"; x.occurred_at=_dt(r.get("occurred")); x.etc_at=_dt(r.get("etc")); x.assignee_text=r.get("assignee"); x.impact=r.get("impact"); x.photo_count=int(r.get("photos") or 0); x.vendor=r.get("vendor"); x.closure=r.get("closure"); x.source_task=r.get("sourceTask"); x.reopened_from=r.get("reopenedFrom"); x.reopen_count=int(r.get("reopenCount") or 0); x.legacy_payload=r; db.add(x)
 
     for r in state.get("handovers",[]) or []:
         lid=str(r.get("id") or "").strip()
@@ -629,7 +494,7 @@ def _sync_state_head(db:Session,state:dict[str,Any],expected_revision:int|None,u
         no=str(r.get("id") or "").strip()
         if not no: continue
         t=db.scalar(select(OMTask).where(OMTask.work_order_no==no)) or OMTask(work_order_no=no,task_name=r.get("name") or no,status=r.get("status") or "Scheduled",created_by=user.id)
-        p=by_name.get(r.get("plant")) or by_code.get(normalize_site_code(r.get("plant"))); t.plant_id=p.id if p else None; t.task_name=r.get("name") or t.task_name; t.task_type=r.get("type"); t.problem=r.get("problem"); t.problem_source=r.get("problemSource"); t.equipment_ref=r.get("equip"); t.frequency=r.get("freq"); t.due_on=_date(r.get("due")); t.assignee_text=r.get("assignee"); t.assignee_user_id=uuid.UUID(str(r.get("assigneeUserId"))) if r.get("assigneeUserId") else t.assignee_user_id; t.status=r.get("status") or t.status; t.sop=r.get("sop"); t.safety=r.get("safety"); t.tools=r.get("tools"); t.duration=r.get("duration"); t.completion=r.get("completion"); t.actual_completed_on=_date((r.get("completion") or {}).get("date") if isinstance(r.get("completion"),dict) else r.get("actualCompleted")); t.delay_days=int((r.get("completion") or {}).get("delay") or r.get("delayDays") or 0) if r.get("completion") or r.get("delayDays") is not None else None; t.problem_found=bool((r.get("completion") or {}).get("anomaly")) if isinstance(r.get("completion"),dict) else bool(r.get("problemFound")); t.recurrence_parent_no=r.get("recurrenceOf"); t.linked_issue=r.get("linkedIssue"); t.evidence=_clean_evidence(r.get("evidence")) or t.evidence; t.log=r.get("log") or []; t.legacy_payload={k:v for k,v in r.items() if k!="evidence"}; db.add(t)
+        p=by_name.get(r.get("plant")) or by_code.get(normalize_site_code(r.get("plant"))); t.plant_id=p.id if p else None; t.task_name=r.get("name") or t.task_name; t.task_type=r.get("type"); t.problem=r.get("problem"); t.problem_source=r.get("problemSource"); t.frequency=r.get("freq"); t.due_on=_date(r.get("due")); t.assignee_text=r.get("assignee"); t.assignee_user_id=uuid.UUID(str(r.get("assigneeUserId"))) if r.get("assigneeUserId") else t.assignee_user_id; t.status=r.get("status") or t.status; t.sop=r.get("sop"); t.safety=r.get("safety"); t.tools=r.get("tools"); t.duration=r.get("duration"); t.completion=r.get("completion"); t.actual_completed_on=_date((r.get("completion") or {}).get("date") if isinstance(r.get("completion"),dict) else r.get("actualCompleted")); t.delay_days=int((r.get("completion") or {}).get("delay") or r.get("delayDays") or 0) if r.get("completion") or r.get("delayDays") is not None else None; t.problem_found=bool((r.get("completion") or {}).get("anomaly")) if isinstance(r.get("completion"),dict) else bool(r.get("problemFound")); t.recurrence_parent_no=r.get("recurrenceOf"); t.linked_issue=r.get("linkedIssue"); t.evidence=_clean_evidence(r.get("evidence")) or t.evidence; t.log=r.get("log") or []; t.legacy_payload={k:v for k,v in r.items() if k!="evidence"}; db.add(t)
     db.flush()
 
     # Legacy client state is read-only for washing; configuration and reports use dedicated APIs.

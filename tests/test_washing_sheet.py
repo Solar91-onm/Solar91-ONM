@@ -3,10 +3,10 @@ from __future__ import annotations
 from datetime import timedelta
 from pathlib import Path
 
-from app.core.models import Notification, UserEquipmentTypeAssignment, UserPlantAssignment, WashingDailyReport
+from app.core.models import Notification, UserPlantAssignment, WashingDailyReport
 from app.core.timeutil import business_today
 from tests import conftest
-from tests.conftest import login_user
+from tests.conftest import grant_assignee_plants, login_user
 from tests.test_washing_cycles import BASE, _plant, _setup_cycle_users, _stub_washing_storage, _upload_washing_photos
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -124,7 +124,7 @@ def test_bulk_confirm_checks_reviewer_photos_and_completes_the_cycle(client, db,
 
     assert confirm(ids).status_code == 403  # the engineer cannot confirm their own days
     other = login_user(client, db, role="Assignee", name="Other Sheet Assignee", email="sheet-other-assignee@example.com")
-    db.add(UserEquipmentTypeAssignment(user_id=other.id, equipment_type="Modules cleaning"))
+    grant_assignee_plants(db, other.id)
     db.commit()
     assert confirm(ids).status_code == 403  # washing scope, but not this plant's Assignee
 
@@ -163,13 +163,6 @@ def test_single_review_also_skips_photos_for_backfilled_days(client, db):
     assert client.post(f"{BASE}/daily-reports/{backfilled['id']}/review", json={"decision": "Confirm"}).status_code == 200
 
 
-def test_record_tab_uses_the_cycle_sheet():
-    washing = (ROOT / "frontend/static/js/26-washing-cycles.js").read_text(encoding="utf-8")
-    assert "/api/scheduled/washing/daily-reports/sheet" in washing
-    assert "/api/scheduled/washing/daily-reports/confirm" in washing
-    assert "tab===\"record\"?sheetHtml(p)" in washing
-
-
 def test_sheet_saves_a_zero_day_as_not_done_with_remarks(client, db):
     """The sheet has no reason column: typing 0 tables saves a not-done day (reason "Other") with the remarks."""
     plant = _plant(db)
@@ -185,77 +178,12 @@ def test_sheet_saves_a_zero_day_as_not_done_with_remarks(client, db):
     assert saved.exception_reason == "Other" and saved.remarks == "Pump down"
 
 
-def test_record_sheet_has_no_reason_column_and_accepts_zero():
-    washing = (ROOT / "frontend/static/js/26-washing-cycles.js").read_text(encoding="utf-8")
-    assert "<th>Not done reason</th>" not in washing
-    assert "<th>Tables cleaned</th><th>Remarks</th>" in washing
-    # the count box has no up/down spinner; arrow keys / Enter move between days instead
-    assert 'class="wx-in wx-num" type="text" inputmode="numeric"' in washing
-    assert 'onkeydown="washSheetKey(event,this)"' in washing
-    assert "window.washSheetKey=function(e,el)" in washing
-    assert 'job_status:"Not done",tables_cleaned:0,exception_reason:"Other"' in washing
-    assert "tables cleaned must be a whole number" not in washing
-
-
-def test_command_center_hub_shows_the_operations_donut_cards():
-    hub = (ROOT / "frontend/static/js/20-modern-ui-2026.js").read_text(encoding="utf-8")
-    dash = (ROOT / "frontend/static/js/08-actions-exports-and-submission.js").read_text(encoding="utf-8")
-    assert "function ccOpsOverviewPanel(" in dash
-    assert "h+=ccOpsOverviewPanel(plants,open,f)" in dash
-    assert "ccOpsOverviewPanel(plants,open,blankIssF())" in hub
-    # the third card is panel washing (plant health was dropped); every slice opens a filtered register
-    assert '"Panel washing"' in dash and '"Plant health"' not in dash
-    assert 'act:canOpenWash?"ccWashQueue":""' in dash
-    assert 'if(act==="ccWashQueue"){e.preventDefault();openDashboardWashQueue(id);return}' in dash
-    data = (ROOT / "frontend/static/js/00-auth-data-and-imports.js").read_text(encoding="utf-8")
-    assert "function openDashboardWashQueue(show)" in data
-    washing = (ROOT / "frontend/static/js/26-washing-cycles.js").read_text(encoding="utf-8")
-    assert 'f.show==="ontrack"' in washing and 'f.show==="excused"' in washing and 'f.show==="notontrack"' in washing
-    # the washing card counts plants by cycle schedule, not by compliance score
-    assert '"Delayed by reason"' in dash and '"Not on track"' in dash and '"compliance",washSegments' not in dash
-    # the old work lanes and the separate "Plant washing" panel are no longer on the Command Center
-    assert "cx-lanes" not in hub and "function ccPanel()" not in washing
-
-
-def test_washing_forms_and_views_ask_only_for_remarks_not_a_reason():
-    washing = (ROOT / "frontend/static/js/26-washing-cycles.js").read_text(encoding="utf-8")
-    assert "Reason not done" not in washing and "Reason work was not done" not in washing
-    assert "Choose the reason the work was not done" not in washing
-    assert '"Not done — "+h(r.exception_reason)' not in washing
-    assert 'exception_reason:nd?"Other":null' in washing
-    assert 'body.exception_reason=v("reason")||"Other"' in washing
-
-
-def test_not_reported_view_can_check_any_of_the_last_ten_days():
-    washing = (ROOT / "frontend/static/js/26-washing-cycles.js").read_text(encoding="utf-8")
-    # the view filters on the chosen day's day-activity status, not only on today's report
-    assert "const REP_DAYS=10;" in washing
-    assert '(f.show==="notreported"&&notReportedOn(p,rd))' in washing
-    assert 'return e.status[p.plant_id]==="not_reported";' in washing
-    assert "p.today_report==null).length" not in washing
-    # the day list is cached per overview load, so a saved report drops the plant after the refresh
-    assert "if(S._washDayFor!==S._washCycles){S._washDayFor=S._washCycles;S._washDays={}}" in washing
-    # the Cycle updates day log follows the same day and can open the not-reported list
-    assert "const day=repDay(),e=dayEntry(day),r=e.data;" in washing
-    assert "S.washDay={date:repDay()," in washing
-
-
-def test_washing_filters_are_for_the_om_team_only():
-    washing = (ROOT / "frontend/static/js/26-washing-cycles.js").read_text(encoding="utf-8")
-    # the plant / quick-view / day / Assignee bar renders only for O&M Head and Assignee
-    assert "const bar=head?'<div class=\"wx-bar\">'+" in washing
-    assert 'if(!head)Object.assign(ui,{plant:"all",show:"all",assignee:"all",repDay:""});' in washing
-    # Site Engineers are pinned to today and get no day picker in the Cycle updates log
-    assert "return isTeam()&&d&&d<=t&&d>=addDays(t,-(REP_DAYS-1))?d:t" in washing
-    assert "(team?repDaySelect(\"washFilter('repDay',this.value)\"):'')" in washing
-
-
-def test_cycle_bars_count_untouched_cycles_as_not_started_and_hero_is_monthly_cycles():
-    washing = (ROOT / "frontend/static/js/26-washing-cycles.js").read_text(encoding="utf-8")
-    # a current cycle with no tables reported or carried in is grey (Not started), not blue (In progress)
-    assert 'const cyStarted=c=>c.state==="In progress"&&((c.confirmed||0)+(c.pending||0)+(c.carried_in||0))>0;' in washing
-    assert 'else if(cyStarted(cy))c.run++;else c.wait++;' in washing
-    assert 'parts[1]==="In progress"?cyStarted(c):' in washing
-    # the hero score is cycles done / cycles due this month, so it only rises as cycles complete
-    assert "G.scoreRing(cyPct,heroColor)" in washing
-    assert "<small>cycle compliance</small><span>cycles done this month</span>" in washing
+# Removed with the frontend bundle they asserted on (the portal replaced it):
+#   test_record_tab_uses_the_cycle_sheet
+#   test_record_sheet_has_no_reason_column_and_accepts_zero
+#   test_command_center_hub_shows_the_operations_donut_cards
+#   test_washing_forms_and_views_ask_only_for_remarks_not_a_reason
+#   test_not_reported_view_can_check_any_of_the_last_ten_days
+#   test_washing_filters_are_for_the_om_team_only
+#   test_cycle_bars_count_untouched_cycles_as_not_started_and_hero_is_monthly_cycles
+# The backend behaviour they sat beside is still covered by the tests above.

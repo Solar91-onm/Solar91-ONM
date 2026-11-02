@@ -8,7 +8,7 @@ from openpyxl import load_workbook
 from app.core.models import Issue, Plant
 from app.field.router import run_operational_search
 from app.issues.schemas import normalize_issue_severity
-from tests.conftest import login_user
+from tests.conftest import seed_work_categories, login_user
 
 
 def _plant(db):
@@ -50,12 +50,13 @@ def test_stored_low_rows_show_and_filter_as_medium(client, db):
 
 def test_upload_template_offers_two_levels_and_old_low_rows_import_as_medium(client, db):
     _plant(db)
+    seed_work_categories(db)
     login_user(client, db)
     wb = load_workbook(io.BytesIO(client.get("/api/issues/import/template").content))
     formulas = [dv.formula1 for ws in wb.worksheets for dv in ws.data_validations.dataValidation]
     assert '"Critical,Medium"' in formulas and not any("Low" in (f or "") for f in formulas)
-    csv_text = ("Site code,Issue category,Problem,Description,Severity,Equipment / unit,Occurred on,Target date,Assignee email\n"
-                "LVL01,Inverter,,Old sheet row,Low,,,,\n")
+    csv_text = ("Site code,Issue category,Problem,Description,Severity,Occurred on,Target date,Assignee email\n"
+                "LVL01,Inverter,,Old sheet row,Low,,,\n")
     r = client.post("/api/issues/import?dry_run=false", files={"file": ("i.csv", csv_text.encode(), "text/csv")})
     assert r.status_code == 200 and r.json()["saved"] == 1, r.text
     assert db.query(Issue).filter_by(description="Old sheet row").one().severity == "Medium"
@@ -78,27 +79,6 @@ def test_search_shows_resolved_tickets_as_solved(client, db):
     assert [r.get("ticket") for r in run_operational_search(db, head, "solved inverter")["records"]] == ["S-DONE"]
 
 
-def test_frontend_levels_show_solved_and_keep_old_low_tickets_at_medium():
-    import subprocess
-    import textwrap
-    from pathlib import Path
-    script = textwrap.dedent(r'''
-      const fs=require('fs'),vm=require('vm'),assert=require('assert');
-      const s=fs.readFileSync('frontend/static/js/00-auth-data-and-imports.js','utf8');
-      const a=s.indexOf('/* Issues have two levels'),b=s.indexOf('\n',s.indexOf('function sevOpts('));
-      assert(a>=0&&b>a);
-      const box={String};vm.createContext(box);
-      vm.runInContext(s.slice(a,b).replace(/^const /gm,'var '),box);
-      assert.deepStrictEqual(Array.from(box.SEV),['Critical','Medium']);
-      assert.strictEqual(box.issueLevel({severity:'Low',status:'Open'}),'Medium');
-      assert.strictEqual(box.issueLevel({severity:'High',status:'In Progress'}),'Critical');
-      assert.strictEqual(box.issueLevel({severity:'Critical',status:'Resolved'}),'Solved');
-      assert.strictEqual(box.issueLevel({severity:'Medium',status:'Closed'}),'Solved');
-      assert.strictEqual(box.SEV_COLOR.Solved,'#16A34A');
-      // editing an old Low ticket must not silently default the dropdown to Critical
-      assert.ok(box.sevOpts('Low').includes('<option selected>Medium</option>'));
-      assert.ok(!box.sevOpts('Low').includes('Low'));
-    ''')
-    run = subprocess.run(["node", "-e", script], cwd=Path(__file__).resolve().parents[1],
-                         capture_output=True, text=True, timeout=10)
-    assert run.returncode == 0, run.stderr
+# Removed with the frontend bundle they asserted on (the portal replaced it):
+#   test_frontend_levels_show_solved_and_keep_old_low_tickets_at_medium
+# The backend behaviour they sat beside is still covered by the tests above.

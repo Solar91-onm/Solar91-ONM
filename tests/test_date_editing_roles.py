@@ -2,19 +2,21 @@ from __future__ import annotations
 
 from datetime import date, datetime, timezone
 
-from app.core.models import Issue, OMTask, Plant, UserEquipmentTypeAssignment, UserPlantAssignment, WashingConfig
-from tests.conftest import login_user
+from app.core.models import Issue, OMTask, Plant, UserPlantAssignment, WashingConfig
+from tests.conftest import grant_assignee_plants, login_user
 from tests import conftest
 from tests.test_washing_cycles import BASE, _plant, _setup_cycle_users
 
 
-def _pm(db, assignee_type="Inverter"):
+def _pm(db):
+    """Two PM jobs: one at the plant under test, one at a plant nobody here is assigned to."""
     plant = Plant(site_code="DT01", plant_name="Date Plant")
-    db.add(plant); db.commit(); db.refresh(plant)
+    elsewhere = Plant(site_code="DT02", plant_name="Other Date Plant")
+    db.add_all([plant, elsewhere]); db.commit(); db.refresh(plant); db.refresh(elsewhere)
     db.add_all([
         OMTask(work_order_no="WO-DT-INV", plant_id=plant.id, task_name="Clean fans", task_type="Inverter",
                frequency="Monthly", start_on=date(2026, 11, 1), due_on=date(2026, 11, 10), status="Scheduled"),
-        OMTask(work_order_no="WO-DT-TR", plant_id=plant.id, task_name="Check oil", task_type="Transformer",
+        OMTask(work_order_no="WO-DT-TR", plant_id=elsewhere.id, task_name="Check oil", task_type="Transformer",
                frequency="Monthly", due_on=date(2026, 11, 10), status="Scheduled"),
     ])
     db.commit()
@@ -34,11 +36,12 @@ def test_pm_start_date_head_edit_and_validation(client, db):
 def test_pm_assignee_dates_only_and_site_engineer_blocked(client, db):
     plant = _pm(db)
     assignee = login_user(client, db, role="Assignee", name="Ravi", email="dt-assignee@example.com")
-    db.add(UserEquipmentTypeAssignment(user_id=assignee.id, equipment_type="Inverter")); db.commit()
+    grant_assignee_plants(db, assignee.id, plant.id); db.commit()      # their plant only
     ok = client.patch("/api/scheduled/tasks/WO-DT-INV/schedule", json={"start_on": "2026-11-02", "due_on": "2026-11-12"})
     assert ok.status_code == 200, ok.text
     assert ok.json()["task"]["start"] == "2026-11-02" and ok.json()["task"]["due"] == "2026-11-12"
     assert client.patch("/api/scheduled/tasks/WO-DT-INV/schedule", json={"name": "Renamed"}).status_code == 403
+    # a job at a plant outside their scope stays closed to them
     assert client.patch("/api/scheduled/tasks/WO-DT-TR/schedule", json={"due_on": "2026-11-12"}).status_code == 403
     se = login_user(client, db, role="Site Engineer", name="SE", email="dt-se@example.com")
     db.add(UserPlantAssignment(user_id=se.id, plant_id=plant.id, assignment_role="Site Engineer")); db.commit()
@@ -70,7 +73,7 @@ def test_issue_dates_head_assignee_and_site_engineer(client, db):
     assignee = login_user(client, db, role="Assignee", name="Ravi", email="dt-iss-assignee@example.com")
     other = login_user(client, db, role="Assignee", name="Other", email="dt-iss-other@example.com")
     for u in (assignee, other):
-        db.add(UserEquipmentTypeAssignment(user_id=u.id, equipment_type="Inverter"))
+        grant_assignee_plants(db, u.id)
     issue = Issue(ticket_no="DT-1", plant_id=plant.id, vertical="Inverter", description="Fault", severity="Medium",
                   status="Assigned", assigned_to=assignee.id, assignee_text="Ravi",
                   occurred_at=datetime(2026, 10, 1, 9, tzinfo=timezone.utc), etc_at=datetime(2026, 10, 5, 9, tzinfo=timezone.utc))

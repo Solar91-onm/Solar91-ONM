@@ -6,7 +6,7 @@ from datetime import date
 from openpyxl import Workbook
 
 from app.core.timeutil import business_today
-from app.core.models import Equipment, OMTask, PMTemplate, Plant
+from app.core.models import OMTask, PMTemplate, PMUnitConfig, Plant
 from tests.conftest import login_user
 
 
@@ -25,11 +25,11 @@ def _quick(**over):
     return body
 
 
-def test_quick_add_one_task_per_register_unit(client, db):
+def test_quick_add_one_task_per_configured_unit(client, db):
+    """Unit counts come from the plant's PM unit configuration (pm_unit_config)."""
     login_user(client, db, role="O&M Head")
     plant = _plant(db)
-    db.add(Equipment(plant_id=plant.id, equipment_code="INV-01", equipment_name="Inverter 1", equipment_type="Inverter"))
-    db.add(Equipment(plant_id=plant.id, equipment_code="INV-02", equipment_name="Inverter 2", equipment_type="Inverter"))
+    db.add(PMUnitConfig(plant_id=plant.id, equipment_type="Inverter", total_units=2, units_per_day=2))
     db.commit()
     dry = client.post("/api/pm-plan/tasks", json=_quick(dry_run=True)).json()
     assert dry["count"] == 2 and db.query(OMTask).count() == 0
@@ -41,7 +41,7 @@ def test_quick_add_one_task_per_register_unit(client, db):
     assert again["count"] == 0 and again["skipped"] == 2
 
 
-def test_units_hint_used_when_register_empty(client, db):
+def test_units_hint_used_when_no_unit_config_exists(client, db):
     login_user(client, db, role="O&M Head")
     _plant(db)
     res = client.post("/api/pm-plan/tasks", json=_quick(units=3)).json()
@@ -59,13 +59,11 @@ def test_template_apply_and_save(client, db):
     assert "Heatsink temperature" in (task.sop or "")
 
 
-def test_one_job_stores_equipment_register_quantity(client, db):
+def test_one_job_stores_the_configured_unit_count(client, db):
+    """A non-per-unit job records how many units it covers, from the plant's configuration."""
     login_user(client, db, role="O&M Head")
     plant=_plant(db)
-    db.add_all([
-        Equipment(plant_id=plant.id,equipment_code="INV-01",equipment_name="Inverter 1",equipment_type="Inverter",quantity=8),
-        Equipment(plant_id=plant.id,equipment_code="INV-02",equipment_name="Inverter 2",equipment_type="Inverter",quantity=4),
-    ])
+    db.add(PMUnitConfig(plant_id=plant.id, equipment_type="Inverter", total_units=12, units_per_day=4))
     db.commit()
     response=client.post("/api/pm-plan/tasks",json=_quick(per_unit=False))
     assert response.status_code==200,response.text

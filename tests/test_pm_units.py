@@ -3,9 +3,9 @@ from __future__ import annotations
 from datetime import date, timedelta
 
 from app.core.timeutil import business_today
-from app.core.models import Notification, OMTask, PMTemplate, PMUnitConfig, Plant, User, UserEquipmentTypeAssignment
+from app.core.models import Notification, OMTask, PMTemplate, PMUnitConfig, Plant, User, UserPlantAssignment
 from app.pmplan.units import day_plan, distribute, run_daily
-from tests.conftest import login_user
+from tests.conftest import grant_assignee_plants, login_user
 
 
 def _plant(db, code="KRN_01", name="Kerli"):
@@ -40,7 +40,6 @@ def test_units_spread_over_days(client, db):
     assert rows[-1].due_on == today + timedelta(days=4) and rows[-1].cycle_day == 5
     assert {t.cycle_id for t in rows} and len({t.cycle_id for t in rows}) == 1 and rows[0].total_units == 10
     assert {t.task_name for t in rows} == {"Inverter service"}
-    assert all(t.equipment_ref is None for t in rows)
 
 
 def test_unit_subset_and_validation(client, db):
@@ -85,7 +84,7 @@ def test_one_assignee_per_plant(client, db):
     for n in ("Asha", "Ravi"):
         person = User(auth_provider="t", external_subject=n, display_name=n, role="Assignee", is_active=True)
         db.add(person); db.commit()
-        db.add(UserEquipmentTypeAssignment(user_id=person.id, equipment_type="Inverter")); db.commit()
+        grant_assignee_plants(db, person.id); db.commit()
     db.add(User(auth_provider="t", external_subject="boss", display_name="Board Member", role="Administration", is_active=True)); db.commit()
     refused = client.post("/api/pm-plan/tasks", json=_body(plants=["A_01"], assignees=["Board Member"]))
     assert refused.status_code == 422 and "Assignee role" in refused.json()["detail"]
@@ -124,7 +123,7 @@ def test_reminders_three_days_before_and_on_due_date(client, db):
     head = login_user(client, db, role="O&M Head")
     _plant(db)
     a = User(auth_provider="t", external_subject="asha", email="asha@example.com", display_name="Asha", role="Assignee", is_active=True); db.add(a); db.flush()
-    db.add(UserEquipmentTypeAssignment(user_id=a.id, equipment_type="Inverter")); db.commit()
+    grant_assignee_plants(db, a.id); db.commit()
     response = client.post("/api/pm-plan/tasks", json=_body(per_unit=False, assignees=["Asha"], start_date=(business_today() + timedelta(days=3)).isoformat()))
     assert response.status_code == 200, response.text
     assert run_daily(db, business_today())["advance"] == 1
@@ -218,11 +217,11 @@ def test_missing_migration_gives_clear_message(client, db):
 
 
 def test_finish_within_days_paces_each_plant_by_its_own_units(client, db):
-    from app.core.models import Equipment
+    from app.core.models import PMUnitConfig
     login_user(client, db)
     big, small = _plant(db, "BIG_01", "Big"), _plant(db, "SML_01", "Small")
-    db.add_all([Equipment(plant_id=big.id, equipment_code=f"INV-{n}", equipment_name=f"Inverter {n}", equipment_type="Inverter") for n in range(1, 9)])
-    db.add(Equipment(plant_id=small.id, equipment_code="INV-1", equipment_name="Inverter 1", equipment_type="Inverter"))
+    db.add(PMUnitConfig(plant_id=big.id, equipment_type="Inverter", total_units=8, units_per_day=2))
+    db.add(PMUnitConfig(plant_id=small.id, equipment_type="Inverter", total_units=1, units_per_day=1))
     db.commit()
     res = client.post("/api/pm-plan/tasks", json=_body(plants=["BIG_01", "SML_01"], spread_days=4))
     assert res.status_code == 200, res.text            # one unit at a plant is fine: no "per day > units" error
@@ -232,20 +231,23 @@ def test_finish_within_days_paces_each_plant_by_its_own_units(client, db):
     assert [t.due_on for t in rows if t.plant_id == small.id] == [business_today()]
 
 
-def test_all_plants_job_skips_plants_without_that_equipment(client, db):
-    from app.core.models import Equipment
+def test_all_plants_job_skips_plants_without_that_category_configured(client, db):
+    from app.core.models import PMUnitConfig
     login_user(client, db)
     with_inv, without = _plant(db, "INV_01", "Has inverters"), _plant(db, "NOI_01", "No inverters")
-    db.add(Equipment(plant_id=with_inv.id, equipment_code="INV-1", equipment_name="Inverter 1", equipment_type="Inverter", quantity=2, criticality="High"))
-    db.add(Equipment(plant_id=without.id, equipment_code="TR-1", equipment_name="Transformer 1", equipment_type="Transformer", status="fault"))
+    db.add(PMUnitConfig(plant_id=with_inv.id, equipment_type="Inverter", total_units=2, units_per_day=1))
+    db.add(PMUnitConfig(plant_id=without.id, equipment_type="Transformer", total_units=1, units_per_day=1))
     db.commit()
     preview = client.post("/api/pm-plan/tasks", json=_body(plants=["All plants"], dry_run=True)).json()
     assert preview["plants"] == 1 and preview["skipped_plants"] == ["No inverters"]
     client.post("/api/pm-plan/tasks", json=_body(plants=["All plants"]))
     assert {t.plant_id for t in db.query(OMTask).all()} == {with_inv.id}
-    # a type nobody has registered still goes to every plant, as before
+    # a category nobody has configured still goes to every plant, as before
     wms = client.post("/api/pm-plan/tasks", json=_body(equipment_type="WMS", task_name="WMS clean", plants=["All plants"], dry_run=True)).json()
     assert wms["plants"] == 2 and wms["skipped_plants"] == []
-    register = {(r["plant_id"], r["equipment_type"]): r for r in client.get("/api/pm-plan/unit-config").json()["register"]}
-    assert register[(str(with_inv.id), "Inverter")] == {"plant_id": str(with_inv.id), "equipment_type": "Inverter", "units": 2, "critical": 2, "faulty": 0}
-    assert register[(str(without.id), "Transformer")]["faulty"] == 1
+    # The per-asset register is gone: unit counts come from the saved configuration.
+    body = client.get("/api/pm-plan/unit-config").json()
+    assert body["register"] == []
+    configs = {(c["plant_id"], c["equipment_type"]): c for c in body["configs"]}
+    assert configs[(str(with_inv.id), "Inverter")]["total_units"] == 2
+    assert configs[(str(without.id), "Transformer")]["total_units"] == 1

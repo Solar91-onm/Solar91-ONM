@@ -32,7 +32,6 @@ import uuid
 
 PROFILE = {
     "plants": 100,
-    "equipment_per_plant": 4,
     "issues_per_plant": 40,
     "closed_share": 0.6,
     "tasks_per_plant": 40,
@@ -63,7 +62,7 @@ def _queries(header: str) -> int | None:
 def seed(db, profile: dict) -> dict[str, int]:
     from sqlalchemy import insert
     from app.core.models import (
-        AuditLog, Equipment, Issue, Notification, OMTask, Plant, User, UserEquipmentTypeAssignment,
+        AuditLog, Issue, Notification, OMTask, Plant, User,
         UserPlantAssignment, WashingConfig, WashingDailyReport, WashingHistory, WashingTable,
     )
     try:
@@ -81,10 +80,9 @@ def seed(db, profile: dict) -> dict[str, int]:
                     email="engineer@example.invalid", display_name="Bench Engineer", role="Site Engineer", is_active=True)
     db.add_all([head, assignee, engineer])
     db.flush()
-    db.add_all([UserEquipmentTypeAssignment(user_id=assignee.id, equipment_type="Inverter"),
-                UserEquipmentTypeAssignment(user_id=assignee.id, equipment_type="Modules cleaning")])
+    # Assignee scope is plant-based; the plants are assigned after they are inserted below.
     counts: dict[str, int] = defaultdict(int)
-    plants, equipment, issues, tasks, tables, history, reports, configs = [], [], [], [], [], [], [], []
+    plants, issues, tasks, tables, history, reports, configs = [], [], [], [], [], [], []
     for p in range(profile["plants"]):
         pid = uuid.uuid4()
         plants.append({"id": pid, "site_code": f"BN{p:04d}", "plant_name": f"Bench Plant {p:04d}", "status": "active",
@@ -92,18 +90,11 @@ def seed(db, profile: dict) -> dict[str, int]:
                        "legacy_payload": {}})
         configs.append({"id": uuid.uuid4(), "plant_id": pid, "team": ["Bench Assignee"], "assigned_user_id": assignee.id,
                         "frequency_days": 10, "active": True, "cycle_overrides": {}})
-        eq_ids = []
-        for e in range(profile["equipment_per_plant"]):
-            eid = uuid.uuid4(); eq_ids.append((eid, f"BN{p:04d}-INV-{e:02d}"))
-            equipment.append({"id": eid, "plant_id": pid, "equipment_code": f"BN{p:04d}-INV-{e:02d}",
-                              "equipment_name": f"Inverter {e:02d}", "equipment_type": "Inverter", "status": "active",
-                              "quantity": 1, "metadata_json": {}})
         closed_cut = int(profile["issues_per_plant"] * profile["closed_share"])
         for n in range(profile["issues_per_plant"]):
-            eid, code = eq_ids[n % len(eq_ids)]
             created = now - timedelta(days=(n * 7) % 700, hours=n % 24)
-            issues.append({"id": uuid.uuid4(), "ticket_no": f"BN{p:04d}-ISS-{n:05d}", "plant_id": pid, "equipment_id": eid,
-                           "equipment_ref": code, "vertical": "Inverter", "description": f"Inverter fault pattern {n % 9}",
+            issues.append({"id": uuid.uuid4(), "ticket_no": f"BN{p:04d}-ISS-{n:05d}", "plant_id": pid,
+                           "vertical": "Inverter", "description": f"Inverter fault pattern {n % 9}",
                            "severity": ("Critical", "High", "Medium", "Low")[n % 4],
                            "status": "Closed" if n < closed_cut else ("Open", "Assigned", "In Progress", "Resolved")[n % 4],
                            "occurred_at": created, "created_at": created, "updated_at": created + timedelta(hours=6),
@@ -113,7 +104,7 @@ def seed(db, profile: dict) -> dict[str, int]:
         for n in range(profile["tasks_per_plant"]):
             tasks.append({"id": uuid.uuid4(), "work_order_no": f"BN{p:04d}-PM-{n:05d}", "plant_id": pid,
                           "task_name": f"Preventive check {n % 6}", "task_type": "Inverter",
-                          "equipment_ref": eq_ids[n % len(eq_ids)][1], "frequency": "Monthly",
+                          "frequency": "Monthly",
                           "due_on": today + timedelta(days=(n % 60) - 30), "assignee_text": "Bench Assignee",
                           "assignee_user_id": assignee.id, "status": ("Scheduled", "In Progress", "Completed")[n % 3],
                           "evidence": [], "log": [{"at": now.isoformat(), "text": "Created", "actor": "System"}],
@@ -135,7 +126,9 @@ def seed(db, profile: dict) -> dict[str, int]:
                             "review_status": ("Pending", "Confirmed")[r % 2], "cycle_completed": False})
     db.execute(insert(Plant), plants)
     db.add(UserPlantAssignment(user_id=engineer.id, plant_id=plants[0]["id"], assignment_role="Site Engineer"))
-    for model, rows in ((WashingConfig, configs), (Equipment, equipment), (Issue, issues), (OMTask, tasks),
+    db.add_all([UserPlantAssignment(user_id=assignee.id, plant_id=row["id"], assignment_role="Assignee")
+                for row in plants])
+    for model, rows in ((WashingConfig, configs), (Issue, issues), (OMTask, tasks),
                         (WashingTable, tables), (WashingHistory, history), (WashingDailyReport, reports)):
         for start in range(0, len(rows), 5000):
             db.execute(insert(model), rows[start:start + 5000])
@@ -160,7 +153,6 @@ ENDPOINTS = {
         ("GET", "/api/scheduled/tasks"),
         ("GET", "/api/field/overview"),
         ("GET", "/api/issues?limit=50"),
-        ("GET", "/api/equipment/page?page=1&page_size=50"),
         ("GET", "/api/users"),
         ("GET", "/api/issues/assignees"),
     ],

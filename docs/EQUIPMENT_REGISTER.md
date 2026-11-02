@@ -23,6 +23,8 @@ New fields include DISCOM, feeder/GSS, rating/capacity/quantity, plant location,
 
 The existing Solar91 classes and visual identity are retained. The screen now includes server-side pagination, persisted filters, DISCOM/in-charge/warranty/service columns, data-completeness shortcuts, Excel/CSV import with dry-run validation, filtered Excel export, atomic bulk add, Move, Retire, and typed-confirmation permanent delete.
 
+The Asset & Warranty view adds a warranty snapshot for the currently loaded page. Its expiring, expired and incomplete-date cards apply the existing server-side warranty filters; the counts are not portfolio totals. Use pagination to review other records. A known expiry date with a missing start date can appear in both an expiry and date-completeness category.
+
 Click a row to open the right-side detail drawer:
 
 1. **Overview** — full asset data, plant/DISCOM, in-charge and type owners, warranty state.
@@ -54,7 +56,7 @@ The Washing screen was deliberately not redesigned. Its existing workflow remain
 1. Sign in as **O&M Head**. Open Equipment Register, add an item with the new fields, edit it, move it to another plant, and verify Assignment history contains the change. Retire it; verify status becomes inactive. Confirm permanent delete requires typing `DELETE`.
 2. Add two records with **Add many** and confirm one request creates both. Repeat with a duplicate code and confirm the entire operation fails with no partial creation.
 3. Download the import template, populate a valid and invalid row, run preview, correct the invalid row, then commit. Export the filtered register and open the XLSX.
-4. Exercise DISCOM, in-charge, warranty, no-in-charge and maker-missing filters. Refresh the browser and verify the filter/page state returns. Use Back/Forward and verify the hash route restores the page.
+4. Exercise DISCOM, in-charge, warranty, no-in-charge and maker-missing filters. Confirm the warranty snapshot counts the loaded page and its cards filter the table. Refresh the browser and verify the filter/page state returns. Use Back/Forward and verify the hash route restores the page.
 5. Open an equipment row and check all five drawer tabs. Upload/open/remove a test document. Confirm linked PM tasks/issues appear for matching code/name.
 6. Sign in as **Administration**: register is visible but editing actions are absent/forbidden.
 7. Sign in as **Assignee**: only assigned equipment types appear; editing is unavailable.

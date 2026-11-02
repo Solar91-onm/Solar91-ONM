@@ -91,9 +91,6 @@ def test_day_summary_scope(client, db):
     assert _activity(client, d1).status_code == 403
 
 
-def test_day_summary_button_and_compact_sheet_are_wired():
-    js = (ROOT / "frontend/static/js/26-washing-cycles.js").read_text(encoding="utf-8")
-    css = (ROOT / "frontend/static/css/40-washing-and-picker.css").read_text(encoding="utf-8")
-    assert "openWashDaySummary()" in js and "/api/scheduled/washing/day-activity" in js
-    assert 'S.modal==="washingDaySummary"' in js and "todayStrip()+feedHtml()" in js
-    assert ".wx-sheet{max-height:none;overflow-y:visible}" in css      # the whole cycle in one view, no inner scroll box
+# Removed with the frontend bundle they asserted on (the portal replaced it):
+#   test_day_summary_button_and_compact_sheet_are_wired
+# The backend behaviour they sat beside is still covered by the tests above.

@@ -2,7 +2,7 @@
 from app.core.models import Issue, OMTask, Plant, UserPlantAssignment
 from tests.conftest import login_user
 
-KEYS = ["plants", "issues", "tasks", "equipment", "washMeta", "audit", "inventory"]
+KEYS = ["plants", "issues", "tasks", "washMeta", "audit", "inventory"]
 
 
 def _seed(db):

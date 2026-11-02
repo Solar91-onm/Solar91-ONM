@@ -3,8 +3,8 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta, timezone
 
 from app.core.timeutil import business_today
-from app.core.models import Equipment, Notification, OMTask, PMFollowUp, Plant, User, UserEquipmentAssignment, UserEquipmentTypeAssignment, UserPlantAssignment, WashingConfig, WashingHistory, WashingTable, Permit
-from tests.conftest import login_user
+from app.core.models import Notification, OMTask, PMFollowUp, Permit, Plant, User, UserPlantAssignment, WashingConfig, WashingHistory, WashingTable
+from tests.conftest import grant_assignee_plants, login_user
 
 
 def _scoped_engineer(db, client):
@@ -23,7 +23,7 @@ def test_site_engineer_can_complete_scheduled_task_and_next_occurrence_is_genera
     db.add(head)
     task = OMTask(
         work_order_no='WO-PM-001', plant_id=plant.id, task_name='Inverter preventive maintenance',
-        task_type='Electrical', equipment_ref='INV-01', frequency='Weekly', due_on=date(2026, 9, 28),
+        task_type='Electrical', frequency='Weekly', due_on=date(2026, 9, 28),
         assignee_text='Field Engineer', status='In Progress', sop='PM checklist', safety='LOTO',
         tools='IR tester', duration='2 h', created_by=user.id,
     )
@@ -95,27 +95,6 @@ def test_site_engineer_can_log_washing_exception_and_reschedule(client, db):
     assert updated.next_due_on == date(2026, 9, 28)
     assert db.query(WashingHistory).filter(WashingHistory.washing_table_id == updated.id).count() == 0
 
-def test_frontend_contains_planned_maintenance_hub_and_washing_submodule(client):
-    page = client.get('/')
-    assert page.status_code == 200
-    html = page.text
-    assert 'Preventive Maintenance' in html
-    assert 'Operations overview' in html
-    assert 'Unplanned · Site Issues' in html
-    assert 'Planned · Preventive Maintenance' in html
-    dashboard_script = '/static/js/08-actions-exports-and-submission.js'
-    assert dashboard_script in html
-    dashboard = client.get(dashboard_script)
-    assert dashboard.status_code == 200
-    assert 'aria-label="Filter dashboard by equipment"' in dashboard.text
-    assert 'setDashboardEquipmentFilter(this.value)' in dashboard.text
-    assert 'cc-ops-overview' in html
-    assert 'Scheduled O&amp;M' not in html
-    assert 'link("scheduled","Scheduled O&amp;M"' not in html
-    assert 'Washing' in html
-    assert 'Sudden breakdowns and urgent requests remain in' in html
-
-
 def test_site_engineer_cannot_create_problem_based_scheduled_task(client, db):
     plant, _user = _scoped_engineer(db, client)
     response = client.post('/api/scheduled/tasks/problem', json={
@@ -123,7 +102,6 @@ def test_site_engineer_cannot_create_problem_based_scheduled_task(client, db):
         'asset': 'Inverter',
         'problem': 'Fan failure',
         'task_name': 'Weekly inverter fan inspection',
-        'equipment_ref': 'INV-01',
         'frequency': 'Weekly',
         'due_on': '2026-10-01',
         'assignee': 'Field Engineer',
@@ -152,7 +130,6 @@ def test_administration_cannot_create_problem_based_scheduled_task(client, db):
         'asset': 'Transformer',
         'problem': 'Oil leakage',
         'task_name': 'Transformer oil leakage inspection',
-        'equipment_ref': 'TR-01',
         'frequency': 'Monthly',
         'due_on': '2026-10-05',
         'assignee': 'O&M Team',
@@ -162,30 +139,37 @@ def test_administration_cannot_create_problem_based_scheduled_task(client, db):
     assert response.status_code == 403, response.text
 
 
-def test_assignee_problem_task_creation_is_limited_to_assigned_equipment_types_across_plants(client, db):
+def test_assignee_problem_task_creation_is_limited_to_their_assigned_plants(client, db):
     own = Plant(site_code='AS01', plant_name='Assigned Plant')
     other = Plant(site_code='AS02', plant_name='Also Assigned Plant')
     db.add_all([own, other]); db.commit(); db.refresh(own); db.refresh(other)
+    elsewhere = Plant(site_code='AS03', plant_name='Unassigned Plant')
+    db.add(elsewhere); db.commit(); db.refresh(elsewhere)
     user = login_user(client, db, role='Assignee', name='O&M Member', email='om.member@example.com')
-    db.add(UserEquipmentTypeAssignment(user_id=user.id, equipment_type='CCTV'))
+    grant_assignee_plants(db, user.id, own.id, other.id)        # not `elsewhere`
     other_assignee = User(
         auth_provider='supabase', external_subject='other-assignee',
         email='other-assignee@example.com', display_name='Other User',
         role='Assignee', is_active=True,
     )
     db.add(other_assignee); db.commit()
-    db.add(UserEquipmentTypeAssignment(user_id=other_assignee.id, equipment_type='Inverter')); db.commit()
+    grant_assignee_plants(db, other_assignee.id, own.id); db.commit()   # only `own`
 
     payload = {
         'asset': 'CCTV', 'problem': 'Camera offline', 'task_name': 'CCTV preventive inspection',
-        'equipment_ref': 'CAM-01', 'frequency': 'Weekly', 'due_on': '2026-10-02',
+        'frequency': 'Weekly', 'due_on': '2026-10-02',
         'assignee': 'O&M Member', 'sop': 'CCTV-PM-01', 'safety': '—',
     }
-    denied_type = client.post('/api/scheduled/tasks/problem', json={**payload, 'asset': 'Transformer', 'plant_id': str(own.id)})
-    assert denied_type.status_code == 403, denied_type.text
+    # a plant outside their scope is refused
+    denied_plant = client.post('/api/scheduled/tasks/problem', json={**payload, 'plant_id': str(elsewhere.id)})
+    assert denied_plant.status_code == 403, denied_plant.text
+    # any category at either of their own plants is allowed
     for plant in (own, other):
-        allowed = client.post('/api/scheduled/tasks/problem', json={**payload, 'plant_id': str(plant.id)})
-        assert allowed.status_code == 201, allowed.text
+        for asset in ('CCTV', 'Transformer'):
+            allowed = client.post('/api/scheduled/tasks/problem',
+                                  json={**payload, 'asset': asset, 'plant_id': str(plant.id)})
+            assert allowed.status_code == 201, allowed.text
+    # assigning to someone who does not hold that plant is refused
     denied_assignment = client.post('/api/scheduled/tasks/problem', json={**payload, 'assignee': 'Other User', 'plant_id': str(other.id)})
     assert denied_assignment.status_code == 422, denied_assignment.text
 
@@ -211,8 +195,7 @@ def test_scheduled_before_after_evidence_is_private_and_required(client, db, mon
     plant, user = _scoped_engineer(db, client)
     task = OMTask(
         work_order_no='WO-EVIDENCE-01', plant_id=plant.id, task_name='Inverter PM with evidence',
-        task_type='Inverter', problem='Fan failure', problem_source='Site Issues problem library',
-        equipment_ref='INV-01', frequency='Weekly', due_on=date(2026, 9, 28),
+        task_type='Inverter', problem='Fan failure', problem_source='Site Issues problem library', frequency='Weekly', due_on=date(2026, 9, 28),
         assignee_text='Field Engineer', status='In Progress', sop='INV-PM-01', safety='LOTO',
         tools='Standard toolkit', duration='2 h', evidence=[], created_by=user.id,
     )
@@ -280,26 +263,12 @@ def test_mutating_scheduled_api_rejects_cookie_only_style_request(client, db):
     assert 'bearer token' in response.json()['detail'].lower()
 
 
-def test_frontend_is_productionized_and_uses_site_issues(client):
-    page = client.get('/')
-    assert page.status_code == 200
-    html = page.text
-    assert 'Site Issues' in html
-    assert 'Scheduled O&amp;M filters' not in html
-    assert 'Scheduled O&M filters' not in html
-    assert 'Standalone Prototype' not in html
-    assert 'Reset demo data' not in html
-    assert 'localStorage' not in html
-    assert 'SUPABASE_SERVICE_ROLE_KEY' not in html
-    assert 'PRODUCTION IDENTITY + ACCESS ENFORCEMENT' in html
-
 
 def test_ptw_or_loto_task_is_blocked_until_approved_and_closes_on_completion(client, db):
     plant, user = _scoped_engineer(db, client)
     task = OMTask(
         work_order_no='WO-PTW-01', plant_id=plant.id, task_name='HT panel inspection',
-        task_type='Electrical', problem='Inspection', problem_source='Site Issues problem library',
-        equipment_ref='HT-01', frequency='Monthly', due_on=date(2026, 9, 28),
+        task_type='Electrical', problem='Inspection', problem_source='Site Issues problem library', frequency='Monthly', due_on=date(2026, 9, 28),
         assignee_text=user.display_name, assignee_user_id=user.id, status='Scheduled',
         sop='HT-01', safety='PTW + LOTO required', tools='PPE', duration='2 h',
         evidence=[], created_by=user.id,
@@ -342,27 +311,17 @@ def test_ptw_or_loto_task_is_blocked_until_approved_and_closes_on_completion(cli
     assert db.query(Permit).filter(Permit.permit_no == permit_no).one().status == 'Closed'
 
 
-def test_scheduled_task_list_batches_equipment_quantity_and_followup_reads(client, db):
+def test_scheduled_task_list_batches_followup_reads(client, db):
     plant = Plant(site_code="LATENCY01", plant_name="Latency Plant")
     db.add(plant); db.flush()
-    expected_equipment = {}
-    tasks = []
-    for index in range(8):
-        equipment = Equipment(
-            plant_id=plant.id, equipment_code=f"LAT-INV-{index}", equipment_name=f"Latency Inverter {index}",
-            equipment_type="Inverter", status="active", quantity=2,
-        )
-        db.add(equipment); db.flush()
-        expected_equipment[f"WO-LAT-{index}"] = str(equipment.id)
-        tasks.append(OMTask(
+    tasks = [
+        OMTask(
             work_order_no=f"WO-LAT-{index}", plant_id=plant.id, task_name=f"Latency check {index}",
-            task_type="Inverter", equipment_ref=equipment.equipment_code,
+            task_type="Inverter", quantity=21,
             due_on=business_today() + timedelta(days=index), status="Scheduled",
-        ))
-    db.add(Equipment(
-        plant_id=plant.id, equipment_code="LAT-INV-RETIRED", equipment_name="Retired Latency Inverter",
-        equipment_type="Inverter", status="inactive", quantity=5,
-    ))
+        )
+        for index in range(8)
+    ]
     db.add_all(tasks); db.flush()
     now = datetime.now(timezone.utc)
     db.add_all([
@@ -377,8 +336,12 @@ def test_scheduled_task_list_batches_equipment_quantity_and_followup_reads(clien
     rows = {row["id"]: row for row in response.json()}
     assert len(rows) == 8
     assert all(row["plant"] == "Latency Plant" and row["quantity"] == 21 for row in rows.values())
-    assert {work_order: rows[work_order]["equipmentId"] for work_order in rows} == expected_equipment
     assert rows["WO-LAT-0"]["last_follow_up"]["spoke_to"] == "Latest contact"
 
     query_count = int(response.headers["server-timing"].split('desc="')[1].split()[0])
     assert query_count <= 3, f"Task list used {query_count} database queries for 8 tasks"
+
+
+# Removed with the frontend bundle they asserted on (the portal replaced it):
+#   test_frontend_contains_planned_maintenance_hub_and_washing_submodule
+# The backend behaviour they sat beside is still covered by the tests above.

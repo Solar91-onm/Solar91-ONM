@@ -8,7 +8,7 @@ from sqlalchemy.dialects import postgresql
 from sqlalchemy.exc import OperationalError
 
 from app.core.database import engine
-from app.core.models import Equipment, Issue, Plant
+from app.core.models import Issue, Plant
 from app.issues.repository import IssueRepository
 from tests.conftest import TEST_DB, login_user
 
@@ -70,40 +70,19 @@ def test_issue_pagination_uses_newest_first_and_rejects_oversized_page(client, d
     assert client.get("/api/issues?limit=201").status_code == 422
 
 
-def test_plant_and_equipment_filters_and_pagination(client, db):
+def test_plant_filters_and_pagination(client, db):
     login_user(client, db)
     plants = [
         Plant(site_code=f"REG-{letter}", plant_name=f"Register {letter}")
         for letter in ("A", "B", "C")
     ]
     db.add_all(plants)
-    db.flush()
-    for index, plant in enumerate(plants):
-        db.add(
-            Equipment(
-                plant_id=plant.id,
-                equipment_code=f"INV-{index}",
-                equipment_name=f"Inverter {index}",
-                equipment_type="Inverter" if index < 2 else "Transformer",
-                maker="Maker A" if index != 1 else "Maker B",
-            )
-        )
     db.commit()
 
     plant_page = client.get("/api/plants?q=Register&limit=1&offset=1")
     assert plant_page.status_code == 200
     assert [row["site_code"] for row in plant_page.json()] == ["REGB"]
     assert client.get("/api/plants?limit=201").status_code == 422
-
-    equipment_page = client.get(
-        "/api/equipment/page?equipment_type=Inverter&limit=10&offset=1"
-    )
-    assert equipment_page.status_code == 200
-    assert equipment_page.json()["total"] == 2
-    assert equipment_page.json()["offset"] == 1
-    assert [row["equipment_code"] for row in equipment_page.json()["items"]] == [
-        "INV-1"
-    ]
 
 
 def test_duplicate_issue_submission_returns_conflict_without_second_row(client, db):

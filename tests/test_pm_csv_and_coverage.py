@@ -1,5 +1,5 @@
 """Regression tests for the plant/unit-aware PM redesign and native CSV uploads."""
-from app.core.models import Equipment, OMTask, Plant, PMUnitConfig
+from app.core.models import OMTask, PMUnitConfig, Plant
 from tests.conftest import login_user
 
 
@@ -50,12 +50,15 @@ def test_pm_unit_inventory_is_scoped_for_site_engineer(client, db):
     assert client.get("/api/pm-plan/unit-config").status_code == 403
 
 
-def test_pm_inventory_includes_equipment_without_scheduled_tasks(client, db):
+def test_pm_inventory_lists_unit_config_without_scheduled_tasks(client, db):
+    """A configured category appears in unit-config even before any PM job exists for it."""
     login_user(client, db, role="O&M Head")
     p = plant(db)
-    db.add(Equipment(plant_id=p.id, equipment_code="TRANSFORMERS", equipment_name="Transformers", equipment_type="Transformer", quantity=7))
+    db.add(PMUnitConfig(plant_id=p.id, equipment_type="Transformer", total_units=7, units_per_day=2))
     db.commit()
     r = client.get("/api/pm-plan/unit-config")
     assert r.status_code == 200, r.text
-    assert {"plant_id": str(p.id), "equipment_type": "Transformer", "units": 7, "critical": 0, "faulty": 0} in r.json()["register"]
+    configs = r.json()["configs"]
+    row = next(c for c in configs if c["equipment_type"] == "Transformer")
+    assert (row["plant_id"], row["total_units"], row["units_per_day"]) == (str(p.id), 7, 2)
     assert db.query(OMTask).count() == 0

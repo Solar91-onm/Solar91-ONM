@@ -1,8 +1,8 @@
 {
   "id": "/",
-  "name": "SOLAR 91 — Plant Operations & Photo Intelligence",
+  "name": "SOLAR 91 \u2014 O&M Plant Operations",
   "short_name": "SOLAR 91 O&M",
-  "description": "Solar91 plant dashboard, site issues, preventive maintenance, washing and photo intelligence",
+  "description": "Solar91 O&M portal: portfolio overview, plant details, site issues, preventive maintenance and washing",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
@@ -32,19 +32,6 @@
     }
   ],
   "shortcuts": [
-    {
-      "name": "O&M Photo Intelligence",
-      "short_name": "Photos",
-      "description": "Add site photos and browse photos from your plants",
-      "url": "/#/photos",
-      "icons": [
-        {
-          "src": "/static/pwa/icon-192.png",
-          "sizes": "192x192",
-          "type": "image/png"
-        }
-      ]
-    },
     {
       "name": "Operations Calendar",
       "short_name": "Calendar",

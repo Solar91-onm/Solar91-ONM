@@ -5,8 +5,8 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta, timezone
 from uuid import UUID
 
-from app.core.models import Equipment, Issue, IssueETCChange, IssueHistory, IssueStep, Notification, Plant, User, UserEquipmentTypeAssignment, UserPlantAssignment
-from tests.conftest import login_user
+from app.core.models import Issue, IssueETCChange, IssueHistory, IssueStep, Notification, Plant, User, UserPlantAssignment
+from tests.conftest import grant_assignee_plants, login_user
 
 
 def _head_with_issue(client, db, *, vertical="Inverter", code="WR01"):
@@ -35,14 +35,13 @@ def test_assignees_endpoint_lists_every_active_assignee(client, db):
     assert str(assignee.id) in {r["id"] for r in rows}      # no equipment scope yet, still listed
 
 
-def test_head_assigning_an_unscoped_assignee_grants_the_category_scope(client, db):
+def test_head_assigning_an_unscoped_assignee_grants_the_plant_scope(client, db):
     assignee, _, issue = _head_with_issue(client, db)
     resp = client.post(f"/api/issues/{issue['id']}/assign", json={"assigned_to": str(assignee.id)})
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["assigned_to"] == str(assignee.id) and body["assignee_text"] == "Ravi Assignee" and body["status"] == "Assigned"
-    owned = [t.equipment_type for t in db.query(UserEquipmentTypeAssignment).filter_by(user_id=assignee.id)]
-    assert owned == ["Inverter"]
+    assert db.query(UserPlantAssignment).filter_by(user_id=assignee.id).count() == 1
 
 
 def test_assignment_by_name_only_resolves_to_the_database_user(client, db):
@@ -71,7 +70,7 @@ def test_assigned_assignee_can_acknowledge_and_move_forward(client, db):
 
 def test_ticket_assigned_by_name_only_can_still_be_acknowledged_by_that_assignee(client, db):
     assignee, plant, _ = _head_with_issue(client, db)
-    db.add(UserEquipmentTypeAssignment(user_id=assignee.id, equipment_type="Inverter"))
+    grant_assignee_plants(db, assignee.id)
     row = Issue(ticket_no="TKT-LEGACY-1", plant_id=UUID(plant["id"]), vertical="Inverter", description="Legacy",
                 severity="Medium", status="Assigned", assignee_text="Ravi Assignee", assigned_to=None)
     db.add(row); db.commit(); db.refresh(row)
@@ -85,7 +84,7 @@ def test_ticket_assigned_by_name_only_can_still_be_acknowledged_by_that_assignee
 
 def test_unassigned_ticket_cannot_be_acknowledged_by_an_assignee(client, db):
     assignee, _, issue = _head_with_issue(client, db)
-    db.add(UserEquipmentTypeAssignment(user_id=assignee.id, equipment_type="Inverter")); db.commit()
+    grant_assignee_plants(db, assignee.id); db.commit()
     from tests import conftest
     conftest._CURRENT_USER = db.get(User, assignee.id)
     assert client.post(f"/api/issues/{issue['id']}/acknowledge").status_code == 403
@@ -96,7 +95,7 @@ def test_only_the_head_or_the_tickets_assignee_can_edit_or_close_and_direct_clos
     from tests import conftest
     head = conftest._CURRENT_USER
     # before the ticket is assigned to them, an Assignee cannot edit or close it
-    db.add(UserEquipmentTypeAssignment(user_id=assignee.id, equipment_type="Inverter")); db.commit()
+    grant_assignee_plants(db, assignee.id); db.commit()
     conftest._CURRENT_USER = db.get(User, assignee.id)
     assert client.patch(f"/api/issues/{issue['id']}", json={"description": "tampered"}).status_code == 403
     assert client.post(f"/api/issues/{issue['id']}/close", json={"note": "x", "direct": True}).status_code == 403
@@ -106,7 +105,7 @@ def test_only_the_head_or_the_tickets_assignee_can_edit_or_close_and_direct_clos
     other = User(auth_provider="test", external_subject="wr-other", email="wr-o@example.com",
                  display_name="Other Assignee", role="Assignee", is_active=True)
     db.add(other); db.commit(); db.refresh(other)
-    db.add(UserEquipmentTypeAssignment(user_id=other.id, equipment_type="Inverter")); db.commit()
+    grant_assignee_plants(db, other.id); db.commit()
     conftest._CURRENT_USER = db.get(User, other.id)
     assert client.patch(f"/api/issues/{issue['id']}", json={"description": "tampered"}).status_code == 403
     assert client.post(f"/api/issues/{issue['id']}/close", json={"note": "x", "direct": True}).status_code == 403
@@ -192,27 +191,25 @@ def test_site_engineer_can_raise_equipment_issue_and_notifies_assignee_and_heads
                     display_name="Field Engineer", role="Site Engineer", is_active=True)
     assignee = User(auth_provider="test", external_subject="wr-se-assignee", email="raise-assignee@example.com",
                     display_name="Inverter Assignee", role="Assignee", is_active=True)
-    equipment = Equipment(plant_id=plant.id, equipment_code="INV-07", equipment_name="Inverter 7",
-                          equipment_type="Inverter", status="active")
-    db.add_all([engineer, assignee, equipment])
+    db.add_all([engineer, assignee])
     db.flush()
     db.add_all([
         UserPlantAssignment(user_id=engineer.id, plant_id=plant.id, assignment_role="Site Engineer"),
-        UserEquipmentTypeAssignment(user_id=assignee.id, equipment_type="Inverter"),
+        UserPlantAssignment(user_id=assignee.id, plant_id=plant.id, assignment_role="Assignee"),
     ])
     db.commit()
     _set_user(db, engineer.id)
 
     response = client.post("/api/issues", json={
-        "plant_id": str(plant.id), "equipment_id": str(equipment.id), "equipment_ref": "INV-07",
-        "vertical": "Inverter", "description": "Inverter trips on startup", "severity": "Medium",
+        "plant_id": str(plant.id),
+        "vertical": "Inverter", "subcategory": "Trips on startup",
+        "description": "Inverter trips on startup", "severity": "Medium",
         "assigned_to": str(assignee.id),
     })
 
     assert response.status_code == 201, response.text
     body = response.json()
-    assert body["equipment_id"] == str(equipment.id)
-    assert body["equipment_ref"] == "INV-07"
+    assert body["vertical"] == "Inverter" and body["subcategory"] == "Trips on startup"
     assert {(row.event_type, row.user_id) for row in db.query(Notification).all()} == {
         ("issue_created", head.id), ("issue_created", assignee.id),
     }
@@ -240,7 +237,7 @@ def test_site_engineer_can_raise_equipment_issue_and_notifies_assignee_and_heads
     db.add(other_plant)
     db.commit()
     denied = client.post("/api/issues", json={
-        "plant_id": str(other_plant.id), "equipment_ref": "INV-07", "vertical": "Inverter",
+        "plant_id": str(other_plant.id), "vertical": "Inverter",
         "description": "Out-of-scope issue", "severity": "Medium",
     })
     assert denied.status_code == 403

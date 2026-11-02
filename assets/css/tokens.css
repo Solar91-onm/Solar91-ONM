@@ -1,0 +1,83 @@
+/*
+ * Solar91 Portal — design tokens
+ * A reserved palette: white surfaces, warm neutrals, Solar91 green as the accent.
+ * The reference IPP table drove the sizing and the soft row-separator feel.
+ */
+:root {
+  /* Surface */
+  --ep-bg:           #FFFFFF;
+  --ep-bg-page:      #F2F6F0;   /* very soft mint tint, like the reference dashboard */
+  --ep-bg-muted:     #F7F8F7;
+  --ep-bg-subtle:    #FAFAFA;
+  --ep-bg-elev:      #FFFFFF;
+  --ep-sidebar-bg:   #FFFFFF;
+
+  /* Line */
+  --ep-border:       #E6E8E7;
+  --ep-border-soft:  #EEF0EE;
+  --ep-border-strong:#D4D7D4;
+
+  /* Text */
+  --ep-text:         #0E1512;
+  --ep-text-strong:  #050807;
+  --ep-text-muted:   #5B6761;
+  --ep-text-faint:   #8E9A94;
+  --ep-text-inverse: #FFFFFF;
+
+  /* Brand accent — Solar91 green */
+  --ep-accent:       #009710;
+  --ep-accent-soft:  #E6F4E7;
+  --ep-accent-strong:#007A0D;
+  --ep-accent-ring:  rgba(0, 151, 16, 0.28);
+  --ep-amber:        #B4610A;
+  --ep-amber-soft:   #FDF2E0;
+  --ep-red:          #B42318;
+  --ep-red-soft:     #FEE8E6;
+  --ep-grey:         #6B7570;
+  --ep-grey-soft:    #EEF0EE;
+
+  /* Shadow */
+  --ep-shadow-sm:  0 1px 2px rgba(16, 24, 20, 0.04);
+  --ep-shadow-md:  0 1px 3px rgba(16, 24, 20, 0.06), 0 1px 2px rgba(16, 24, 20, 0.04);
+  --ep-shadow-pop: 0 10px 32px rgba(16, 24, 20, 0.12), 0 2px 6px rgba(16, 24, 20, 0.06);
+
+  /* Shape */
+  --ep-radius-xs: 4px;
+  --ep-radius-sm: 6px;
+  --ep-radius-md: 10px;
+  --ep-radius-lg: 14px;
+  --ep-radius-xl: 20px;
+
+  /* Spacing step */
+  --ep-s-1:  4px;
+  --ep-s-2:  8px;
+  --ep-s-3:  12px;
+  --ep-s-4:  16px;
+  --ep-s-5:  20px;
+  --ep-s-6:  24px;
+  --ep-s-7:  32px;
+  --ep-s-8:  40px;
+  --ep-s-9:  56px;
+
+  /* Type */
+  --ep-font-sans: "Inter", "Segoe UI", "Helvetica Neue", Arial, system-ui, sans-serif;
+  --ep-font-mono: "JetBrains Mono", "SF Mono", ui-monospace, Consolas, monospace;
+
+  --ep-fs-xs: 11px;
+  --ep-fs-sm: 12px;
+  --ep-fs-md: 13.5px;
+  --ep-fs-base: 14.5px;
+  --ep-fs-lg: 16px;
+  --ep-fs-xl: 20px;
+  --ep-fs-2xl: 26px;
+  --ep-fs-3xl: 34px;
+
+  --ep-lh-tight: 1.2;
+  --ep-lh:        1.45;
+  --ep-lh-loose:  1.6;
+
+  /* Layout */
+  --ep-sidebar-w: 268px;
+  --ep-sidebar-w-collapsed: 72px;
+  --ep-content-max: 1480px;
+}

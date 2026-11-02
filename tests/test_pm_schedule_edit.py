@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from datetime import date
 
-from app.core.models import AuditLog, OMTask, Plant, UserEquipmentTypeAssignment, UserPlantAssignment
-from tests.conftest import login_user
+from app.core.models import AuditLog, OMTask, Plant, UserPlantAssignment
+from tests.conftest import grant_assignee_plants, login_user
 
 
 def _tasks(db):
@@ -82,16 +82,19 @@ def test_unit_plan_can_expand_shrink_and_keeps_removed_tasks_as_history(client, 
     assert db.query(AuditLog).filter(AuditLog.action == 'Cancelled scheduled unit outside revised PM plan').count() == 2
 
 
-def test_assignee_can_only_edit_units_for_assigned_equipment_type(client, db):
+def test_assignee_can_only_edit_units_at_their_assigned_plants(client, db):
     assignee = login_user(client, db, role='Assignee', name='Ravi', email='unit-assignee@example.com')
     plant = Plant(site_code='UNIT-2', plant_name='Unit Scope Plant')
     db.add(plant)
     db.flush()
-    db.add(UserEquipmentTypeAssignment(user_id=assignee.id, equipment_type='Inverter'))
+    elsewhere = Plant(site_code='UNIT02', plant_name='Other Unit Plant')
+    db.add(elsewhere)
+    db.flush()
+    grant_assignee_plants(db, assignee.id, plant.id)       # their plant only
     db.add_all([
         OMTask(work_order_no='WO-UNIT-INV', plant_id=plant.id, task_name='Clean fans', task_type='Inverter',
                frequency='Monthly', due_on=date(2026, 11, 1), status='Scheduled'),
-        OMTask(work_order_no='WO-UNIT-TR', plant_id=plant.id, task_name='Check oil', task_type='Transformer',
+        OMTask(work_order_no='WO-UNIT-TR', plant_id=elsewhere.id, task_name='Check oil', task_type='Transformer',
                frequency='Monthly', due_on=date(2026, 11, 1), status='Scheduled'),
     ])
     db.commit()

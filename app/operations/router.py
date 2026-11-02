@@ -9,7 +9,7 @@ from app.core.database import get_db
 from app.core.fastjson import json_response
 from app.core.legacy_state import load_state, sync_state
 from app.core.models import Plant, StateCollectionRevision, User
-from app.core.security import ROLE_MODULES, ROLE_PERMISSIONS, get_current_user, has_portfolio_scope, require_csrf, user_scoped_equipment_ids, user_scoped_equipment_types, user_scoped_plant_ids
+from app.core.security import ROLE_MODULES, ROLE_PERMISSIONS, get_current_user, has_portfolio_scope, require_csrf, user_scoped_plant_ids
 from app.operations.schemas import StateSyncRequest
 
 router = APIRouter(prefix="/api", tags=["Application State"])
@@ -23,13 +23,9 @@ def bootstrap(
 ):
     result = load_state(db, user, include_washing=not lite)
     allowed = user_scoped_plant_ids(db, user)
-    equipment_scope = user_scoped_equipment_ids(db, user)
-    type_scope = user_scoped_equipment_types(db, user)
     scope = {
-        "type": "portfolio" if allowed is None else "equipment" if user.role == "Assignee" else "plant",
+        "type": "portfolio" if allowed is None else "plant",
         "plant_ids": [str(x) for x in (allowed or set())],
-        "equipment_ids": [str(x) for x in (equipment_scope or set())],
-        "equipment_types": sorted(type_scope or set()),
     }
     if allowed is not None and len(allowed) == 1:
         plant = db.get(Plant, next(iter(allowed)))
@@ -50,9 +46,10 @@ def bootstrap(
     result["scope"] = scope
     result["permissions"] = sorted(ROLE_PERMISSIONS.get(user.role, set()))
     result["modules"] = ROLE_MODULES.get(user.role, [])
+    # Every scoped role now waits on a plant assignment (Assignees used to wait on equipment types).
     result["pending_access"] = (
-        user.role == "Site Engineer" and len(scope["plant_ids"]) == 0
-    ) or (user.role == "Assignee" and len(scope["equipment_types"]) == 0)
+        user.role in {"Site Engineer", "Assignee"} and len(scope["plant_ids"]) == 0
+    )
     return json_response(result)
 
 

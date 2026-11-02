@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date, timedelta
 from uuid import UUID
 
-from app.core.models import AppSetting, AuditLog, Notification, UserEquipmentTypeAssignment, UserPlantAssignment, WashingDailyReport
+from app.core.models import AppSetting, AuditLog, Notification, UserPlantAssignment, WashingDailyReport
 from app.core.timeutil import business_today
 from app.scheduled import washing_cycles
 from app.scheduled.washing_cycles import (
@@ -15,7 +15,7 @@ from app.scheduled.washing_cycles import (
     check_cycle_compliance_alerts,
 )
 from tests import conftest
-from tests.conftest import login_user
+from tests.conftest import grant_assignee_plants, login_user
 from tests.test_washing_cycles import BASE, _plant
 
 TABLES = 100
@@ -25,7 +25,7 @@ def _setup(client, db):
     """A plant with 100 tables per cycle; returns (plant, head, assignee). The O&M Head is the current user."""
     plant = _plant(db)
     assignee = login_user(client, db, role="Assignee", name="Reason Assignee", email="reason-assignee@example.com")
-    db.add(UserEquipmentTypeAssignment(user_id=assignee.id, equipment_type="Modules cleaning"))
+    grant_assignee_plants(db, assignee.id)
     db.commit()
     head = login_user(client, db, role="O&M Head", name="Reason Head", email="reason-head@example.com")
     setup = client.post(f"{BASE}/setup", json={"plant_id": str(plant.id), "table_count": TABLES, "assignee_user_id": str(assignee.id)})

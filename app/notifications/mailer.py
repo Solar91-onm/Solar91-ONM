@@ -52,7 +52,7 @@ def _logo_b64() -> str | None:
 
 ROLE_POINTS = {
     "Assignee": [
-        "See and act on every issue for your equipment types, in all plants",
+        "See and act on every issue at the plants you are assigned to",
         "Run scheduled maintenance and panel-washing tasks",
         "Log your work with before / after photos as proof",
     ],
@@ -137,7 +137,7 @@ def _invite_html(name: str, email: str, role: str, scope: str, invited_by: str, 
  <tr><td style="padding:26px 34px 6px">
    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#FFF7E0;border:1px solid #F5D77A;border-left:5px solid #F5B821;border-radius:12px"><tr><td style="padding:16px 18px">
      <div style="font-size:15px;font-weight:800;color:#6B4E00">&#128260; Your work can change later</div>
-     <div style="font-size:13.5px;line-height:1.6;color:#4F4320;margin-top:5px">Responsibilities in O&amp;M move as plants and teams grow. Your O&amp;M Head can update your equipment types or plants at any time, and the change appears the next time you open the portal &mdash; <b>no new invitation needed</b>.</div>
+     <div style="font-size:13.5px;line-height:1.6;color:#4F4320;margin-top:5px">Responsibilities in O&amp;M move as plants and teams grow. Your O&amp;M Head can update your plants at any time, and the change appears the next time you open the portal &mdash; <b>no new invitation needed</b>.</div>
    </td></tr></table>
  </td></tr>
 
@@ -168,7 +168,7 @@ def _invite_text(name: str, email: str, role: str, scope: str, invited_by: str, 
         f"Role: {role}\nYou will work on: {scope}\n\n"
         f"Sign in here: {url}\n"
         f"Use this exact email address: {email}\n\n"
-        "Your work can change later: your O&M Head can update your equipment types or plants as "
+        "Your work can change later: your O&M Head can update your plants as "
         "responsibilities change. Changes appear next time you open the portal - no new invite needed.\n\n"
         "Did not expect this email? You can ignore it.\n"
     )

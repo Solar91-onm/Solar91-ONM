@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 
-from app.core.models import Equipment, Issue, OMTask, Plant, UserPlantAssignment, WashingConfig, WashingTable
+from app.core.models import Issue, OMTask, Plant, UserPlantAssignment, WashingConfig, WashingTable
 from tests.conftest import login_user
 
 
@@ -12,7 +12,6 @@ def _seed(db):
     other = Plant(site_code="SEOTH1", plant_name="Other Plant")
     db.add_all([mine, other]); db.commit()
     for plant, tag in ((mine, "OWN"), (other, "OTHER")):
-        db.add(Equipment(plant_id=plant.id, equipment_code=f"INV-{tag}", equipment_name=f"Inverter {tag}", equipment_type="Inverter"))
         db.add(Issue(ticket_no=f"ISS-{tag}", plant_id=plant.id, description=f"Fault at {tag}", severity="Medium", status="Open", vertical="Inverter"))
         db.add(OMTask(work_order_no=f"WO-{tag}", plant_id=plant.id, task_name=f"Inspect {tag}", task_type="Inverter", status="Scheduled",
                       due_on=date.today() + timedelta(days=2)))
@@ -52,8 +51,6 @@ def test_site_engineer_reads_only_their_own_plant(client, db):
     other_issue = db.query(Issue).filter_by(ticket_no="ISS-OTHER").one()
     assert client.get(f"/api/issues/{other_issue.id}/activity").status_code in (403, 404)
     assert client.get(f"/api/scheduled/tasks/WO-OTHER/followups").status_code in (403, 404)
-    other_eq = db.query(Equipment).filter_by(equipment_code="INV-OTHER").one()
-    assert client.get(f"/api/equipment/{other_eq.id}/detail").status_code in (403, 404)
 
     # and their own plant is visible
     assert "ISS-OWN" in client.get("/api/issues").text

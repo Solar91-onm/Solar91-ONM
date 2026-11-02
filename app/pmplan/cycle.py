@@ -1,4 +1,4 @@
-"""Monthly Preventive Maintenance cycle: the order, area and days each equipment type takes at a plant.
+"""Monthly Preventive Maintenance cycle: the order, area and days each work category takes at a plant.
 
 A cycle is CYCLE_DAYS (30) days from its start date, the same length as the Monthly recurrence
 (FREQ_DAYS["Monthly"]), so every unit comes back on the same cycle day next month.
@@ -38,10 +38,10 @@ MISC = "Miscellaneous"
 # Aux. Transformer and one ACDB (separate jobs), and the Miscellaneous job covers the small items
 # (Street Light, ERT, ...) in one visit.
 ONE_JOB_TYPES = ("ACCB Panel", "Aux. Transformer", "ACDB", MISC)
-# Removed from Preventive Maintenance (still an equipment / issue type elsewhere)
+# Removed from Preventive Maintenance (still an issue category elsewhere)
 NOT_IN_PM = ("MCCB",)
 
-# (area, phase name, equipment types, days; None = share the remaining days)
+# (area, phase name, work categories, days; None = share the remaining days)
 _PHASES: list[tuple[str, str, tuple[str, ...], int | None]] = [
     ("Plant side", "Inverter", ("Inverter",), 7),
     ("Plant side", "ACCB", ("ACCB Panel",), 2),
@@ -80,27 +80,27 @@ NAMED_TYPES = [t for p in CYCLE for t in p["equipment_types"]]
 
 
 def phase_for(equipment_type: str) -> dict[str, Any]:
-    """The phase an equipment type is maintained in; types not named in the cycle go to Miscellaneous."""
+    """The phase a work category is maintained in; categories not named in the cycle go to Miscellaneous."""
     return _BY_TYPE.get((equipment_type or "").strip().casefold(), _MISC_PHASE)
 
 
 def one_job(equipment_type: str) -> bool:
-    """True when the equipment is planned as a single PM job per plant (ONE_JOB_TYPES)."""
+    """True when the category is planned as a single PM job per plant (ONE_JOB_TYPES)."""
     return (equipment_type or "").strip().casefold() in {t.casefold() for t in ONE_JOB_TYPES}
 
 
 def in_pm(equipment_type: str) -> bool:
-    """False for equipment removed from Preventive Maintenance (NOT_IN_PM)."""
+    """False for categories removed from Preventive Maintenance (NOT_IN_PM)."""
     return (equipment_type or "").strip().casefold() not in {t.casefold() for t in NOT_IN_PM}
 
 
 def phase_index(equipment_type: str) -> int:
-    """Position of the equipment's phase in the cycle (0 = Inverter)."""
+    """Position of the category's phase in the cycle (0 = Inverter)."""
     return _INDEX[id(phase_for(equipment_type))]
 
 
 def window(equipment_type: str, cycle_start: date) -> dict[str, Any]:
-    """Dates of this equipment's phase in the cycle that starts on `cycle_start`."""
+    """Dates of this category's phase in the cycle that starts on `cycle_start`."""
     p = phase_for(equipment_type)
     start = cycle_start + timedelta(days=p["start_day"] - 1)
     return {**p, "cycle_start": cycle_start, "start": start, "end": start + timedelta(days=p["days"] - 1)}

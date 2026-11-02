@@ -5,8 +5,8 @@ from uuid import uuid4
 import pytest
 
 from app.calendar import router as calendar_router
-from app.core.models import Issue, OMTask, Plant, UserEquipmentTypeAssignment, UserPlantAssignment, WashingDailyReport
-from tests.conftest import login_user
+from app.core.models import Issue, OMTask, Plant, UserPlantAssignment, WashingDailyReport
+from tests.conftest import grant_assignee_plants, login_user
 
 TODAY = date(2026, 10, 30)
 
@@ -31,7 +31,7 @@ def fixtures(db):
                     subcategory="DC Input", assignee_text="Ravi")
               for i, p, severity, status in [(1,a,"Critical","Open"),(2,a,"Medium","Resolved"),(3,b,"Critical","Open")]]
     tasks = [OMTask(work_order_no=f"CALPM-{i}", plant_id=a.id, task_name="Check inverter", task_type="Inverter",
-                    equipment_ref=f"INV-{i}", due_on=date(2026,10,29), status=status, unit_no=i)
+                    due_on=date(2026,10,29), status=status, unit_no=i)
              for i, status in [(1,"Scheduled"),(2,"Completed")]]
     washing = WashingDailyReport(plant_id=a.id,cycle_month="2026-10",cycle_no=3,
         report_date=date(2026,10,29),job_status="Done",tables_cleaned=12,reported_by="Engineer CALA",
@@ -76,13 +76,22 @@ def test_scope_filters_and_detail_enforced(client,db):
     assert client.get(f'/api/operations-calendar/washing/{wash.id}').status_code==200
 
 
-def test_assignee_type_and_washing_access(client,db):
+def test_assignee_sees_every_category_and_washing_at_their_plants(client,db):
+    """An Assignee is scoped by plant, so washing is part of their calendar too.
+
+    It used to be hidden unless they held the "Modules cleaning" equipment type.
+    """
     a,b,issues,tasks,wash=fixtures(db)
-    user=login_user(client,db,role='Assignee',name='Inverter Team',email='calendar-assignee@example.com')
-    db.add(UserEquipmentTypeAssignment(user_id=user.id,equipment_type='Inverter'));db.commit()
+    user=login_user(client,db,role='Assignee',name='O&M Team',email='calendar-assignee@example.com')
+    grant_assignee_plants(db, user.id);db.commit()
     rows=fetch(client).json()['events']
-    assert len(rows)==5 and all(r['kind']!='washing' for r in rows)
-    assert client.get(f'/api/operations-calendar/washing/{wash.id}').status_code==403
+    assert len(rows)==6 and any(r['kind']=='washing' for r in rows)
+    assert client.get(f'/api/operations-calendar/washing/{wash.id}').status_code==200
+
+    # An Assignee with no plant assigned is in the pending-access state and sees nothing.
+    from app.core.models import UserPlantAssignment
+    db.query(UserPlantAssignment).filter_by(user_id=user.id).delete();db.commit()
+    assert fetch(client).json()['events']==[]
 
 
 def test_query_filters_and_range_validation(client,db):
@@ -91,9 +100,9 @@ def test_query_filters_and_range_validation(client,db):
     assert len(fetch(client,activity_type='pm').json()['events'])==2
     assert len(fetch(client,severity='Critical').json()['events'])==2
     assert len(fetch(client,status='Resolved').json()['events'])==1
-    assert len(fetch(client,q='DC Input').json()['events'])==3  # search includes actual equipment subpart
+    assert len(fetch(client,q='DC Input').json()['events'])==3  # search includes the ticket subpart
     assert len(fetch(client,subpart='DC Input').json()['events'])==3
-    assert len(fetch(client,equipment='Inverter').json()['events'])==5
+    assert len(fetch(client,category='Inverter').json()['events'])==5
     assert fetch(client,start='2026-10-30',end='2026-10-29').status_code==422
     assert fetch(client,start='2026-01-01',end='2026-10-29').status_code==422
     assert fetch(client,activity_type='imaginary').status_code==422
@@ -212,7 +221,7 @@ def test_summary_counts_match_events_and_respect_scope(client, db):
     assert body['days'] == expected
     assert body['days']['2026-10-29'] == {'issue': 3, 'pm': 2, 'washing': 1, 'issue_done': 1, 'pm_done': 1, 'washing_done': 0}
     assert body['days']['2026-10-30'] == {'issue': 2, 'pm': 1, 'washing': 0, 'issue_done': 0, 'pm_done': 0, 'washing_done': 0}
-    assert 'Inverter' in body['facets']['equipment'] and 'Ravi' in body['facets']['assignee']
+    assert 'Inverter' in body['facets']['category'] and 'Ravi' in body['facets']['assignee']
     assert 'events' not in body  # counts only: records load per day
     filtered = client.get('/api/operations-calendar/summary', params={'start': '2026-10-29', 'end': '2026-10-29', 'severity': 'Critical'}).json()
     assert (filtered['days']['2026-10-29']['issue'], filtered['days']['2026-10-29']['pm']) == (2, 0)

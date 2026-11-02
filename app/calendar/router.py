@@ -10,13 +10,13 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import String, and_, case, cast, exists, func, or_, select
+from sqlalchemy import and_, case, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.core.models import Equipment, Issue, OMTask, Plant, User, WashingConfig, WashingDailyReport
+from app.core.models import Issue, OMTask, Plant, User, WashingConfig, WashingDailyReport
 from app.core.security import (WASHING_TYPE, ROLE_PERMISSIONS, get_current_user,
-    user_scoped_plant_ids, user_scoped_equipment_types)
+    user_scoped_plant_ids)
 from app.core.timeutil import BUSINESS_TZ, business_today
 from app.scheduled.washing_cycles import _cycle_due_dates, _cycle_start_dates, month_cycles
 
@@ -51,32 +51,6 @@ def _allowed(db: Session, user: User, plant_id: UUID | None):
             raise HTTPException(404, "Plant not found")
         return {plant_id}
     return scoped
-
-
-def _type_filter(column, types: set[str]):
-    return func.lower(func.trim(func.coalesce(column, ""))).in_(types)
-
-
-def _issue_auth(types: set[str]):
-    return or_(
-        _type_filter(Issue.vertical, types),
-        and_(func.trim(func.coalesce(Issue.vertical, "")) == "",
-             exists(select(Equipment.id).where(Equipment.id == Issue.equipment_id,
-                 _type_filter(Equipment.equipment_type, types)))),
-    )
-
-
-def _pm_auth(types: set[str]):
-    return or_(
-        _type_filter(OMTask.task_type, types),
-        and_(func.trim(func.coalesce(OMTask.task_type, "")) == "",
-             exists(select(Equipment.id).where(
-                 Equipment.plant_id == OMTask.plant_id,
-                 or_(Equipment.equipment_code == OMTask.equipment_ref,
-                     Equipment.equipment_name == OMTask.equipment_ref,
-                     cast(Equipment.id, String) == OMTask.equipment_ref),
-                 _type_filter(Equipment.equipment_type, types)))),
-    )
 
 
 def _issue_date(value: datetime | None) -> str | None:
@@ -138,8 +112,8 @@ def _event_issue(r: Issue, p: Plant, reporter: str | None = None) -> dict:
     day = _issue_date(r.occurred_at)
     until, done = _issue_span(r.occurred_at, r.status, r.fixed_on, r.closed_on)
     return {"key": f"issue:{r.id}", "kind": "issue", "id": str(r.id), "reference": r.ticket_no,
-        "date": day, "until": until.isoformat(), "done": done, **_plant_fields(p), "title": r.vertical or r.equipment_ref or "Site issue",
-        "equipment": r.vertical or r.equipment_ref, "subpart": r.subcategory,
+        "date": day, "until": until.isoformat(), "done": done, **_plant_fields(p), "title": r.vertical or "Site issue",
+        "category": r.vertical, "subpart": r.subcategory,
         "assignee": r.assignee_text, "engineer": p.assigned_engineer,
         "reporter": reporter, "status": r.status, "severity": r.severity,
         "tone": _tone("issue", r.status, r.severity, r.occurred_at.date() if r.occurred_at else business_today())}
@@ -149,8 +123,8 @@ def _event_pm(r: OMTask, p: Plant) -> dict:
     until, done = _pm_span(r.due_on, r.status, r.actual_completed_on)
     return {"key": f"pm:{r.id}", "kind": "pm", "id": str(r.id), "reference": r.work_order_no,
         "date": r.due_on.isoformat(), "until": until.isoformat(), "done": done, **_plant_fields(p),
-        "title": r.task_name, "equipment": r.task_type or r.equipment_ref,
-        "subpart": r.equipment_ref, "unit": r.unit_no,
+        "title": r.task_name, "category": r.task_type,
+        "subpart": None, "unit": r.unit_no,
         "assignee": r.assignee_text, "engineer": p.assigned_engineer,
         "status": r.status, "severity": None,
         "tone": _tone("pm", r.status, None, r.due_on)}
@@ -162,7 +136,7 @@ def _event_wash(r: WashingDailyReport, p: Plant) -> dict:
         "date": r.report_date.isoformat(), "until": r.report_date.isoformat(),
         "done": (r.review_status or "").casefold() == "confirmed" and (r.job_status or "").casefold() == "done",
         **_plant_fields(p), "title": "Panel washing",
-        "equipment": WASHING_TYPE, "subpart": None,
+        "category": WASHING_TYPE, "subpart": None,
         "assignee": r.reported_by, "engineer": p.assigned_engineer,
         "status": r.review_status, "job_status": r.job_status, "severity": None,
         "tables_cleaned": r.tables_cleaned,
@@ -189,7 +163,7 @@ def _cycle_record(p: Plant, cfg: WashingConfig, due: date, start: date, month: s
         "kind": "washing", "source": "cycle", "id": f"{p.id}:{month}:{number}",
         "reference": f"Cycle {number} · {month}", "date": due.isoformat(),
         "until": (until or due).isoformat(), "done": confirmed,
-        **_plant_fields(p), "title": label, "equipment": WASHING_TYPE,
+        **_plant_fields(p), "title": label, "category": WASHING_TYPE,
         "subpart": None, "assignee": assignee, "engineer": p.assigned_engineer,
         "status": state, "severity": None, "start_date": start.isoformat(),
         "reports": reports, "cycle_no": number, "cycle_month": month,
@@ -198,10 +172,10 @@ def _cycle_record(p: Plant, cfg: WashingConfig, due: date, start: date, month: s
         "tone": "done" if confirmed else LATE_TONES[_late_tier(late_days)]}
 
 
-FACETS = ("equipment", "subpart", "engineer", "assignee", "status", "severity")
+FACETS = ("category", "subpart", "engineer", "assignee", "status", "severity")
 
 
-def _get_data(db, user, start, end, plant_id=None, kinds=None, equipment=None, subpart=None,
+def _get_data(db, user, start, end, plant_id=None, kinds=None, category=None, subpart=None,
               engineer=None, assignee=None, status=None, severity=None, search=None, cap=1000, offset=0,
               summary=False):
     """Calendar events for the period, or with ``summary`` only per-day counts by kind plus filter options.
@@ -209,7 +183,6 @@ def _get_data(db, user, start, end, plant_id=None, kinds=None, equipment=None, s
     The summary runs the same filtered, permission-scoped queries but selects just the date and filter
     columns, so a month view never builds or transfers thousands of full event rows."""
     scope = _allowed(db, user, plant_id)
-    types = user_scoped_equipment_types(db, user) if user.role == "Assignee" else None
     counts: dict[str, dict[str, int]] = {}
     facets: dict[str, set[str]] = {name: set() for name in FACETS}
     tiers: dict[str, int] = {}   # day -> worst late tier among that day's unfinished washing cycles
@@ -234,7 +207,7 @@ def _get_data(db, user, start, end, plant_id=None, kinds=None, equipment=None, s
         return {"days": counts, "washing_tier": tiers,
                 "facets": {name: sorted(v, key=str.casefold)[:150] for name, v in facets.items()}}
 
-    if (scope is not None and not scope) or (types is not None and not types):
+    if scope is not None and not scope:
         return finish_summary() if summary else ([], False)
     allowed_kinds = set(kinds or ("issue", "pm", "washing"))
     # The max is enforced in SQL, never in Python after loading all history.
@@ -256,19 +229,18 @@ def _get_data(db, user, start, end, plant_id=None, kinds=None, equipment=None, s
         if today >= start: shown.append(~solved)
         query = (select(Issue, Plant).join(Plant, Plant.id == Issue.plant_id)
             .where(*shared, Issue.deleted_at.is_(None), Issue.occurred_at < utc_until, or_(*shown)))
-        if types is not None: query = query.where(_issue_auth(types))
-        if equipment: query = query.where(or_(Issue.vertical.ilike(f"%{equipment}%"), Issue.equipment_ref.ilike(f"%{equipment}%")))
+        if category: query = query.where(Issue.vertical.ilike(f"%{category}%"))
         if subpart: query = query.where(Issue.subcategory.ilike(f"%{subpart}%"))
         if assignee: query = query.where(Issue.assignee_text.ilike(f"%{assignee}%"))
         if status: query = query.where(func.lower(Issue.status) == status.casefold())
         if severity: query = query.where(func.lower(Issue.severity) == severity.casefold())
-        if search_text: query = query.where(or_(Issue.ticket_no.ilike(search_text), Issue.description.ilike(search_text), Issue.vertical.ilike(search_text), Issue.subcategory.ilike(search_text), Issue.equipment_ref.ilike(search_text), Issue.assignee_text.ilike(search_text), Plant.plant_name.ilike(search_text), Plant.site_code.ilike(search_text), Plant.assigned_engineer.ilike(search_text)))
+        if search_text: query = query.where(or_(Issue.ticket_no.ilike(search_text), Issue.description.ilike(search_text), Issue.vertical.ilike(search_text), Issue.subcategory.ilike(search_text), Issue.assignee_text.ilike(search_text), Plant.plant_name.ilike(search_text), Plant.site_code.ilike(search_text), Plant.assigned_engineer.ilike(search_text)))
         if summary:
-            for when, vertical, ref, sub, who, st, sev, eng, fixed, closed in db.execute(query.with_only_columns(
-                    Issue.occurred_at, Issue.vertical, Issue.equipment_ref, Issue.subcategory, Issue.assignee_text,
+            for when, vertical, sub, who, st, sev, eng, fixed, closed in db.execute(query.with_only_columns(
+                    Issue.occurred_at, Issue.vertical, Issue.subcategory, Issue.assignee_text,
                     Issue.status, Issue.severity, Plant.assigned_engineer, Issue.fixed_on, Issue.closed_on)):
                 until, done = _issue_span(when, st, fixed, closed)
-                tally("issue", date.fromisoformat(_issue_date(when)), until, done, equipment=vertical or ref,
+                tally("issue", date.fromisoformat(_issue_date(when)), until, done, category=vertical,
                       subpart=sub, assignee=who, status=st, severity=sev, engineer=eng)
         else:
             result.extend(_event_issue(r, p) for r, p in db.execute(query.order_by(Issue.occurred_at, Issue.id).limit(take)))
@@ -279,9 +251,9 @@ def _get_data(db, user, start, end, plant_id=None, kinds=None, equipment=None, s
         if today >= start: shown.append(pm_status.not_in(PM_ENDED))
         query = (select(OMTask, Plant).join(Plant, Plant.id == OMTask.plant_id)
             .where(*shared, OMTask.due_on <= end, or_(*shown)))
-        if types is not None: query = query.where(_pm_auth(types))
-        if equipment: query = query.where(or_(OMTask.task_type.ilike(f"%{equipment}%"), OMTask.equipment_ref.ilike(f"%{equipment}%")))
-        if subpart: query = query.where(OMTask.equipment_ref.ilike(f"%{subpart}%"))
+        if category: query = query.where(OMTask.task_type.ilike(f"%{category}%"))
+        # A PM job has no subpart (that was the asset reference), so filtering by one excludes PM.
+        if subpart: query = query.where(False)
         if assignee: query = query.where(OMTask.assignee_text.ilike(f"%{assignee}%"))
         if status:
             if status.casefold() == "overdue":
@@ -290,19 +262,19 @@ def _get_data(db, user, start, end, plant_id=None, kinds=None, equipment=None, s
             else:
                 query = query.where(func.lower(OMTask.status) == status.casefold())
         if severity: query = query.where(False)  # PM has no severity column
-        if search_text: query = query.where(or_(OMTask.work_order_no.ilike(search_text), OMTask.task_name.ilike(search_text), OMTask.task_type.ilike(search_text), OMTask.equipment_ref.ilike(search_text), OMTask.assignee_text.ilike(search_text), Plant.plant_name.ilike(search_text), Plant.site_code.ilike(search_text), Plant.assigned_engineer.ilike(search_text)))
+        if search_text: query = query.where(or_(OMTask.work_order_no.ilike(search_text), OMTask.task_name.ilike(search_text), OMTask.task_type.ilike(search_text), OMTask.assignee_text.ilike(search_text), Plant.plant_name.ilike(search_text), Plant.site_code.ilike(search_text), Plant.assigned_engineer.ilike(search_text)))
         if summary:
-            for due, kind_, ref, who, st, eng, completed in db.execute(query.with_only_columns(
-                    OMTask.due_on, OMTask.task_type, OMTask.equipment_ref, OMTask.assignee_text, OMTask.status,
+            for due, kind_, who, st, eng, completed in db.execute(query.with_only_columns(
+                    OMTask.due_on, OMTask.task_type, OMTask.assignee_text, OMTask.status,
                     Plant.assigned_engineer, OMTask.actual_completed_on)):
                 until, done = _pm_span(due, st, completed)
-                tally("pm", due, until, done, equipment=kind_ or ref, subpart=ref, assignee=who, status=st, engineer=eng)
+                tally("pm", due, until, done, category=kind_, assignee=who, status=st, engineer=eng)
         else:
             result.extend(_event_pm(r, p) for r, p in db.execute(query.order_by(OMTask.due_on, OMTask.id).limit(take)))
-    if "washing" in allowed_kinds and user.role != "Administration" and (types is None or WASHING_TYPE.casefold() in types):
+    if "washing" in allowed_kinds and user.role != "Administration":
         query = (select(WashingDailyReport, Plant).join(Plant, Plant.id == WashingDailyReport.plant_id)
             .where(*shared, WashingDailyReport.report_date >= start, WashingDailyReport.report_date <= end))
-        if equipment and equipment.casefold() not in WASHING_TYPE.casefold() and equipment.casefold() not in "panel washing": query = query.where(False)
+        if category and category.casefold() not in WASHING_TYPE.casefold() and category.casefold() not in "panel washing": query = query.where(False)
         if subpart: query = query.where(False)
         if assignee: query = query.where(WashingDailyReport.reported_by.ilike(f"%{assignee}%"))
         if status: query = query.where(or_(func.lower(WashingDailyReport.review_status) == status.casefold(), func.lower(WashingDailyReport.job_status) == status.casefold()))
@@ -313,14 +285,14 @@ def _get_data(db, user, start, end, plant_id=None, kinds=None, equipment=None, s
                     WashingDailyReport.report_date, WashingDailyReport.reported_by, WashingDailyReport.review_status,
                     WashingDailyReport.job_status, Plant.assigned_engineer)):
                 done = (st or "").casefold() == "confirmed" and (job or "").casefold() == "done"
-                tally("washing", day, day, done, equipment=WASHING_TYPE, assignee=who, status=st, engineer=eng)
+                tally("washing", day, day, done, category=WASHING_TYPE, assignee=who, status=st, engineer=eng)
         else:
             result.extend(_event_wash(r, p) for r, p in db.execute(query.order_by(WashingDailyReport.report_date, WashingDailyReport.id).limit(take)))
         # Scheduled cycle due dates are configured independently of daily reports.
         # A cycle deadline is one activity; each actual daily report is another,
         # with a distinct key. Never synthesize a confirmed/completed report.
-        if not subpart and not severity and (not equipment or equipment.casefold() in
-            WASHING_TYPE.casefold() or equipment.casefold() in "panel washing cycle"):
+        if not subpart and not severity and (not category or category.casefold() in
+            WASHING_TYPE.casefold() or category.casefold() in "panel washing cycle"):
             # The previous month too: a missed cycle there can still be outstanding at the start of the period.
             months = _calendar_months(_months_back(start.replace(day=1), OUTSTANDING_LOOKBACK_MONTHS), end)
             month_keys = [m.strftime("%Y-%m") for m in months]
@@ -391,7 +363,7 @@ def _get_data(db, user, start, end, plant_id=None, kinds=None, equipment=None, s
                             if summary:
                                 tally("washing", due, until, confirmed,
                                       tier_of=None if confirmed else (lambda day, due=due: _late_tier((day - due).days)),
-                                      equipment=WASHING_TYPE, assignee=display_name, status=state, engineer=p.assigned_engineer)
+                                      category=WASHING_TYPE, assignee=display_name, status=state, engineer=p.assigned_engineer)
                             else:
                                 result.append(_cycle_record(p, cfg, due, begin, month, n, state,
                                     display_name, report_count, confirmed, until, blocked_by))
@@ -405,7 +377,7 @@ def _get_data(db, user, start, end, plant_id=None, kinds=None, equipment=None, s
 def list_calendar(start: date, end: date,
     db: Annotated[Session, Depends(get_db)], user: Annotated[User, Depends(get_current_user)],
     plant_id: UUID | None = None, activity_type: str | None = None,
-    equipment: str | None = Query(None, max_length=120), subpart: str | None = Query(None, max_length=160),
+    category: str | None = Query(None, max_length=120), subpart: str | None = Query(None, max_length=160),
     engineer: str | None = Query(None, max_length=160), assignee: str | None = Query(None, max_length=160),
     status: str | None = Query(None, max_length=80), severity: str | None = Query(None, max_length=60),
     q: str | None = Query(None, max_length=160), limit: int = Query(1500, ge=1, le=2000),
@@ -415,7 +387,7 @@ def list_calendar(start: date, end: date,
     if activity_type and activity_type not in {"issue", "pm", "washing"}:
         raise HTTPException(422, "Unknown activity type")
     rows, more = _get_data(db, user, start, end, plant_id,
-        {activity_type} if activity_type else None, equipment, subpart,
+        {activity_type} if activity_type else None, category, subpart,
         engineer, assignee, status, severity, q, limit, offset)
     return {"events": rows, "has_more": more, "next_offset": offset + len(rows) if more else None,
         "start": start.isoformat(), "end": end.isoformat()}
@@ -425,7 +397,7 @@ def list_calendar(start: date, end: date,
 def calendar_summary(start: date, end: date,
     db: Annotated[Session, Depends(get_db)], user: Annotated[User, Depends(get_current_user)],
     plant_id: UUID | None = None, activity_type: str | None = None,
-    equipment: str | None = Query(None, max_length=120), subpart: str | None = Query(None, max_length=160),
+    category: str | None = Query(None, max_length=120), subpart: str | None = Query(None, max_length=160),
     engineer: str | None = Query(None, max_length=160), assignee: str | None = Query(None, max_length=160),
     status: str | None = Query(None, max_length=80), severity: str | None = Query(None, max_length=60),
     q: str | None = Query(None, max_length=160)):
@@ -434,7 +406,7 @@ def calendar_summary(start: date, end: date,
         raise HTTPException(422, f"Date range must be 1–{MAX_DAYS + 1} days")
     if activity_type and activity_type not in {"issue", "pm", "washing"}:
         raise HTTPException(422, "Unknown activity type")
-    out = _get_data(db, user, start, end, plant_id, {activity_type} if activity_type else None, equipment,
+    out = _get_data(db, user, start, end, plant_id, {activity_type} if activity_type else None, category,
         subpart, engineer, assignee, status, severity, q, summary=True)
     return {**out, "start": start.isoformat(), "end": end.isoformat()}
 
@@ -444,8 +416,7 @@ def cycle_detail(plant_id: UUID, month: str, cycle_no: int,
                  db: Annotated[Session, Depends(get_db)],
                  user: Annotated[User, Depends(get_current_user)]):
     _allowed(db, user, plant_id)
-    if user.role == "Administration" or (user.role == "Assignee" and
-            WASHING_TYPE.casefold() not in user_scoped_equipment_types(db, user)):
+    if user.role == "Administration":
         raise HTTPException(403, "Washing is outside your assigned scope")
     if cycle_no not in (1, 2, 3): raise HTTPException(404, "Cycle not found")
     try:
@@ -475,17 +446,12 @@ def event_detail(kind: str, record_id: UUID, db: Annotated[Session, Depends(get_
                  user: Annotated[User, Depends(get_current_user)]):
     if kind not in {"issue", "pm", "washing"}: raise HTTPException(404, "Event not found")
     scope = _allowed(db, user, None)
-    types = user_scoped_equipment_types(db, user) if user.role == "Assignee" else None
     model = {"issue": Issue, "pm": OMTask, "washing": WashingDailyReport}[kind]
     row = db.get(model, record_id)
     if row is None or (kind == "issue" and row.deleted_at is not None): raise HTTPException(404, "Event not found")
     if scope is not None and row.plant_id not in scope: raise HTTPException(403, "Plant is outside your assigned scope")
-    if kind == "washing" and (user.role == "Administration" or (types is not None and WASHING_TYPE.casefold() not in types)):
+    if kind == "washing" and user.role == "Administration":
         raise HTTPException(403, "Washing is outside your assigned scope")
-    if kind == "issue" and types is not None:
-        if not db.scalar(select(Issue.id).where(Issue.id == record_id, _issue_auth(types))): raise HTTPException(403, "Equipment is outside your assigned scope")
-    if kind == "pm" and types is not None:
-        if not db.scalar(select(OMTask.id).where(OMTask.id == record_id, _pm_auth(types))): raise HTTPException(403, "Equipment is outside your assigned scope")
     plant = db.get(Plant, row.plant_id) if row.plant_id else None
     if plant is None: raise HTTPException(404, "Plant not found")
     if kind == "issue":
@@ -493,7 +459,7 @@ def event_detail(kind: str, record_id: UUID, db: Annotated[Session, Depends(get_
         assignee = db.get(User, row.assigned_to) if row.assigned_to else None
         out = _event_issue(row, plant, reporter.display_name if reporter else None)
         out.update({"description": row.description, "remarks": (row.legacy_payload or {}).get("remarks"),
-            "equipment_ref": row.equipment_ref, "occurred_at": row.occurred_at.isoformat() if row.occurred_at else None,
+            "occurred_at": row.occurred_at.isoformat() if row.occurred_at else None,
             "due_date": row.etc_at.isoformat() if row.etc_at else None,
             "assignee": row.assignee_text or (assignee.display_name if assignee else None),
             "impact": row.impact,

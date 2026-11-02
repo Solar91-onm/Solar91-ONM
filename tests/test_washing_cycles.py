@@ -7,14 +7,13 @@ from app.core.models import (
     Notification,
     Plant,
     User,
-    UserEquipmentTypeAssignment,
     UserPlantAssignment,
     WashingConfig,
     WashingDailyReport,
     WashingTable,
 )
 from app.scheduled.washing_cycles import check_cycle_compliance_alerts, check_missed_monthly_targets
-from tests.conftest import login_user
+from tests.conftest import grant_assignee_plants, login_user
 from tests import conftest
 
 
@@ -35,7 +34,7 @@ def _plant(db):
 def _setup_cycle_users(client, db, plant):
     head = login_user(client, db, role="O&M Head", name="Cycle Head", email="cycle-head@example.com")
     assignee = login_user(client, db, role="Assignee", name="Cycle Assignee", email="cycle-assignee@example.com")
-    db.add(UserEquipmentTypeAssignment(user_id=assignee.id, equipment_type="Modules cleaning"))
+    grant_assignee_plants(db, assignee.id)
     db.commit()
     login_user(client, db, role="O&M Head", name="Cycle Head", email="cycle-head-setup@example.com")
     setup = client.post(f"{BASE}/setup", json={
@@ -65,7 +64,7 @@ def test_cycle_requires_daily_reports_and_reviewer_confirmation(client, db, monk
     assert submitted.json()["remarks"] == "First half cleaned"
 
     other_assignee = login_user(client, db, role="Assignee", name="Unassigned Reviewer", email="cycle-assignee-other@example.com")
-    db.add(UserEquipmentTypeAssignment(user_id=other_assignee.id, equipment_type="Modules cleaning"))
+    grant_assignee_plants(db, other_assignee.id)
     db.commit()
     # A different account with the Assignee role is not the configured Assignee.
     response = client.post(f"{BASE}/daily-reports/{first_report_id}/review", json={"decision": "Confirm"})
@@ -202,8 +201,7 @@ def test_setup_lists_every_assignee_and_grants_the_washing_scope(client, db):
     assert row["has_washing_scope"] is False                 # listed even though they have no washing scope yet
     setup = client.post(f"{BASE}/setup", json={"plant_id": str(plant.id), "table_count": 6, "assignee_user_id": str(assignee.id)})
     assert setup.status_code == 200, setup.text
-    owned = [t.equipment_type for t in db.query(UserEquipmentTypeAssignment).filter_by(user_id=assignee.id)]
-    assert owned == ["Modules cleaning"]
+    assert db.query(UserPlantAssignment).filter_by(user_id=assignee.id, plant_id=plant.id).count() == 1
     again = client.get(f"{BASE}/assignees").json()
     assert next(a for a in again if a["id"] == str(assignee.id))["has_washing_scope"] is True
 

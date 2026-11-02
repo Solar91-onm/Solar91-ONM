@@ -3,8 +3,8 @@ from datetime import date, timedelta
 from uuid import UUID
 
 from app.core.timeutil import business_today
-from app.core.models import AuditLog, Issue, IssueHistory, OMTask, Plant, User, UserEquipmentTypeAssignment, UserPlantAssignment
-from tests.conftest import login_user
+from app.core.models import AuditLog, Issue, IssueHistory, OMTask, Plant, User, UserPlantAssignment
+from tests.conftest import grant_assignee_plants, login_user
 from tests import conftest
 
 
@@ -68,9 +68,10 @@ def test_role_access_and_read_only_viewer(client,db):
     pending=User(auth_provider='test',external_subject='field-pending',email='pending@example.com',
                  display_name='Pending Signup',role='Viewer',is_active=True)
     assignee=User(auth_provider='test',external_subject='field-assignee',email='assignee@example.com',
-                  display_name='Equipment Team',role='Assignee',is_active=True)
+                  display_name='O&M Team',role='Assignee',is_active=True)
     db.add_all([admin,pending,assignee]);db.commit()
-    db.add(UserEquipmentTypeAssignment(user_id=assignee.id,equipment_type='Inverter'));db.commit()
+    # Scoped to the first plant only, so the second plant's PM job stays out of their worklist.
+    grant_assignee_plants(db, assignee.id, UUID(plants[0]['id']));db.commit()
     conftest._CURRENT_USER=db.get(User,admin.id)
     assert len(client.get('/api/field/overview').json()['issues'])==2
     issue=head_overview['issues'][0]
@@ -79,7 +80,8 @@ def test_role_access_and_read_only_viewer(client,db):
     assert client.get('/api/field/overview').status_code==403
     conftest._CURRENT_USER=db.get(User,assignee.id)
     scoped=client.get('/api/field/overview').json()
-    assert len(scoped['issues'])==2
+    assert [x['id'] for x in scoped['issues']]  # their plant's issues are visible
+    assert all(x['plant']=='Field FE01' for x in scoped['issues'])
     assert [x['id'] for x in scoped['tasks']]==['FIELD-PM-1']
     assert client.post(f'/api/field/issues/{issue["id"]}/updates',json={'note':'Forbidden note'}).status_code==403
 
@@ -102,7 +104,7 @@ def test_assignee_field_overview_query_count_does_not_grow_with_work_rows(client
     assignee=User(auth_provider='test',external_subject='field-batch-assignee',email='batch@example.com',
                   display_name='Batch Assignee',role='Assignee',is_active=True)
     db.add(assignee);db.flush()
-    db.add(UserEquipmentTypeAssignment(user_id=assignee.id,equipment_type='Inverter'));db.commit()
+    grant_assignee_plants(db, assignee.id);db.commit()
     conftest._CURRENT_USER=db.get(User,assignee.id)
 
     def request_query_count():

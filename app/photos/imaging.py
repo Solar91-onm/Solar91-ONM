@@ -5,7 +5,7 @@ The stored original is a WebP display copy: upright (EXIF orientation applied), 
 without EXIF/XMP metadata (camera GPS and serial numbers are not kept); the colour profile is kept. A WebP that the
 phone already produced within those limits and without metadata is stored byte-for-byte, so it is not compressed a
 second time. PNG sources are encoded as *lossless* WebP: PNG is chosen for screenshots and drawings whose exact
-pixels matter. Reports, PDFs and other fidelity-critical files belong in Equipment Documents, which are never
+pixels matter. Reports, PDFs and other fidelity-critical files belong in document storage, which is never
 recompressed.
 """
 from __future__ import annotations

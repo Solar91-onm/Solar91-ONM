@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.core.models import Equipment, Plant, User, UserEquipmentTypeAssignment, UserPlantAssignment
+from app.core.models import Plant, User, UserPlantAssignment
 from tests import conftest as test_context
 from tests.conftest import login_user
 
@@ -47,66 +47,78 @@ def test_portfolio_roles_drop_plant_rows(client, db):
     assert db.query(UserPlantAssignment).filter_by(user_id=target.id).count() == 0
 
 
-def test_assignee_scope_is_equipment_types_across_all_plants(client, db):
+def test_assignee_scope_is_the_plants_assigned(client, db):
+    """An Assignee sees the plants they are assigned to — and only those.
+
+    Before the asset register was removed, an Assignee was scoped by equipment type,
+    which exposed every plant. Scope is now explicit plant rows.
+    """
     first, second = _plants(db)
     login_user(client, db, email="head@example.com")
     target = _person(db, "assignee@example.com")
     response = client.put(
         f"/api/users/{target.id}/access",
-        json={"role": "Assignee", "equipment_types": ["Inverter", "Module"]},
+        json={"role": "Assignee", "plant_ids": [str(first.id)]},
     )
     assert response.status_code == 200, response.text
     listing = {u["email"]: u for u in client.get("/api/users").json()}
-    assert listing["assignee@example.com"]["equipment_types"] == ["Inverter", "Module"]
-    assert db.query(UserEquipmentTypeAssignment).filter_by(user_id=target.id).count() == 2
+    assert [p["plant_id"] for p in listing["assignee@example.com"]["plants"]] == [str(first.id)]
+    assert db.query(UserPlantAssignment).filter_by(user_id=target.id).count() == 1
 
     db.refresh(target)
     test_context._CURRENT_USER = target
-    assert {row["id"] for row in client.get("/api/plants").json()} == {str(first.id), str(second.id)}
+    assert {row["id"] for row in client.get("/api/plants").json()} == {str(first.id)}
+    assert str(second.id) not in {row["id"] for row in client.get("/api/plants").json()}
 
 
-def test_assignee_cannot_be_assigned_plant_scope_and_types_are_assignee_only(client, db):
-    plant = _plants(db, 1)[0]
+def test_assignee_may_hold_several_plants_but_needs_at_least_one(client, db):
+    first, second = _plants(db)
     login_user(client, db, email="head@example.com")
     target = _person(db, "assignee@example.com")
-    plant_scope = client.put(
+    several = client.put(
         f"/api/users/{target.id}/access",
-        json={"role": "Assignee", "plant_ids": [str(plant.id)]},
+        json={"role": "Assignee", "plant_ids": [str(first.id), str(second.id)]},
     )
-    assert plant_scope.status_code == 422
-    not_assignee = client.put(
+    assert several.status_code == 200, several.text
+    assert db.query(UserPlantAssignment).filter_by(user_id=target.id).count() == 2
+
+    # Unlike a Site Engineer, an Assignee is not limited to one plant — but zero is a
+    # pending-access state the API refuses to create.
+    none_at_all = client.put(
         f"/api/users/{target.id}/access",
-        json={"role": "Administration", "equipment_types": ["Inverter"]},
+        json={"role": "Assignee", "plant_ids": []},
     )
-    assert not_assignee.status_code == 422
+    assert none_at_all.status_code == 422
 
 
-def test_assignee_invite_uses_equipment_types(client, db):
+def test_assignee_invite_uses_plants(client, db):
+    plant = _plants(db, 1)[0]
     login_user(client, db, email="head@example.com")
     response = client.post("/api/users/invite", json={
         "name": "New Assignee", "email": "new-assignee@example.com", "role": "Assignee",
-        "equipment": ["inverter", "Module"],
+        "plants": [plant.site_code],
     })
     assert response.status_code == 201, response.text
     target = db.query(User).filter_by(email="new-assignee@example.com").one()
-    assert {r.equipment_type for r in db.query(UserEquipmentTypeAssignment).filter_by(user_id=target.id)} == {"Inverter", "Module"}
+    assert {str(r.plant_id) for r in db.query(UserPlantAssignment).filter_by(user_id=target.id)} == {str(plant.id)}
 
-    bad = client.post("/api/users/invite", json={
-        "name": "Bad", "email": "bad@example.com", "role": "Assignee", "equipment": ["Toaster"],
+    unknown_plant = client.post("/api/users/invite", json={
+        "name": "Bad", "email": "bad@example.com", "role": "Assignee", "plants": ["NOSUCHPLANT"],
     })
-    assert bad.status_code == 422
-    invalid = client.post("/api/users/invite", json={
+    assert unknown_plant.status_code == 422
+    no_plant = client.post("/api/users/invite", json={
         "name": "Invalid Assignee", "email": "invalid-assignee@example.com", "role": "Assignee",
-        "plants": ["T00"],
+        "plants": [],
     })
-    assert invalid.status_code == 422
+    assert no_plant.status_code == 422
 
 
-def test_assignee_csv_import_accepts_equipment_type_column(client, db):
+def test_assignee_csv_import_accepts_plants_column(client, db):
+    plant = _plants(db, 1)[0]
     login_user(client, db, email="head@example.com")
     csv_data = (
-        "Name,Email,Role,Equipment Types\n"
-        "Imported Assignee,imported@example.com,Assignee,Inverter|Transformer\n"
+        "Name,Email,Role,Plants\n"
+        f"Imported Assignee,imported@example.com,Assignee,{plant.site_code}\n"
     ).encode()
     response = client.post(
         "/api/users/import",
@@ -115,7 +127,7 @@ def test_assignee_csv_import_accepts_equipment_type_column(client, db):
     assert response.status_code == 200, response.text
     assert response.json()["created"] == 1
     target = db.query(User).filter_by(email="imported@example.com").one()
-    assert db.query(UserEquipmentTypeAssignment).filter_by(user_id=target.id).count() == 2
+    assert db.query(UserPlantAssignment).filter_by(user_id=target.id).count() == 1
 
 
 def test_cannot_demote_or_deactivate_self_or_last_head(client, db):
@@ -143,14 +155,15 @@ def test_deactivate_and_reactivate_user(client, db):
 
 def test_invite_sends_designed_email_and_reports_failure(client, db, monkeypatch):
     from app.users import invites as inv
+    plant = _plants(db, 1)[0]
     sent = []
     monkeypatch.setattr(inv, "send_invite_email", lambda **kw: (sent.append(kw) or (True, "sent")))
     login_user(client, db, email="head@example.com")
     r = client.post("/api/users/invite", json={
-        "name": "Vikash", "email": "vikash@example.com", "role": "Assignee", "equipment": ["Inverter"]})
+        "name": "Vikash", "email": "vikash@example.com", "role": "Assignee", "plants": [plant.site_code]})
     assert r.status_code == 201, r.text
     assert r.json()["email_sent"] is True
-    assert sent[0]["to_email"] == "vikash@example.com" and "Inverter" in sent[0]["scope"]
+    assert sent[0]["to_email"] == "vikash@example.com" and plant.plant_name in sent[0]["scope"]
 
     monkeypatch.setattr(inv, "send_invite_email", lambda **kw: (False, "not set up"))
     r2 = client.post("/api/users/invite", json={

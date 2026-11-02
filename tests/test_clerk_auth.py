@@ -268,6 +268,7 @@ def test_public_auth_configuration_and_portal_shell_use_clerk(client, monkeypatc
     assert configuration.status_code == 200
     assert configuration.json()["provider"] == "clerk"
     assert "secret_key" not in configuration.json()
+    assert configuration.json()["frontend_api"] == settings.clerk_frontend_api
 
     page = client.get("/")
     assert page.status_code == 200
@@ -275,3 +276,13 @@ def test_public_auth_configuration_and_portal_shell_use_clerk(client, monkeypatc
     assert "@clerk/clerk-js@6" in page.text
     assert "silver-ewe-29.clerk.accounts.dev" in page.text
     assert "supabase-js" not in page.text
+
+
+def test_the_portal_is_the_application_served_at_the_root(client):
+    """The portal design replaced the previous frontend; /portal keeps old bookmarks working."""
+    page = client.get("/")
+    assert page.status_code == 200
+    assert "<title>Solar91 - O&amp;M Intelligence Centre</title>" in page.text
+    assert client.get("/assets/js/portal-api.js").status_code == 200
+    moved = client.get("/portal", follow_redirects=False)
+    assert moved.status_code == 308 and moved.headers["location"] == "/"

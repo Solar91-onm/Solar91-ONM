@@ -7,7 +7,7 @@ import pytest
 from fastapi import HTTPException
 from PIL import Image
 
-from app.core.models import Issue, OMTask, Plant, SitePhoto, UserPlantAssignment, WashingDailyReport, InventoryItem
+from app.core.models import InventoryItem, Issue, OMTask, Plant, SitePhoto, UserPlantAssignment, WashingDailyReport
 from app.storage import service as storage_mod
 from app.photos.router import _resolve_link
 from tests.conftest import login_user

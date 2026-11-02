@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
-from app.core.models import AppSetting, AuditLog, Issue, IssueETCChange, IssueHistory, User, UserEquipmentTypeAssignment
+from app.core.models import AppSetting, AuditLog, Issue, IssueETCChange, IssueHistory, User, UserPlantAssignment
 from app.issues.deadlines import DEADLINE_SETTING
 from tests import conftest
 from tests.conftest import login_user
@@ -87,8 +87,8 @@ def test_assigned_assignee_can_edit_details_and_deadline_with_a_logged_change(cl
 
     # a deadline before the start date is refused
     assert client.patch(f"/api/issues/{issue['id']}", json={"etc_at": "2000-01-01T00:00:00Z"}).status_code == 422
-    # moving the ticket to equipment outside the Assignee's scope is refused
-    assert client.patch(f"/api/issues/{issue['id']}", json={"vertical": "Transformer"}).status_code == 403
+    # the category is not a scope boundary any more: the ticket's Assignee may correct it
+    assert client.patch(f"/api/issues/{issue['id']}", json={"vertical": "Transformer"}).status_code == 200
     # the dates endpoint stays open to them as well
     dates = client.patch(f"/api/issues/{issue['id']}/dates", json={"etc_at": (new_etc + timedelta(days=1)).isoformat(), "reason": "Parts late"})
     assert dates.status_code == 200, dates.text

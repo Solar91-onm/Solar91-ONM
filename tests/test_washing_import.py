@@ -5,7 +5,7 @@ from io import BytesIO
 
 from openpyxl import load_workbook
 
-from app.core.models import AuditLog, Plant, UserEquipmentTypeAssignment, WashingConfig, WashingTable
+from app.core.models import AuditLog, Plant, UserPlantAssignment, WashingConfig, WashingTable
 from app.scheduled.washing_cycles import check_washing_overdue
 from tests.conftest import login_user
 from tests import conftest
@@ -77,7 +77,7 @@ def test_import_dry_run_then_create_setup_and_write_audit(client, db):
     assert config.compliance_threshold_percent == 90
     assert config.active is True and config.notes == "Use south gate"
     assert config.tables_per_cycle == 11 and db.query(WashingTable).filter_by(plant_id=plant.id).count() == 0
-    assert db.query(UserEquipmentTypeAssignment).filter_by(user_id=assignee.id, equipment_type="Modules cleaning").count() == 1
+    assert db.query(UserPlantAssignment).filter_by(user_id=assignee.id, plant_id=plant.id).count() == 1
     audit = db.query(AuditLog).filter_by(user_id=head.id, action="Imported washing setup").one()
     assert audit.metadata_json == {"created": 1, "updated": 0, "unchanged": 0}
 

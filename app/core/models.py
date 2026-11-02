@@ -98,67 +98,8 @@ class UserPlantAssignment(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
-class UserEquipmentAssignment(Base):
-    __tablename__ = "user_equipment_assignments"
-    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
-    equipment_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("equipment.id", ondelete="CASCADE"), primary_key=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
-class UserEquipmentTypeAssignment(Base):
-    """Assignee responsibility by equipment TYPE (e.g. Inverter) across every plant."""
-    __tablename__ = "user_equipment_type_assignments"
-    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
-    equipment_type: Mapped[str] = mapped_column(String(120), primary_key=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-
-
-class Equipment(Base, TimestampMixin):
-    __tablename__ = "equipment"
-    id: Mapped[uuid.UUID] = uuid_pk()
-    plant_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("plants.id", ondelete="CASCADE"), nullable=False)
-    equipment_code: Mapped[str | None] = mapped_column(String(120))
-    equipment_name: Mapped[str] = mapped_column(String(255), nullable=False)
-    equipment_type: Mapped[str | None] = mapped_column(String(120))
-    maker: Mapped[str | None] = mapped_column(String(120))
-    model: Mapped[str | None] = mapped_column(String(120))
-    serial_number: Mapped[str | None] = mapped_column(String(180))
-    status: Mapped[str] = mapped_column(String(60), default="active")
-    discom: Mapped[str | None] = mapped_column(String(120))
-    feeder_or_gss: Mapped[str | None] = mapped_column(Text)
-    rating: Mapped[str | None] = mapped_column(String(120))
-    capacity_kw: Mapped[float | None] = mapped_column(Numeric(14, 3))
-    quantity: Mapped[int] = mapped_column(Integer, default=1)
-    location_in_plant: Mapped[str | None] = mapped_column(String(255))
-    manufacture_year: Mapped[int | None] = mapped_column(Integer)
-    commissioned_on: Mapped[date | None] = mapped_column(Date)
-    warranty_start: Mapped[date | None] = mapped_column(Date)
-    warranty_end: Mapped[date | None] = mapped_column(Date)
-    amc_vendor: Mapped[str | None] = mapped_column(String(255))
-    amc_end: Mapped[date | None] = mapped_column(Date)
-    supplier: Mapped[str | None] = mapped_column(String(255))
-    purchase_order_no: Mapped[str | None] = mapped_column(String(160))
-    criticality: Mapped[str | None] = mapped_column(String(20))
-    notes: Mapped[str | None] = mapped_column(Text)
-    in_charge_user_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), index=True)
-    last_service_on: Mapped[date | None] = mapped_column(Date)
-    next_service_due: Mapped[date | None] = mapped_column(Date)
-    metadata_json: Mapped[dict[str, Any]] = mapped_column("metadata", JSON, default=dict)
-    created_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
-    __table_args__ = (UniqueConstraint("plant_id", "equipment_code"),)
-
-
-class EquipmentDocument(Base):
-    __tablename__ = "equipment_documents"
-    id: Mapped[uuid.UUID] = uuid_pk()
-    equipment_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("equipment.id", ondelete="CASCADE"), nullable=False, index=True)
-    kind: Mapped[str] = mapped_column(String(80), nullable=False)
-    original_name: Mapped[str] = mapped_column(String(255), nullable=False)
-    storage_path: Mapped[str] = mapped_column(Text, nullable=False)
-    content_type: Mapped[str] = mapped_column(String(120), nullable=False)
-    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
-    uploaded_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class Issue(Base):
@@ -166,8 +107,7 @@ class Issue(Base):
     id: Mapped[uuid.UUID] = uuid_pk()
     ticket_no: Mapped[str] = mapped_column(String(80), unique=True, nullable=False)
     plant_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("plants.id", ondelete="SET NULL"))
-    equipment_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("equipment.id", ondelete="SET NULL"))
-    equipment_ref: Mapped[str | None] = mapped_column(String(255))
+    # Work category the issue is raised against (see security.WORK_CATEGORIES).
     vertical: Mapped[str | None] = mapped_column(String(120))
     subcategory: Mapped[str | None] = mapped_column(String(160))
     description: Mapped[str] = mapped_column(Text, nullable=False)
@@ -181,7 +121,6 @@ class Issue(Base):
     closed_on: Mapped[date | None] = mapped_column(Date)
     assignee_text: Mapped[str | None] = mapped_column(String(255))
     assigned_to: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
-    maker: Mapped[str | None] = mapped_column(String(160))
     impact: Mapped[str | None] = mapped_column(Text)
     photo_count: Mapped[int] = mapped_column(Integer, default=0)
     vendor: Mapped[dict[str, Any] | None] = mapped_column(JSON)
@@ -194,14 +133,6 @@ class Issue(Base):
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     deleted_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
     deletion_reason: Mapped[str | None] = mapped_column(Text)
-
-    @property
-    def supplier(self) -> str | None:
-        return (self.legacy_payload or {}).get("supplier")
-
-    @property
-    def serial_number(self) -> str | None:
-        return (self.legacy_payload or {}).get("serial_number")
 
     @property
     def evidence(self) -> list[dict[str, Any]]:
@@ -329,7 +260,6 @@ class OMTask(Base, TimestampMixin):
     plant_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("plants.id", ondelete="SET NULL"))
     task_name: Mapped[str] = mapped_column(String(255), nullable=False)
     task_type: Mapped[str | None] = mapped_column(String(180))
-    equipment_ref: Mapped[str | None] = mapped_column(String(255))
     frequency: Mapped[str | None] = mapped_column(String(80))
     due_on: Mapped[date | None] = mapped_column(Date)
     assignee_text: Mapped[str | None] = mapped_column(String(255))
@@ -352,7 +282,7 @@ class OMTask(Base, TimestampMixin):
     legacy_payload: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     created_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
     # Unit-level PM scheduling (migration 016). All nullable: tasks created before it keep working unchanged.
-    unit_no: Mapped[int | None] = mapped_column(Integer)            # 1..N within the equipment type at this plant
+    unit_no: Mapped[int | None] = mapped_column(Integer)            # 1..N within the work category at this plant
     total_units: Mapped[int | None] = mapped_column(Integer)        # units in this PM cycle
     cycle_id: Mapped[str | None] = mapped_column(String(60), index=True)   # groups the units of one cycle ("ab12cd34", next period "ab12cd34.1")
     cycle_day: Mapped[int | None] = mapped_column(Integer)          # day-in-cycle the unit is planned for
@@ -705,11 +635,41 @@ class StateCollectionRevision(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
+class WorkCategory(Base, TimestampMixin):
+    """The work-category taxonomy: what an issue is raised against and what PM maintains.
+
+    This replaces the hard-coded list that used to live in ``app/core/security.py``
+    and the per-asset register that was removed with it. It ships EMPTY and is filled
+    either in Supabase directly or from the portal, by an O&M Head or an Assignee.
+
+    * ``name``          — the category, e.g. "Inverter". Unique, case-insensitively.
+    * ``sub_problems``  — the faults that can be reported for it, as a list of strings.
+                          The Raise Issue form offers these as the ticket's subcategory.
+    * ``default_units`` — how many of these a plant typically has. Only a default for the
+                          per-plant unit configuration (``pm_unit_config``), never a limit.
+    * ``code``          — your own identifier for the category, if you use one.
+    """
+    __tablename__ = "work_categories"
+    id: Mapped[uuid.UUID] = uuid_pk()
+    name: Mapped[str] = mapped_column(String(120), nullable=False, unique=True)
+    code: Mapped[str | None] = mapped_column(String(60))
+    sub_problems: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    default_units: Mapped[int | None] = mapped_column(Integer)
+    area: Mapped[str | None] = mapped_column(String(60))      # "Plant side" / "GSS side", for the PM cycle
+    notes: Mapped[str | None] = mapped_column(Text)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=100)
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+
+
 class PMTemplate(Base, TimestampMixin):
-    """Reusable Preventive Maintenance job for one equipment type (e.g. Inverter - monthly fan clean).
+    """Reusable Preventive Maintenance job for one work category (e.g. Inverter - monthly fan clean).
 
     `checks` is a list of readings to record: [{"name","unit","min","max"}].
-    Tasks are generated from a template for chosen plants (one per equipment unit).
+    Tasks are generated from a template for chosen plants (one per unit).
+
+    ``equipment_type`` keeps its column name for schema compatibility; it holds a
+    work category from ``security.WORK_CATEGORIES``, not a row in an asset register.
     """
     __tablename__ = "pm_templates"
     id: Mapped[uuid.UUID] = uuid_pk()
@@ -727,7 +687,7 @@ class PMTemplate(Base, TimestampMixin):
 
 
 class PMScopeConfig(Base, TimestampMixin):
-    """Single row: the O&M Head's edit of the Maintenance Scope Library (which equipment sits in which section / is hidden)."""
+    """Single row: the O&M Head's edit of the Maintenance Scope Library (which category sits in which section / is hidden)."""
     __tablename__ = "pm_scope_config"
     id: Mapped[uuid.UUID] = uuid_pk()
     config: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
@@ -735,7 +695,7 @@ class PMScopeConfig(Base, TimestampMixin):
 
 
 class PMUnitConfig(Base, TimestampMixin):
-    """Per plant + equipment type: how many units exist and how many can be maintained per day."""
+    """Per plant + work category: how many units exist and how many can be maintained per day."""
     __tablename__ = "pm_unit_config"
     id: Mapped[uuid.UUID] = uuid_pk()
     plant_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("plants.id", ondelete="CASCADE"), nullable=False, index=True)

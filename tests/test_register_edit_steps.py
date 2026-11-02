@@ -10,8 +10,7 @@ def _seed(db, client):
     plant = Plant(site_code='ES01', plant_name='Edit Steps Plant')
     db.add(plant); db.commit(); db.refresh(plant)
     head = login_user(client, db, role='O&M Head', name='Head', email='head@example.com')
-    task = OMTask(work_order_no='WO-ES-1', plant_id=plant.id, task_name='Inverter PM', task_type='Electrical',
-                  equipment_ref='INV-01', frequency='Monthly', due_on=date(2026, 10, 10), status='Scheduled',
+    task = OMTask(work_order_no='WO-ES-1', plant_id=plant.id, task_name='Inverter PM', task_type='Electrical', frequency='Monthly', due_on=date(2026, 10, 10), status='Scheduled',
                   assignee_text='Tech', sop='SOP', safety='LOTO', tools='Kit', duration='2 h', created_by=head.id)
     issue = Issue(ticket_no='SI-ES-1', plant_id=plant.id, description='Fuse blown', severity='High',
                   status='Assigned', assignee_text='Tech', created_by=head.id)

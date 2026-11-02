@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from app.core.models import Plant, WashingConfig, WashingHistory, WashingTable, StateRevision
+from app.core.models import Plant, StateRevision, WashingConfig, WashingHistory, WashingTable
 from app.core.config import get_settings
 from tests.conftest import login_user
 

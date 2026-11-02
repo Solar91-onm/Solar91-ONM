@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 from uuid import UUID
-from sqlalchemy import func, or_, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.core.models import Equipment, Notification, User, UserEquipmentTypeAssignment, UserPlantAssignment
+from app.core.models import Notification, User, UserPlantAssignment
 
 def create_notification(
     db: Session,
@@ -93,30 +93,24 @@ def users_for_plant(db: Session, plant_id: UUID, roles: set[str] | None = None) 
         stmt = stmt.where(User.role.in_(roles))
     return list(db.scalars(stmt))
 
-def equipment_responsible_users(
-    db: Session, *, plant_id: UUID | None, equipment_id: UUID | None = None,
-    equipment_ref: str | None = None, equipment_type: str | None = None,
-) -> list[User]:
-    """Notification routing only: per-item in-charge wins; visibility remains type/plant scoped elsewhere."""
-    equipment = db.get(Equipment, equipment_id) if equipment_id else None
-    if not equipment and plant_id and equipment_ref:
-        ref = equipment_ref.strip().casefold()
-        equipment = db.scalar(select(Equipment).where(
-            Equipment.plant_id == plant_id,
-            or_(func.lower(func.coalesce(Equipment.equipment_code, "")) == ref,
-                func.lower(Equipment.equipment_name) == ref),
-        ))
-    if equipment and equipment.in_charge_user_id:
-        person = db.get(User, equipment.in_charge_user_id)
-        if person and person.is_active:
-            return [person]
-    etype = (equipment.equipment_type if equipment else equipment_type) or equipment_type
-    if not etype:
+def plant_responsible_users(db: Session, *, plant_id: UUID | None) -> list[User]:
+    """Notification routing only: the Assignees responsible for this plant.
+
+    Routing used to follow the per-asset "in charge" field, falling back to the
+    holders of that equipment type — always O&M team members, never the Site
+    Engineer who raised the ticket. With the asset register removed this routes
+    to the plant's Assignees, which keeps that same audience: a Site Engineer is
+    not notified of work they reported, and managers are alerted separately.
+
+    Visibility is still enforced by the API's own scope checks.
+    """
+    if plant_id is None:
         return []
     return list(db.scalars(
-        select(User).join(UserEquipmentTypeAssignment, UserEquipmentTypeAssignment.user_id == User.id).where(
+        select(User).join(UserPlantAssignment, UserPlantAssignment.user_id == User.id).where(
             User.is_active.is_(True),
-            func.lower(UserEquipmentTypeAssignment.equipment_type) == etype.strip().lower(),
+            User.role == "Assignee",
+            UserPlantAssignment.plant_id == plant_id,
         ).order_by(User.display_name)
     ))
 

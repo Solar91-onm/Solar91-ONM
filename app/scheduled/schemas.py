@@ -24,7 +24,6 @@ class ProblemTaskCreate(BaseModel):
     asset: str
     problem: str | None = Field(default=None, max_length=255)
     task_name: str = Field(min_length=2, max_length=255)
-    equipment_ref: str | None = Field(default=None, max_length=255)
     frequency: str
     due_on: date
     assignee: str | None = Field(default=None, max_length=255)
@@ -70,7 +69,6 @@ class TaskIssueLink(BaseModel):
 class TaskScheduleEdit(BaseModel):
     """Edit an open Preventive Maintenance task's schedule (O&M Head)."""
     name: str | None = Field(default=None, min_length=1, max_length=255)
-    equipment_ref: str | None = Field(default=None, max_length=255)
     frequency: str | None = None
     start_on: date | None = None
     due_on: date | None = None
@@ -135,7 +133,7 @@ class WashingDailyReportRequest(BaseModel):
     tables_cleaned: int = Field(ge=0, le=5000)
     cleaned_table_codes: list[str] = Field(default_factory=list, max_length=5000)
     job_status: Literal["Done", "Not done"]
-    exception_reason: Literal["Rain", "Water shortage", "Equipment breakdown", "Access restriction", "Safety stand-down", "Other"] | None = None
+    exception_reason: Literal["Rain", "Water shortage", "Machine breakdown", "Access restriction", "Safety stand-down", "Other"] | None = None
     remarks: str | None = Field(default=None, max_length=4000)
     report_date: date | None = None
 
@@ -159,7 +157,7 @@ class WashingSheetEntry(BaseModel):
     report_date: date
     tables_cleaned: int = Field(default=0, ge=0, le=5000)
     job_status: Literal["Done", "Not done"]
-    exception_reason: Literal["Rain", "Water shortage", "Equipment breakdown", "Access restriction", "Safety stand-down", "Other"] | None = None
+    exception_reason: Literal["Rain", "Water shortage", "Machine breakdown", "Access restriction", "Safety stand-down", "Other"] | None = None
     remarks: str | None = Field(default=None, max_length=4000)
 
     @model_validator(mode="after")
@@ -207,7 +205,7 @@ class WashingReportUpdateRequest(BaseModel):
     report_date: date | None = None
     job_status: Literal["Done", "Not done"] | None = None
     tables_cleaned: int | None = Field(default=None, ge=0, le=5000)
-    exception_reason: Literal["Rain", "Water shortage", "Equipment breakdown", "Access restriction", "Safety stand-down", "Other"] | None = None
+    exception_reason: Literal["Rain", "Water shortage", "Machine breakdown", "Access restriction", "Safety stand-down", "Other"] | None = None
     remarks: str | None = Field(default=None, max_length=4000)
 
 
