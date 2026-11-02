@@ -419,8 +419,7 @@
       days += '<button type="button" class="' + classes + '"' +
         (inMonth ? ' data-calendar-action="open-date" data-date="' + date + '"' : " disabled") +
         (inMonth
-        ? (hoverEnabled ? ' aria-describedby="' + hoverId + '"' :
-          ' title="' + escape(displayDate(date) + (tooltip ? " · " + tooltip : "")) + '"') +
+        ? (hoverEnabled ? ' aria-describedby="' + hoverId + '"' : "") +
           ' aria-label="' + escape(displayDate(date) + ", " + dayEvents.length +
             " saved records" +
             (tooltip ? ". " + tooltip : "")) + '"'
@@ -942,64 +941,6 @@
     '</div>';
   }
 
-  function renderCycleSummary(state) {
-    if (!state.liveWashing) return "";
-    var plant = state.washingPlant;
-    if (!plant) {
-      if (!state.washingNotConfigured) return "";
-      return '<section class="ep-wash-cycle-card ep-wash-cycle-card--empty" aria-label="Washing cycle status">' +
-        '<strong>Washing is not set up for this plant.</strong>' +
-        '<span>There is no configured table count or cycle progress to show.</span></section>';
-    }
-
-    var cycles = plant.cycles || [];
-    var current = cycles.find(function (cycle) { return cycle.state === "In progress"; }) ||
-      cycles.find(function (cycle) { return cycle.state === "Upcoming"; }) ||
-      cycles.find(function (cycle) { return cycle.state === "Missed"; });
-    var total = Number(plant.table_count) || 0;
-    var confirmed = current ? Number(current.confirmed) || 0 : total;
-    var pending = current ? Number(current.pending) || 0 : 0;
-    var percent = total ? Math.min(100, Math.round(100 * confirmed / total)) : 0;
-    var today = state.events.filter(function (event) {
-      return event.kind === "report" && event.date === state.washingDataToday;
-    });
-    var todayCount = today.reduce(function (sum, event) {
-      return sum + (Number(event.tablesCleaned) || 0);
-    }, 0);
-    var todayText = today.length
-      ? todayCount + " table" + (todayCount === 1 ? "" : "s") + " reported today"
-      : "No report today";
-    var status = pending > 0
-      ? pending + " awaiting confirmation"
-      : plant.overdue_bucket && plant.overdue_bucket !== "on_track"
-        ? (Number(plant.overdue_days) || 0) + " d late"
-        : plant.cycles_this_month >= plant.monthly_target
-          ? "Month complete"
-          : "On track";
-    var progress = current
-      ? confirmed + (pending ? " +" + pending + " awaiting" : "") + " of " + total + " tables"
-      : total + " tables · all cycles done";
-    var pills = cycles.map(function (cycle) {
-      var stateClass = cycle.state === "Completed" ? "is-done" :
-        cycle.state === "In progress" || cycle.state === "Missed" ? "is-current" : "is-next";
-      return '<span class="ep-wash-cycle-card__pill ' + stateClass + '"' +
-        ' title="' + escape("Cycle " + cycle.cycle_no + ": " + cycle.state + " · due " + displayDate(cycle.due_date)) + '">' +
-        (cycle.state === "Completed" ? "✓" : escape(cycle.cycle_no)) + '</span>';
-    }).join("");
-    var progressAngle = Math.round(percent * 3.6);
-
-    return '<section class="ep-wash-cycle-card" aria-label="Current washing cycle status">' +
-      '<div class="ep-wash-cycle-card__head"><strong>' + escape(plant.plant) + '</strong>' +
-        '<span>' + escape(plant.site_code) + '</span></div>' +
-      '<div class="ep-wash-cycle-card__body"><div class="ep-wash-cycle-card__ring" style="--ep-wash-angle:' +
-        progressAngle + 'deg"><span><b>' + percent + '%</b><small>' +
-          escape(current ? "Cycle " + current.cycle_no : "Complete") + '</small></span></div>' +
-        '<div class="ep-wash-cycle-card__details"><div class="ep-wash-cycle-card__pills">' + pills + '</div>' +
-          '<span>' + escape(progress) + '</span><span>' + escape(todayText) + '</span></div></div>' +
-      '<div class="ep-wash-cycle-card__foot"><span class="ep-wash-cycle-card__status">' + escape(status) + '</span>' +
-        '<span>' + escape(plant.assignee_name || "No Assignee") + '</span></div></section>';
-  }
-
   function renderView(host, state, context) {
     var typeLabel = context.type === "pm" ? "Preventive Maintenance" : "Washing";
     var plant = context.plantCode && state.plants.find(function (item) {
@@ -1048,9 +989,8 @@
             ? '<button type="button" class="ep-calendar__setup-button" data-calendar-action="open-setup">Set up washing</button>'
             : "") +
         '</div></header>' +
-      renderToolbar(state, context) +
-      renderCycleSummary(state) +
-      '<div class="ep-calendar__monthbar">' +
+        renderToolbar(state, context) +
+        '<div class="ep-calendar__monthbar">' +
         '<div class="ep-calendar__month-nav"><button type="button" data-calendar-action="previous" aria-label="Previous month">‹</button>' +
           '<h2>' + escape(displayMonth(state.month)) + '</h2>' +
           '<button type="button" data-calendar-action="next" aria-label="Next month">›</button>' +

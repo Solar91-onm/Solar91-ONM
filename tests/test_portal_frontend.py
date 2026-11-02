@@ -236,8 +236,19 @@ def test_plant_washing_calendar_has_date_cycle_hover_and_setup_action():
     assert '"/api/scheduled/washing/setup"' in calendar
     assert "ep-calendar__wash-hover-card" in styles
     assert "ep-calendar__setup-button" in styles
+    assert "renderCycleSummary(state)" not in calendar
     assert "/assets/js/operations-calendar.js" in page
     assert "/assets/css/calendar.css" in page
+
+
+def test_calendar_days_do_not_show_native_plain_text_hover_tooltips():
+    calendar = (PORTAL_ASSETS / "js" / "operations-calendar.js").read_text(encoding="utf-8")
+    grid = calendar[
+        calendar.index("function renderCalendarGrid"):
+        calendar.index("function renderEventCards")
+    ]
+    assert 'title="' not in grid
+    assert 'aria-label="' in grid
 
 
 def test_operations_calendar_month_dates_fit_one_responsive_frame():
@@ -331,7 +342,9 @@ def test_plant_washing_range_sheet_and_health_issue_wizard_are_wired():
 def test_portfolio_health_hides_hero_and_summary_and_calendar_has_nested_detail():
     issues = (PORTAL_ASSETS / "js" / "site-issues.js").read_text(encoding="utf-8")
     assert 'if (!context.plantCode)' in issues
-    assert 'context.plantCode ? renderSummary(unfilteredRows) : ""' in issues
+    assert "renderSummary" not in issues
+    assert "renderPlantSnapshot" not in issues
+    assert 'content = \'<section class="ep-issues__results">' in issues
     assert "renderHeader(context)" in issues
 
     calendar = (PORTAL_ASSETS / "js" / "operations-calendar.js").read_text(encoding="utf-8")

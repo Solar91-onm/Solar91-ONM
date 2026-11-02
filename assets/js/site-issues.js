@@ -194,47 +194,6 @@
       '</div></section>';
   }
 
-  function renderSummary(rows) {
-    var total = rows.length;
-    return '<section class="ep-issues__summary" aria-label="Issue status KPIs">' +
-      STATUSES.map(function (status) {
-        var count = countByStatus(rows, status);
-        var percent = total ? Math.round(count / total * 100) : 0;
-        return '<button type="button" class="ep-issues__metric ep-issues__metric--' +
-          statusTone(status) + (state.statusFilter === status ? " is-selected" : "") +
-          '" data-issue-status="' + escape(status) + '">' +
-          '<span class="ep-issues__donut" style="--ep-issue-percent:' + percent + '%"><span>' +
-            count + '</span></span>' +
-          '<span class="ep-issues__metric-copy"><strong>' + escape(statusLabel(status)) + '</strong>' +
-            '<span>' + count + ' issue' + (count === 1 ? "" : "s") + '</span></span>' +
-        "</button>";
-      }).join("") + "</section>";
-  }
-
-  function renderPlantSnapshot(rows, context) {
-    var siteCode = context.plantCode || state.plantFilter;
-    if (!siteCode) return "";
-    var plant = state.plants.find(function (item) { return item.siteCode === siteCode; });
-    if (!plant) return "";
-    var plantIssues = rows.filter(function (issue) { return issue.plantCode === siteCode; });
-    var equipment = [];
-    plantIssues.forEach(function (issue) {
-      var group = equipment.find(function (item) { return item.name === issue.equipment; });
-      if (!group) {
-        group = { name: issue.equipment, count: 0 };
-        equipment.push(group);
-      }
-      group.count += 1;
-    });
-    return '<section class="ep-issues__snapshot"><h2>' +
-      escape(plant.displayCode) + ' · ' + escape(plantLabel(plant)) +
-      '</h2><div class="ep-issues__equipment-list">' +
-      equipment.slice(0, 5).map(function (item) {
-        return '<span><strong>' + escape(item.name) + '</strong><b>' + item.count + '</b></span>';
-      }).join("") +
-      '</div></section>';
-  }
-
   function renderTable(rows) {
     if (!rows.length) {
       return '<div class="ep-issues__empty"><strong>No issues found</strong>' +
@@ -535,9 +494,7 @@
             ? ' <a href="/auth/login">Sign in to Solar91</a>' : "") +
           '<button type="button" data-issue-action="retry">Try again</button></div>';
     } else {
-      content = (context.plantCode ? renderSummary(unfilteredRows) : "") +
-          renderPlantSnapshot(unfilteredRows, context) +
-          '<section class="ep-issues__results"><div class="ep-issues__section-head">' +
+      content = '<section class="ep-issues__results"><div class="ep-issues__section-head">' +
             '<h2>Issues <span>' + rows.length + '</span></h2>' +
             '<span>' + (state.statusFilter === "All" ? "All statuses" : escape(state.statusFilter)) +
             (state.liveMode && state.rows.length >= 200 ? " · latest 200" : "") + '</span></div>' +
