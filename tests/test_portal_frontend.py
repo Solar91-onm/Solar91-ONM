@@ -55,6 +55,25 @@ def test_sign_in_gate_loads_before_the_portal_application(client):
     assert "/static/css/login.css" in page
 
 
+def test_login_access_uses_real_users_and_hides_categories_from_settings(client):
+    page = _page(client)
+    settings = (PORTAL_ASSETS / "js" / "settings.js").read_text(encoding="utf-8")
+    assert "Login access" in page and "data-nav=\"settings\"" in page
+    assert 'request("/api/users")' in settings
+    assert "/api/users/invite" in settings
+    assert "Arun Demo" not in settings and "Demo invite" not in settings
+    assert "Solar91PortalCategories" not in settings
+    assert "data-categories-host" not in settings
+
+
+def test_login_access_sidebar_icon_and_toggle_are_sized_and_scoped():
+    styles = (PORTAL_ASSETS / "css" / "layout.css").read_text(encoding="utf-8")
+    nav = (PORTAL_ASSETS / "js" / "navigation.js").read_text(encoding="utf-8")
+    assert ".ep-sidebar__settings .ep-nav-icon { width: 16px; height: 16px; }" in styles
+    assert ".ep-shell.is-login-access:not(.is-sidebar-collapsed) [data-sidebar-toggle]" in styles
+    assert 'classList.toggle("is-login-access", navState.activeView === "settings")' in nav
+
+
 def _on_disk(url_path: str) -> Path:
     """Map a served URL to its file: /assets/... -> assets/..., /static/... -> frontend/static/..."""
     if url_path.startswith("/assets/"):
@@ -169,17 +188,125 @@ def test_single_plant_details_shows_only_that_plant_row():
     assert "Solar91PortalPlantDetails" not in editor
 
 
+def test_plant_table_uses_balanced_shared_columns_and_numeric_spv_label():
+    styles = (PORTAL_ASSETS / "css" / "components.css").read_text(encoding="utf-8")
+    widths = [
+        int(value) for value in re.findall(
+            r"\.ep-pt__table th:nth-child\(\d+\), \.ep-pt__table td:nth-child\(\d+\) \{ width: (\d+)%; \}",
+            styles,
+        )
+    ]
+    assert len(widths) == 12
+    assert sum(widths) == 100
+    assert widths[9] >= 7, "the Location column should not wrap its heading"
+    assert "min-width: 1080px" in styles and "overflow-x: auto" in styles
+    assert "function spvNumber(plant)" in (
+        PORTAL_ASSETS / "js" / "plants-table.js"
+    ).read_text(encoding="utf-8")
+
+    script = """
+      global.window = global;
+      require('./assets/js/portal-api.js');
+      const plant = Solar91PortalAPI.normalizePlant({
+        id: 1, site_code: 'ABH01',
+        project_company: 'Solar91 Project Thirty Five Private Limited'
+      });
+      if (plant.projectCompanyShort !== 'Project 35') {
+        throw new Error('Expected numeric project label, got ' + plant.projectCompanyShort);
+      }
+    """
+    run = subprocess.run(["node", "-e", script], cwd=ROOT, capture_output=True, text=True, timeout=20)
+    assert run.returncode == 0, run.stderr
+
+
 def test_plant_washing_calendar_has_date_cycle_hover_and_setup_action():
     calendar = (PORTAL_ASSETS / "js" / "operations-calendar.js").read_text(encoding="utf-8")
     styles = (PORTAL_ASSETS / "css" / "calendar.css").read_text(encoding="utf-8")
+    page = TEMPLATE.read_text(encoding="utf-8")
     assert "renderWashingHoverCard(state, day.dataset.date)" in calendar
-    assert 'event.kind === "report" && event.date === date' in calendar
+    assert 'event.kind === "report" && event.date <= date' in calendar
+    assert 'return event.date === date;' in calendar
     assert 'report.jobStatus === "Done"' in calendar
+    assert 'report.reviewStatus === "Confirmed"' in calendar
+    assert "ep-wash-cycle-card__ring" in calendar
+    assert "ep-calendar__wash-tip-foot" in calendar and "plant.assignee_name" in calendar
+    assert 'tooltip.dataset.requestId === String(state.requestId)' in calendar
     assert 'data-calendar-action="open-setup">Set up washing' in calendar
     assert '"/api/scheduled/washing/assignees"' in calendar
     assert '"/api/scheduled/washing/setup"' in calendar
     assert "ep-calendar__wash-hover-card" in styles
     assert "ep-calendar__setup-button" in styles
+    assert "/assets/js/operations-calendar.js" in page
+    assert "/assets/css/calendar.css" in page
+
+
+def test_operations_calendar_month_dates_fit_one_responsive_frame():
+    calendar = (PORTAL_ASSETS / "js" / "operations-calendar.js").read_text(encoding="utf-8")
+    styles = (PORTAL_ASSETS / "css" / "calendar.css").read_text(encoding="utf-8")
+    assert 'ep-calendar__grid--weeks-' + "' + (cells / 7)" in calendar
+    for weeks in (4, 5, 6):
+        assert f".ep-calendar__grid--weeks-{weeks}" in styles
+    assert "height: clamp(240px, calc(100dvh - 360px), 650px);" in styles
+    assert "height: clamp(210px, calc(100dvh - 450px), 480px);" in styles
+    assert ".ep-calendar__day {\n  display: flex;\n  min-width: 0;\n  min-height: 0;" in styles
+
+
+def test_plant_pm_calendar_shows_job_hover_card_for_scheduled_dates():
+    calendar = (PORTAL_ASSETS / "js" / "operations-calendar.js").read_text(encoding="utf-8")
+    styles = (PORTAL_ASSETS / "css" / "calendar.css").read_text(encoding="utf-8")
+    page = TEMPLATE.read_text(encoding="utf-8")
+    assert "function renderPreventiveHoverCard(state, date)" in calendar
+    assert 'context.type === "pm" && !!context.plantCode' in calendar
+    assert "renderPreventiveHoverCard(state, day.dataset.date)" in calendar
+    assert 'event.date === date;' in calendar
+    assert "equipmentLabel(event, active.context)" in calendar
+    assert "event.unitNo && event.totalUnits" in calendar
+    assert "event.assignee" in calendar
+    assert 'id="' + "' + hoverId + '" in calendar
+    assert "ep-calendar__pm-hover-card" in styles
+    assert "ep-calendar__pm-tip-job" in styles
+    assert "/assets/js/operations-calendar.js" in page
+    assert "/assets/css/calendar.css" in page
+
+
+def test_plant_pm_calendar_date_click_opens_summary_then_saved_job_detail():
+    calendar = (PORTAL_ASSETS / "js" / "operations-calendar.js").read_text(encoding="utf-8")
+    styles = (PORTAL_ASSETS / "css" / "calendar.css").read_text(encoding="utf-8")
+    assert 'if (context.type === "pm" && context.plantCode)' in calendar
+    assert 'aria-labelledby="calendar-dialog-title"' in calendar
+    assert ">Daily summary</h2>" in calendar
+    assert 'data-calendar-filter="modal-search"' in calendar
+    assert "renderPlantPMSummaryEvents(events, state)" in calendar
+    assert 'data-calendar-event-index="' in calendar
+    assert "renderEventDetail(state, context)" in calendar
+    assert 'data-calendar-action="close-event-detail"' in calendar
+    assert "ep-calendar__pm-summary-modal" in styles
+    assert "ep-calendar__pm-summary-item" in styles
+    assert ".ep-calendar__event-detail-modal { z-index: 70; }" in styles
+
+
+def test_portfolio_pm_and_washing_use_centered_daily_summary_not_side_drawer():
+    calendar = (PORTAL_ASSETS / "js" / "operations-calendar.js").read_text(encoding="utf-8")
+    styles = (PORTAL_ASSETS / "css" / "calendar.css").read_text(encoding="utf-8")
+    page = TEMPLATE.read_text(encoding="utf-8")
+    assert "if (!context.plantCode)" in calendar
+    assert "renderPortfolioSummaryEvents(events, context, state)" in calendar
+    portfolio_branch = calendar[
+        calendar.index("if (!context.plantCode)", calendar.index("function renderModal")):
+        calendar.index('if (context.type === "pm" && context.plantCode)')
+    ]
+    assert 'data-calendar-filter="modal-plant"' in calendar
+    assert 'data-calendar-filter="modal-equipment"' in calendar
+    assert 'data-calendar-filter="modal-status"' in calendar
+    assert 'placeholder="Search plant, reference, status..."' in calendar
+    assert "ep-calendar__portfolio-summary-modal" in calendar
+    assert "ep-calendar__modal--drawer" not in portfolio_branch
+    assert 'class="ep-calendar__modal ep-calendar__pm-summary-modal' in portfolio_branch
+    assert ".ep-calendar__portfolio-summary-modal .ep-calendar__dialog" in styles
+    assert ".ep-calendar__portfolio-summary-filters" in styles
+    assert "renderEventDetail(state, context)" in calendar
+    assert "/assets/js/operations-calendar.js" in page
+    assert "/assets/css/calendar.css" in page
 
 
 def test_plant_washing_range_sheet_and_health_issue_wizard_are_wired():

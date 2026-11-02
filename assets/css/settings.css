@@ -176,13 +176,13 @@
 }
 
 .ep-settings__table {
-  min-width: 780px;
+  min-width: 1040px;
 }
 
 .ep-settings__table-head,
 .ep-settings__person {
   display: grid;
-  grid-template-columns: minmax(200px, 1.1fr) minmax(145px, 0.8fr) minmax(250px, 1.35fr) minmax(115px, 0.55fr) minmax(90px, 0.4fr);
+  grid-template-columns: minmax(190px, 1.2fr) minmax(190px, 1.2fr) minmax(140px, 0.8fr) minmax(90px, 0.5fr) minmax(250px, 1.4fr);
   align-items: center;
   column-gap: 12px;
 }
@@ -289,6 +289,44 @@
   font: inherit;
   font-size: var(--ep-fs-sm);
   font-weight: 700;
+}
+
+.ep-settings__role-label {
+  color: var(--ep-text-strong);
+  font-size: var(--ep-fs-sm);
+}
+
+.ep-settings__login-status {
+  color: var(--ep-text-muted);
+  font-size: var(--ep-fs-xs);
+}
+
+.ep-settings__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.ep-settings__button--small {
+  min-height: 30px;
+  padding: 0 7px;
+  font-size: var(--ep-fs-xs);
+}
+
+.ep-settings__plant-field.is-hidden {
+  display: none !important;
+}
+
+.ep-settings__dialog select[multiple] {
+  min-height: 128px;
+  padding: 7px;
+}
+
+.ep-settings__form-error {
+  margin: 0;
+  color: var(--ep-red);
+  font-size: var(--ep-fs-sm);
 }
 
 .ep-settings__scope {
@@ -482,11 +520,11 @@
   .ep-settings__access-badge { font-size: 0; }
   .ep-settings__access-badge i { width: 9px; height: 9px; }
   .ep-settings__panel { overflow-x: auto; }
-  .ep-settings__panel-intro { min-width: 780px; }
+  .ep-settings__panel-intro { min-width: 1040px; }
   .ep-settings__role-legend,
   .ep-settings__toolbar,
   .ep-settings__message,
-  .ep-settings__footnote { min-width: 780px; }
+  .ep-settings__footnote { min-width: 1040px; }
 }
 
 /* ─────────────────────────────────────────────────────────────────────

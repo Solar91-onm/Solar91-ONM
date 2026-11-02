@@ -175,6 +175,8 @@
 
   // ─── Content area routing ───────────────────────────────────────────
   function updateContentArea() {
+    var shell = document.querySelector(".ep-shell");
+    if (shell) shell.classList.toggle("is-login-access", navState.activeView === "settings");
     var overviewEl = document.querySelector('[data-tab-view="overview"]');
     var tableEl = document.querySelector('[data-tab-view="plants-table"]');
     var calendarEl = document.querySelector('[data-tab-view="calendar"]');
@@ -202,7 +204,7 @@
     }
     if (navState.activeView === "settings") {
       showOnly(settingsEl);
-      if (titleEl) titleEl.textContent = "Settings";
+      if (titleEl) titleEl.textContent = "Login access";
       global.Solar91PortalSettings.render(document.querySelector("[data-settings-host]"));
       try { sessionStorage.setItem("solar91Portal.navState", JSON.stringify(navState)); } catch (_) {}
       return;

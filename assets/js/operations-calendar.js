@@ -177,54 +177,165 @@
     var plant = state.washingPlant;
     if (!plant) return "";
 
-    var reports = state.events.filter(function (event) {
-      return event.kind === "report" && event.date === date;
+    var reportsThroughDate = state.events.filter(function (event) {
+      return event.kind === "report" && event.date <= date;
     });
-    var cycleNumbers = (plant.cycles || []).map(function (cycle) {
-      return Number(cycle.cycle_no);
+    var reportsOnDate = reportsThroughDate.filter(function (event) {
+      return event.date === date;
     });
-    reports.forEach(function (report) {
-      var cycleNumber = Number(report.cycleNo);
-      if (cycleNumber > 0 && cycleNumbers.indexOf(cycleNumber) === -1) cycleNumbers.push(cycleNumber);
+    var cycleDefinitions = (plant.cycles || []).slice().sort(function (a, b) {
+      return Number(a.cycle_no) - Number(b.cycle_no);
     });
-    if (!cycleNumbers.length) cycleNumbers = [1, 2, 3];
-    cycleNumbers.sort(function (a, b) { return a - b; });
-
     var tableCount = Number(plant.table_count) || 0;
-    var cycles = cycleNumbers.map(function (cycleNumber) {
-      var cycleReports = reports.filter(function (report) {
-        return Number(report.cycleNo) === cycleNumber;
+    var recordedCarry = 0;
+    var confirmedCarry = 0;
+    var cycleProgress = cycleDefinitions.map(function (cycle) {
+      var cycleNumber = Number(cycle.cycle_no);
+      var reports = reportsThroughDate.filter(function (report) {
+        return Number(report.cycleNo) === cycleNumber &&
+          (report.reviewStatus === "Pending" || report.reviewStatus === "Confirmed") &&
+          report.jobStatus === "Done";
       });
-      var cleaned = cycleReports.reduce(function (sum, report) {
-        return report.jobStatus === "Done"
+      var confirmedTotal = confirmedCarry + reports.reduce(function (sum, report) {
+        return report.reviewStatus === "Confirmed"
           ? sum + (Number(report.tablesCleaned) || 0)
           : sum;
       }, 0);
-      var percent = tableCount ? Math.min(100, Math.round(cleaned * 100 / tableCount)) : 0;
-      var statuses = [];
-      cycleReports.forEach(function (report) {
-        if (statuses.indexOf(report.status) === -1) statuses.push(report.status);
-      });
-      var status = statuses.length ? statuses.join(", ") : "No report";
+      var recordedTotal = recordedCarry + reports.reduce(function (sum, report) {
+        return sum + (Number(report.tablesCleaned) || 0);
+      }, 0);
+      var capCarry = cycleNumber < 3 && tableCount > 0;
+      var confirmed = capCarry ? Math.min(confirmedTotal, tableCount) : confirmedTotal;
+      var recorded = capCarry ? Math.min(recordedTotal, tableCount) : recordedTotal;
+      confirmedCarry = capCarry ? Math.max(0, confirmedTotal - tableCount) : 0;
+      recordedCarry = capCarry ? Math.max(0, recordedTotal - tableCount) : 0;
+      var percent = tableCount ? Math.min(100, Math.round(confirmed * 100 / tableCount)) : 0;
+      var status = !tableCount
+        ? "Unavailable"
+        : confirmed >= tableCount
+          ? "Completed"
+          : recorded > confirmed
+            ? "Awaiting confirmation"
+            : date < cycle.start_date
+              ? "Upcoming"
+              : date > cycle.due_date
+                ? "Overdue"
+                : "On track";
+      return {
+        cycle: cycle,
+        cycleNumber: cycleNumber,
+        confirmed: confirmed,
+        pending: Math.max(0, recorded - confirmed),
+        percent: percent,
+        status: status
+      };
+    });
 
-      return '<div class="ep-calendar__wash-cycle">' +
-        '<div class="ep-calendar__wash-cycle-head"><strong>Cycle ' + cycleNumber + '</strong>' +
-          '<span>' + percent + '%</span></div>' +
-        '<div class="ep-calendar__wash-progress" aria-hidden="true"><span style="width:' + percent + '%"></span></div>' +
-        '<div class="ep-calendar__wash-cycle-foot"><span>' + cleaned + ' of ' + tableCount +
-          ' tables</span><span>' + escape(status) + '</span></div>' +
-      '</div>';
+    var selected = null;
+    reportsOnDate.some(function (report) {
+      selected = cycleProgress.find(function (item) {
+        return item.cycleNumber === Number(report.cycleNo);
+      }) || null;
+      return !!selected;
+    });
+    if (!selected) {
+      cycleProgress.forEach(function (item) {
+        if (item.cycle.start_date <= date) selected = item;
+      });
+    }
+    if (!selected) selected = cycleProgress[0] || null;
+
+    var pills = cycleProgress.map(function (item) {
+      var stateClass = item.status === "Completed" ? "is-done" :
+        item === selected ? "is-current" : "";
+      return '<span class="ep-wash-cycle-card__pill' +
+        (stateClass ? " " + stateClass : "") + '" title="' +
+        escape("Cycle " + item.cycleNumber + ": " + item.status) + '">' +
+        escape(item.cycleNumber) + "</span>";
     }).join("");
+    var dayStatus = reportsOnDate.some(function (report) {
+      return report.reviewStatus === "Pending";
+    }) ? "Awaiting confirmation" :
+      reportsOnDate.some(function (report) {
+        return report.reviewStatus === "Confirmed" && report.jobStatus === "Done";
+      }) ? "Report confirmed today" :
+        reportsOnDate.some(function (report) {
+          return report.reviewStatus === "Rejected";
+        }) ? "Report rejected" :
+          reportsOnDate.length ? "No tables cleaned" : "No report on this date";
+    var percent = selected ? selected.percent : 0;
+    var assignee = plant.assignee_name || "No Assignee";
+    var statusClass = selected && selected.status === "Overdue" ? " is-overdue" :
+      selected && selected.status === "Awaiting confirmation" ? " is-awaiting" : "";
 
     return '<div class="ep-calendar__wash-tip-head"><strong>' +
         escape(plant.plant || plant.plantName ||
           (state.washingSetup && state.washingSetup.plantName) || "Selected plant") + '</strong>' +
         '<span>' + escape(plant.site_code || "") + '</span></div>' +
       '<p class="ep-calendar__wash-tip-date">' + escape(displayDate(date)) + '</p>' +
-      cycles +
-      (reports.length
-        ? ""
-        : '<p class="ep-calendar__wash-tip-empty">No report on this date</p>');
+      '<div class="ep-wash-cycle-card__body ep-calendar__wash-tip-summary">' +
+        '<div class="ep-wash-cycle-card__ring" style="--ep-wash-angle:' + Math.round(percent * 3.6) +
+          'deg"><span><b>' + percent + '%</b><small>' +
+          escape(selected ? "Cycle " + selected.cycleNumber : "No cycle") + '</small></span></div>' +
+        '<div class="ep-wash-cycle-card__details">' +
+          '<div class="ep-wash-cycle-card__pills">' + pills + '</div>' +
+          '<span>' + (selected && tableCount
+            ? selected.confirmed + " of " + tableCount + " tables"
+            : "Table count unavailable") + '</span>' +
+          (selected && selected.pending
+            ? '<span>' + selected.pending + ' tables awaiting confirmation</span>'
+            : "") +
+          '<span>' + escape(dayStatus) + '</span>' +
+        '</div>' +
+      '</div>' +
+      '<div class="ep-calendar__wash-tip-foot">' +
+        '<span class="ep-wash-cycle-card__status' + statusClass + '">' +
+          escape(selected ? selected.status : "Unavailable") + '</span>' +
+        '<span>' + escape(assignee) + '</span>' +
+      '</div>';
+  }
+
+  function renderPreventiveHoverCard(state, date) {
+    var jobs = state.events.filter(function (event) {
+      return event.date === date;
+    });
+    if (!jobs.length) return "";
+
+    var plant = state.plants.find(function (item) {
+      return item.siteCode === active.context.plantCode;
+    });
+    var scheduledCount = jobs.filter(function (event) {
+      return event.status === "Scheduled";
+    }).length;
+    var assignees = [];
+    jobs.forEach(function (event) {
+      var name = (event.assignee || "").trim();
+      if (name && assignees.indexOf(name) === -1) assignees.push(name);
+    });
+    var summary = scheduledCount
+      ? scheduledCount + " scheduled"
+      : jobs.length + (jobs.length === 1 ? " job" : " jobs");
+    var jobCards = jobs.map(function (event) {
+      var unit = event.unitNo && event.totalUnits
+        ? "Unit " + event.unitNo + " of " + event.totalUnits
+        : event.status;
+      var description = [event.title, event.frequency].filter(Boolean).join(" · ");
+      return '<div class="ep-calendar__pm-tip-job">' +
+        '<div class="ep-calendar__pm-tip-job-head"><strong>' +
+          escape(equipmentLabel(event, active.context)) + '</strong><span>' +
+          escape(unit) + '</span></div>' +
+        '<p>' + escape(description) + '</p>' +
+      '</div>';
+    }).join("");
+
+    return '<div class="ep-calendar__pm-tip-head"><strong>' +
+        escape(plant ? plantLabel(plant) : jobs[0].plantName || "Selected plant") + '</strong>' +
+        '<span>' + escape(plant ? plant.displayCode : jobs[0].plantSiteCode || "") + '</span></div>' +
+      '<p class="ep-calendar__pm-tip-date">' + escape(displayDate(date)) + " · " +
+        jobs.length + (jobs.length === 1 ? " job" : " jobs") + '</p>' +
+      '<div class="ep-calendar__pm-tip-jobs">' + jobCards + '</div>' +
+      '<div class="ep-calendar__pm-tip-foot"><span>' + escape(summary) + '</span>' +
+        '<span>' + escape(assignees.join(", ") || "Not assigned") + '</span></div>';
   }
 
   function positionWashingTooltip(host, day) {
@@ -243,12 +354,26 @@
     tooltip.style.top = top + "px";
   }
 
-  function showWashingTooltip(host, state, day) {
-    if (!state.liveWashing || !state.washingPlant || !day) return;
+  function showCalendarHoverCard(host, state, context, day) {
+    if (!day) return;
+    var isWashing = state.liveWashing && state.washingPlant;
+    var isPlantPM = context.type === "pm" && !!context.plantCode;
+    if (!isWashing && !isPlantPM) return;
     var tooltip = host.querySelector("[data-calendar-hover-card]");
-    if (!tooltip || tooltip.dataset.date === day.dataset.date) return;
-    tooltip.innerHTML = renderWashingHoverCard(state, day.dataset.date);
+    if (!tooltip) return;
+    var content = isWashing
+      ? renderWashingHoverCard(state, day.dataset.date)
+      : renderPreventiveHoverCard(state, day.dataset.date);
+    if (!content) {
+      hideWashingTooltip(host);
+      return;
+    }
+    if (!tooltip || (tooltip.dataset.date === day.dataset.date &&
+        tooltip.dataset.requestId === String(state.requestId))) return;
+    tooltip.innerHTML = content;
+    tooltip.dataset.hoverKind = isWashing ? "washing" : "pm";
     tooltip.dataset.date = day.dataset.date;
+    tooltip.dataset.requestId = String(state.requestId);
     tooltip.hidden = false;
     positionWashingTooltip(host, day);
   }
@@ -260,7 +385,7 @@
     tooltip.dataset.date = "";
   }
 
-  function renderCalendarGrid(state, events, washingHoverEnabled) {
+  function renderCalendarGrid(state, events, hoverEnabled, hoverId) {
     var parts = monthParts(state.month);
     var firstDay = new Date(parts.year, parts.month - 1, 1).getDay();
     var daysInMonth = new Date(parts.year, parts.month, 0).getDate();
@@ -294,7 +419,7 @@
       days += '<button type="button" class="' + classes + '"' +
         (inMonth ? ' data-calendar-action="open-date" data-date="' + date + '"' : " disabled") +
         (inMonth
-        ? (washingHoverEnabled ? ' aria-describedby="calendar-washing-hover-card"' :
+        ? (hoverEnabled ? ' aria-describedby="' + hoverId + '"' :
           ' title="' + escape(displayDate(date) + (tooltip ? " · " + tooltip : "")) + '"') +
           ' aria-label="' + escape(displayDate(date) + ", " + dayEvents.length +
             " saved records" +
@@ -313,7 +438,8 @@
           : '<span class="ep-calendar__day-empty"></span>') +
       "</button>";
     }
-    return '<div class="ep-calendar__grid" role="grid" aria-label="' + escape(displayMonth(state.month)) + '">' +
+    return '<div class="ep-calendar__grid ep-calendar__grid--weeks-' + (cells / 7) +
+      '" role="grid" aria-label="' + escape(displayMonth(state.month)) + '">' +
       weekdays + days + "</div>";
   }
 
@@ -342,6 +468,74 @@
         '<span class="ep-calendar__event-card-open">View details →</span>' +
       '</button>';
     }).join("") + "</div>";
+  }
+
+  function renderPlantPMSummaryEvents(events, state) {
+    if (!events.length) {
+      return '<p class="ep-calendar__empty">No saved Preventive Maintenance jobs match this search.</p>';
+    }
+    return '<section class="ep-calendar__pm-summary-group">' +
+      '<header><span><i aria-hidden="true"></i><strong>Preventive Maintenance</strong></span>' +
+        '<span class="ep-calendar__pm-summary-count">' + events.length + '</span></header>' +
+      '<div class="ep-calendar__pm-summary-list">' +
+        events.map(function (event) {
+          var eventIndex = state.events.indexOf(event);
+          var unit = event.unitNo && event.totalUnits
+            ? "Unit " + event.unitNo + " of " + event.totalUnits
+            : "";
+          var meta = [
+            event.plantName,
+            unit,
+            event.frequency,
+            event.title
+          ].filter(Boolean).join(" · ");
+          return '<button type="button" class="ep-calendar__pm-summary-item" data-calendar-event-index="' +
+            eventIndex + '">' +
+            '<span class="ep-calendar__pm-summary-badge">PM</span>' +
+            '<strong>' + escape(equipmentLabel(event, { type: "pm" })) + '</strong>' +
+            '<span class="ep-calendar__pm-summary-meta">' + escape(meta) + '</span>' +
+            '<span class="ep-calendar__pm-summary-status">' + escape(event.status) + '</span>' +
+          '</button>';
+        }).join("") +
+      '</div>' +
+    '</section>';
+  }
+
+  function renderPortfolioSummaryEvents(events, context, state) {
+    var title = context.type === "pm" ? "Preventive Maintenance" : "Washing";
+    if (!events.length) {
+      return '<p class="ep-calendar__empty">No saved records match these filters.</p>';
+    }
+
+    return '<section class="ep-calendar__pm-summary-group ep-calendar__portfolio-summary-group">' +
+      '<header><span><i aria-hidden="true"></i><strong>' + escape(title) + '</strong></span>' +
+        '<span class="ep-calendar__pm-summary-count">' + events.length + '</span></header>' +
+      '<div class="ep-calendar__pm-summary-list">' +
+        events.map(function (event) {
+          var eventIndex = state.events.indexOf(event);
+          var unit = event.unitNo && event.totalUnits
+            ? "Unit " + event.unitNo + " of " + event.totalUnits
+            : "";
+          var cycle = event.cycleNo ? "Cycle " + event.cycleNo : "";
+          var meta = [
+            event.plantName,
+            event.plantSiteCode,
+            unit || cycle,
+            event.reference,
+            event.title
+          ].filter(Boolean).join(" · ");
+          return '<button type="button" class="ep-calendar__pm-summary-item" data-calendar-event-index="' +
+            eventIndex + '">' +
+            '<span class="ep-calendar__pm-summary-badge' +
+              (context.type === "washing" ? " ep-calendar__pm-summary-badge--washing" : "") + '">' +
+              (context.type === "pm" ? "PM" : "WASH") + '</span>' +
+            '<strong>' + escape(equipmentLabel(event, context)) + '</strong>' +
+            '<span class="ep-calendar__pm-summary-meta">' + escape(meta) + '</span>' +
+            '<span class="ep-calendar__pm-summary-status">' + escape(event.status) + '</span>' +
+          '</button>';
+        }).join("") +
+      '</div>' +
+    '</section>';
   }
 
   function renderEventDetail(state, context) {
@@ -409,6 +603,70 @@
     if (!state.modalDate) return "";
     var events = modalEvents(state, context);
     var typeLabel = context.type === "pm" ? "Preventive Maintenance" : "Washing";
+    if (!context.plantCode) {
+      var totalActivities = state.events.filter(function (event) {
+        return event.date === state.modalDate;
+      }).length;
+      var summaryDate = new Intl.DateTimeFormat("en-IN", {
+        weekday: "long", day: "numeric", month: "long", year: "numeric"
+      }).format(new Date(state.modalDate + "T12:00:00"));
+      var availableEvents = state.events.filter(function (event) {
+        return event.date === state.modalDate;
+      });
+      return '<div class="ep-calendar__modal ep-calendar__pm-summary-modal ep-calendar__portfolio-summary-modal" data-calendar-modal>' +
+        '<button class="ep-calendar__backdrop" type="button" data-calendar-action="close-modal" aria-label="Close daily summary"></button>' +
+        '<section class="ep-calendar__dialog" role="dialog" aria-modal="true" aria-labelledby="calendar-dialog-title">' +
+          '<header class="ep-calendar__pm-summary-head"><h2 id="calendar-dialog-title">Daily summary</h2>' +
+            '<button type="button" class="ep-calendar__close" data-calendar-action="close-modal" aria-label="Close">×</button></header>' +
+          '<div class="ep-calendar__pm-summary-body">' +
+            '<p class="ep-calendar__pm-summary-date">' + escape(summaryDate) + " · " +
+              totalActivities + (totalActivities === 1 ? " activity" : " activities") + '</p>' +
+            '<label class="ep-calendar__pm-summary-search"><span class="ep-sr-only">Search this date</span>' +
+              '<input type="search" data-calendar-filter="modal-search" value="' +
+                escape(state.modalSearch) + '" placeholder="Search plant, reference, status..." /></label>' +
+            '<div class="ep-calendar__portfolio-summary-filters">' +
+              '<label><span class="ep-sr-only">Filter by plant</span><select data-calendar-filter="modal-plant">' +
+                renderPlantOptions(state.plants, state.modalPlant, "All plants") +
+              '</select></label>' +
+              '<label><span class="ep-sr-only">Filter by equipment</span><select data-calendar-filter="modal-equipment">' +
+                renderEquipmentOptions(availableEvents, state.modalEquipment, context) +
+              '</select></label>' +
+              '<label><span class="ep-sr-only">Filter by status</span><select data-calendar-filter="modal-status">' +
+                renderStatusOptions(availableEvents, state.modalStatus) +
+              '</select></label>' +
+            '</div>' +
+            renderPortfolioSummaryEvents(events, context, state) +
+          '</div>' +
+        '</section>' +
+      '</div>';
+    }
+    if (context.type === "pm" && context.plantCode) {
+      var selectedPlant = state.plants.find(function (item) {
+        return item.siteCode === context.plantCode;
+      });
+      var totalActivities = state.events.filter(function (event) {
+        return event.date === state.modalDate;
+      }).length;
+      var summaryDate = new Intl.DateTimeFormat("en-IN", {
+        weekday: "long", day: "numeric", month: "long", year: "numeric"
+      }).format(new Date(state.modalDate + "T12:00:00"));
+      return '<div class="ep-calendar__modal ep-calendar__pm-summary-modal" data-calendar-modal>' +
+        '<button class="ep-calendar__backdrop" type="button" data-calendar-action="close-modal" aria-label="Close daily summary"></button>' +
+        '<section class="ep-calendar__dialog" role="dialog" aria-modal="true" aria-labelledby="calendar-dialog-title">' +
+          '<header class="ep-calendar__pm-summary-head"><h2 id="calendar-dialog-title">Daily summary</h2>' +
+            '<button type="button" class="ep-calendar__close" data-calendar-action="close-modal" aria-label="Close">×</button></header>' +
+          '<div class="ep-calendar__pm-summary-body">' +
+            '<p class="ep-calendar__pm-summary-date">' + escape(summaryDate) + " · " +
+              totalActivities + (totalActivities === 1 ? " activity" : " activities") +
+              (selectedPlant ? " · " + escape(plantLabel(selectedPlant)) : "") + '</p>' +
+            '<label class="ep-calendar__pm-summary-search"><span class="ep-sr-only">Search jobs for this date</span>' +
+              '<input type="search" data-calendar-filter="modal-search" value="' +
+                escape(state.modalSearch) + '" placeholder="Search plant, reference, status..." /></label>' +
+            renderPlantPMSummaryEvents(events, state) +
+          '</div>' +
+        '</section>' +
+      '</div>';
+    }
     var filters = !context.plantCode
       ? '<div class="ep-calendar__modal-filters">' +
           '<label><span>Search this date</span><input type="search" data-calendar-filter="modal-search" value="' +
@@ -755,6 +1013,12 @@
       ? " saved record"
       : " saved records");
     var content = "";
+    var hoverEnabled = !!(context.plantCode && (
+      context.type === "pm" || (state.liveWashing && state.washingPlant)
+    ));
+    var hoverId = context.type === "pm"
+      ? "calendar-pm-hover-card"
+      : "calendar-washing-hover-card";
     if (state.loading) {
       content = '<div class="ep-calendar__message" role="status">' +
         "Loading saved records…" + '</div>';
@@ -763,7 +1027,7 @@
         '<p>Calendar could not be loaded: ' + escape(state.error) + '</p>' +
         '<button type="button" data-calendar-action="retry">Try again</button></div>';
     } else {
-      content = renderCalendarGrid(state, events, state.liveWashing && !!state.washingPlant);
+      content = renderCalendarGrid(state, events, hoverEnabled, hoverId);
     }
     var showSetupButton = state.liveWashing && state.washingSetup &&
       context.plantCode && canManageWashing();
@@ -793,8 +1057,10 @@
         '</div><button type="button" class="ep-calendar__today" data-calendar-action="today">Today</button>' +
       '</div>' +
       content +
-      (state.liveWashing && state.washingPlant
-        ? '<div class="ep-calendar__wash-hover-card" id="calendar-washing-hover-card" ' +
+      (hoverEnabled
+        ? '<div class="ep-calendar__wash-hover-card' +
+          (context.type === "pm" ? ' ep-calendar__pm-hover-card' : "") +
+          '" id="' + hoverId + '" ' +
           'data-calendar-hover-card role="tooltip" hidden></div>'
         : '') +
       '<p class="ep-calendar__disclaimer">' +
@@ -1288,7 +1554,7 @@
     host.addEventListener("pointerover", function (event) {
       if (!active || active.host !== host) return;
       var day = event.target.closest(".ep-calendar__day[data-date]");
-      if (day) showWashingTooltip(host, active.state, day);
+      if (day) showCalendarHoverCard(host, active.state, active.context, day);
     });
 
     host.addEventListener("pointerout", function (event) {
@@ -1309,7 +1575,7 @@
     host.addEventListener("focusin", function (event) {
       if (!active || active.host !== host) return;
       var day = event.target.closest(".ep-calendar__day[data-date]");
-      if (day) showWashingTooltip(host, active.state, day);
+      if (day) showCalendarHoverCard(host, active.state, active.context, day);
     });
 
     host.addEventListener("focusout", function (event) {

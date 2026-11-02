@@ -1,5 +1,5 @@
 /**
- * UI-only settings preview for the standalone portal.
+ * Login access management backed by the authenticated Solar91 user APIs.
  */
 (function (global) {
   "use strict";
@@ -12,45 +12,23 @@
     "Site Engineer": "engineer",
     Viewer: "viewer"
   };
-  var people = [
-    { name: "Arun Demo", email: "arun.demo@example.com", role: "O&M Head", scope: "All plants · all equipment", note: "Full administration, all plants", status: "Demo", signedIn: true, isYou: true },
-    { name: "Babita Demo", email: "babita.demo@example.com", role: "Assignee", scope: "Inverter · all plants", note: "O&M team — assigned equipment only", status: "Demo", signedIn: false },
-    { name: "Dhaval Demo", email: "dhaval.demo@example.com", role: "Administration", scope: "All plants · all equipment", note: "Read-only portfolio view", status: "Demo", signedIn: false },
-    { name: "Himanshu Demo", email: "himanshu.demo@example.com", role: "O&M Head", scope: "All plants · all equipment", note: "Full administration, all plants", status: "Demo", signedIn: false },
-    { name: "Kush Demo", email: "kush.demo@example.com", role: "Assignee", scope: "Modules cleaning · selected plants", note: "Washing jobs for assigned plants", status: "Demo", signedIn: false },
-    { name: "Neha Demo", email: "neha.demo@example.com", role: "Site Engineer", scope: "One assigned plant", note: "Site operations for assigned plant", status: "Demo", signedIn: true }
-  ];
+  var users = [];
   var filters = { search: "", role: "all" };
   var statusMessage = "";
   var activeHost = null;
   var wiredHost = null;
+  var loading = false;
 
   function escape(value) {
     return global.Solar91PortalFormat.escape(value);
   }
 
-  function scopeDescription(person) {
-    if (person.role === "O&M Head") return "Full administration, all plants";
-    if (person.role === "Administration") return "Read-only portfolio view";
-    if (person.role === "Site Engineer") return "Site operations for assigned plant";
-    if (person.role === "Assignee") return "O&M team — assigned equipment only";
-    return "Read-only access";
+  function api() {
+    return global.Solar91PortalAPI;
   }
 
-  function scopeForRole(role) {
-    if (role === "O&M Head" || role === "Administration") return "All plants · all equipment";
-    if (role === "Site Engineer") return "One assigned plant";
-    if (role === "Assignee") return "Inverter · all plants";
-    return "Portfolio · read only";
-  }
-
-  function filteredPeople() {
-    var term = filters.search.trim().toLowerCase();
-    return people.filter(function (person) {
-      if (filters.role !== "all" && person.role !== filters.role) return false;
-      if (!term) return true;
-      return (person.name + " " + person.email + " " + person.role).toLowerCase().indexOf(term) !== -1;
-    });
+  function roleClass(role) {
+    return roleClasses[role] || "viewer";
   }
 
   function renderRoleOptions(selected) {
@@ -64,95 +42,173 @@
     return '<div class="ep-settings__role-legend" aria-label="Available roles">' +
       ROLES.map(function (role) {
         return '<span class="ep-settings__role-chip ep-settings__role-chip--' +
-          roleClasses[role] + '"><i></i>' + escape(role) + "</span>";
+          roleClass(role) + '"><i></i>' + escape(role) + "</span>";
       }).join("") + "</div>";
   }
 
-  function renderRow(person, index) {
-    var initials = person.name.split(/\s+/).map(function (part) {
+  function plantScope(person) {
+    if (person.role === "O&M Head" || person.role === "Administration") return "All plants";
+    if (person.role === "Viewer") return "No operational access";
+    var assigned = (person.plants || []).map(function (plant) {
+      return plant.site_code + " · " + plant.plant_name;
+    });
+    return assigned.length ? assigned.join(", ") : "No plants assigned";
+  }
+
+  function filteredUsers() {
+    var term = filters.search.trim().toLowerCase();
+    return users.filter(function (person) {
+      if (filters.role !== "all" && person.role !== filters.role) return false;
+      if (!term) return true;
+      return [person.name, person.email, person.role, plantScope(person)]
+        .join(" ").toLowerCase().indexOf(term) !== -1;
+    });
+  }
+
+  function renderRow(person) {
+    var name = person.name || person.email || "Unnamed user";
+    var initials = name.split(/\s+/).map(function (part) {
       return part.charAt(0);
     }).join("").slice(0, 2).toUpperCase();
-    var scopeClass = roleClasses[person.role] || "viewer";
-    return '<article class="ep-settings__person ep-settings__person--' + scopeClass + '" data-person-index="' + index + '">' +
+    var role = roleClass(person.role);
+    var loginStatus = person.invited ? "Invite pending" : "Clerk account linked";
+    var activeStatus = person.active ? "Enabled" : "Disabled";
+    var actions = '<button type="button" class="ep-settings__button ep-settings__button--small" ' +
+      'data-settings-action="edit-access" data-user-id="' + escape(person.id) + '">Role &amp; plants</button>' +
+      '<button type="button" class="ep-settings__button ep-settings__button--small" ' +
+      'data-settings-action="edit-profile" data-user-id="' + escape(person.id) + '">Edit details</button>';
+    if (person.invited && person.active) {
+      actions += '<button type="button" class="ep-settings__button ep-settings__button--small" ' +
+        'data-settings-action="resend" data-user-id="' + escape(person.id) + '">Resend invite</button>';
+    }
+    if (!person.is_self) {
+      actions += '<button type="button" class="ep-settings__remove" data-settings-action="toggle-active" ' +
+        'data-user-id="' + escape(person.id) + '">' + (person.active ? "Disable login" : "Enable login") + "</button>";
+    }
+    return '<article class="ep-settings__person ep-settings__person--' + role + '">' +
       '<div class="ep-settings__person-cell">' +
         '<span class="ep-settings__avatar" aria-hidden="true">' + escape(initials) + '</span>' +
-        '<div class="ep-settings__identity"><strong>' + escape(person.name) +
-          (person.isYou ? ' <span class="ep-settings__you">You</span>' : "") +
-          (!person.signedIn ? ' <span class="ep-settings__not-signed">Demo invite</span>' : "") +
-          '</strong><span>' + escape(person.email) + '</span>' +
-          '<button type="button" class="ep-settings__edit-link" data-settings-action="edit" data-index="' + index + '">Edit details</button>' +
-        '</div>' +
+        '<div class="ep-settings__identity"><strong>' + escape(name) +
+          (person.is_self ? ' <span class="ep-settings__you">You</span>' : "") +
+          '</strong><span>' + escape(person.email || "No email address") + '</span></div>' +
       '</div>' +
-      '<div class="ep-settings__role-cell"><label class="ep-settings__sr-only" for="settings-role-' + index + '">Role for ' + escape(person.name) + '</label>' +
-        '<select id="settings-role-' + index + '" class="ep-settings__role-select ep-settings__role-select--' + scopeClass + '" data-settings-action="role" data-index="' + index + '">' +
-          renderRoleOptions(person.role) +
-        '</select><span>' + escape(scopeDescription(person)) + '</span>' +
-      '</div>' +
-      '<div class="ep-settings__scope ep-settings__scope--' + scopeClass + '">' +
-        '<strong>' + escape(person.scope) + '</strong><span>' + escape(person.note) + '</span>' +
-      '</div>' +
-      '<div class="ep-settings__access-cell">' +
-        '<button type="button" class="ep-settings__remove' + (person.removed ? " is-removed" : "") +
-          '" data-settings-action="toggle-access" data-index="' + index + '">' +
-          (person.removed ? "Restore access (demo)" : "Remove access") + "</button>" +
-      '</div>' +
+      '<div class="ep-settings__role-cell"><strong class="ep-settings__role-label">' + escape(person.role) +
+        '</strong><span>' + escape(plantScope(person)) + '</span></div>' +
+      '<div class="ep-settings__login-status">' + escape(loginStatus) + '</div>' +
       '<div class="ep-settings__status"><span class="ep-settings__status-pill' +
-        (person.removed ? " is-removed" : "") + '"><i></i>' +
-        (person.removed ? "Removed (demo)" : person.status) + "</span></div>" +
+        (person.active ? "" : " is-removed") + '"><i></i>' + escape(activeStatus) + '</span></div>' +
+      '<div class="ep-settings__actions">' + actions + '</div>' +
     "</article>";
   }
 
   function render() {
     if (!activeHost) return;
-    var list = filteredPeople();
+    var canManage = api().can("users.manage");
+    var list = filteredUsers();
     activeHost.innerHTML = '<div class="ep-settings">' +
-      '<header class="ep-settings__page-head"><div><h1>Settings</h1>' +
-        '<p>Manage team access, operational roles, issue workflow and notification rules.</p></div>' +
-        '<span class="ep-settings__access-badge"><i></i>Access controls</span></header>' +
+      '<header class="ep-settings__page-head"><div><h1>Login access</h1>' +
+        '<p>Manage Clerk sign-in invitations, account status, roles and plant assignments.</p></div>' +
+        '<span class="ep-settings__access-badge"><i></i>Clerk sign-in</span></header>' +
       '<section class="ep-settings__panel" aria-labelledby="settings-team-title">' +
         '<div class="ep-settings__panel-intro"><h2 id="settings-team-title">Team &amp; access</h2>' +
-          '<p>New people can be invited and assigned a role. Assignees are scoped to their assigned plants; Site Engineers are limited to exactly one plant. Role and access changes shown here are for demo preview only and are not saved or applied.</p></div>' +
-        renderRoleChips() +
-        '<div class="ep-settings__toolbar">' +
-          '<label class="ep-settings__sr-only" for="settings-search">Search name or email</label>' +
-          '<input id="settings-search" type="search" placeholder="Search name or email" value="' + escape(filters.search) + '" data-settings-filter="search" />' +
+          '<p>Names and login details are loaded from the authenticated Solar91 user directory. Role and plant changes are saved to the database. Assignees need one or more plants; Site Engineers need exactly one.</p></div>' +
+        (canManage ? renderRoleChips() :
+          '<p class="ep-settings__message" role="status">Your account does not have permission to manage login access.</p>') +
+        (canManage ? '<div class="ep-settings__toolbar">' +
+          '<label class="ep-settings__sr-only" for="settings-search">Search name, email or plant</label>' +
+          '<input id="settings-search" type="search" placeholder="Search name, email or plant" value="' + escape(filters.search) + '" data-settings-filter="search" />' +
           '<label class="ep-settings__sr-only" for="settings-role-filter">Filter by role</label>' +
-          '<select id="settings-role-filter" data-settings-filter="role"><option value="all"' + (filters.role === "all" ? " selected" : "") + '>All people (' + people.length + ')</option>' +
+          '<select id="settings-role-filter" data-settings-filter="role"><option value="all"' + (filters.role === "all" ? " selected" : "") + '>All roles</option>' +
             renderRoleOptions(filters.role === "all" ? "" : filters.role) + '</select>' +
           '<button type="button" class="ep-settings__button" data-settings-action="refresh">Refresh</button>' +
-          '<button type="button" class="ep-settings__button ep-settings__button--primary" data-settings-action="add">+ Add person</button>' +
-          '<button type="button" class="ep-settings__button" data-settings-action="import">Import from Excel</button>' +
-        '</div>' +
+          '<button type="button" class="ep-settings__button ep-settings__button--primary" data-settings-action="invite">+ Invite person</button>' +
+        '</div>' : "") +
         (statusMessage ? '<p class="ep-settings__message" role="status">' + escape(statusMessage) + '</p>' : "") +
-        '<div class="ep-settings__table" role="table" aria-label="Demo team access">' +
-          '<div class="ep-settings__table-head" role="row">' +
-            '<span role="columnheader">Person</span><span role="columnheader">Role</span>' +
-            '<span role="columnheader">Scope · Equipment type / plant</span>' +
-            '<span role="columnheader">Access</span><span role="columnheader">Status</span>' +
-          '</div>' +
-          (list.length
-            ? list.map(function (person) { return renderRow(person, people.indexOf(person)); }).join("")
-            : '<p class="ep-settings__empty">No demo people match this search.</p>') +
-        '</div>' +
-        '<p class="ep-settings__footnote">Demo preview only. No invitations, permissions or database settings are changed.</p>' +
+        (canManage ? (loading
+          ? '<p class="ep-settings__empty" role="status">Loading real user accounts…</p>'
+          : '<div class="ep-settings__table" role="table" aria-label="Login access accounts">' +
+            '<div class="ep-settings__table-head" role="row">' +
+              '<span role="columnheader">Person</span><span role="columnheader">Role &amp; plant scope</span>' +
+              '<span role="columnheader">Login</span><span role="columnheader">Account</span><span role="columnheader">Actions</span>' +
+            '</div>' +
+            (list.length
+              ? list.map(renderRow).join("")
+              : '<p class="ep-settings__empty">' + (users.length ? "No accounts match this search." : "No user accounts were found.") + '</p>') +
+          '</div>') : "") +
+        '<p class="ep-settings__footnote">Sign-in is provided by Clerk. This page manages Solar91 invitations and database-backed access; it does not display or expose Clerk credentials.</p>' +
       '</section>' +
       (activeHost.querySelector("[data-settings-modal]") ? activeHost.querySelector("[data-settings-modal]").outerHTML : "") +
     "</div>";
   }
 
-  function modalHTML() {
+  function loadUsers() {
+    if (!api().can("users.manage")) {
+      loading = false;
+      render();
+      return Promise.resolve();
+    }
+    loading = true;
+    render();
+    return api().request("/api/users").then(function (result) {
+      users = Array.isArray(result) ? result : [];
+      loading = false;
+      render();
+    }).catch(function (error) {
+      loading = false;
+      statusMessage = error.message || "Could not load login access accounts.";
+      render();
+    });
+  }
+
+  function selectedPlantOptions(plantList, selected, useCode) {
+    return plantList.map(function (plant) {
+      var value = useCode ? plant.siteCode : plant.id;
+      var label = plant.siteCode + " · " + plant.plantName;
+      return '<option value="' + escape(value) + '"' +
+        (selected.indexOf(String(value)) !== -1 ? " selected" : "") + ">" + escape(label) + "</option>";
+    }).join("");
+  }
+
+  function modalHTML(mode, person, plantList) {
+    var isProfile = mode === "profile";
+    var role = person ? person.role : "Viewer";
+    var selectedIds = person ? (person.plants || []).map(function (plant) { return String(plant.plant_id); }) : [];
+    var selectedCodes = person ? (person.plants || []).map(function (plant) { return String(plant.site_code); }) : [];
+    var title = mode === "invite" ? "Invite a person" : (isProfile ? "Edit person details" : "Change role and plant scope");
+    var plantsRequired = role === "Assignee" || role === "Site Engineer";
+    var fields;
+    if (isProfile) {
+      var isInvited = person.invited;
+      fields = '<label>Name<input name="name" required maxlength="255" value="' + escape(person.name || "") + '" /></label>' +
+        '<label>Email<input name="email" type="email" maxlength="240" value="' + escape(person.email || "") + '"' +
+          (isInvited ? "" : " disabled") + ' /></label>' +
+        '<p>' + (isInvited ? "Updating an invited email address resends the Clerk sign-in invitation." :
+          "This email is verified by Clerk and cannot be changed here.") + '</p>';
+    } else {
+      fields = (mode === "invite"
+        ? '<label>Name<input name="name" required maxlength="255" autocomplete="name" /></label>' +
+          '<label>Email<input name="email" type="email" required maxlength="240" autocomplete="email" /></label>'
+        : "") +
+        '<label>Role<select name="role" data-settings-role>' + renderRoleOptions(role) + '</select></label>' +
+        '<label class="ep-settings__plant-field' + (plantsRequired ? "" : " is-hidden") + '" data-plant-field>' +
+          'Assigned plants<select name="plants" multiple size="7" data-settings-plants' + (plantsRequired ? " required" : "") +
+          '>' + selectedPlantOptions(plantList, mode === "invite" ? selectedCodes : selectedIds, mode === "invite") +
+          '</select></label>' +
+        '<p data-plant-help>' + (role === "Site Engineer" ? "Select exactly one plant." :
+          role === "Assignee" ? "Select one or more plants." : "Portfolio roles have access to all plants.") + '</p>';
+    }
     return '<div class="ep-settings__modal" data-settings-modal>' +
       '<button class="ep-settings__backdrop" type="button" data-settings-action="close" aria-label="Close dialog"></button>' +
       '<section class="ep-settings__dialog" role="dialog" aria-modal="true" aria-labelledby="settings-dialog-title">' +
-        '<header><div><p>Demo preview</p><h2 id="settings-dialog-title">Add a person</h2></div>' +
+        '<header><div><p>Login access</p><h2 id="settings-dialog-title">' + escape(title) + '</h2></div>' +
           '<button type="button" class="ep-settings__icon-close" data-settings-action="close" aria-label="Close">×</button></header>' +
-        '<form data-settings-form>' +
-          '<label>Name<input name="name" required autocomplete="name" /></label>' +
-          '<label>Email<input name="email" type="email" required autocomplete="email" /></label>' +
-          '<label>Role<select name="role">' + renderRoleOptions("Viewer") + '</select></label>' +
-          '<p>Adding a person here only changes this temporary demo preview.</p>' +
+        '<form data-settings-form data-mode="' + escape(mode) + '"' +
+          (person ? ' data-user-id="' + escape(person.id) + '" data-expected-name="' + escape(person.name || "") +
+            '" data-expected-email="' + escape(person.email || "") + '"' : "") + '>' +
+          fields +
           '<footer><button type="button" class="ep-settings__button" data-settings-action="close">Cancel</button>' +
-            '<button type="submit" class="ep-settings__button ep-settings__button--primary">Add demo person</button></footer>' +
+            '<button type="submit" class="ep-settings__button ep-settings__button--primary">' +
+              (mode === "invite" ? "Send invitation" : "Save changes") + '</button></footer>' +
         '</form>' +
       '</section>' +
     '</div>';
@@ -164,88 +220,177 @@
     if (modal) modal.remove();
   }
 
+  function openModal(mode, person) {
+    statusMessage = "";
+    var plantsPromise = mode === "profile" ? Promise.resolve([]) : api().plants();
+    plantsPromise.then(function (plantList) {
+      if (!activeHost) return;
+      var wrapper = document.createElement("div");
+      wrapper.innerHTML = modalHTML(mode, person, plantList);
+      var modal = wrapper.firstElementChild;
+      activeHost.appendChild(modal);
+      var first = modal.querySelector('input:not([disabled]), select');
+      if (first) first.focus();
+    }).catch(function (error) {
+      statusMessage = error.message || "Could not load plants for access settings.";
+      render();
+    });
+  }
+
+  function updatePlantField(form) {
+    var roleSelect = form.querySelector("[data-settings-role]");
+    var plantField = form.querySelector("[data-plant-field]");
+    var plantSelect = form.querySelector("[data-settings-plants]");
+    var help = form.querySelector("[data-plant-help]");
+    if (!roleSelect || !plantField || !plantSelect) return;
+    var role = roleSelect.value;
+    var needsPlants = role === "Assignee" || role === "Site Engineer";
+    plantField.classList.toggle("is-hidden", !needsPlants);
+    plantSelect.required = needsPlants;
+    if (help) {
+      help.textContent = role === "Site Engineer" ? "Select exactly one plant." :
+        role === "Assignee" ? "Select one or more plants." : "Portfolio roles have access to all plants.";
+    }
+  }
+
   function wire(host) {
     if (wiredHost === host) return;
     wiredHost = host;
     host.addEventListener("input", function (event) {
-      if (event.target.dataset.settingsFilter === "search") {
-        var position = event.target.selectionStart;
-        filters.search = event.target.value;
-        render();
-        var input = host.querySelector('[data-settings-filter="search"]');
-        if (input) {
-          input.focus();
-          input.setSelectionRange(position, position);
-        }
+      if (event.target.dataset.settingsFilter !== "search") return;
+      var position = event.target.selectionStart;
+      filters.search = event.target.value;
+      render();
+      var input = host.querySelector('[data-settings-filter="search"]');
+      if (input) {
+        input.focus();
+        input.setSelectionRange(position, position);
       }
     });
     host.addEventListener("change", function (event) {
-      var index = Number(event.target.dataset.index);
       if (event.target.dataset.settingsFilter === "role") {
         filters.role = event.target.value;
-        statusMessage = "Role filter updated. Demo access has not been changed.";
         render();
-      } else if (event.target.dataset.settingsAction === "role" && people[index]) {
-        people[index].role = event.target.value;
-        people[index].scope = scopeForRole(event.target.value);
-        people[index].note = scopeDescription(people[index]);
-        people[index].status = "Unsaved demo";
-        statusMessage = "Role updated in this demo preview only.";
-        render();
+      } else if (event.target.matches("[data-settings-role]")) {
+        updatePlantField(event.target.form);
       }
     });
     host.addEventListener("click", function (event) {
       var button = event.target.closest("[data-settings-action]");
       if (!button) return;
       var action = button.dataset.settingsAction;
-      var index = Number(button.dataset.index);
+      var person = users.find(function (item) { return item.id === button.dataset.userId; });
       if (action === "refresh") {
-        filters.search = "";
-        filters.role = "all";
-        statusMessage = "Demo list refreshed. No backend request was made.";
-        render();
-      } else if (action === "add") {
-        var wrapper = document.createElement("div");
-        wrapper.innerHTML = modalHTML();
-        activeHost.appendChild(wrapper.firstElementChild);
-        activeHost.querySelector('[name="name"]').focus();
+        statusMessage = "";
+        loadUsers();
+      } else if (action === "invite") {
+        openModal("invite");
+      } else if (action === "edit-access" && person) {
+        openModal("access", person);
+      } else if (action === "edit-profile" && person) {
+        openModal("profile", person);
       } else if (action === "close") {
         closeModal();
-      } else if (action === "import") {
-        statusMessage = "Excel import will be connected after database setup.";
-        render();
-      } else if (action === "toggle-access" && people[index]) {
-        people[index].removed = !people[index].removed;
-        people[index].status = people[index].removed ? "Removed (demo)" : "Unsaved demo";
-        statusMessage = "Demo access status changed locally only.";
-        render();
-      } else if (action === "edit" && people[index]) {
-        statusMessage = "Editing " + people[index].name + " is not connected in this demo.";
-        render();
+      } else if (action === "resend" && person) {
+        button.disabled = true;
+        api().request("/api/users/" + encodeURIComponent(person.id) + "/resend-invite", { method: "POST" })
+          .then(function (result) {
+            statusMessage = result.email_sent ? "Invitation resent to " + person.email + "." :
+              (result.email_note || "The invitation could not be sent.");
+            render();
+          }).catch(function (error) {
+            statusMessage = error.message || "Could not resend the invitation.";
+            render();
+          });
+      } else if (action === "toggle-active" && person) {
+        var nextActive = !person.active;
+        if (!global.confirm((nextActive ? "Enable" : "Disable") + " login access for " +
+            (person.name || person.email) + "?")) return;
+        button.disabled = true;
+        api().request("/api/users/" + encodeURIComponent(person.id) + "/active", {
+          method: "PATCH",
+          body: { is_active: nextActive }
+        }).then(function () {
+          statusMessage = nextActive ? "Login access enabled." : "Login access disabled.";
+          return loadUsers();
+        }).catch(function (error) {
+          statusMessage = error.message || "Could not update login access.";
+          render();
+        });
       }
     });
     host.addEventListener("submit", function (event) {
-      if (!event.target.matches("[data-settings-form]")) return;
+      var form = event.target;
+      if (!form.matches("[data-settings-form]")) return;
       event.preventDefault();
-      var values = new FormData(event.target);
-      var name = String(values.get("name") || "").trim();
-      var email = String(values.get("email") || "").trim();
-      var role = String(values.get("role") || "Viewer");
-      if (!name || !email || ROLES.indexOf(role) === -1) return;
-      people.unshift({
-        name: name,
-        email: email,
-        role: role,
-        scope: scopeForRole(role),
-        note: scopeDescription({ role: role }),
-        status: "Unsaved demo",
-        signedIn: false
+      var submit = form.querySelector('[type="submit"]');
+      if (submit.disabled) return;
+      submit.disabled = true;
+      var values = new FormData(form);
+      var mode = form.dataset.mode;
+      var request;
+      if (mode === "invite") {
+        var inviteRole = String(values.get("role") || "Viewer");
+        var invitePlants = Array.from(form.querySelector("[data-settings-plants]").selectedOptions)
+          .map(function (option) { return option.value; });
+        request = api().request("/api/users/invite", {
+          method: "POST",
+          body: {
+            name: String(values.get("name") || "").trim(),
+            email: String(values.get("email") || "").trim(),
+            role: inviteRole,
+            plants: invitePlants
+          }
+        }).then(function (result) {
+          statusMessage = result.email_sent
+            ? "Invitation sent to " + result.email + "."
+            : "Account saved for " + result.email + ". " + (result.email_note || "Invitation email was not sent.");
+        });
+      } else if (mode === "access") {
+        var role = String(values.get("role") || "");
+        var plantSelect = form.querySelector("[data-settings-plants]");
+        var plantIds = role === "Assignee" || role === "Site Engineer"
+          ? Array.from(plantSelect.selectedOptions).map(function (option) { return option.value; })
+          : [];
+        request = api().request("/api/users/" + encodeURIComponent(form.dataset.userId) + "/access", {
+          method: "PUT",
+          body: { role: role, plant_ids: plantIds }
+        }).then(function () {
+          statusMessage = "Role and plant access saved.";
+        });
+      } else {
+        var profile = {
+          name: String(values.get("name") || "").trim(),
+          expected_name: form.dataset.expectedName,
+          expected_email: form.dataset.expectedEmail
+        };
+        if (!form.querySelector('[name="email"]').disabled) {
+          profile.email = String(values.get("email") || "").trim();
+        }
+        request = api().request("/api/users/" + encodeURIComponent(form.dataset.userId) + "/profile", {
+          method: "PATCH",
+          body: profile
+        }).then(function (result) {
+          statusMessage = result.email_sent
+            ? "Person details saved and invitation sent to " + result.email + "."
+            : "Person details saved.";
+        });
+      }
+      request.then(function () {
+        closeModal();
+        return loadUsers();
+      }).catch(function (error) {
+        submit.disabled = false;
+        var errorEl = form.querySelector("[data-form-error]");
+        if (!errorEl) {
+          errorEl = document.createElement("p");
+          errorEl.className = "ep-settings__form-error";
+          errorEl.setAttribute("role", "alert");
+          errorEl.setAttribute("data-form-error", "");
+          form.insertBefore(errorEl, form.querySelector("footer"));
+        }
+        errorEl.textContent = error.message || "Could not save login access changes.";
       });
-      filters.search = "";
-      filters.role = "all";
-      statusMessage = "Demo person added to this page only. Nothing was saved or invited.";
-      closeModal();
-      render();
     });
     host.addEventListener("keydown", function (event) {
       if (event.key === "Escape" && host.querySelector("[data-settings-modal]")) closeModal();
@@ -256,15 +401,8 @@
     if (!host) throw new Error("Settings host element is missing.");
     activeHost = host;
     wire(host);
-    render();
-    // The category list is live and persisted, unlike the team preview above.
-    var categories = host.querySelector("[data-categories-host]");
-    if (!categories) {
-      categories = document.createElement("div");
-      categories.setAttribute("data-categories-host", "");
-      (host.querySelector(".ep-settings") || host).appendChild(categories);
-    }
-    if (global.Solar91PortalCategories) global.Solar91PortalCategories.render(categories);
+    statusMessage = "";
+    loadUsers();
   }
 
   global.Solar91PortalSettings = { render: renderPage };

@@ -81,6 +81,7 @@ button { font: inherit; cursor: pointer; }
 }
 .ep-nav-item .ep-nav-icon { width: 18px; height: 18px; opacity: 0.9; }
 .ep-nav-item.is-active .ep-nav-icon { opacity: 1; }
+.ep-sidebar__settings .ep-nav-icon { width: 16px; height: 16px; }
 .is-sidebar-collapsed .ep-nav-item { justify-content: center; }
 .is-sidebar-collapsed .ep-nav-item__label { display: none; }
 .ep-nav-item[hidden] { display: none; }
@@ -165,6 +166,7 @@ button { font: inherit; cursor: pointer; }
   transition: background 120ms ease, border-color 120ms ease;
 }
 .ep-icon-btn:hover { background: var(--ep-bg-muted); border-color: var(--ep-border-strong); }
+.ep-shell.is-login-access:not(.is-sidebar-collapsed) [data-sidebar-toggle] { display: none; }
 
 .ep-page {
   flex: 1;
