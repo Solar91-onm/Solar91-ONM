@@ -1,4 +1,6 @@
-# Equipment Register
+# Historical Equipment Register (Retired)
+
+> **This document describes a retired implementation and is not current setup or QA guidance.** The current Asset & Warranty page reads only role-authorized plant records. It does not expose an equipment register, unit counts, or warranty status because the portal has no current inventory source or category-to-warranty mapping. It shows these values as unavailable or unconfigured and does not infer inventory from Preventive Maintenance setup. Do not apply the migration or use the API and manual-QA procedures below for the current portal.
 
 Solar91 O&M Equipment Register is the plant-scoped asset register used by Preventive Maintenance and Site Issues. The v2 work is additive: the existing equipment API, status values, type ownership and free-text PM/issue equipment entry remain compatible.
 

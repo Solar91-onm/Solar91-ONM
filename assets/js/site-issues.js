@@ -155,7 +155,12 @@
     }).join("");
   }
 
-  function renderHeader() {
+  function renderHeader(context) {
+    if (!context.plantCode) {
+      return state.canRaise
+        ? '<div class="ep-issues__portfolio-actions"><button class="ep-issues__button ep-issues__button--primary" type="button" data-issue-action="raise">+ Raise issue</button></div>'
+        : "";
+    }
     return '<header class="ep-issues__hero"><div><p class="ep-issues__eyebrow">Solar operations · Issue register</p>' +
       '<h1>Site Issues</h1><p>Track reported issues across plants.</p></div>' +
       '<div class="ep-issues__hero-actions"><span class="ep-issues__demo-tag">' +
@@ -323,7 +328,7 @@
   }
 
   function renderStepper() {
-    var steps = ["Plant", "Classification", "Status & details"];
+    var steps = ["Plant", "Classification", "Priority & details"];
     return '<ol class="ep-issues__stepper" aria-label="Issue capture steps">' +
       steps.map(function (step, index) {
         var number = index + 1;
@@ -380,8 +385,8 @@
     return '<div class="ep-issues__wizard-step"><label class="ep-issues__wizard-field">Plant code' +
       renderWizardPlant(context, draft) + '</label>' +
       '<div class="ep-issues__wizard-info"><strong>What you will add</strong>' +
-        '<span>Equipment type and affected unit</span><span>Classification and fault area</span>' +
-        '<span>Priority, details and optional photos</span>' +
+        '<span>Issue category and fault area</span><span>Issue priority and details</span>' +
+        '<span>Optional evidence photos and assignee</span>' +
       '</div><div class="ep-issues__wizard-actions"><span></span>' +
         '<button type="button" class="ep-issues__button ep-issues__button--primary" data-wizard-action="next">Next</button>' +
       '</div></div>';
@@ -395,8 +400,6 @@
         '<select name="subpart">' + renderSubpartOptions(draft.subpart, draft.equipment) + '</select>' +
         '<small>The fault for this category; describe the full problem separately in Issue details.</small>' +
       '</label>' +
-      '<label class="ep-issues__wizard-field">Occurrence date<input name="occurredAt" type="date" required value="' +
-        escape(draft.occurredAt) + '" /></label>' +
       (templates().length
         ? '<div class="ep-issues__template-area"><strong>Quick templates — 1 click fills category, sub-problem and description</strong>' +
           '<div>' + templates().map(function (template, index) {
@@ -418,6 +421,8 @@
         '<label class="ep-issues__wizard-field">Expected time to close (optional)' +
           '<input name="dueAt" type="datetime-local" value="' + escape(draft.dueAt) + '" />' +
           '<small>Leave blank to use the configured deadline for this priority.</small></label>' +
+        '<label class="ep-issues__wizard-field">Occurrence date<input name="occurredAt" type="date" required value="' +
+          escape(draft.occurredAt) + '" /></label>' +
       '</div>' +
       '<label class="ep-issues__wizard-field">Issue details<textarea name="problem" required rows="4" placeholder="Describe the full problem observed">' +
         escape(draft.problem) + '</textarea>' +
@@ -478,7 +483,9 @@
           '</p>' +
           '<h2 id="issue-drawer-title">' + title + '</h2></div>' +
           '<button type="button" class="ep-issues__drawer-x" data-issue-action="close" aria-label="Close">×</button></header>' +
-        (isForm ? '<div class="ep-issues__drawer-content">' + "" + '</div>' : renderDetails(issue || {
+        (isWizard
+          ? '<div class="ep-issues__drawer-content">' + renderRaiseWizard(context) + '</div>'
+          : isForm ? '<div class="ep-issues__drawer-content"></div>' : renderDetails(issue || {
           id: "Issue unavailable", plantCode: "", plantName: "", equipment: "", status: "Unhealthy",
           problem: "", reportedAt: "", reportedBy: "", assignee: "", notes: ""
         })) +
@@ -494,6 +501,8 @@
     if (active && previousScope !== nextScope) {
       state.modalId = "";
       state.modalMode = "";
+      state.draft = null;
+      state.wizardStep = 1;
       state.plantFilter = "";
       state.search = "";
       state.statusFilter = "All";
@@ -526,7 +535,7 @@
             ? ' <a href="/auth/login">Sign in to Solar91</a>' : "") +
           '<button type="button" data-issue-action="retry">Try again</button></div>';
     } else {
-      content = renderSummary(unfilteredRows) +
+      content = (context.plantCode ? renderSummary(unfilteredRows) : "") +
           renderPlantSnapshot(unfilteredRows, context) +
           '<section class="ep-issues__results"><div class="ep-issues__section-head">' +
             '<h2>Issues <span>' + rows.length + '</span></h2>' +
@@ -535,7 +544,7 @@
           renderTable(rows) + '</section>';
     }
     host.innerHTML = '<div class="ep-issues">' +
-      renderHeader() +
+      renderHeader(context) +
       '<div class="ep-issues__body">' +
         renderFilters(context, unfilteredRows) +
         content +
@@ -612,6 +621,14 @@
     });
     host.addEventListener("change", function (event) {
       if (!active || active.host !== host) return;
+      if (event.target.name === "equipment" && state.modalMode === "create" && state.draft) {
+        var currentWizard = host.querySelector("[data-issue-wizard]");
+        if (currentWizard) syncWizardDraft(currentWizard);
+        state.draft.equipment = event.target.value;
+        state.draft.subpart = "";
+        renderView();
+        return;
+      }
       if (event.target.name === "evidence" && state.modalMode === "create" && state.draft) {
         var files = Array.prototype.slice.call(event.target.files || []);
         var error = host.querySelector("[data-wizard-error]");
@@ -717,6 +734,8 @@
         state.submitNotice = "";
         state.modalId = "";
         state.modalMode = "create";
+        state.wizardStep = 1;
+        state.draft = createDraft(active.context);
       } else if (action === "clear") {
         state.search = "";
         state.plantFilter = "";
@@ -726,6 +745,8 @@
         state.modalId = "";
         state.modalMode = "";
         state.submitNotice = "";
+        state.draft = null;
+        state.wizardStep = 1;
       } else if (action === "retry") {
         state.loaded = false;
         load();
@@ -779,6 +800,8 @@
         if (state.submitting) return;
         state.modalMode = "";
         state.modalId = "";
+        state.draft = null;
+        state.wizardStep = 1;
         renderView();
       }
     });

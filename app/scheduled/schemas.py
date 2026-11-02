@@ -153,9 +153,11 @@ class WashingDailyReportRequest(BaseModel):
 
 
 class WashingSheetEntry(BaseModel):
-    """One day of a cycle sheet: how many tables were cleaned that day, or why nothing was done."""
+    """One day of a cycle sheet: cleaned tables, an optional inclusive table-number range, or an exception."""
     report_date: date
     tables_cleaned: int = Field(default=0, ge=0, le=5000)
+    table_start: int | None = Field(default=None, ge=1, le=5000)
+    table_end: int | None = Field(default=None, ge=1, le=5000)
     job_status: Literal["Done", "Not done"]
     exception_reason: Literal["Rain", "Water shortage", "Machine breakdown", "Access restriction", "Safety stand-down", "Other"] | None = None
     remarks: str | None = Field(default=None, max_length=4000)
@@ -168,7 +170,14 @@ class WashingSheetEntry(BaseModel):
             raise ValueError("An exception reason is only valid when the job was not done")
         if self.job_status == "Done" and self.tables_cleaned < 1:
             raise ValueError("Enter how many tables were cleaned")
-        if self.job_status == "Not done" and self.tables_cleaned:
+        if (self.table_start is None) != (self.table_end is None):
+            raise ValueError("Enter both the first and last table numbers")
+        if self.table_start is not None:
+            if self.table_end < self.table_start:
+                raise ValueError("Last table number must be at least the first table number")
+            if self.tables_cleaned != self.table_end - self.table_start + 1:
+                raise ValueError("Tables cleaned must match the selected table-number range")
+        if self.job_status == "Not done" and (self.tables_cleaned or self.table_start is not None):
             raise ValueError("A not-done exception cannot include cleaned tables")
         return self
 

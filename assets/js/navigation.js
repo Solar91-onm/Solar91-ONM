@@ -18,14 +18,16 @@
     { id: "details",         label: "Details" },
     { id: "health",          label: "Health" },
     { id: "pm",              label: "Preventive Maintenance" },
-    { id: "washing",         label: "Washing" }
+    { id: "washing",         label: "Washing" },
+    { id: "asset-warranty",  label: "Asset & Warranty" }
   ];
 
   var VIEW_SUB_PAGES = [
     { id: "details",         label: "Details" },
     { id: "health",          label: "Health" },
     { id: "pm",              label: "Preventive Maintenance" },
-    { id: "washing",         label: "Washing" }
+    { id: "washing",         label: "Washing" },
+    { id: "asset-warranty",  label: "Asset & Warranty" }
   ];
 
   var ROLE_TAB_VISIBILITY = {
@@ -177,6 +179,7 @@
     var tableEl = document.querySelector('[data-tab-view="plants-table"]');
     var calendarEl = document.querySelector('[data-tab-view="calendar"]');
     var healthEl = document.querySelector('[data-tab-view="health"]');
+    var assetWarrantyEl = document.querySelector('[data-tab-view="asset-warranty"]');
     var detailsEl = document.querySelector('[data-tab-view="plant-details"]');
     var settingsEl = document.querySelector('[data-tab-view="settings"]');
     var placeholderEl = document.querySelector('[data-tab-view="placeholder"]');
@@ -186,7 +189,7 @@
     var phContext = document.querySelector("[data-placeholder-context]");
 
     function showOnly(el) {
-      [overviewEl, tableEl, calendarEl, healthEl, detailsEl, settingsEl, placeholderEl].forEach(function (section) {
+      [overviewEl, tableEl, calendarEl, healthEl, assetWarrantyEl, detailsEl, settingsEl, placeholderEl].forEach(function (section) {
         if (section) section.classList.toggle("is-visible", section === el);
       });
     }
@@ -242,24 +245,24 @@
         document.querySelector("[data-calendar-host]"),
         { type: calendarType, plantCode: plantCode }
       );
-    } else if (isDetails && plantCode && global.Solar91PortalPlantDetails) {
-      // One plant: the full plant record, read from the database.
-      showOnly(detailsEl);
-      global.Solar91PortalPlantDetails.render(
-        document.querySelector("[data-plant-details-host]"),
-        { siteCode: plantCode }
-      );
     } else if (isDetails && global.Solar91PortalPlantsTable) {
-      // Portfolio-wide: the comparison table across every plant.
-      showOnly(tableEl);
+      // Details is one table of stored plant fields: this plant's single row
+      // when a plant is selected, every plant's row portfolio-wide.
+      showOnly(plantCode ? detailsEl : tableEl);
       global.Solar91PortalPlantsTable.show(
-        document.querySelector("[data-plants-table-host]"),
-        null
+        document.querySelector(plantCode ? "[data-plant-details-host]" : "[data-plants-table-host]"),
+        plantCode ? { siteCode: plantCode } : null
       );
     } else if (pageId === "health" && global.Solar91PortalIssues) {
       showOnly(healthEl);
       global.Solar91PortalIssues.render(
         document.querySelector("[data-issues-host]"),
+        { plantCode: plantCode }
+      );
+    } else if (pageId === "asset-warranty" && global.Solar91PortalAssetWarranty) {
+      showOnly(assetWarrantyEl);
+      global.Solar91PortalAssetWarranty.render(
+        document.querySelector("[data-asset-warranty-host]"),
         { plantCode: plantCode }
       );
     } else {

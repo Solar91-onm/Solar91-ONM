@@ -12,6 +12,10 @@ PM tasks, Site Issues and washing records are persisted through their domain API
 `/api/state/sync` endpoint excludes those collections; changes to unrelated legacy state use
 per-collection revisions so unrelated edits do not conflict with one another.
 
+## Raising a Site Issue
+
+On a plant's Health page, **Raise issue** opens a three-step form: Plant, Classification, and Priority & details. The plant is fixed when opened from a plant page; the portfolio issue page allows choosing an authorized plant. Classification uses the configured issue category and optional sub-problem. The final step captures severity, occurrence date, issue details, optional deadline, up to 10 evidence photos, and an optional Assignee. Creation and photo uploads use the existing authenticated issue APIs; fields unsupported by the current issue schema are not collected.
+
 ## Who can create planned work
 
 Problem-based Preventive Maintenance creation is allowed to:
@@ -124,6 +128,7 @@ Core tables:
 Latest production fields are introduced by `007_rev14_production.sql`.
 
 ## Washing cycle dates, assignment and plant search (October 2026)
+- **Plant Washing calendar**: hovering or focusing a date shows the selected plant's saved cleaned-table count for each cycle on that date, including its report status; the card updates for each date from the month data already loaded. O&M Heads and washing Assignees can open **Set up washing** in the calendar header to set the cycle table count and assigned Assignee.
 - **Cycle dates for any month**: the washing plant overlay has a *Cycles & dates* tab with a month switcher (two years back to one year ahead). The O&M Head / washing Assignee can set every cycle's start and deadline to any day of that month and save all three at once (`PUT /api/scheduled/washing/plants/{id}/cycle-schedule`). Ticking *Use these dates every month from … on* stores a repeating pattern (`cycle_overrides["pattern"]`, day numbers clamped to short months) and clears one-off dates of later months. `GET /api/scheduled/washing/plants/{id}/cycles?month=YYYY-MM` returns a month's cycles; Site Engineers can read their own plant only.
 - **Past data**: the O&M team can record washing for any past date (it counts towards that month's cycles); Site Engineers keep the 45-day limit.
 - **Washing scope**: in Settings → Team access, washing is given to an Assignee like an equipment type ("💧 Washing (module cleaning)" = `Modules cleaning`).
@@ -131,7 +136,7 @@ Latest production fields are introduced by `007_rev14_production.sql`.
 - **Plant search**: every plant drop-down (top bar, Site Issues, PM, washing, raise-issue wizard, Team access) opens a type-to-search list.
 
 ## Washing cycle sheet (October 2026)
-- **Record washing** in the plant overlay is a sheet: pick a month and cycle, and every day of that cycle is listed on one table. Type the tables cleaned per day (0 when no washing was done, saved as not done with the reason "Other"; no reason is asked for anywhere in washing, what happened goes in Remarks), add remarks and before/after photos per row, and save all days at once. Work counts towards the month's first unfinished cycle, so the open cycle lists every day from the day after the previous cycle was completed (the 1st for cycle 1) up to today, even past its deadline. Days already reported show their count, status and reporter; **Open** shows that day's reports, photos, edit and reject.
+- **Record washing** in the plant calendar opens the selected cycle's daily sheet. For each day, enter the last table number cleaned; the first number is calculated from the cycle's first table or the previous day's saved/draft range. The inclusive range determines the day's cleaned count. Saving submits only days with a range, with optional remarks, in one request. Rejected reports do not advance the next range; a new cycle starts at table 1. Days already reported show their count, table range, status and remarks. Site Engineers can report within the existing 45-day limit; O&M Head / washing Assignees can back-fill within the API's supported date range.
 - `POST /api/scheduled/washing/daily-reports/sheet` saves up to 62 days of one plant in one transaction (all or nothing). Days that already have a pending or confirmed report are refused (edit those instead). A Site Engineer's days stay *Pending* and raise **one** review notification for the whole sheet; O&M Head / washing Assignee entries are saved as confirmed.
 - `POST /api/scheduled/washing/daily-reports/confirm` lets the O&M Head or the plant's washing Assignee confirm several pending days at once (never their own; all or nothing), with one summary notification plus a cycle-completed notification when a cycle finishes.
 - **Photos**: a day entered within 3 days of the work (`PHOTO_REQUIRED_DAYS`) still needs before and after photos before it can be confirmed. Days entered 3 or more days later (back-filled) can be confirmed without photos; reports carry `backfilled` / `photos_required` and the sheet flags *No photos · back-filled* for the reviewer.

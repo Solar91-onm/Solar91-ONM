@@ -16,7 +16,8 @@ import subprocess
 import pytest
 from sqlalchemy import select
 
-from app.core.models import Issue, Plant, UserPlantAssignment
+from app.core.models import Issue, OMTask, Plant, UserPlantAssignment
+from app.core.timeutil import business_today
 from tests import conftest
 from tests.conftest import grant_assignee_plants, login_user
 
@@ -140,9 +141,35 @@ def test_plant_capacity_saved_through_api_and_rendered_with_units(client, db):
     # The portal reads capacity back through its own API and shows both kWp and MWp.
     portal = client.get("/api/portal/plants").json()["plants"][0]
     assert (portal["dc_capacity_kw"], portal["ac_capacity_kw"]) == (5000, 4000)
-    details = (ROOT / "assets/js/plant-details.js").read_text(encoding="utf-8")
-    assert "MWp" in details and "kWp" in details
-    assert "DC / AC ratio" in details
+    table = (ROOT / "assets/js/plants-table.js").read_text(encoding="utf-8")
+    assert "AC (KW)" in table and "DC (KWP)" in table
+
+
+def test_portfolio_calendar_exposes_saved_pm_equipment_and_unit_details(client, db):
+    login_user(client, db, role="O&M Head", email="calendar-head@example.com")
+    plant = Plant(site_code="CAL01", plant_name="Calendar Plant")
+    db.add(plant)
+    db.flush()
+    due = business_today()
+    db.add(OMTask(
+        work_order_no="WO-CALENDAR-01",
+        plant_id=plant.id,
+        task_name="Inspect cooling fans",
+        task_type="Inverter",
+        frequency="Monthly",
+        due_on=due,
+        status="Scheduled",
+        unit_no=3,
+        total_units=20,
+    ))
+    db.commit()
+
+    response = client.get("/api/portal/calendar", params={"kind": "pm", "month": due.strftime("%Y-%m")})
+    assert response.status_code == 200, response.text
+    event = next(row for row in response.json()["entries"] if row["reference"] == "WO-CALENDAR-01")
+    assert event["equipmentType"] == "Inverter"
+    assert event["frequency"] == "Monthly"
+    assert (event["unitNo"], event["totalUnits"]) == (3, 20)
 
 
 # ---------------------------------------------------------------- exports

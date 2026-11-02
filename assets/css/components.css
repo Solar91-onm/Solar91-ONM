@@ -888,19 +888,18 @@
 .ep-pt__table {
   width: 100%; table-layout: fixed; border-collapse: collapse;
 }
-.ep-pt__table th:nth-child(1), .ep-pt__table td:nth-child(1) { width: 12%; }
-.ep-pt__table th:nth-child(2), .ep-pt__table td:nth-child(2) { width: 5%; }
+.ep-pt__table th:nth-child(1), .ep-pt__table td:nth-child(1) { width: 14%; }
+.ep-pt__table th:nth-child(2), .ep-pt__table td:nth-child(2) { width: 7%; }
 .ep-pt__table th:nth-child(3), .ep-pt__table td:nth-child(3) { width: 6%; }
 .ep-pt__table th:nth-child(4), .ep-pt__table td:nth-child(4) { width: 7%; }
-.ep-pt__table th:nth-child(5), .ep-pt__table td:nth-child(5) { width: 6%; }
-.ep-pt__table th:nth-child(6), .ep-pt__table td:nth-child(6) { width: 5%; }
-.ep-pt__table th:nth-child(7), .ep-pt__table td:nth-child(7) { width: 8%; }
-.ep-pt__table th:nth-child(8), .ep-pt__table td:nth-child(8) { width: 7%; }
+.ep-pt__table th:nth-child(5), .ep-pt__table td:nth-child(5) { width: 7%; }
+.ep-pt__table th:nth-child(6), .ep-pt__table td:nth-child(6) { width: 6%; }
+.ep-pt__table th:nth-child(7), .ep-pt__table td:nth-child(7) { width: 12%; }
+.ep-pt__table th:nth-child(8), .ep-pt__table td:nth-child(8) { width: 9%; }
 .ep-pt__table th:nth-child(9), .ep-pt__table td:nth-child(9) { width: 6%; }
-.ep-pt__table th:nth-child(10), .ep-pt__table td:nth-child(10) { width: 8%; }
-.ep-pt__table th:nth-child(11), .ep-pt__table td:nth-child(11) { width: 9%; }
-.ep-pt__table th:nth-child(12), .ep-pt__table td:nth-child(12) { width: 12%; }
-.ep-pt__table th:nth-child(13), .ep-pt__table td:nth-child(13) { width: 9%; }
+.ep-pt__table th:nth-child(10), .ep-pt__table td:nth-child(10) { width: 4%; }
+.ep-pt__table th:nth-child(11), .ep-pt__table td:nth-child(11) { width: 14%; }
+.ep-pt__table th:nth-child(12), .ep-pt__table td:nth-child(12) { width: 8%; }
 .ep-pt__scroll:focus { outline: 2px solid var(--ep-accent); outline-offset: -2px; }
 .ep-pt__table thead th {
   position: sticky; top: 0; z-index: 1;
@@ -936,26 +935,26 @@
 .ep-pt__code, .ep-pt__name { display: block; overflow-wrap: anywhere; }
 .ep-pt__code {
   font-family: var(--ep-font-mono);
-  font-size: var(--ep-fs-base);
+  font-size: 13px;
   font-weight: 600;
   letter-spacing: 0.02em;
-  color: var(--ep-text-strong);
+  color: #3F4A44;
 }
 .ep-pt__name {
-  font-size: var(--ep-fs-sm);
+  font-size: 10px;
+  font-weight: 400;
   text-transform: uppercase;
-  letter-spacing: 0.03em;
+  letter-spacing: 0.02em;
   color: var(--ep-text-muted);
 }
 .ep-pt__spv { font-weight: 700; color: var(--ep-text-strong); }
 .ep-pt__dash { color: var(--ep-text-faint); }
 .ep-pt__loc {
-  display: inline-flex; align-items: center; gap: 4px;
-  max-width: 100%; padding: 4px 5px; border: 1px solid var(--ep-border);
-  border-radius: var(--ep-radius-sm); text-decoration: none;
-  font-size: 11px; color: var(--ep-text);
+  display: inline-flex; align-items: center;
+  max-width: 100%; padding: 2px 0; text-decoration: none;
+  font-size: 11px; color: var(--ep-accent-strong); white-space: nowrap;
 }
-.ep-pt__loc:hover { background: var(--ep-bg-muted); }
+.ep-pt__loc:hover { text-decoration: underline; }
 
 /* ─── Status cell ─────────────────────────────────────────────────── */
 .ep-pt__status {

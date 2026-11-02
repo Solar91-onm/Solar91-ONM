@@ -30,6 +30,7 @@
 <link rel="stylesheet" href="/assets/css/settings.css"/>
 <link rel="stylesheet" href="/assets/css/site-issues.css"/>
 <link rel="stylesheet" href="/assets/css/plant-details.css"/>
+<link rel="stylesheet" href="/assets/css/asset-warranty.css"/>
 
 <link rel="manifest" href="/manifest.webmanifest"/>
 <meta name="theme-color" content="#005e09"/>
@@ -109,6 +110,9 @@
             </button>
             <button class="ep-nav-item ep-nav-item--sub" type="button" data-nav="view:washing">
               <span class="ep-nav-item__label">Washing</span>
+            </button>
+            <button class="ep-nav-item ep-nav-item--sub" type="button" data-nav="view:asset-warranty">
+              <span class="ep-nav-item__label">Asset &amp; Warranty</span>
             </button>
           </div>
         </div>
@@ -252,7 +256,12 @@
             <div data-issues-host></div>
           </section>
 
-          <!-- ═════════════ PLANT DETAILS ═════════════ -->
+          <!-- ═════════════ ASSET & WARRANTY ═════════════ -->
+          <section class="ep-tab-view" data-tab-view="asset-warranty">
+            <div data-asset-warranty-host></div>
+          </section>
+
+          <!-- ═════════════ PLANT DETAILS (one plant's row) ═════════════ -->
           <section class="ep-tab-view" data-tab-view="plant-details">
             <div data-plant-details-host></div>
           </section>
@@ -307,6 +316,7 @@ window.S91_CONFIG = JSON.parse(document.getElementById("s91-config").textContent
 <script defer src="/assets/js/plant-details.js"></script>
 <script defer src="/assets/js/plants-table.js"></script>
 <script defer src="/assets/js/site-issues.js"></script>
+<script defer src="/assets/js/asset-warranty.js"></script>
 <script defer src="/assets/js/operations-calendar.js"></script>
 <script defer src="/assets/js/categories.js"></script>
 <script defer src="/assets/js/settings.js"></script>

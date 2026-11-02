@@ -1,0 +1,85 @@
+.ep-aw { display: flex; flex-direction: column; gap: 18px; }
+.ep-aw__header { display: flex; align-items: flex-start; }
+.ep-aw__header h2, .ep-aw__dialog h2 {
+  margin: 0; color: var(--ep-text-strong); font-size: 22px; font-weight: 650;
+}
+.ep-aw__eyebrow {
+  margin: 0 0 5px; color: var(--ep-accent-strong); font-size: 10px;
+  font-weight: 700; letter-spacing: .12em;
+}
+.ep-aw__intro { margin: 5px 0 0; color: var(--ep-text-muted); font-size: 13px; }
+.ep-aw__metrics {
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px;
+}
+.ep-aw__metric {
+  display: flex; flex-direction: column; gap: 8px; padding: 16px 18px;
+  background: var(--ep-bg); border: 1px solid var(--ep-border);
+  border-radius: var(--ep-radius-lg); box-shadow: var(--ep-shadow-sm);
+}
+.ep-aw__metric span { color: var(--ep-text-muted); font-size: 12px; }
+.ep-aw__metric strong { color: var(--ep-text-strong); font-size: 16px; }
+.ep-aw__panel { min-width: 0; }
+.ep-aw__search input {
+  width: min(250px, 42vw); padding: 8px 10px; color: var(--ep-text);
+  background: var(--ep-bg); border: 1px solid var(--ep-border);
+  border-radius: var(--ep-radius-sm); font: inherit; font-size: 12px;
+}
+.ep-aw__search input:focus { outline: 2px solid var(--ep-accent-ring); border-color: var(--ep-accent); }
+.ep-aw__table-wrap { width: 100%; overflow-x: auto; }
+.ep-aw__table { width: 100%; border-collapse: collapse; text-align: left; }
+.ep-aw__table th {
+  padding: 10px 14px; color: var(--ep-text-muted); background: var(--ep-bg-muted);
+  border-bottom: 1px solid var(--ep-border); font-size: 10px; font-weight: 650;
+  text-transform: uppercase; letter-spacing: .06em; white-space: nowrap;
+}
+.ep-aw__table td {
+  padding: 12px 14px; color: var(--ep-text); border-bottom: 1px solid var(--ep-border-soft);
+  font-size: 12px; vertical-align: middle;
+}
+.ep-aw__table td:first-child strong { display: block; color: var(--ep-text-strong); }
+.ep-aw__code { display: block; margin-top: 3px; color: var(--ep-text-muted); font-size: 11px; }
+.ep-aw__state {
+  display: inline-flex; padding: 4px 8px; color: var(--ep-text-muted);
+  background: var(--ep-bg-muted); border-radius: 999px; font-size: 11px; white-space: nowrap;
+}
+.ep-aw__action { text-align: right; white-space: nowrap; }
+.ep-aw__view {
+  padding: 7px 10px; color: var(--ep-accent-strong); background: transparent;
+  border: 1px solid var(--ep-border); border-radius: var(--ep-radius-sm);
+  font: inherit; font-size: 11px; font-weight: 600; cursor: pointer;
+}
+.ep-aw__view:hover { background: var(--ep-accent-soft); }
+.ep-aw__loading, .ep-aw__empty, .ep-aw__error { padding: 28px !important; text-align: center; }
+.ep-aw__loading, .ep-aw__empty { color: var(--ep-text-muted) !important; }
+.ep-aw__error { color: var(--ep-danger, #a32626) !important; }
+.ep-aw__backdrop {
+  position: fixed; inset: 0; z-index: 1000; display: grid; place-items: center;
+  padding: 20px; background: rgb(15 23 42 / 45%);
+}
+.ep-aw__dialog {
+  position: relative; width: min(500px, 100%); padding: 26px;
+  background: var(--ep-bg); border: 1px solid var(--ep-border);
+  border-radius: var(--ep-radius-lg); box-shadow: var(--ep-shadow-lg, 0 20px 60px rgb(0 0 0 / 20%));
+}
+.ep-aw__close {
+  position: absolute; top: 10px; right: 12px; width: 34px; height: 34px;
+  color: var(--ep-text-muted); background: transparent; border: 0;
+  font: inherit; font-size: 24px; cursor: pointer;
+}
+.ep-aw__notice {
+  margin-top: 22px; padding: 16px; background: var(--ep-bg-muted);
+  border: 1px solid var(--ep-border-soft); border-radius: var(--ep-radius-md, 8px);
+}
+.ep-aw__notice strong { color: var(--ep-text-strong); font-size: 13px; }
+.ep-aw__notice p { margin: 7px 0 0; color: var(--ep-text-muted); font-size: 12px; line-height: 1.6; }
+.ep-aw .ep-sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+}
+@media (max-width: 700px) {
+  .ep-aw__metrics { grid-template-columns: 1fr; }
+  .ep-aw__metric { padding: 12px 14px; }
+  .ep-aw__table { min-width: 620px; }
+  .ep-aw__panel .ep-panel__head { align-items: flex-start; }
+  .ep-aw__search input { width: 155px; }
+}

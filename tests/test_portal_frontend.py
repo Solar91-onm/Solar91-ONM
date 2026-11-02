@@ -6,7 +6,7 @@ what that swap must keep true:
   * the page is served at / behind the unchanged sign-in gate
   * every stylesheet and script it references exists and parses
   * the sign-in panel loads before the application that boots after it
-  * no equipment-register page, asset or nav item survives
+  * the retired equipment register stays removed; Asset & Warranty does not invent data
   * no production token is embedded in the page
 """
 from __future__ import annotations
@@ -88,14 +88,18 @@ def test_homepage_does_not_embed_production_tokens(client):
         assert secret not in page
 
 
-# ── Equipment register is gone ───────────────────────────────────────────────
+# ── Asset & Warranty does not imply an inventory register ───────────────────
 
-def test_no_equipment_register_in_the_frontend(client):
+def test_asset_warranty_view_is_present_without_invented_register_data(client):
     page = _page(client)
-    assert "asset-warranty" not in page
-    assert "Asset &amp; Warranty" not in page and "Asset & Warranty" not in page
-    assert not (PORTAL_ASSETS / "js" / "asset-warranty.js").exists()
-    assert not (PORTAL_ASSETS / "css" / "asset-warranty.css").exists()
+    assert 'data-nav="view:asset-warranty"' in page
+    assert 'data-tab-view="asset-warranty"' in page
+    assert "/assets/js/asset-warranty.js" in page
+    assert "/assets/css/asset-warranty.css" in page
+    module = (PORTAL_ASSETS / "js" / "asset-warranty.js").read_text(encoding="utf-8")
+    assert "No inventory records" in module
+    assert "Not configured" in module
+    assert "Unit counts and warranty status cannot be shown" in module
 
 
 def test_portal_scripts_do_not_reference_removed_endpoints():
@@ -119,14 +123,13 @@ def test_no_mock_data_module_remains():
 
 # ── Navigation ───────────────────────────────────────────────────────────────
 
-def test_plant_and_view_sub_pages_are_details_health_pm_washing():
+def test_plant_and_view_sub_pages_include_asset_warranty():
     nav = (PORTAL_ASSETS / "js" / "navigation.js").read_text(encoding="utf-8")
     for block in ("PLANT_SUB_PAGES", "VIEW_SUB_PAGES"):
         start = nav.index(block)
         section = nav[start:nav.index("];", start)]
         ids = re.findall(r'id:\s*"([a-z-]+)"', section)
-        assert ids == ["details", "health", "pm", "washing"], (block, ids)
-        assert "asset-warranty" not in section
+        assert ids == ["details", "health", "pm", "washing", "asset-warranty"], (block, ids)
 
 
 def test_plant_details_page_is_wired_up():
@@ -135,9 +138,82 @@ def test_plant_details_page_is_wired_up():
     assert "/assets/js/plant-details.js" in page
     assert "/assets/css/plant-details.css" in page
     nav = (PORTAL_ASSETS / "js" / "navigation.js").read_text(encoding="utf-8")
-    # One plant opens the detail page; the portfolio view keeps the comparison table.
-    assert "Solar91PortalPlantDetails" in nav
+    # Details is the plant table either way: one plant's row when a plant is
+    # selected, every plant's row portfolio-wide.
     assert "Solar91PortalPlantsTable" in nav
+    assert '{ siteCode: plantCode }' in nav
+    assert "data-plant-details-host" in nav
+
+
+def test_asset_warranty_routes_for_plant_and_portfolio_without_inventory_api():
+    nav = (PORTAL_ASSETS / "js" / "navigation.js").read_text(encoding="utf-8")
+    module = (PORTAL_ASSETS / "js" / "asset-warranty.js").read_text(encoding="utf-8")
+    assert 'pageId === "asset-warranty"' in nav
+    assert 'data-asset-warranty-host' in nav
+    assert "{ plantCode: plantCode }" in nav
+    assert "data.listPlants()" in module
+    assert "/api/equipment" not in module
+    assert "data-aw-view" in module and 'role="dialog"' in module
+
+
+def test_single_plant_details_shows_only_that_plant_row():
+    table = (PORTAL_ASSETS / "js" / "plants-table.js").read_text(encoding="utf-8")
+    # A single plant shows its heading and row, without portfolio controls.
+    assert '(single ? "" : toolbarHTML())' in table
+    assert '(single ? "" :\n            \'<div class="ep-pt__meta">\' +' in table
+    assert 'data-pt-export="csv"' in table
+    assert 'data-pt-export="excel"' in table
+    editor = (PORTAL_ASSETS / "js" / "plant-details.js").read_text(encoding="utf-8")
+    # The removed detail page must not come back as a second rendering of the same record.
+    assert "Solar91PortalPlantEditor" in editor
+    assert "Solar91PortalPlantDetails" not in editor
+
+
+def test_plant_washing_calendar_has_date_cycle_hover_and_setup_action():
+    calendar = (PORTAL_ASSETS / "js" / "operations-calendar.js").read_text(encoding="utf-8")
+    styles = (PORTAL_ASSETS / "css" / "calendar.css").read_text(encoding="utf-8")
+    assert "renderWashingHoverCard(state, day.dataset.date)" in calendar
+    assert 'event.kind === "report" && event.date === date' in calendar
+    assert 'report.jobStatus === "Done"' in calendar
+    assert 'data-calendar-action="open-setup">Set up washing' in calendar
+    assert '"/api/scheduled/washing/assignees"' in calendar
+    assert '"/api/scheduled/washing/setup"' in calendar
+    assert "ep-calendar__wash-hover-card" in styles
+    assert "ep-calendar__setup-button" in styles
+
+
+def test_plant_washing_range_sheet_and_health_issue_wizard_are_wired():
+    calendar = (PORTAL_ASSETS / "js" / "operations-calendar.js").read_text(encoding="utf-8")
+    calendar_styles = (PORTAL_ASSETS / "css" / "calendar.css").read_text(encoding="utf-8")
+    assert 'data-calendar-action="open-record">Record washing' in calendar
+    assert '"/api/scheduled/washing/daily-reports/sheet"' in calendar
+    assert "table_start: row.start" in calendar and "table_end: end" in calendar
+    assert "function syncRecordRangeInputs" in calendar
+    assert "previousCompletion" in calendar and "startDate = afterPrevious" in calendar
+    assert "ep-calendar__record-modal" in calendar_styles
+
+    issues = (PORTAL_ASSETS / "js" / "site-issues.js").read_text(encoding="utf-8")
+    issue_styles = (PORTAL_ASSETS / "css" / "site-issues.css").read_text(encoding="utf-8")
+    assert 'data-issue-wizard' in issues
+    assert 'renderRaiseWizard(context)' in issues
+    assert 'state.draft = createDraft(active.context)' in issues
+    assert '["Plant", "Classification", "Priority & details"]' in issues
+    assert "ep-issues__stepper" in issue_styles and "ep-issues__wizard-fields--two" in issue_styles
+
+
+def test_portfolio_health_hides_hero_and_summary_and_calendar_has_nested_detail():
+    issues = (PORTAL_ASSETS / "js" / "site-issues.js").read_text(encoding="utf-8")
+    assert 'if (!context.plantCode)' in issues
+    assert 'context.plantCode ? renderSummary(unfilteredRows) : ""' in issues
+    assert "renderHeader(context)" in issues
+
+    calendar = (PORTAL_ASSETS / "js" / "operations-calendar.js").read_text(encoding="utf-8")
+    styles = (PORTAL_ASSETS / "css" / "calendar.css").read_text(encoding="utf-8")
+    assert 'data-calendar-filter="modal-equipment"' in calendar
+    assert 'data-calendar-event-index="' in calendar
+    assert "renderEventDetail(state, context)" in calendar
+    assert 'data-calendar-action="close-event-detail"' in calendar
+    assert "ep-calendar__event-detail-modal" in styles
 
 
 # ── Syntax ───────────────────────────────────────────────────────────────────

@@ -40,12 +40,18 @@ from `app/issues`, the PM status set and overdue rule from
 
 **A plant with no records reads "Not available", never `0`.**
 
-## 3. Plants → Details is new
+## 3. Plants → Details is one table
 
-Driven entirely by the stored plant record: identity and ownership, capacity with
-DC/AC ratio, location with DISCOM and coordinates, the real Site Engineers (from
-`user_plant_assignments`, not the free-text field), live operations panels for
-issues/PM/washing, recent activity, and any `custom_fields`.
+Details is the plant table in both places: one plant's own row under
+Plants → <plant> → Details, every plant's row under Views → Details. The
+columns are the stored record — plant code and name, SPV/project, AC and DC
+capacity, district, DISCOM, the real Site Engineers (from
+`user_plant_assignments`, not the free-text field), washing assignee, COD,
+location and last activity — with CSV and Excel export and the Edit button.
+Portfolio-wide Details retains CSV and Excel export. A single plant's Details
+page shows only its heading and one table row (with Edit where permitted), with
+no search, filter, sort or export controls. Issues, PM and washing have their
+own sub-pages, so the details page no longer repeats them.
 
 Editing writes through the existing `PATCH /api/plants/{id}` and is only offered
 to roles holding `plants.manage`. It sends **only changed fields**, so a stale

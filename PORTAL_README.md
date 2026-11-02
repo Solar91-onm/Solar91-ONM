@@ -26,8 +26,8 @@ assets/                          the portal design system, served at /assets
     ├── format.js                escaping, numbers, dates, CSV formula guard
     ├── portal-api.js            one authenticated route to the API (delegates to auth-gate)
     ├── data-adapter.js          the ONE place that fetches and aggregates
-    ├── plant-details.js         Plants → <plant> → Details, and the plant editor
-    ├── plants-table.js          Views → Details (the portfolio grid)
+    ├── plant-details.js         The plant record editor (PATCH /api/plants/:id)
+    ├── plants-table.js          Details: one plant's row, or the portfolio grid
     ├── site-issues.js           Health: the issue register and raise-issue flow
     ├── operations-calendar.js   PM and Washing calendars
     ├── categories.js            Settings → Categories (the work-category list)

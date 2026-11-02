@@ -527,7 +527,7 @@ def calendar(db: Session, user: User, kind: str, month: str, plant_ids: list[UUI
         due = func.coalesce(OMTask.planned_due_on, OMTask.due_on)
         rows = db.execute(
             select(OMTask.id, OMTask.plant_id, OMTask.work_order_no, OMTask.task_name,
-                   OMTask.status, due.label("due_on"), OMTask.actual_completed_on,
+                   OMTask.task_type, OMTask.frequency, OMTask.status, due.label("due_on"), OMTask.actual_completed_on,
                    OMTask.assignee_text, OMTask.unit_no, OMTask.total_units)
             .where(OMTask.plant_id.in_(plant_ids), due >= first, due <= last)
             .order_by(due)
@@ -544,6 +544,10 @@ def calendar(db: Session, user: User, kind: str, month: str, plant_ids: list[UUI
                 "kind": "pm.overdue" if overdue else ("pm.completed" if row.status == "Completed" else "pm.scheduled"),
                 "title": row.task_name + (f" · unit {row.unit_no}/{row.total_units}" if row.unit_no and row.total_units else ""),
                 "reference": row.work_order_no,
+                "equipmentType": row.task_type or "",
+                "frequency": row.frequency or "",
+                "unitNo": row.unit_no,
+                "totalUnits": row.total_units,
                 "status": status,
                 "assignee": row.assignee_text or "",
                 "date": row.due_on.isoformat(),

@@ -81,6 +81,44 @@ def test_sheet_is_all_or_nothing_and_rejects_days_already_reported(client, db):
     assert db.query(WashingDailyReport).filter_by(plant_id=plant.id).count() == 1
 
 
+def test_sheet_persists_inclusive_table_ranges_and_contiguous_days(client, db):
+    plant = _plant(db)
+    _setup_cycle_users(client, db, plant)
+    _engineer(client, db, plant)
+    d1, d2 = _days(2)
+
+    response = _sheet(client, plant, [
+        {**_done(d1, 2), "table_start": 1, "table_end": 2},
+        {**_done(d2, 2), "table_start": 3, "table_end": 4},
+    ])
+
+    assert response.status_code == 200, response.text
+    reports = response.json()["reports"]
+    assert [report["cleaned_table_codes"] for report in reports] == [
+        ["Table 001", "Table 002"],
+        ["Table 003", "Table 004"],
+    ]
+
+
+def test_sheet_rejects_invalid_or_out_of_configured_range(client, db):
+    plant = _plant(db)
+    _setup_cycle_users(client, db, plant)  # 4 configured tables
+    _engineer(client, db, plant)
+    d1, d2 = _days(2)
+
+    mismatched = _sheet(client, plant, [
+        {**_done(d1, 1), "table_start": 1, "table_end": 2},
+    ])
+    assert mismatched.status_code == 422
+    assert db.query(WashingDailyReport).filter_by(plant_id=plant.id).count() == 0
+
+    over_configured_count = _sheet(client, plant, [
+        {**_done(d2, 1), "table_start": 5, "table_end": 5},
+    ])
+    assert over_configured_count.status_code == 422
+    assert db.query(WashingDailyReport).filter_by(plant_id=plant.id).count() == 0
+
+
 def test_sheet_requires_report_permission_and_plant_scope(client, db):
     plant = _plant(db)
     _setup_cycle_users(client, db, plant)

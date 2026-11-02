@@ -9,7 +9,8 @@
  * configuration, so the people columns reflect real access, not free text.
  *
  * "Edit" writes through PATCH /api/plants/:id and is only offered to roles that
- * hold plants.manage. One plant's own page lives in plant-details.js.
+ * hold plants.manage. The same table, in single mode, is one plant's Details
+ * page: that plant's row and nothing else. The editor lives in plant-details.js.
  */
 (function (global) {
   "use strict";
@@ -36,7 +37,7 @@
     return n.length < 2 ? "0" + n : n;
   }
 
-  // dd-mm-yy keeps the date columns narrow enough for all 13 to fit.
+  // dd-mm-yy keeps the COD column compact.
   function formatCOD(iso) {
     var m = String(iso || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
     return m ? m[3] + "-" + m[2] + "-" + m[1].slice(2) : (iso || "—");
@@ -47,14 +48,13 @@
     var d = new Date(profile.lastReportAt);
     if (isNaN(d.getTime())) return null;
     return {
-      date: two(d.getDate()) + "-" + two(d.getMonth() + 1) + "-" + String(d.getFullYear()).slice(2),
-      time: two(d.getHours()) + ":" + two(d.getMinutes())
+      date: two(d.getDate()) + "/" + two(d.getMonth() + 1) + "/" + String(d.getFullYear()).slice(2)
     };
   }
 
   function lastActivity(profile) {
     var a = activityParts(profile);
-    return a ? a.date + " " + a.time : "—";
+    return a ? a.date : "—";
   }
 
   function numText(v) {
@@ -123,9 +123,9 @@
   function rowHTML(entry) {
     var p = entry.plant;
     var locationCell = "<td>" + (p.mapsUrl
-        ? '<a class="ep-pt__loc" href="' + fmt.escape(p.mapsUrl) + '" target="_blank" rel="noopener">' +
-            '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#E5484D" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"></path><circle cx="12" cy="10" r="3"></circle></svg>' +
-            "View Location</a>"
+        ? '<a class="ep-pt__loc" href="' + fmt.escape(p.mapsUrl) + '" target="_blank" rel="noopener" aria-label="View plant location" title="' +
+            fmt.escape(p.location || p.district || "View plant location") + '">' +
+            "View</a>"
         : dash()) + "</td>";
     return "" +
       "<tr>" +
@@ -235,20 +235,23 @@
         "</div>" +
 
         '<div class="ep-pt__card">' +
-          toolbarHTML() +
-          '<div class="ep-pt__meta">' +
-            '<span class="ep-pt__count">' + countLine + "</span>" +
-            '<span class="ep-pt__spacer"></span>' +
-            '<button class="ep-pt__export" type="button" data-pt-export="csv">' +
-              '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><path d="m7 10 5 5 5-5"></path><path d="M12 15V3"></path></svg>CSV' +
-            "</button>" +
-            '<button class="ep-pt__export" type="button" data-pt-export="excel">' +
-              '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><path d="m7 10 5 5 5-5"></path><path d="M12 15V3"></path></svg>Excel' +
-            "</button>" +
-          "</div>" +
+          // One plant has nothing to search, filter or sort.
+          (single ? "" : toolbarHTML()) +
+          (single ? "" :
+            '<div class="ep-pt__meta">' +
+              '<span class="ep-pt__count">' + countLine + "</span>" +
+              '<span class="ep-pt__spacer"></span>' +
+              '<button class="ep-pt__export" type="button" data-pt-export="csv">' +
+                '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><path d="m7 10 5 5 5-5"></path><path d="M12 15V3"></path></svg>CSV' +
+              "</button>" +
+              '<button class="ep-pt__export" type="button" data-pt-export="excel">' +
+                '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><path d="m7 10 5 5 5-5"></path><path d="M12 15V3"></path></svg>Excel' +
+              "</button>" +
+            "</div>") +
 
           '<div class="ep-pt__table-wrap">' +
-            '<div class="ep-pt__scroll" data-pt-scroll tabindex="0" role="region" aria-label="Plant details table; scroll vertically to see more plants">' +
+            '<div class="ep-pt__scroll" data-pt-scroll tabindex="0" role="region" aria-label="' +
+              (single ? "Plant details" : "Plant details table; scroll vertically to see more plants") + '">' +
               '<table class="ep-pt__table">' +
               "<thead><tr>" +
                 COLUMNS.map(function (c) {
@@ -259,7 +262,11 @@
               "<tbody>" +
                 (rows.length
                   ? rows.map(rowHTML).join("")
-                  : '<tr><td colspan="' + COLUMNS.length + '" class="ep-pt__empty">No plants match these filters.</td></tr>') +
+                  : '<tr><td colspan="' + COLUMNS.length + '" class="ep-pt__empty">' +
+                      (single
+                        ? "This plant was not found, or it is outside your assigned scope."
+                        : "No plants match these filters.") +
+                    "</td></tr>") +
               "</tbody>" +
               "</table>" +
             "</div>" +

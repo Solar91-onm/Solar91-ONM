@@ -1197,8 +1197,7 @@ def _add_report(
     """Create one daily report (no commit, no notification). Returns the report and whether it completed a cycle."""
     _validate_report_date(user, manager, report_date)
     month = _month_key(report_date)
-    # Teams only report HOW MANY tables they cleaned that day. The plant's number is a target, never a limit,
-    # so nothing is rejected for being above or below it and no individual tables are tracked.
+    # Counts remain compatible with older clients; the current daily sheet can also persist numbered tables.
     report = WashingDailyReport(
         plant_id=plant.id,
         cycle_month=month,
@@ -1285,10 +1284,20 @@ def create_sheet_reports(db: Session, user: User, payload: WashingSheetRequest) 
         raise HTTPException(409, "Already reported for " + ", ".join(_day_label(value) for value in taken) + ". Edit those days instead of adding them again.")
     created: list[WashingDailyReport] = []
     for entry in entries:
+        if entry.table_end is not None and entry.table_end > total_tables:
+            raise HTTPException(
+                422,
+                f"Table number {entry.table_end} exceeds this plant's configured table count ({total_tables})",
+            )
+        cleaned_codes = (
+            [f"Table {number:03d}" for number in range(entry.table_start, entry.table_end + 1)]
+            if entry.table_start is not None and entry.table_end is not None
+            else []
+        )
         report, _completed = _add_report(
             db, user, plant, manager, total_tables,
             report_date=entry.report_date, job_status=entry.job_status, tables_cleaned=entry.tables_cleaned,
-            exception_reason=entry.exception_reason, remarks=entry.remarks,
+            exception_reason=entry.exception_reason, remarks=entry.remarks, cleaned_codes=cleaned_codes,
         )
         created.append(report)
     pending = [report for report in created if report.review_status == "Pending"]
