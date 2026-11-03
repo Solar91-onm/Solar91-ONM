@@ -128,10 +128,17 @@ def test_template_lists_categories_and_round_trips(client, db):
     assert book["Site issues"]["A1"].value == "Site code"
     assert "Inverter" in [row[0] for row in book["Lists"].iter_rows(min_row=2, max_col=1, values_only=True)]
     sheet = book["Site issues"]
-    for column, value in enumerate(("ISSUP01", None, "Module", "Hotspot", "Hotspot on string 4 modules", "Medium"), start=1):
-        sheet.cell(2, column, value)
+    # Filled by header name, so the row keeps working when the template gains a column.
+    columns = {sheet.cell(1, index).value: index for index in range(1, sheet.max_column + 1)}
+    for header, value in (("Site code", "ISSUP01"), ("Issue category", "Module"), ("Problem", "Hotspot"),
+                          ("Serial number", "MOD-99871"), ("Supplier / Maker", "Vikram Solar"), ("Units", 4),
+                          ("Description", "Hotspot on string 4 modules"), ("Severity", "Medium")):
+        sheet.cell(2, columns[header], value)
     buffer = BytesIO()
     book.save(buffer)
     saved = client.post(f"{BASE}/import?dry_run=false", files={"file": ("issues.xlsx", buffer.getvalue(), XLSX)})
     assert saved.status_code == 200, saved.text
     assert saved.json()["saved"] == 1
+    # The equipment the fault was found on is stored on the ticket, not dropped on the way in.
+    raised = db.query(Issue).filter(Issue.ticket_no == saved.json()["tickets"][0]).one()
+    assert (raised.serial_no, raised.supplier_maker, raised.unit_count) == ("MOD-99871", "Vikram Solar", 4)

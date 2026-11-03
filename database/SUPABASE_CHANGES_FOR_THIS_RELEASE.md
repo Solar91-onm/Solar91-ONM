@@ -6,14 +6,22 @@ access panel are unchanged by this release.
 
 ---
 
-## 1. Run two migrations, in order
+## 1. Run the migrations, in order
 
 | Order | File | What it does |
 |---|---|---|
 | 1 | `database/migrations/032_remove_equipment_register.sql` | Removes the equipment register and moves Assignee scope to plants |
 | 2 | `database/migrations/033_work_categories.sql` | Creates the (empty) `work_categories` table your new list goes into |
+| 3 | `database/migrations/034_asset_warranty.sql` | Creates `asset_warranty`, the table the Asset & Warranty page fills |
+| 4 | `database/migrations/035_issue_equipment_details.sql` | Adds `serial_no`, `supplier_maker` and `unit_count` to `issues` |
 
-Paste each into **Supabase → SQL Editor** and run it. Both are safe to re-run.
+Paste each into **Supabase → SQL Editor** and run it. All are safe to re-run.
+
+**035 must be run before (or together with) the deploy that carries it.** The
+Raise Issue form and the Site Issues upload both write those three columns, so
+the portal's issue pages fail against a database that does not have them yet.
+Nothing is dropped and no existing ticket is changed: all three are nullable and
+nothing is back-filled.
 
 Before you do:
 

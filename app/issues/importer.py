@@ -36,12 +36,16 @@ logger = logging.getLogger(__name__)
 MAX_ISSUE_BYTES = 2 * 1024 * 1024
 MAX_ISSUE_ROWS = 500
 SHEET = "Site issues"
-HEADERS = ("Site code", "Plant name", "Issue category", "Problem", "Description", "Severity",
-           "Occurred on", "Target date", "Assignee email", "Impact", "Remarks")
+HEADERS = ("Site code", "Plant name", "Issue category", "Problem", "Serial number", "Supplier / Maker",
+           "Units", "Description", "Severity", "Occurred on", "Target date", "Assignee email", "Impact", "Remarks")
 ALIASES = {
     "site_code": {"Site code", "Plant code", "Site", "Code"},
     "category": {"Issue category", "Category", "Vertical"},
     "problem": {"Problem", "Subcategory", "Sub category", "Fault"},
+    "serial_no": {"Serial number", "Serial no", "Serial", "Serial no.", "Equipment serial number"},
+    "supplier_maker": {"Supplier / Maker", "Supplier/Maker", "Maker / Supplier", "Maker/Supplier",
+                       "Supplier", "Maker", "Make", "Manufacturer"},
+    "unit_count": {"Units", "No of units", "No. of units", "Number of units", "Quantity", "Qty"},
     "description": {"Description", "Issue details", "Details", "Issue description"},
     "severity": {"Severity", "Priority", "Severity / Priority"},
     "occurred": {"Occurred on", "Occurred", "Date", "Issue date", "Reported on", "Start date"},
@@ -92,6 +96,7 @@ def template_bytes(db: Session, user: User) -> bytes:
         "Required: Site code, Issue category, Description and Severity (Critical or Medium; an old 'Low' is read as Medium).",
         "Occurred on: the day the fault happened (DD-MM-YYYY). Blank means today.",
         "Target date: when it should be fixed. Blank uses the usual deadline ("+_deadline_text(deadline_hours(db))+").",
+        "Serial number, Supplier / Maker and Units: optional. What the fault was found on, who made or supplied it, and how many units it covers.",
         "Assignee email: optional. It must be an active Assignee; the ticket then starts as Assigned instead of Open.",
         "Remarks: optional. What is going on right now (e.g. 'Vendor called, spare expected Friday'). It becomes the ticket's first message.",
         "Nothing is saved until every row is correct. A row that matches a ticket that is still open is skipped.",
@@ -105,9 +110,10 @@ def template_bytes(db: Session, user: User) -> bytes:
     for cell in sheet[1]:
         cell.font = Font(bold=True)
     sheet.freeze_panes = "A2"
-    for index, width in enumerate((14, 30, 22, 24, 50, 12, 18, 14, 14, 30, 16, 30, 45), start=1):
+    for index, width in enumerate((14, 30, 22, 24, 18, 22, 8, 50, 12, 18, 14, 24, 30, 45), start=1):
         sheet.column_dimensions[sheet.cell(1, index).column_letter].width = width
-    for column in ("H", "I"):
+    # Occurred on and Target date.
+    for column in ("J", "K"):
         for row in range(2, MAX_ISSUE_ROWS + 2):
             sheet[f"{column}{row}"].number_format = "DD-MM-YYYY"
 
@@ -123,10 +129,11 @@ def template_bytes(db: Session, user: User) -> bytes:
         lists.cell(row, 4, plant.site_code)
         lists.cell(row, 5, plant.plant_name)
     last = MAX_ISSUE_ROWS + 1
+    # Each range is the column its list belongs to: C category, I severity, L assignee email, A site code.
     validations = [
         (DataValidation(type="list", formula1=f"'Lists'!$A$2:$A${max(2, len(category_list) + 1)}", allow_blank=True), f"C2:C{last}"),
-        (DataValidation(type="list", formula1='"Critical,Medium"', allow_blank=True), f"F2:F{last}"),
-        (DataValidation(type="list", formula1=f"'Lists'!$C$2:$C${max(2, len(assignees) + 1)}", allow_blank=True), f"J2:J{last}"),
+        (DataValidation(type="list", formula1='"Critical,Medium"', allow_blank=True), f"I2:I{last}"),
+        (DataValidation(type="list", formula1=f"'Lists'!$C$2:$C${max(2, len(assignees) + 1)}", allow_blank=True), f"L2:L{last}"),
         (DataValidation(type="list", formula1=f"'Lists'!$D$2:$D${max(2, len(plants) + 1)}", allow_blank=True), f"A2:A{last}"),
     ]
     for validation, cells in validations:
@@ -139,9 +146,9 @@ def template_bytes(db: Session, user: User) -> bytes:
     return buffer.getvalue()
 
 
-EXPORT_HEADERS = ("Ticket", "Site code", "Plant name", "Issue category", "Problem", "Description",
-                  "Severity", "Status", "Occurred on", "Target date", "Assignee", "Impact",
-                  "Fixed on", "Closed on", "Photos")
+EXPORT_HEADERS = ("Ticket", "Site code", "Plant name", "Issue category", "Problem", "Serial number",
+                  "Supplier / Maker", "Units", "Description", "Severity", "Status", "Occurred on",
+                  "Target date", "Assignee", "Impact", "Fixed on", "Closed on", "Photos")
 MAX_EXPORT_ROWS = 20000
 
 
@@ -186,6 +193,9 @@ def export_bytes(db: Session, user: User, *, site_code: str | None = None) -> by
             plant.plant_name if plant else None,
             issue.vertical,
             issue.subcategory,
+            issue.serial_no,
+            issue.supplier_maker,
+            issue.unit_count,
             issue.description,
             normalize_issue_severity(issue.severity),
             issue.status,
@@ -197,9 +207,10 @@ def export_bytes(db: Session, user: User, *, site_code: str | None = None) -> by
             issue.closed_on,
             issue.photo_count or 0,
         ])
-    for index, width in enumerate((16, 14, 30, 22, 24, 50, 12, 16, 14, 14, 24, 30, 14, 14, 10), start=1):
+    for index, width in enumerate((16, 14, 30, 22, 24, 18, 22, 8, 50, 12, 16, 14, 14, 24, 30, 14, 14, 10), start=1):
         sheet.column_dimensions[sheet.cell(1, index).column_letter].width = width
-    for column in ("I", "J", "M", "N"):
+    # Occurred on, Target date, Fixed on and Closed on.
+    for column in ("L", "M", "P", "Q"):
         for row in range(2, len(rows) + 2):
             sheet[f"{column}{row}"].number_format = "DD-MM-YYYY"
     # A cell beginning = + - @ is otherwise executed as a formula when the file is opened.
@@ -285,11 +296,23 @@ def import_issues(db: Session, user: User, filename: str, content: bytes, *, dry
         if severity not in ISSUE_SEVERITIES:
             errors.append("Severity must be Critical or Medium")
         problem = cell_text(get("problem"))
+        serial_no, supplier_maker = cell_text(get("serial_no")), cell_text(get("supplier_maker"))
         impact, remarks = cell_text(get("impact")), cell_text(get("remarks"))
         for label, value, limit in (("Problem", problem, 160),
+                                    ("Serial number", serial_no, 120), ("Supplier / Maker", supplier_maker, 160),
                                     ("Impact", impact, 4000), ("Remarks", remarks, 4000)):
             if len(value) > limit:
                 errors.append(f"{label} must be {limit} characters or fewer")
+        unit_count = None
+        unit_text = cell_text(get("unit_count"))
+        if unit_text:
+            try:
+                unit_count = int(float(unit_text))
+            except ValueError:
+                errors.append("Units must be a whole number")
+            else:
+                if not 1 <= unit_count <= 100000:
+                    errors.append("Units must be between 1 and 100000")
         occurred = target = None
         try:
             occurred = parse_sheet_date(get("occurred"))
@@ -323,6 +346,7 @@ def import_issues(db: Session, user: User, filename: str, content: bytes, *, dry
         records.append({
             "row": number, "plant": plant, "site_text": site_text, "category": category, "description": description,
             "severity": severity, "problem": problem or None,
+            "serial_no": serial_no or None, "supplier_maker": supplier_maker or None, "unit_count": unit_count,
             "impact": impact or None, "remarks": remarks or None, "occurred": occurred, "target": target, "assignee": assignee,
             "errors": errors, "notes": notes, "action": "New",
         })
@@ -398,6 +422,8 @@ def import_issues(db: Session, user: User, filename: str, content: bytes, *, dry
             issue = Issue(
                 ticket_no=f"ISS-{number:04d}", plant_id=record["plant"].id,
                 vertical=record["category"], subcategory=record["problem"],
+                serial_no=record["serial_no"], supplier_maker=record["supplier_maker"],
+                unit_count=record["unit_count"],
                 description=record["description"], severity=record["severity"],
                 status="Assigned" if assignee else "Open", occurred_at=occurred_at,
                 etc_at=_target_at(record["target"]) if record["target"] else now + timedelta(hours=hours[record["severity"]]),

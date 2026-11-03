@@ -61,7 +61,9 @@ def test_issue_register_downloads_as_a_workbook_of_the_current_tickets(client, d
     _seed(client, db)
     rows = _rows(_sheet(client.get("/api/issues/export")))
     assert rows[0][0] == "Ticket" and "Site code" in rows[0] and "Severity" in rows[0]
-    descriptions = {row[5] for row in rows[1:]}
+    # By header, so the assertion keeps holding when the register gains a column.
+    description_at = rows[0].index("Description")
+    descriptions = {row[description_at] for row in rows[1:]}
     assert {"Register issue 0", "Register issue 1"} <= descriptions
     # Every ticket carries its plant, so the sheet is usable without a second lookup.
     assert {row[1] for row in rows[1:]} == {"RG01", "RG02"}

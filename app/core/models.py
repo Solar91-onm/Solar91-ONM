@@ -110,6 +110,11 @@ class Issue(Base):
     # Work category the issue is raised against (see security.WORK_CATEGORIES).
     vertical: Mapped[str | None] = mapped_column(String(120))
     subcategory: Mapped[str | None] = mapped_column(String(160))
+    # What the fault was found on: the physical item's serial number, who made or supplied it,
+    # and how many units the fault covers. All optional; the ticket is still raised without them.
+    serial_no: Mapped[str | None] = mapped_column(String(120))
+    supplier_maker: Mapped[str | None] = mapped_column(String(160))
+    unit_count: Mapped[int | None] = mapped_column(Integer)
     description: Mapped[str] = mapped_column(Text, nullable=False)
     severity: Mapped[str] = mapped_column(String(40), nullable=False)
     status: Mapped[str] = mapped_column(String(60), default="Open")

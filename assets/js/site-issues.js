@@ -90,6 +90,9 @@
       plantName: plant ? plantLabel(plant) : "Plant unavailable",
       equipment: issue.vertical || "Other",
       subpart: issue.subcategory || "",
+      serialNo: issue.serial_no || "",
+      supplierMaker: issue.supplier_maker || "",
+      unitCount: issue.unit_count == null ? "" : String(issue.unit_count),
       occurredAt: issue.occurred_at || "",
       dueAt: issue.etc_at || "",
       problem: issue.description,
@@ -114,7 +117,7 @@
       if (!term) return true;
       return [
         issue.id, issue.plantCode, issue.plantName, issue.equipment,
-        issue.problem, issue.status, issue.assignee
+        issue.supplierMaker, issue.serialNo, issue.problem, issue.status, issue.assignee
       ].join(" ").toLowerCase().indexOf(term) !== -1;
     });
     return rows.sort(function (a, b) {
@@ -198,7 +201,7 @@
       return '<div class="ep-issues__empty"><strong>No issues found</strong>' +
         '<button type="button" class="ep-issues__button" data-issue-action="clear">Clear filters</button></div>';
     }
-    var headers = ["Issue ID", "Equipment", "Problem", "Plant", "Assigned to", "Status", "Action"];
+    var headers = ["Issue ID", "Equipment", "Maker / Supplier", "Problem", "Plant", "Assigned to", "Status", "Action"];
     return '<div class="ep-issues__table-wrap"><table class="ep-issues__table"><thead><tr>' +
       headers.map(function (header) { return "<th>" + header + "</th>"; }).join("") +
       '</tr></thead><tbody>' + rows.map(function (issue) {
@@ -208,15 +211,19 @@
             escape(issue.id) + '">' + escape(issue.id) + '</button></td>' +
           '<td data-label="' + labels[1] + '"><strong>' + escape(issue.equipment) + '</strong>' +
             (issue.subpart ? "<small>" + escape(issue.subpart) + "</small>" : "") + '</td>' +
-          '<td data-label="' + labels[2] + '" class="ep-issues__problem">' + escape(issue.problem) + '</td>' +
-          '<td data-label="' + labels[3] + '"><strong>' + escape(issue.plantCode) + '</strong><small>' + escape(issue.plantName) + '</small></td>' +
-          '<td data-label="' + labels[4] + '">' + (issue.assignee
+          '<td data-label="' + labels[2] + '">' + (issue.supplierMaker
+            ? '<strong>' + escape(issue.supplierMaker) + '</strong>' +
+              (issue.serialNo ? "<small>S/N " + escape(issue.serialNo) + "</small>" : "")
+            : '<span class="ep-issues__unassigned">Not recorded</span>') + '</td>' +
+          '<td data-label="' + labels[3] + '" class="ep-issues__problem">' + escape(issue.problem) + '</td>' +
+          '<td data-label="' + labels[4] + '"><strong>' + escape(issue.plantCode) + '</strong><small>' + escape(issue.plantName) + '</small></td>' +
+          '<td data-label="' + labels[5] + '">' + (issue.assignee
             ? '<span class="ep-issues__assignee"><i>' + escape(issue.assignee.split(/\s+/).map(function (part) { return part[0]; }).join("").slice(0, 2)) +
               '</i>' + escape(issue.assignee) + '</span>'
             : '<span class="ep-issues__unassigned">Unassigned</span>') + '</td>' +
-          '<td data-label="' + labels[5] + '"><span class="ep-issues__status ep-issues__status--' +
+          '<td data-label="' + labels[6] + '"><span class="ep-issues__status ep-issues__status--' +
             statusTone(issue.status) + '"><i></i>' + escape(issue.status) + '</span></td>' +
-          '<td data-label="' + labels[6] + '">' + (state.liveMode
+          '<td data-label="' + labels[7] + '">' + (state.liveMode
             ? '<span aria-label="Manage this saved ticket in Solar91 O&M">Saved</span>'
             : '<button type="button" class="ep-issues__button ep-issues__button--small" data-issue-edit="' +
               escape(issue.id) + '">Edit</button>') + '</td>' +
@@ -242,6 +249,9 @@
         field("Site code", issue.plantCode) +
         field("Category", issue.equipment) +
         field("Subpart / fault area", issue.subpart) +
+        field("Supplier / Maker", issue.supplierMaker) +
+        field("Serial number", issue.serialNo) +
+        field("Number of units", issue.unitCount) +
         field("Occurrence date", issue.occurredAt ? formatIssueDate(issue.occurredAt) : "") +
         field("Expected time to close", issue.dueAt ? issue.dueAt.replace("T", " ") : "") +
         field("Reported", formatIssueDate(issue.reportedAt)) +
@@ -277,6 +287,9 @@
       plantCode: context.plantCode || state.plantFilter || "",
       equipment: "",
       subpart: "",
+      serialNo: "",
+      supplierMaker: "",
+      unitCount: "",
       occurredAt: localDate(new Date()),
       dueAt: "",
       problem: "",
@@ -358,6 +371,19 @@
         '<select name="subpart">' + renderSubpartOptions(draft.subpart, draft.equipment) + '</select>' +
         '<small>The fault for this category; describe the full problem separately in Issue details.</small>' +
       '</label>' +
+      '<div class="ep-issues__wizard-fields ep-issues__wizard-fields--two">' +
+        '<label class="ep-issues__wizard-field">Serial number of equipment (optional)' +
+          '<input name="serialNo" type="text" maxlength="120" value="' + escape(draft.serialNo || "") +
+          '" placeholder="e.g. INV-2023-004517" /></label>' +
+        '<label class="ep-issues__wizard-field">Supplier / Maker (optional)' +
+          '<input name="supplierMaker" type="text" maxlength="160" value="' + escape(draft.supplierMaker || "") +
+          '" placeholder="Who made or supplied it" /></label>' +
+      '</div>' +
+      '<label class="ep-issues__wizard-field">Number of units (optional)' +
+        '<input name="unitCount" type="number" min="1" max="100000" step="1" value="' +
+        escape(draft.unitCount || "") + '" placeholder="How many units are affected" />' +
+        '<small>How many units of this equipment the fault covers. Leave blank if it is not counted.</small>' +
+      '</label>' +
       (templates().length
         ? '<div class="ep-issues__template-area"><strong>Quick templates — 1 click fills category, sub-problem and description</strong>' +
           '<div>' + templates().map(function (template, index) {
@@ -372,13 +398,9 @@
   function renderWizardStepThree(draft) {
     return '<div class="ep-issues__wizard-step">' +
       '<div class="ep-issues__wizard-fields ep-issues__wizard-fields--two">' +
-        '<label class="ep-issues__wizard-field">Severity / priority<select name="severity">' +
-          '<option value="Critical"' + (draft.severity === "Critical" ? " selected" : "") + '>Critical</option>' +
-          '<option value="Medium"' + (draft.severity !== "Critical" ? " selected" : "") + '>Medium</option>' +
-        '</select></label>' +
         '<label class="ep-issues__wizard-field">Expected time to close (optional)' +
           '<input name="dueAt" type="datetime-local" value="' + escape(draft.dueAt) + '" />' +
-          '<small>Leave blank to use the configured deadline for this priority.</small></label>' +
+          '<small>Leave blank to use the configured deadline.</small></label>' +
         '<label class="ep-issues__wizard-field">Occurrence date<input name="occurredAt" type="date" required value="' +
           escape(draft.occurredAt) + '" /></label>' +
       '</div>' +
@@ -771,8 +793,8 @@
   function syncWizardDraft(form) {
     if (!state.draft || !form) return;
     var values = new FormData(form);
-    ["plantCode", "equipment", "subpart", "occurredAt", "severity", "dueAt",
-      "problem", "assignee"].forEach(function (name) {
+    ["plantCode", "equipment", "subpart", "serialNo", "supplierMaker", "unitCount",
+      "occurredAt", "dueAt", "problem", "assignee"].forEach(function (name) {
       if (values.has(name)) state.draft[name] = String(values.get(name) || "");
     });
   }
@@ -799,12 +821,18 @@
     state.submitting = true;
     state.submitError = "";
     renderView();
+    var units = parseInt(draft.unitCount, 10);
     var payload = {
       plant_id: plant.dbId,
       vertical: draft.equipment,
       subcategory: draft.subpart || null,
+      serial_no: (draft.serialNo || "").trim() || null,
+      supplier_maker: (draft.supplierMaker || "").trim() || null,
+      unit_count: isNaN(units) ? null : units,
       description: draft.problem.trim(),
-      severity: draft.severity || "Medium",
+      // Tickets raised here all carry the same priority, so the form no longer asks for one.
+      // Medium is what the deadline defaults and notifications are keyed to.
+      severity: "Medium",
       assigned_to: draft.assignee || null,
       occurred_at: toUtcTimestamp(draft.occurredAt, "09:00"),
       etc_at: draft.dueAt ? toUtcTimestamp(draft.dueAt) : null,

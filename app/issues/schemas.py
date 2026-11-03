@@ -31,8 +31,12 @@ class IssueCreate(BaseModel):
     plant_id: UUID | None = None
     vertical: str | None = None
     subcategory: str | None = None
+    # The equipment the fault was found on. Optional: a ticket can still be raised without them.
+    serial_no: str | None = Field(default=None, max_length=120)
+    supplier_maker: str | None = Field(default=None, max_length=160)
+    unit_count: int | None = Field(default=None, ge=1, le=100000)
     description: str = Field(min_length=1)
-    severity: str
+    severity: str = "Medium"
     assigned_to: UUID | None = None
     occurred_at: datetime | None = None
     etc_at: datetime | None = None
@@ -48,6 +52,9 @@ class IssueCreate(BaseModel):
 class IssueUpdate(BaseModel):
     vertical: str | None = None
     subcategory: str | None = None
+    serial_no: str | None = Field(default=None, max_length=120)
+    supplier_maker: str | None = Field(default=None, max_length=160)
+    unit_count: int | None = Field(default=None, ge=1, le=100000)
     description: str | None = None
     severity: str | None = None
     occurred_at: datetime | None = None
@@ -195,6 +202,9 @@ class IssueOut(BaseModel):
     plant_id: UUID | None
     vertical: str | None
     subcategory: str | None
+    serial_no: str | None = None
+    supplier_maker: str | None = None
+    unit_count: int | None = None
     description: str
     severity: str
     status: str

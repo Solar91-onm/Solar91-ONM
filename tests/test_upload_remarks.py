@@ -23,7 +23,9 @@ def test_issue_upload_remarks_become_the_first_ticket_message(client, db):
     seed_work_categories(db)
     login_user(client, db, role="O&M Head", name="Remarks Head", email="remarks-head@example.com")
     template = load_workbook(BytesIO(client.get("/api/issues/import/template").content))
-    assert template["Site issues"].cell(1, 11).value == "Remarks"
+    # By header, not by position, so the column survives the template gaining a column.
+    sheet = template["Site issues"]
+    assert "Remarks" in [sheet.cell(1, index).value for index in range(1, sheet.max_column + 1)]
 
     text = ("Site code,Issue category,Description,Severity,Remarks\n"
             "REM01,Inverter,INV-02 tripping,Medium,Vendor called; spare expected Friday\n"
