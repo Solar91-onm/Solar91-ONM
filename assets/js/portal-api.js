@@ -145,6 +145,57 @@
     return (currentSession && currentSession.user) || null;
   }
 
+  /**
+   * Download a file the API returns as bytes.
+   *
+   * `request` parses every response as JSON, so a workbook cannot go through it. This fetches with the
+   * same bearer token, honours the filename the server sets in Content-Disposition, and surfaces a
+   * failed download as a readable error instead of saving an HTML or JSON error page as a .xlsx.
+   */
+  function downloadFile(url, fallbackName) {
+    if (typeof global.clerkToken !== "function") {
+      return Promise.reject(new Error("Solar91 sign-in is not ready. Reload the page."));
+    }
+    return global.clerkToken().then(function (token) {
+      var headers = {};
+      if (token) headers.Authorization = "Bearer " + token;
+      return fetch(url, { headers: headers });
+    }).then(function (response) {
+      if (!response.ok) {
+        return response.json().catch(function () { return {}; }).then(function (body) {
+          var detail = body && (body.detail || body.message);
+          if (detail && typeof detail === "object") detail = detail.message;
+          var error = new Error(detail || ("The download failed (HTTP " + response.status + ")."));
+          error.status = response.status;
+          throw error;
+        });
+      }
+      var disposition = response.headers.get("Content-Disposition") || "";
+      var match = /filename="?([^"]+)"?/.exec(disposition);
+      var name = match ? match[1] : fallbackName;
+      return response.blob().then(function (blob) { return { blob: blob, name: name }; });
+    }).then(function (result) {
+      var objectUrl = URL.createObjectURL(result.blob);
+      var link = document.createElement("a");
+      link.href = objectUrl;
+      link.download = result.name;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      // Revoked on the next tick: revoking immediately cancels the download in some browsers.
+      setTimeout(function () { URL.revokeObjectURL(objectUrl); }, 0);
+      return result.name;
+    });
+  }
+
+  /** POST one spreadsheet as multipart form data. `apiFetch` already leaves a FormData body alone. */
+  function uploadFile(url, file, params) {
+    var form = new FormData();
+    form.append("file", file);
+    var query = new URLSearchParams(params || {}).toString();
+    return request(url + (query ? "?" + query : ""), { method: "POST", body: form });
+  }
+
   global.Solar91PortalAPI = {
     request: request,
     session: session,
@@ -153,6 +204,8 @@
     currentUser: currentUser,
     plants: plants,
     normalizePlant: normalizePlant,
-    isPortalRoute: isPortalRoute
+    isPortalRoute: isPortalRoute,
+    downloadFile: downloadFile,
+    uploadFile: uploadFile
   };
 }(window));

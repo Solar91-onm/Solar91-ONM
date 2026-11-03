@@ -55,6 +55,14 @@ def issue_upload_template(db:Annotated[Session,Depends(get_db)],user:Annotated[U
                     media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     headers={"Content-Disposition":'attachment; filename="Site_Issues_Template.xlsx"'})
 
+@router.get("/export")
+def export_issues(db:Annotated[Session,Depends(get_db)],user:Annotated[User,Depends(get_current_user)],site_code:str|None=None):
+    """Download the current Site Issues register for the caller's scope as a workbook."""
+    return Response(content=issue_importer.export_bytes(db,user,site_code=site_code),
+                    media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={"Content-Disposition":'attachment; filename="Site_Issues_Register.xlsx"',
+                             "Cache-Control":"private, no-store"})
+
 @router.post("/import",dependencies=[Depends(require_csrf)])
 def upload_issues(db:Annotated[Session,Depends(get_db)],user:Annotated[User,Depends(require_permission("issues.create"))],file:UploadFile=File(...),dry_run:bool=True):
     return issue_importer.import_issues(db,user,file.filename or "",file.file.read(issue_importer.MAX_ISSUE_BYTES+1),dry_run=dry_run)

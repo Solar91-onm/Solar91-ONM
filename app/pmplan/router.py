@@ -17,7 +17,7 @@ import uuid
 from datetime import date, datetime, timedelta
 from typing import Annotated, Any, Literal
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile
 from openpyxl import load_workbook
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import func, select
@@ -31,6 +31,7 @@ from app.plants.codes import find_plant_by_code
 from app.pmplan.alerts import PM_ALERT_EVENTS, PM_TEAM_RECIPIENT_MODES, default_pm_preferences, get_pm_preferences
 from app.pmplan.cycle import (CYCLE, CYCLE_DAYS, NAMED_TYPES, NOT_IN_PM, ONE_JOB_TYPES, chained_window, in_pm, one_job,
                                phase_for, phase_index, window as cycle_window, window_out)
+from app.pmplan import sheets as pm_sheets
 from app.pmplan.units import distribute, next_cycle_id, run_daily  # noqa: F401  (next_cycle_id re-exported for the scheduled router)
 from app.scheduled.schemas import ALLOWED_ASSETS, ALLOWED_FREQUENCIES
 
@@ -1079,6 +1080,27 @@ def _clean_row(cell: dict[str, Any]) -> tuple[dict[str, Any] | None, list[str]]:
            "frequency": freq, "safety": safety, "est_hours": hours, "tools": None, "checks": checks,
            "units_per_day": per_day}
     return tpl, []
+
+
+XLSX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+
+@router.get("/import/template")
+def pm_plan_template(db: Annotated[Session, Depends(get_db)], user: Annotated[User, Depends(get_current_user)]):
+    """Blank PM plan workbook with the columns the importer accepts."""
+    _require(user, PLANNER_ROLES, "Only the O&M Head can download the PM plan template")
+    return Response(content=pm_sheets.template_bytes(db, user), media_type=XLSX_MEDIA_TYPE,
+                    headers={"Content-Disposition": 'attachment; filename="PM_Plan_Template.xlsx"',
+                             "Cache-Control": "private, no-store"})
+
+
+@router.get("/export")
+def pm_plan_export(db: Annotated[Session, Depends(get_db)], user: Annotated[User, Depends(get_current_user)],
+                   site_code: str | None = None):
+    """Download the current PM work order register for the caller's scope."""
+    return Response(content=pm_sheets.export_bytes(db, user, site_code=site_code), media_type=XLSX_MEDIA_TYPE,
+                    headers={"Content-Disposition": 'attachment; filename="PM_Register.xlsx"',
+                             "Cache-Control": "private, no-store"})
 
 
 @router.post("/import", dependencies=[Depends(require_csrf)])

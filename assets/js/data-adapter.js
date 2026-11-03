@@ -74,6 +74,38 @@
   let portfolioLoadedAt = 0;
   const calendarCache = new Map();   // "kind:month" → Promise<entries[]>
 
+  // The Overview range and trend endpoints are re-requested every time a filter
+  // or the Range selector changes, and operators flip between the same few
+  // combinations constantly ("This month" → "This week" → back). Keeping the
+  // recent answers means the second visit to a combination costs no request at
+  // all, and two rapid changes to the same combination share one in-flight
+  // promise instead of racing. Bounded, so a long session cannot grow it
+  // without limit, and TTL'd to the same minute as the portfolio so a new
+  // record still shows up promptly.
+  const RANGE_CACHE_MAX = 24;
+  const rangeCache = new Map();   // request key → { at, promise }
+
+  function cached(key, load) {
+    const hit = rangeCache.get(key);
+    if (hit && Date.now() - hit.at <= PORTFOLIO_TTL_MS) {
+      // Refresh insertion order so the entries in active use are evicted last.
+      rangeCache.delete(key);
+      rangeCache.set(key, hit);
+      return hit.promise;
+    }
+    const entry = { at: Date.now(), promise: null };
+    entry.promise = load().catch(function (error) {
+      // A failure must never be cached: the next attempt has to reach the API.
+      if (rangeCache.get(key) === entry) rangeCache.delete(key);
+      throw error;
+    });
+    rangeCache.set(key, entry);
+    while (rangeCache.size > RANGE_CACHE_MAX) {
+      rangeCache.delete(rangeCache.keys().next().value);
+    }
+    return entry.promise;
+  }
+
   function normalizeRow(row) {
     const plant = api().normalizePlant(row.plant);
     const profile = Object.assign({}, row.profile);
@@ -108,16 +140,18 @@
         !/^\d{4}-\d{2}-\d{2}$/.test(String(endDate))) {
       return Promise.reject(new Error("Overview date range requires valid start and end dates."));
     }
-    return api().request(
-      "/api/portal/overview/range?start_date=" + encodeURIComponent(startDate) +
-      "&end_date=" + encodeURIComponent(endDate)
-    ).then(function (body) {
-      return {
-        rows: (body.rows || []).map(normalizeRow),
-        totals: body.totals || {},
-        startDate: body.startDate,
-        endDate: body.endDate
-      };
+    return cached("range:" + startDate + ":" + endDate, function () {
+      return api().request(
+        "/api/portal/overview/range?start_date=" + encodeURIComponent(startDate) +
+        "&end_date=" + encodeURIComponent(endDate)
+      ).then(function (body) {
+        return {
+          rows: (body.rows || []).map(normalizeRow),
+          totals: body.totals || {},
+          startDate: body.startDate,
+          endDate: body.endDate
+        };
+      });
     });
   }
 
@@ -130,9 +164,15 @@
       start_date: startDate,
       end_date: endDate
     });
-    (Array.isArray(siteCodes) ? siteCodes : siteCodes ? [siteCodes] : [])
-      .forEach(function (siteCode) { params.append("site_code", siteCode); });
-    return api().request("/api/portal/overview/trend?" + params.toString());
+    // Sorted so that the same set of plants selected in a different order is
+    // one cache entry, not two.
+    const codes = (Array.isArray(siteCodes) ? siteCodes : siteCodes ? [siteCodes] : [])
+      .slice().sort();
+    codes.forEach(function (siteCode) { params.append("site_code", siteCode); });
+    const query = params.toString();
+    return cached("trend:" + query, function () {
+      return api().request("/api/portal/overview/trend?" + query);
+    });
   }
 
   function listPlants() {
@@ -257,6 +297,7 @@
   function invalidate() {
     portfolioPromise = null;
     calendarCache.clear();
+    rangeCache.clear();
   }
 
   global.Solar91PortalData = {

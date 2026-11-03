@@ -307,14 +307,21 @@
 .ep-overview-trend__svg { display: block; width: 100%; min-height: 220px; overflow: visible; }
 .ep-overview-trend__grid { stroke: var(--ep-border-soft); stroke-width: 1; }
 .ep-overview-trend__axis { fill: var(--ep-text-faint); font: 11px var(--ep-font-sans); }
-.ep-overview-trend__bar--washing { fill: #16803c; }
-.ep-overview-trend__bar--pm { fill: #4b79a1; }
-.ep-overview-trend__bar--issues { fill: #c65a20; }
+.ep-overview-trend__line { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.ep-overview-trend__line--washing { stroke: #16803c; }
+.ep-overview-trend__line--pm { stroke: #4b79a1; }
+.ep-overview-trend__line--issues { stroke: #c65a20; }
+.ep-overview-trend__dot--washing { fill: #16803c; }
+.ep-overview-trend__dot--pm { fill: #4b79a1; }
+.ep-overview-trend__dot--issues { fill: #c65a20; }
+/* Transparent, not fill:none — a none fill takes no pointer events, so the
+   per-bucket tooltip target would never be hovered. */
+.ep-overview-trend__hover { fill: transparent; }
 .ep-overview-trend__axis-label { fill: var(--ep-text-muted); font: 11px var(--ep-font-sans); }
 .ep-overview-trend__x-label { fill: var(--ep-text-faint); font: 10px var(--ep-font-sans); }
 .ep-overview-trend__legend { display: flex; flex-wrap: wrap; gap: var(--ep-s-4); justify-content: center; }
 .ep-overview-trend__legend-item { display: inline-flex; align-items: center; gap: 6px; color: var(--ep-text-muted); font-size: var(--ep-fs-xs); }
-.ep-overview-trend__legend-mark { width: 9px; height: 9px; border-radius: 2px; background: #16803c; }
+.ep-overview-trend__legend-mark { width: 14px; height: 3px; border-radius: 2px; background: #16803c; }
 .ep-overview-trend__legend-mark--washing { background: #16803c; }
 .ep-overview-trend__legend-mark--pm { background: #4b79a1; }
 .ep-overview-trend__legend-mark--issues { background: #c65a20; }
@@ -1099,3 +1106,118 @@
 .ep-pt__btn--primary { background: var(--ep-accent); border-color: var(--ep-accent); color: var(--ep-text-inverse); }
 .ep-pt__btn--primary:hover { background: var(--ep-accent-strong); }
 @media (max-width: 560px) { .ep-pt__modal-body { grid-template-columns: 1fr; } }
+
+/* ── Register import / export (assets/js/register-io.js) ───────────────────
+   Shared by Site issues and the PM plan, so it lives with the design system
+   rather than in either view's stylesheet. The buttons are deliberately quiet:
+   they sit beside a primary action (Raise issue, Set up PM) and must not
+   compete with it. */
+.ep-sheet-io { display: inline-flex; align-items: center; gap: 6px; }
+.ep-sheet-io__button {
+  min-height: 36px;
+  padding: 0 13px;
+  border: 1px solid var(--ep-border-soft);
+  border-radius: var(--ep-radius-sm);
+  background: var(--ep-bg-elev);
+  color: var(--ep-text-strong);
+  font: inherit;
+  font-size: var(--ep-fs-sm);
+  font-weight: 650;
+  cursor: pointer;
+  transition: background .15s ease, border-color .15s ease;
+}
+.ep-sheet-io__button:not(:disabled):hover { border-color: var(--ep-border); background: var(--ep-bg-muted); }
+.ep-sheet-io__button:focus-visible { outline: 2px solid var(--ep-accent-ring); outline-offset: 2px; }
+.ep-sheet-io__button:disabled { opacity: .55; cursor: not-allowed; }
+.ep-sheet-io__button--primary {
+  border-color: var(--ep-accent-strong);
+  background: var(--ep-accent-strong);
+  color: var(--ep-text-inverse);
+}
+.ep-sheet-io__button--primary:not(:disabled):hover { background: var(--ep-accent); }
+
+/* 80 clears the calendar's own modals (60) and its event detail (70), so the
+   import dialog is reachable when it is opened from the PM calendar. */
+.ep-sheet-io__overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--ep-s-4);
+  background: rgba(16, 32, 24, .45);
+}
+.ep-sheet-io__dialog {
+  width: min(560px, 100%);
+  max-height: 86vh;
+  overflow: auto;
+  border-radius: var(--ep-radius-md);
+  background: var(--ep-bg-elev);
+  box-shadow: 0 18px 48px rgba(12, 28, 20, .28);
+}
+.ep-sheet-io__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ep-s-3);
+  padding: var(--ep-s-4) var(--ep-s-5);
+  border-bottom: 1px solid var(--ep-border-soft);
+}
+.ep-sheet-io__head h2 { margin: 0; color: var(--ep-text-strong); font-size: var(--ep-fs-lg); }
+.ep-sheet-io__head h2:focus-visible { outline: 2px solid var(--ep-accent-ring); outline-offset: 3px; }
+.ep-sheet-io__close {
+  min-width: 32px;
+  min-height: 32px;
+  border: 0;
+  border-radius: var(--ep-radius-sm);
+  background: transparent;
+  color: var(--ep-text-muted);
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+}
+.ep-sheet-io__close:hover { background: var(--ep-bg-muted); color: var(--ep-text-strong); }
+.ep-sheet-io__body { display: grid; gap: var(--ep-s-3); padding: var(--ep-s-5); }
+.ep-sheet-io__hint { margin: 0; color: var(--ep-text-muted); font-size: var(--ep-fs-sm); }
+.ep-sheet-io__link {
+  justify-self: start;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ep-accent-strong);
+  font: inherit;
+  font-size: var(--ep-fs-sm);
+  font-weight: 650;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.ep-sheet-io__file { display: grid; gap: 5px; color: var(--ep-text-muted); font-size: var(--ep-fs-xs); font-weight: 600; }
+.ep-sheet-io__file input {
+  padding: 9px 10px;
+  border: 1px dashed var(--ep-border);
+  border-radius: var(--ep-radius-sm);
+  background: var(--ep-bg-muted);
+  font: inherit;
+  font-size: var(--ep-fs-sm);
+}
+.ep-sheet-io__status { min-height: 18px; margin: 0; color: var(--ep-text-muted); font-size: var(--ep-fs-xs); }
+.ep-sheet-io__status.is-error { color: var(--ep-red); }
+.ep-sheet-io__status.is-ok { color: var(--ep-accent-strong); }
+.ep-sheet-io__summary { margin: 0; padding-left: 18px; color: var(--ep-text-strong); font-size: var(--ep-fs-sm); }
+.ep-sheet-io__problems { max-height: 240px; overflow: auto; border: 1px solid var(--ep-border-soft); border-radius: var(--ep-radius-sm); padding: var(--ep-s-3); }
+.ep-sheet-io__problems p { margin: 0 0 6px; color: var(--ep-red); font-size: var(--ep-fs-xs); font-weight: 650; }
+.ep-sheet-io__problems ul { margin: 0; padding-left: 18px; color: var(--ep-text-muted); font-size: var(--ep-fs-xs); }
+.ep-sheet-io__problems li { margin-bottom: 3px; }
+.ep-sheet-io__foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--ep-s-2);
+  padding: var(--ep-s-4) var(--ep-s-5);
+  border-top: 1px solid var(--ep-border-soft);
+}
+
+@media (max-width: 720px) {
+  .ep-sheet-io { flex-wrap: wrap; }
+  .ep-sheet-io__dialog { width: 100%; }
+}

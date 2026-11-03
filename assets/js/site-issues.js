@@ -156,9 +156,16 @@
   }
 
   function renderHeader(context) {
-    return state.canRaise
-      ? '<div class="ep-issues__portfolio-actions"><button class="ep-issues__button ep-issues__button--primary" type="button" data-issue-action="raise">+ Raise issue</button></div>'
+    // Export is offered to everyone who can see the register; import follows the
+    // same permission as raising a ticket, because that is what each row becomes.
+    var sheets = global.Solar91RegisterIO
+      ? global.Solar91RegisterIO.controls("issues", { canImport: state.canRaise })
       : "";
+    var raise = state.canRaise
+      ? '<button class="ep-issues__button ep-issues__button--primary" type="button" data-issue-action="raise">+ Raise issue</button>'
+      : "";
+    if (!sheets && !raise) return "";
+    return '<div class="ep-issues__portfolio-actions">' + raise + sheets + '</div>';
   }
 
   function renderFilters(context, unfilteredRows) {
@@ -674,6 +681,11 @@
         renderView();
         return;
       }
+      // The shared Import / Export control handles its own clicks.
+      if (global.Solar91RegisterIO && global.Solar91RegisterIO.handleClick(event, {
+        siteCode: (active.context && active.context.plantCode) || "",
+        onImported: function () { state.loaded = false; renderView(); }
+      })) return;
       var actionButton = event.target.closest("[data-issue-action]");
       if (!actionButton) return;
       var action = actionButton.dataset.issueAction;

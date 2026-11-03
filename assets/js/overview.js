@@ -4,8 +4,8 @@
  * The portfolio-wide Overview tab.
  *
  * Three summary tiles — PM compliance, Washing compliance, Open site issues —
- * and directly below them a grouped bar chart of the same three measures over
- * time.
+ * and directly below them a multi-line trend chart of the same three measures
+ * over time, one line per measure.
  *
  * ONE date control drives all four. The Range selector in the filter bar is
  * the single source of truth: `applyRange` records the dates on `state` and
@@ -25,6 +25,7 @@
   let rangeRequest = 0;
   let rangeKey = "";
   let trendRequest = 0;
+  let trendTimer = null;
 
   let state = null;      // { allRows, rows, totals, sort }
   let searchTerm = "";
@@ -327,26 +328,48 @@
         '<text class="ep-overview-trend__axis" x="' + (width - right + 8) + '" y="' + (y + 4) +
         '" text-anchor="start">' + issueValue + '</text></g>';
     }).join("");
-    const barWidth = Math.max(2, Math.min(18, bucketWidth * 0.22));
-    const barGap = Math.max(1, Math.min(5, bucketWidth * 0.045));
-    const groupWidth = barWidth * series.length + barGap * (series.length - 1);
-    const bars = series.map((item, seriesIndex) => {
+
+    // Each measure is drawn as a trend line rather than a group of bars: over a
+    // long range the eye follows the direction of travel, which bars two or
+    // three pixels wide cannot show. Buckets keep their centres, so the x
+    // labels still sit under the points they name.
+    const pointX = (index) => left + index * bucketWidth + bucketWidth / 2;
+    const pointY = (item, value) => {
+      const scaled = item.axis === "percent"
+        ? Math.max(0, Math.min(100, Number(value))) / 100
+        : Math.max(0, Number(value)) / issueAxisMax;
+      return top + plotHeight - scaled * plotHeight;
+    };
+    // Dots would crowd into a solid band on a long range, so they appear only
+    // when the buckets are few enough to read individually.
+    const showDots = trend.labels.length <= 40;
+    const dot = (cls, x, y) => '<circle class="ep-overview-trend__dot ep-overview-trend__dot--' +
+      cls + '" cx="' + x + '" cy="' + y + '" r="2.5"></circle>';
+    const lines = series.map((item) => {
       const cls = colors[item.key] || "issues";
-      return item.values.map((value, bucketIndex) => {
-        if (value === null || value === undefined) return "";
-        const scaled = item.axis === "percent"
-          ? Math.max(0, Math.min(100, Number(value))) / 100
-          : Math.max(0, Number(value)) / issueAxisMax;
-        const barHeight = scaled * plotHeight;
-        const x = left + bucketIndex * bucketWidth + (bucketWidth - groupWidth) / 2 +
-          seriesIndex * (barWidth + barGap);
-        const y = top + plotHeight - barHeight;
-        return '<rect class="ep-overview-trend__bar ep-overview-trend__bar--' + cls +
-          '" x="' + x + '" y="' + y + '" width="' + barWidth + '" height="' + Math.max(barHeight, 0.8) +
-          '" rx="1"><title>' + fmt.escape(trend.labels[bucketIndex] + ": " + item.label + " " +
-            value + (item.axis === "percent" ? "%" : "")) + '</title></rect>';
+      // A missing value is a gap in the data, not a zero, so the line breaks
+      // and resumes instead of diving to the axis and back.
+      const segments = [];
+      let run = [];
+      item.values.forEach((value, index) => {
+        if (value === null || value === undefined) {
+          if (run.length) segments.push(run);
+          run = [];
+          return;
+        }
+        run.push([pointX(index), pointY(item, value)]);
+      });
+      if (run.length) segments.push(run);
+      return segments.map((points) => {
+        // A lone point between two gaps has no line to draw, so it is always
+        // marked — otherwise that bucket would render as nothing at all.
+        if (points.length === 1) return dot(cls, points[0][0], points[0][1]);
+        const path = '<polyline class="ep-overview-trend__line ep-overview-trend__line--' + cls +
+          '" points="' + points.map((point) => point[0] + "," + point[1]).join(" ") + '"></polyline>';
+        return path + (showDots ? points.map((point) => dot(cls, point[0], point[1])).join("") : "");
       }).join("");
     }).join("");
+
     const labelStep = Math.max(1, Math.ceil(trend.labels.length / 6));
     const xIndices = trend.labels.map((_, index) => index)
       .filter((index) => index % labelStep === 0 || index === trend.labels.length - 1);
@@ -354,6 +377,22 @@
       (left + index * bucketWidth + bucketWidth / 2) +
       '" y="' + (height - 12) + '" text-anchor="' + (index === 0 ? "start" : index === trend.labels.length - 1 ? "end" : "middle") +
       '">' + fmt.escape(trend.labels[index]) + '</text>').join("");
+
+    // Every bar used to carry its own tooltip. A line has no comparable area to
+    // hover, so one transparent target per bucket spans the plot height and
+    // reports all three measures for that date together — easier to compare.
+    const hovers = trend.labels.map((label, index) => {
+      const readout = series.map((item) => {
+        const value = item.values[index];
+        return item.label + ": " + (value === null || value === undefined
+          ? "no data"
+          : value + (item.axis === "percent" ? "%" : ""));
+      }).join("\n");
+      return '<rect class="ep-overview-trend__hover" x="' + (left + index * bucketWidth) +
+        '" y="' + top + '" width="' + bucketWidth + '" height="' + plotHeight +
+        '"><title>' + fmt.escape(label + "\n" + readout) + '</title></rect>';
+    }).join("");
+
     const legend = series.map((item) => {
       const cls = colors[item.key] || "health";
       return '<span class="ep-overview-trend__legend-item"><i class="ep-overview-trend__legend-mark ep-overview-trend__legend-mark--' +
@@ -364,17 +403,28 @@
     host.innerHTML = '<svg class="ep-overview-trend__svg" style="min-height:0" viewBox="0 0 ' + width + " " + height +
       '" role="img" aria-label="Washing compliance, PM compliance and active site issues from ' +
       fmt.escape(trend.startDate) + " to " + fmt.escape(trend.endDate) +
-      '. Left axis: compliance percentage. Right axis: active issue count.">' + grid + bars + xLabels +
+      '. Left axis: compliance percentage. Right axis: active issue count.">' + grid + lines + xLabels +
       '<text class="ep-overview-trend__axis-label" x="' + left + '" y="12">Compliance (%)</text>' +
       '<text class="ep-overview-trend__axis-label" x="' + (width - right) + '" y="12" text-anchor="end">Active issues</text>' +
-      '</svg><div class="ep-overview-trend__legend">' +
+      hovers + '</svg><div class="ep-overview-trend__legend">' +
       legend + '</div>';
   }
 
-  /** Redraw the chart for the range already in state — used when a filter changes. */
+  /**
+   * Redraw the chart for the range already in state — used when a filter changes.
+   *
+   * Coalesced: narrowing by plant, then district, then company used to fire a
+   * request per change, and only the last one's answer was ever drawn. One
+   * short delay collapses a burst of filter changes into a single request.
+   */
   function reloadTrendForFilters() {
     if (!state || !state.rangeStart || !state.rangeEnd) return;
-    loadTrend(state.rangeStart, state.rangeEnd);
+    if (trendTimer) clearTimeout(trendTimer);
+    trendTimer = setTimeout(function () {
+      trendTimer = null;
+      if (!state || !state.rangeStart || !state.rangeEnd) return;
+      loadTrend(state.rangeStart, state.rangeEnd);
+    }, 150);
   }
 
   /**
@@ -383,6 +433,9 @@
    */
   function loadTrend(startDate, endDate) {
     if (!state) return;
+    // The Range selector draws immediately; drop any filter reload still
+    // waiting out its delay so it cannot fire a second, identical request.
+    if (trendTimer) { clearTimeout(trendTimer); trendTimer = null; }
     if (!startDate || !endDate || startDate > endDate) {
       trendRequest += 1;
       trendStatus("Choose a start date on or before the end date.", true);

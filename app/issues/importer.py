@@ -139,6 +139,76 @@ def template_bytes(db: Session, user: User) -> bytes:
     return buffer.getvalue()
 
 
+EXPORT_HEADERS = ("Ticket", "Site code", "Plant name", "Issue category", "Problem", "Description",
+                  "Severity", "Status", "Occurred on", "Target date", "Assignee", "Impact",
+                  "Fixed on", "Closed on", "Photos")
+MAX_EXPORT_ROWS = 20000
+
+
+def export_bytes(db: Session, user: User, *, site_code: str | None = None) -> bytes:
+    """The current Site Issues register as a workbook, in the caller's plant scope.
+
+    Read-only: the same rows the portal already shows this user, in the column order of the upload
+    template so an exported register can be corrected and uploaded back. Deleted tickets stay out.
+    """
+    allowed = _scoped_plants(db, user)
+    plants = {plant.id: plant for plant in db.scalars(select(Plant))}
+    statement = select(Issue).where(Issue.deleted_at.is_(None))
+    if allowed is not None:
+        if not allowed:
+            statement = statement.where(False)
+        else:
+            statement = statement.where(Issue.plant_id.in_(allowed))
+    if site_code:
+        wanted = normalize_site_code(site_code)
+        match = next((plant for plant in plants.values() if normalize_site_code(plant.site_code) == wanted), None)
+        if match is None:
+            raise HTTPException(404, "No plant matches that site code")
+        if allowed is not None and match.id not in allowed:
+            raise HTTPException(403, "That plant is outside your scope")
+        statement = statement.where(Issue.plant_id == match.id)
+    # Newest first, and bounded: a register download must not become an unbounded table read.
+    rows = list(db.scalars(statement.order_by(Issue.created_at.desc()).limit(MAX_EXPORT_ROWS)))
+
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = SHEET
+    sheet.append(EXPORT_HEADERS)
+    for cell in sheet[1]:
+        cell.font = Font(bold=True)
+    sheet.freeze_panes = "A2"
+    sheet.auto_filter.ref = f"A1:{sheet.cell(1, len(EXPORT_HEADERS)).column_letter}1"
+    for issue in rows:
+        plant = plants.get(issue.plant_id)
+        sheet.append([
+            issue.ticket_no,
+            plant.site_code if plant else None,
+            plant.plant_name if plant else None,
+            issue.vertical,
+            issue.subcategory,
+            issue.description,
+            normalize_issue_severity(issue.severity),
+            issue.status,
+            issue.occurred_at.astimezone(PLANT_TIMEZONE).date() if issue.occurred_at else None,
+            issue.etc_at.astimezone(PLANT_TIMEZONE).date() if issue.etc_at else None,
+            issue.assignee_text,
+            issue.impact,
+            issue.fixed_on,
+            issue.closed_on,
+            issue.photo_count or 0,
+        ])
+    for index, width in enumerate((16, 14, 30, 22, 24, 50, 12, 16, 14, 14, 24, 30, 14, 14, 10), start=1):
+        sheet.column_dimensions[sheet.cell(1, index).column_letter].width = width
+    for column in ("I", "J", "M", "N"):
+        for row in range(2, len(rows) + 2):
+            sheet[f"{column}{row}"].number_format = "DD-MM-YYYY"
+    # A cell beginning = + - @ is otherwise executed as a formula when the file is opened.
+    neutralise_formulas(workbook)
+    buffer = io.BytesIO()
+    workbook.save(buffer)
+    return buffer.getvalue()
+
+
 def _occurred_at(day: date, now: datetime) -> datetime:
     """09:00 plant time on the day it happened (never later than now)."""
     stamp = datetime.combine(day, time(9, 0), tzinfo=PLANT_TIMEZONE).astimezone(timezone.utc)

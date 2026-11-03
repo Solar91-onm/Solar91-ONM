@@ -124,10 +124,130 @@ def test_overview_area_filter_and_operational_trend_controls_are_wired(client):
     assert "districtsByKey" in overview and "(plant.district || \"\").trim()" in overview
     assert 'filters.district !== "__all"' in overview
     assert "renderTrendChart(trend)" in overview
-    assert "ep-overview-trend__bar--" in overview
+    assert "ep-overview-trend__line--" in overview
     assert 'item.axis === "percent"' in overview
     assert "/api/portal/overview/trend?" in adapter
     assert ".ep-overview-trend__svg" in styles
+
+
+def test_overview_range_and_trend_requests_are_cached_deduped_and_bounded():
+    """The Overview refetches on every filter change, so repeats must not reach the API.
+
+    Guards the four properties that make that safe: a repeat is served from
+    cache, concurrent identical calls share one request, a failure is never
+    cached, and the cache cannot grow without bound.
+    """
+    script = """
+      global.window = global;
+      let calls = 0;
+      let fail = false;
+      global.Solar91PortalAPI = {
+        request: () => { calls++; return fail ? Promise.reject(new Error('boom'))
+                                              : Promise.resolve({ rows: [], totals: {} }); },
+        normalizePlant: (p) => p,
+        plants: () => Promise.resolve([])
+      };
+      require('./assets/js/data-adapter.js');
+      const d = global.Solar91PortalData;
+      const fail_if = (cond, msg) => { if (cond) throw new Error(msg); };
+
+      (async () => {
+        // A repeated range costs one request, not three.
+        calls = 0;
+        await d.fetchPortfolioRange('2026-10-01', '2026-10-31');
+        await d.fetchPortfolioRange('2026-10-01', '2026-10-31');
+        await d.fetchPortfolioRange('2026-10-01', '2026-10-31');
+        fail_if(calls !== 1, 'repeated range made ' + calls + ' requests, expected 1');
+
+        // Concurrent identical trend calls share one in-flight request.
+        calls = 0;
+        await Promise.all([
+          d.fetchPortfolioTrend('2026-10-01', '2026-10-31', ['A', 'B']),
+          d.fetchPortfolioTrend('2026-10-01', '2026-10-31', ['B', 'A'])
+        ]);
+        fail_if(calls !== 1, 'concurrent trend made ' + calls + ' requests, expected 1');
+
+        // A write invalidates, so the next read is fresh rather than stale.
+        calls = 0;
+        d.invalidate();
+        await d.fetchPortfolioRange('2026-10-01', '2026-10-31');
+        fail_if(calls !== 1, 'invalidate() did not force a refetch');
+
+        // A failed request must not be cached, or the error would stick.
+        fail = true;
+        calls = 0;
+        await d.fetchPortfolioTrend('2026-08-01', '2026-08-31', []).catch(() => {});
+        fail = false;
+        await d.fetchPortfolioTrend('2026-08-01', '2026-08-31', []).catch(() => {});
+        fail_if(calls !== 2, 'a failure was cached; retry made ' + calls + ' requests, expected 2');
+
+        // The cache is bounded: the oldest entry is evicted, not kept forever.
+        await d.fetchPortfolioRange('2020-01-01', '2020-01-02');
+        for (let i = 1; i <= 40; i++) {
+          await d.fetchPortfolioRange('2021-01-01', '2021-02-' + String(i).padStart(2, '0'));
+        }
+        calls = 0;
+        await d.fetchPortfolioRange('2020-01-01', '2020-01-02');
+        fail_if(calls !== 1, 'the cache is unbounded: the oldest entry was never evicted');
+      })().catch((error) => { console.error(error.message); process.exit(1); });
+    """
+    run = subprocess.run(["node", "-e", script], cwd=ROOT, capture_output=True, text=True, timeout=30)
+    assert run.returncode == 0, run.stderr or run.stdout
+
+
+def test_overview_coalesces_filter_driven_trend_reloads():
+    overview = (PORTAL_ASSETS / "js" / "overview.js").read_text(encoding="utf-8")
+    # Changing plant, then district, then company must issue one request, not three.
+    assert "trendTimer" in overview
+    assert "clearTimeout(trendTimer)" in overview
+
+
+def test_register_import_export_is_offered_beside_raise_issue_and_set_up_pm():
+    page = TEMPLATE.read_text(encoding="utf-8")
+    register = (PORTAL_ASSETS / "js" / "register-io.js").read_text(encoding="utf-8")
+    issues = (PORTAL_ASSETS / "js" / "site-issues.js").read_text(encoding="utf-8")
+    calendar = (PORTAL_ASSETS / "js" / "operations-calendar.js").read_text(encoding="utf-8")
+    styles = (PORTAL_ASSETS / "css" / "components.css").read_text(encoding="utf-8")
+
+    # The shared control loads, and after the data adapter it depends on.
+    assert "/assets/js/register-io.js" in page
+    assert page.index("/assets/js/data-adapter.js") < page.index("/assets/js/register-io.js")
+
+    # It points at the importers that already existed, plus the new downloads.
+    for url in ("/api/issues/import", "/api/issues/import/template", "/api/issues/export",
+                "/api/pm-plan/import", "/api/pm-plan/import/template", "/api/pm-plan/export"):
+        assert url in register, url
+
+    # Import is two steps: the file is validated with dry_run before anything is written.
+    assert 'dry_run: "true"' in register and 'dry_run: "false"' in register
+
+    # Mounted beside each primary action, not replacing it.
+    assert 'Solar91RegisterIO.controls("issues"' in issues
+    assert 'data-issue-action="raise"' in issues
+    assert 'Solar91RegisterIO.controls("pm"' in calendar
+    assert 'data-calendar-action="open-pm-setup"' in calendar
+    assert ".ep-sheet-io__button" in styles
+
+
+def test_register_import_is_gated_on_the_same_permission_as_creating_the_record():
+    issues = (PORTAL_ASSETS / "js" / "site-issues.js").read_text(encoding="utf-8")
+    calendar = (PORTAL_ASSETS / "js" / "operations-calendar.js").read_text(encoding="utf-8")
+    # Uploading issues raises tickets, so it follows canRaise; the PM plan follows PM setup rights.
+    assert "canImport: state.canRaise" in issues
+    assert "canImport: canManagePMSetup()" in calendar
+
+
+def test_pm_setup_offers_all_plants_all_parts_and_all_tasks():
+    calendar = (PORTAL_ASSETS / "js" / "operations-calendar.js").read_text(encoding="utf-8")
+    assert 'var ALL_PLANTS = "__all"' in calendar
+    assert 'var ALL_PARTS = "All parts"' in calendar
+    assert 'var ALL_TASKS = "All tasks"' in calendar
+    # Offered at the top of each list, beside the specific choices.
+    assert "[ALL_PARTS].concat(partOptions)" in calendar
+    assert "[ALL_TASKS].concat(taskOptions)" in calendar
+    assert ">All plants (" in calendar
+    # "All parts" must not be treated as a part name when narrowing the task list.
+    assert 'item.part === ALL_PARTS ? "" : item.part' in calendar
 
 
 # ── Asset & Warranty does not imply an inventory register ───────────────────

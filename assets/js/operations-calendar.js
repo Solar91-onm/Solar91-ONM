@@ -749,6 +749,13 @@
   }
 
   /** Part names for one equipment. */
+  // "Select everything of this kind" sentinels. The part and task pickers are
+  // free-text datalist inputs, so these are ordinary values the operator can
+  // type or pick; the plant <select> uses ALL_PLANTS as its option value.
+  var ALL_PLANTS = "__all";
+  var ALL_PARTS = "All parts";
+  var ALL_TASKS = "All tasks";
+
   function pmPartsFor(equipment) {
     var row = pmCategory(equipment);
     return ((row && row.pm_parts) || []).map(function (entry) { return entry.part; })
@@ -811,13 +818,14 @@
       };
 
       var partOptions = pmPartsFor(item.equipment);
-      var taskOptions = pmTasksFor(item.equipment, item.part);
+      // "All parts" means no single part narrows the task list, so pass none.
+      var taskOptions = pmTasksFor(item.equipment, item.part === ALL_PARTS ? "" : item.part);
       var equipmentHint = PM_CATEGORIES.length
         ? ""
         : "No categories configured yet — type the equipment, or add the list in Settings → Categories.";
       var partHint = item.equipment && !partOptions.length && PM_CATEGORIES.length
         ? "No parts listed for this equipment yet."
-        : "";
+        : item.part === ALL_PARTS ? "Every part of this equipment is scheduled." : "";
 
       return '<fieldset class="ep-calendar__pm-setup-item"><legend>PM item ' +
         (index + 1) + '</legend>' +
@@ -826,9 +834,9 @@
         '<div class="ep-calendar__pm-setup-fields">' +
           picker("equipment", "Equipment", PM_CATEGORIES.map(function (row) { return row.name; }),
                  true, equipmentHint) +
-          picker("part", "Part", partOptions, false, partHint) +
+          picker("part", "Part", [ALL_PARTS].concat(partOptions), false, partHint) +
           field("partNumber", "Part number (optional)", "text", false) +
-          picker("task", "Maintenance task", taskOptions, true, "") +
+          picker("task", "Maintenance task", [ALL_TASKS].concat(taskOptions), true, "") +
           field("startDate", "First scheduled date", "date", true) +
           '<label><span>Frequency</span><select data-pm-setup-index="' + index +
             '" data-pm-setup-field="frequency">' +
@@ -846,6 +854,7 @@
 
   function pmSetupPlantName(state, context) {
     var code = context.plantCode || state.pmSetupPlant;
+    if (code === ALL_PLANTS) return "All plants (" + state.plants.length + ")";
     var plant = state.plants.find(function (item) { return item.siteCode === code; });
     return plant ? plantLabel(plant) : code;
   }
@@ -856,6 +865,9 @@
       ? '<p class="ep-calendar__pm-setup-plant">' + escape(pmSetupPlantName(state, context) || context.plantCode) + '</p>'
       : '<label class="ep-calendar__pm-setup-plant-select"><span>Plant</span><select name="plant_code" required>' +
         '<option value="">Choose a plant</option>' +
+        '<option value="' + ALL_PLANTS + '"' +
+          (state.pmSetupPlant === ALL_PLANTS ? " selected" : "") + ">All plants (" +
+          state.plants.length + ")</option>" +
         state.plants.map(function (plant) {
           return '<option value="' + escape(plant.siteCode) + '"' +
             (plant.siteCode === state.pmSetupPlant ? " selected" : "") + ">" +
@@ -1193,6 +1205,10 @@
           (showPMSetupButton
             ? '<button type="button" class="ep-calendar__setup-button" data-calendar-action="open-pm-setup">Set up PM</button>'
             : "") +
+          // Import / Export of the PM plan sits beside Set up PM, on the PM calendar only.
+          (context.type === "pm" && global.Solar91RegisterIO
+            ? global.Solar91RegisterIO.controls("pm", { canImport: canManagePMSetup() })
+            : "") +
         '</div></header>' +
         renderToolbar(state, context) +
         '<div class="ep-calendar__monthbar">' +
@@ -1518,6 +1534,11 @@
         if (detailClose) detailClose.focus();
         return;
       }
+      // The shared Import / Export control handles its own clicks.
+      if (global.Solar91RegisterIO && global.Solar91RegisterIO.handleClick(event, {
+        siteCode: (active.context && active.context.plantCode) || "",
+        onImported: function () { loadEvents(host, active.state, active.context); }
+      })) return;
       var action = event.target.closest("[data-calendar-action]");
       if (!action) return;
       var state = active.state;
