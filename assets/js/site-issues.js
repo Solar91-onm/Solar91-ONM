@@ -260,12 +260,32 @@
     "Pending Parts/Vendor": ["In Progress"]
   };
 
+  // Resolving is only legal from In Progress or Pending Vendor, so a ticket
+  // further back is walked through the stages in between first. Every step is a
+  // real transition, so the ticket's history reads correctly afterwards.
+  var STEPS_BEFORE_RESOLVE = {
+    "Open": ["Acknowledged", "In Progress"],
+    "Assigned": ["Acknowledged", "In Progress"],
+    "Acknowledged": ["In Progress"],
+    "In Progress": [],
+    "Pending Vendor": [],
+    "Pending Parts/Vendor": []
+  };
+
   /** The statuses this form may offer for a ticket, current one first. */
   function statusChoicesFor(status) {
     var choices = [status].concat(STATUS_FLOW[status] || []);
+    if (STEPS_BEFORE_RESOLVE[status] !== undefined) choices.push("Resolved");
     // Sending a ticket back to Open is a reset, which only the O&M Head may do.
     if (state.isHead && status !== "Open") choices.push("Open");
     return choices.filter(function (value, index) { return choices.indexOf(value) === index; });
+  }
+
+  /** Today as YYYY-MM-DD, so a fix cannot be dated in the future. */
+  function todayISO() {
+    var now = new Date();
+    return now.getFullYear() + "-" + String(now.getMonth() + 1).padStart(2, "0") +
+      "-" + String(now.getDate()).padStart(2, "0");
   }
 
   /** The edit form: the stored details of one ticket, corrected in place. */
@@ -311,9 +331,25 @@
               (value === issue.status ? " (no change)" : "") + "</option>";
           }).join("") +
         '</select>' +
-        '<small>A ticket moves one step at a time, so only the next stage is ' +
-          'offered. Resolved and Closed need a root cause, the corrective action ' +
-          'and an evidence photo, which the ticket workflow collects.</small></label>' +
+        '<small>A ticket moves one step at a time; choosing Resolved walks it ' +
+          'through the stages in between, so its history still reads correctly.</small></label>' +
+      // Shown only when Resolved is chosen. These are what the API stores as the
+      // resolution, and it will not accept the transition without them.
+      '<fieldset class="ep-issues__wizard-field" data-issue-resolution' +
+        (issue.status === "Resolved" ? "" : " hidden") + '>' +
+        '<legend>Resolution</legend>' +
+        '<label class="ep-issues__wizard-field">Root cause' +
+          '<textarea name="rootCause" rows="2" maxlength="4000"></textarea></label>' +
+        '<label class="ep-issues__wizard-field">Corrective action' +
+          '<textarea name="correctiveAction" rows="2" maxlength="4000"></textarea></label>' +
+        '<label class="ep-issues__wizard-field">Fixed on' +
+          '<input name="fixedOn" type="date" max="' + escape(todayISO()) + '" /></label>' +
+        '<label class="ep-issues__wizard-field">Closing remark' +
+          '<input name="resolutionRemark" maxlength="4000" /></label>' +
+        '<label class="ep-issues__wizard-field">Fix photos' +
+          '<input name="resolutionEvidence" type="file" accept="image/jpeg,image/png,image/webp" multiple />' +
+          '<small>At least one photo of the completed fix is required, up to 10.</small></label>' +
+      '</fieldset>' +
       '<label class="ep-issues__wizard-field">Issue details' +
         '<textarea name="problem" required rows="4" maxlength="4000">' + escape(issue.problem || "") + '</textarea></label>' +
       '<label class="ep-issues__wizard-field">Reason for the change' +
@@ -700,6 +736,14 @@
     });
     host.addEventListener("change", function (event) {
       if (!active || active.host !== host) return;
+      // Edit form: the resolution fields only apply when the ticket is being
+      // resolved, so they appear with that choice and hide again otherwise.
+      if (event.target.name === "status" && state.modalMode === "edit") {
+        var statusForm = event.target.closest("[data-issue-edit-form]");
+        var resolution = statusForm && statusForm.querySelector("[data-issue-resolution]");
+        if (resolution) resolution.hidden = event.target.value !== "Resolved";
+        return;
+      }
       // Edit form: a new Equipment changes which sub-problems apply, so refill
       // that list in place rather than redrawing and losing what is typed.
       if (event.target.name === "equipment" && state.modalMode === "edit") {
@@ -963,12 +1007,9 @@
     Object.keys(next).forEach(function (key) {
       if (next[key] !== before[key]) payload[key] = next[key];
     });
-    if (!Object.keys(payload).length) {
-      state.modalMode = "details";
-      state.modalId = issue.id;
-      renderView();
-      return;
-    }
+    // No early return on an empty payload: status and assignee are saved through
+    // their own endpoints below, so changing only one of those is still a change.
+    // The "nothing to do" check is the steps list further down.
     var reason = read("changeReason");
     if (reason) payload.change_reason = reason;
 
@@ -991,7 +1032,39 @@
           { method: "POST", body: { assigned_to: nextAssignee, note: reason || null } });
       });
     }
-    if (nextStatus && nextStatus !== issue.status) {
+    if (nextStatus === "Resolved" && issue.status !== "Resolved") {
+      var rootCause = read("rootCause");
+      var correctiveAction = read("correctiveAction");
+      var photoInput = form.elements.resolutionEvidence;
+      var photos = photoInput && photoInput.files ? Array.prototype.slice.call(photoInput.files) : [];
+      if (!rootCause) return fail("Add the root cause before resolving this ticket.");
+      if (!correctiveAction) return fail("Add the corrective action before resolving this ticket.");
+      if (!photos.length) return fail("Attach at least one photo of the completed fix.");
+
+      // Walk the stages in between first, so the transition the API expects is legal.
+      (STEPS_BEFORE_RESOLVE[issue.status] || []).forEach(function (stage) {
+        steps.push(function () {
+          return api.request(base + "/status", { method: "POST", body: { status: stage, note: reason || null } });
+        });
+      });
+      steps.push(function () {
+        var files = new FormData();
+        photos.forEach(function (file) { files.append("files", file, file.name); });
+        return api.request(base + "/evidence", { method: "POST", body: files }).then(function (uploaded) {
+          return api.request(base + "/resolve", {
+            method: "POST",
+            body: {
+              root_cause: rootCause,
+              corrective_action: correctiveAction,
+              evidence_ids: uploaded.map(function (entry) { return entry.id; }),
+              fixed_on: read("fixedOn") || null,
+              remark: read("resolutionRemark") || null,
+              note: reason || null
+            }
+          });
+        });
+      });
+    } else if (nextStatus && nextStatus !== issue.status) {
       steps.push(function () {
         return nextStatus === "Open"
           ? api.request(base + "/reset", { method: "POST", body: {} })
