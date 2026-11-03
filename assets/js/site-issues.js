@@ -64,9 +64,11 @@
     requestId: 0,
     liveMode: false,
     canRaise: false,
-    // Correcting a stored ticket is the O&M Head's job. The API would also allow
-    // an Assignee on an open ticket of theirs; the register deliberately does not.
+    // Correcting a stored ticket: the O&M Head on any ticket, an Assignee on an
+    // open ticket of theirs — the same pair PATCH /api/issues/{id} allows.
     canEdit: false,
+    // Assigning and resetting to Open need issues.manage, so they are the Head's alone.
+    isHead: false,
     assignees: [],
     submitError: "",
     submitNotice: "",
@@ -93,6 +95,7 @@
       plantName: plant ? plantLabel(plant) : "Plant unavailable",
       equipment: issue.vertical || "Other",
       subpart: issue.subcategory || "",
+      assignedTo: issue.assigned_to ? String(issue.assigned_to) : "",
       serialNo: issue.serial_no || "",
       supplierMaker: issue.supplier_maker || "",
       unitCount: issue.unit_count == null ? "" : String(issue.unit_count),
@@ -239,6 +242,32 @@
       }).join("") + '</tbody></table></div>';
   }
 
+  // The workflow is a state machine (app/issues/service.py :: transition), so a
+  // ticket can only move to an adjacent status — Open cannot jump to In Progress.
+  // Offering anything else just earns a 409, so the dropdown lists exactly what
+  // the current status allows.
+  //
+  // Resolved and Closed are deliberately absent: resolving demands a root cause,
+  // a corrective action and at least one evidence photo, which belongs in the
+  // ticket's own workflow rather than a quick correction here. "Assigned" is not
+  // listed either — that happens by choosing an assignee.
+  var STATUS_FLOW = {
+    "Open": ["Acknowledged"],
+    "Assigned": ["Acknowledged"],
+    "Acknowledged": ["In Progress"],
+    "In Progress": ["Pending Vendor"],
+    "Pending Vendor": ["In Progress"],
+    "Pending Parts/Vendor": ["In Progress"]
+  };
+
+  /** The statuses this form may offer for a ticket, current one first. */
+  function statusChoicesFor(status) {
+    var choices = [status].concat(STATUS_FLOW[status] || []);
+    // Sending a ticket back to Open is a reset, which only the O&M Head may do.
+    if (state.isHead && status !== "Open") choices.push("Open");
+    return choices.filter(function (value, index) { return choices.indexOf(value) === index; });
+  }
+
   /** The edit form: the stored details of one ticket, corrected in place. */
   function renderEditForm(issue) {
     if (!issue) return '<p class="ep-issues__empty">This ticket is no longer in the list.</p>';
@@ -260,6 +289,31 @@
       // No severity field. Raise issue does not ask for one either (every ticket is
       // filed as Medium), so the register does not offer a way to diverge from that.
       // Where a ticket stands is its Status, not its severity.
+      // Assigning is the O&M Head's call: /assign and /reassign both require
+      // issues.manage, so an Assignee sees who holds the ticket but cannot move it.
+      (state.isHead
+        ? '<label class="ep-issues__wizard-field">Assigned to' +
+            '<select name="assignedTo">' +
+              '<option value="">Unassigned</option>' +
+              state.assignees.map(function (person) {
+                return '<option value="' + escape(person.id) + '"' +
+                  (issue.assignedTo === String(person.id) ? " selected" : "") + ">" +
+                  escape(person.name) + "</option>";
+              }).join("") +
+            '</select></label>'
+        : '<p class="ep-issues__wizard-info">Assigned to <strong>' +
+            escape(issue.assignee || "nobody") + '</strong> · only the O&amp;M Head can change this.</p>') +
+      '<label class="ep-issues__wizard-field">Status' +
+        '<select name="status">' +
+          statusChoicesFor(issue.status).map(function (value) {
+            return '<option value="' + escape(value) + '"' +
+              (issue.status === value ? " selected" : "") + ">" + escape(value) +
+              (value === issue.status ? " (no change)" : "") + "</option>";
+          }).join("") +
+        '</select>' +
+        '<small>A ticket moves one step at a time, so only the next stage is ' +
+          'offered. Resolved and Closed need a root cause, the corrective action ' +
+          'and an evidence photo, which the ticket workflow collects.</small></label>' +
       '<label class="ep-issues__wizard-field">Issue details' +
         '<textarea name="problem" required rows="4" maxlength="4000">' + escape(issue.problem || "") + '</textarea></label>' +
       '<label class="ep-issues__wizard-field">Reason for the change' +
@@ -614,7 +668,8 @@
       state.assignees = result.assignees || [];
       state.canRaise = ["O&M Head", "Assignee", "Site Engineer"].indexOf(result.role) !== -1 &&
         state.plants.length > 0;
-      state.canEdit = result.role === "O&M Head";
+      state.canEdit = ["O&M Head", "Assignee"].indexOf(result.role) !== -1;
+      state.isHead = result.role === "O&M Head";
       state.liveMode = true;
       state.loaded = true;
       state.loading = false;
@@ -873,7 +928,7 @@
    *
    * Only the fields that actually changed are sent, so an edit never overwrites
    * something another person changed in the meantime. The API allows this for the
-   * O&M Head, which is the only role the register offers the Edit button to.
+   * O&M Head on any ticket, and an Assignee on an open ticket of theirs.
    */
   function saveIssueEdit(form) {
     var api = global.Solar91PortalAPI;
@@ -917,10 +972,47 @@
     var reason = read("changeReason");
     if (reason) payload.change_reason = reason;
 
+    // Assignment and status are not part of PATCH; each has its own endpoint,
+    // so they are applied in turn after the details and only when they changed.
+    var base = "/api/issues/" + encodeURIComponent(issue.dbId);
+    var nextAssignee = state.isHead ? read("assignedTo") : (issue.assignedTo || "");
+    var nextStatus = read("status");
+    var steps = [];
+    if (Object.keys(payload).length) {
+      steps.push(function () { return api.request(base, { method: "PATCH", body: payload }); });
+    }
+    if (nextAssignee !== (issue.assignedTo || "")) {
+      steps.push(function () {
+        if (!nextAssignee) {
+          // Clearing an assignment is a reassignment to nobody.
+          return api.request(base + "/reassign", { method: "POST", body: { assigned_to: null, note: reason || null } });
+        }
+        return api.request(base + (issue.assignedTo ? "/reassign" : "/assign"),
+          { method: "POST", body: { assigned_to: nextAssignee, note: reason || null } });
+      });
+    }
+    if (nextStatus && nextStatus !== issue.status) {
+      steps.push(function () {
+        return nextStatus === "Open"
+          ? api.request(base + "/reset", { method: "POST", body: {} })
+          : api.request(base + "/status", { method: "POST", body: { status: nextStatus, note: reason || null } });
+      });
+    }
+    if (!steps.length) {
+      state.modalMode = "details";
+      state.modalId = issue.id;
+      renderView();
+      return;
+    }
+
     state.submitting = true;
     if (errorEl) errorEl.hidden = true;
     renderView();
-    api.request("/api/issues/" + encodeURIComponent(issue.dbId), { method: "PATCH", body: payload })
+    steps.reduce(function (chain, step) {
+      return chain.then(function (previous) {
+        return step().then(function (result) { return result || previous; });
+      });
+    }, Promise.resolve(null))
       .then(function (updated) {
         var plantsById = {};
         state.plants.forEach(function (item) { plantsById[item.dbId] = item; });
