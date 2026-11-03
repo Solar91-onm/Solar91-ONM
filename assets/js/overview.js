@@ -263,15 +263,15 @@
       });
     }
 
-    // The chart used to carry its own title, description and From / To / Apply,
-    // which could disagree with the Range selector above. The Range selector now
-    // drives the chart too, so all of that is redundant — and dropping it is what
-    // lets the tiles and the chart share one screen without scrolling.
-    // The range status line above the tiles already states the active period.
-    [".ep-overview-trend__head", ".ep-overview-trend__status"].forEach((sel) => {
-      const el = document.querySelector(sel);
-      if (el) el.style.display = "none";
-    });
+    // The chart used to carry its own title, description and From / To / Apply, which could
+    // disagree with the Range selector above. The Range selector drives the chart now, so that
+    // header has been deleted from the page rather than hidden here: hiding it from JavaScript
+    // meant a hard refresh painted it first and left it on screen until the overview finished
+    // loading — or for good, if the load failed.
+    // The status line stays in the markup because trendStatus() writes to it, but the range
+    // status above the tiles is what the operator reads, so it is not shown.
+    const trendStatusEl = document.querySelector(".ep-overview-trend__status");
+    if (trendStatusEl) trendStatusEl.style.display = "none";
 
     if (dateToggle) dateToggle.addEventListener("change", () => {
       const isRange = dateToggle.checked;
@@ -370,9 +370,17 @@
       }).join("");
     }).join("");
 
-    const labelStep = Math.max(1, Math.ceil(trend.labels.length / 6));
-    const xIndices = trend.labels.map((_, index) => index)
-      .filter((index) => index % labelStep === 0 || index === trend.labels.length - 1);
+    // Ten ticks spread evenly across whatever range is shown, always including the
+    // first and last bucket, so a month and a year are read the same way. Picking
+    // the positions (rather than stepping by a divisor) keeps the count steady
+    // instead of landing on 6 for one range and 16 for the next.
+    const TICK_TARGET = 10;
+    const lastIndex = trend.labels.length - 1;
+    const tickCount = Math.min(TICK_TARGET, trend.labels.length);
+    const xIndices = tickCount <= 1
+      ? [0]
+      : Array.from(new Set(Array.from({ length: tickCount }, (_, position) =>
+          Math.round(position * lastIndex / (tickCount - 1)))));
     const xLabels = xIndices.map((index) => '<text class="ep-overview-trend__x-label" x="' +
       (left + index * bucketWidth + bucketWidth / 2) +
       '" y="' + (height - 12) + '" text-anchor="' + (index === 0 ? "start" : index === trend.labels.length - 1 ? "end" : "middle") +

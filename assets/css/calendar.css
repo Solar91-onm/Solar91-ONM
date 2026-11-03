@@ -1583,3 +1583,53 @@
   .ep-calendar__modal-filters { grid-template-columns: 1fr; }
   .ep-calendar__modal-filters label:first-child { grid-column: auto; }
 }
+/* ── Washing: one date across every plant ─────────────────────────────────
+   Shown in place of the month grid while a date is chosen on the Views tab,
+   because "who washed on this date" is a question about all plants at once. */
+.ep-calendar__day-panel { padding: var(--ep-s-4) 0; }
+.ep-calendar__day-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ep-s-3);
+  flex-wrap: wrap;
+  margin-bottom: var(--ep-s-3);
+}
+.ep-calendar__day-head h2 { margin: 0; color: var(--ep-text-strong); font-size: var(--ep-fs-lg); }
+.ep-calendar__day-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.ep-calendar__day-rows { display: grid; gap: 8px; }
+.ep-calendar__day-row {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) auto minmax(0, 2fr);
+  align-items: center;
+  gap: var(--ep-s-3);
+  padding: 10px 14px;
+  border: 1px solid var(--ep-border-soft);
+  border-radius: var(--ep-radius-sm);
+  background: var(--ep-bg-elev);
+}
+.ep-calendar__day-row strong { display: block; color: var(--ep-text-strong); font-size: var(--ep-fs-sm); }
+.ep-calendar__day-code { color: var(--ep-text-faint); font-size: var(--ep-fs-xs); }
+.ep-calendar__day-row p { margin: 0; color: var(--ep-text-muted); font-size: var(--ep-fs-xs); }
+.ep-calendar__day-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: var(--ep-fs-xs);
+  font-weight: 650;
+  white-space: nowrap;
+  background: var(--ep-bg-muted);
+  color: var(--ep-text-muted);
+}
+.ep-calendar__day-chip--confirmed    { background: #e4f3ea; color: #13623d; }
+.ep-calendar__day-chip--awaiting     { background: #fdf2dc; color: #8a5a10; }
+.ep-calendar__day-chip--not_done     { background: #fde8e4; color: #9a3412; }
+/* The one people come here for: no entry at all for the chosen date. */
+.ep-calendar__day-chip--not_reported { background: #f1e7f6; color: #6b2f8f; }
+.ep-calendar__day-chip--rejected     { background: #fde8e4; color: #9a3412; }
+
+@media (max-width: 720px) {
+  .ep-calendar__day-row { grid-template-columns: minmax(0, 1fr) auto; }
+  .ep-calendar__day-row p { grid-column: 1 / -1; }
+}

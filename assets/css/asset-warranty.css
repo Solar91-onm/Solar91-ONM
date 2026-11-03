@@ -1,5 +1,5 @@
 .ep-aw { display: flex; flex-direction: column; gap: 18px; }
-.ep-aw__header { display: flex; align-items: flex-start; }
+.ep-aw__header { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--ep-s-4); flex-wrap: wrap; }
 .ep-aw__header h2, .ep-aw__dialog h2 {
   margin: 0; color: var(--ep-text-strong); font-size: 22px; font-weight: 650;
 }
@@ -82,4 +82,12 @@
   .ep-aw__table { min-width: 620px; }
   .ep-aw__panel .ep-panel__head { align-items: flex-start; }
   .ep-aw__search input { width: 155px; }
+}
+
+/* Set up (Import / Export) sits opposite the page title. Plant page only — the
+   Views tab has no single plant to set up, so the control is not rendered there. */
+.ep-aw__actions { display: flex; align-items: center; gap: var(--ep-s-2); }
+
+@media (max-width: 720px) {
+  .ep-aw__actions { width: 100%; }
 }

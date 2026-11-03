@@ -12,7 +12,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import inspect as sa_inspect, text
 from fastapi.encoders import jsonable_encoder
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.exc import SQLAlchemyError
@@ -40,6 +40,7 @@ from app.issues.router import invalidate_pulse_cache
 from app.services.router import router as services_router
 from app.users.invites import router as users_invites_router
 from app.users.router import router as users_router
+from app.warranty.router import router as warranty_router
 
 settings=get_settings()
 BASE=Path(__file__).resolve().parents[1]
@@ -314,6 +315,7 @@ app.include_router(portal_router)
 app.include_router(categories_router)
 app.include_router(users_router)
 app.include_router(users_invites_router)
+app.include_router(warranty_router)
 
 @app.get("/",include_in_schema=False)
 def index(request:Request):
@@ -324,8 +326,25 @@ def index(request:Request):
         clerk_publishable_key=settings.clerk_publishable_key,
         clerk_frontend_api=settings.clerk_frontend_api,
         build_id=(info["commit_short"] or "local") + "." + info["frontend_bundle"],
+        # Absolute origin for the canonical link and the share-preview tags. The configured public
+        # URL wins; otherwise the origin actually being browsed, which is always right for a
+        # preview. app_url()'s own fallback is deliberately not used here: it can return a
+        # localhost origin, and a canonical pointing at localhost is worse than none.
+        public_url=settings.app_public_url.rstrip("/") or str(request.base_url).rstrip("/"),
     )
     return HTMLResponse(version_static_urls(html))
+
+
+# Solar91 is an authenticated operations portal, not a public site: every page behind / needs a
+# sign-in, so there is nothing for a crawler to index and being listed only advertises the login.
+# Served as a real route because the app answers every path itself (there is no static web root).
+ROBOTS_TXT = """User-agent: *
+Disallow: /
+"""
+
+@app.get("/robots.txt",include_in_schema=False)
+def robots():
+    return PlainTextResponse(ROBOTS_TXT,headers={"Cache-Control":"public, max-age=86400"})
 
 @app.get("/portal",include_in_schema=False)
 def standalone_portal():

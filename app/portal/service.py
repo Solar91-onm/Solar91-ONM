@@ -737,10 +737,25 @@ def portfolio_trend(
             _add_trend_value(active_issues, row.event_day, start, bucket, int(row.count or 0))
 
     def compliance(numerator: list[int], denominator: list[int]) -> list[int | None]:
-        return [
-            round(100 * complete / expected) if expected else None
-            for complete, expected in zip(numerator, denominator)
-        ]
+        """Compliance so far, bucket by bucket: on-time to date over expected to date.
+
+        Per-bucket compliance cannot be drawn as a trend. Washing has three cycle due dates in a
+        month and PM only as many as there are tasks due, so on a daily range almost every bucket
+        expects nothing and the series was mostly null — three dots, not a line. Running it
+        cumulatively gives a reading on every bucket from the first expectation to the end of the
+        range, and the last bucket is the compliance for the whole range, which is the figure the
+        tiles above the chart already show.
+
+        Buckets before anything was due stay null: nothing was expected yet, so 0% would be a
+        verdict the data does not support.
+        """
+        values: list[int | None] = []
+        complete_so_far = expected_so_far = 0
+        for complete, expected in zip(numerator, denominator):
+            complete_so_far += complete
+            expected_so_far += expected
+            values.append(round(100 * complete_so_far / expected_so_far) if expected_so_far else None)
+        return values
 
     labels = [
         item.strftime("%d %b") if bucket != "month" else item.strftime("%b %Y")

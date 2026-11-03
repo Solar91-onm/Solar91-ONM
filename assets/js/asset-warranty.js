@@ -22,6 +22,13 @@
         '<div><p class="ep-aw__eyebrow">PLANT OPERATIONS</p>' +
           '<h2>Asset &amp; Warranty</h2>' +
           '<p class="ep-aw__intro">Review registered equipment and warranty information for each plant.</p></div>' +
+        // Set up is per plant: the sheet records the equipment AT a plant, so it belongs on the
+        // plant page and not on the portfolio-wide Views tab, where there is no plant to set up.
+        (options.plantCode && global.Solar91RegisterIO
+          ? '<div class="ep-aw__actions">' +
+              global.Solar91RegisterIO.controls("warranty", { canImport: true }) +
+            '</div>'
+          : "") +
       '</header>' +
       '<div class="ep-aw__metrics" aria-label="Asset and warranty availability">' +
         '<article class="ep-aw__metric"><span>Registered units</span><strong>Not available</strong></article>' +
@@ -109,6 +116,11 @@
 
     if (search) search.addEventListener("input", renderRows);
     root.addEventListener("click", function (event) {
+      // The shared Import / Export control handles its own clicks.
+      if (global.Solar91RegisterIO && global.Solar91RegisterIO.handleClick(event, {
+        siteCode: options.plantCode || "",
+        onImported: function () { render(host, options); }
+      })) return;
       var button = event.target.closest("[data-aw-view]");
       if (button) {
         var plant = plants.find(function (item) { return item.siteCode === button.getAttribute("data-aw-view"); });

@@ -120,7 +120,12 @@ def test_overview_area_filter_and_operational_trend_controls_are_wired(client):
     assert 'data-filter="district"' in overview_markup
     assert "data-filter=\"period\"" not in overview_markup
     assert "data-trend-metric" not in overview_markup
-    assert "data-trend-from" in overview_markup and "data-trend-to" in overview_markup
+    # The chart's own From / To / Apply are gone. They were wired to nothing and were hidden from
+    # JavaScript after the data loaded, so a hard refresh painted them and a failed load left them
+    # on screen. The Range selector in the filter bar is the one date control.
+    assert "data-trend-from" not in overview_markup and "data-trend-to" not in overview_markup
+    assert "data-trend-apply" not in overview_markup
+    assert 'data-filter="date"' in overview_markup
     assert "districtsByKey" in overview and "(plant.district || \"\").trim()" in overview
     assert 'filters.district !== "__all"' in overview
     assert "renderTrendChart(trend)" in overview
@@ -248,6 +253,128 @@ def test_pm_setup_offers_all_plants_all_parts_and_all_tasks():
     assert ">All plants (" in calendar
     # "All parts" must not be treated as a part name when narrowing the task list.
     assert 'item.part === ALL_PARTS ? "" : item.part' in calendar
+
+
+def test_root_url_opens_the_portal_with_its_sign_in_gate_without_redirecting(client):
+    """Typing the bare site URL must land on the portal itself, not a redirect or a landing page."""
+    response = client.get("/")
+    assert response.status_code == 200
+    assert response.history == [], "the root URL must serve the portal directly"
+    assert "text/html" in response.headers["content-type"]
+    page = response.text
+    assert '<div id="app">' in page and 'class="ep-shell"' in page
+    # The sign-in panel loads before the application that boots behind it.
+    assert "/static/js/auth-gate.js" in page
+    # The old /portal bookmark still arrives at the same place.
+    legacy = client.get("/portal", follow_redirects=False)
+    assert legacy.status_code == 308 and legacy.headers["location"] == "/"
+
+
+def test_portal_is_not_offered_to_search_engines(client):
+    """A sign-in-gated operations portal has nothing to index; being listed only advertises the login."""
+    robots = client.get("/robots.txt")
+    assert robots.status_code == 200
+    assert robots.headers["content-type"].startswith("text/plain")
+    assert "User-agent: *" in robots.text and "Disallow: /" in robots.text
+    assert '<meta name="robots" content="noindex, nofollow"/>' in client.get("/").text
+
+
+def test_shared_link_carries_a_preview_card_and_a_canonical_url(client):
+    page = client.get("/").text
+    for tag in ('property="og:type"', 'property="og:title"', 'property="og:description"',
+                'property="og:url"', 'property="og:image"', 'name="twitter:card"'):
+        assert tag in page, tag
+    assert 'rel="canonical"' in page
+    # Absolute, or a crawler and a chat client cannot resolve them.
+    for attr in re.findall(r'(?:og:url|og:image)" content="([^"]+)"', page):
+        assert attr.startswith("http"), attr
+    assert re.search(r'<link rel="canonical" href="https?://[^"]+/"', page)
+    # theme-color was already declared once; the preview tags must not duplicate it.
+    assert page.count('name="theme-color"') == 1
+
+
+def test_record_washing_keeps_the_last_cycle_open_for_extra_washing():
+    """A plant that washes again after all three cycles are full must still get rows for those days.
+
+    Cycles 1 and 2 hand the month over to the next cycle on the day they fill, so their grid stops
+    there. The last cycle has nothing to hand over to - the backend keeps later days on it as extra
+    washing - so closing its grid on the completion date hid work that was really done.
+    """
+    script = """
+      global.window = global;
+      global.document = { querySelector: () => null, querySelectorAll: () => [], addEventListener: () => {} };
+      global.Solar91PortalFormat = { escape: (s) => String(s == null ? '' : s) };
+      global.Solar91PortalAPI = { request: () => Promise.resolve({}), can: () => true,
+                                  currentUser: () => ({ role: 'O&M Head' }) };
+      const fs = require('fs');
+      let src = fs.readFileSync('./assets/js/operations-calendar.js', 'utf8');
+      src = src.replace('  global.Solar91PortalCalendar = { render: render };',
+                        '  global.__i = { recordRows };');
+      eval(src);
+
+      const cycles = [
+        { cycle_no: 1, start_date: '2026-10-01', due_date: '2026-10-10', confirmed: 10, state: 'Completed' },
+        { cycle_no: 2, start_date: '2026-10-11', due_date: '2026-10-20', confirmed: 10, state: 'Completed' },
+        { cycle_no: 3, start_date: '2026-10-21', due_date: '2026-10-31', confirmed: 20, state: 'Completed' }
+      ];
+      // Cycles filled on the 5th, 15th and 24th; the plant then washed everything again on the 28th.
+      const reports = [5, 15, 24, 28].map((day, i) => ({
+        report_date: '2026-10-' + String(day).padStart(2, '0'),
+        cycle_no: [1, 2, 3, 3][i], tables_cleaned: 10, job_status: 'Done',
+        review_status: 'Confirmed', cycle_completed: day !== 28
+      }));
+      const rowsFor = (cycleNo) => global.__i.recordRows({
+        month: '2026-10', recordCycle: cycleNo, washingDataToday: '2026-10-31',
+        washingReports: reports, recordDrafts: {},
+        washingPlant: { cycles, table_count: 10, monthly_target: 3 }
+      });
+
+      const third = rowsFor(3);
+      const dates = third.map((row) => row.date);
+      if (!dates.includes('2026-10-28')) {
+        throw new Error('the extra wash on the 28th has no row: ' + dates.join(','));
+      }
+      if (!third.find((row) => row.date === '2026-10-28' && row.report)) {
+        throw new Error('the 28th has a row but not its saved report');
+      }
+      if (dates[dates.length - 1] !== '2026-10-31') {
+        throw new Error('the last cycle must stay open to month end, ended ' + dates[dates.length - 1]);
+      }
+      // The earlier cycles must still close on the day they fill, or their days would double up.
+      const first = rowsFor(1).map((row) => row.date);
+      if (first[first.length - 1] !== '2026-10-05') {
+        throw new Error('cycle 1 should stop at its handover, ended ' + first[first.length - 1]);
+      }
+    """
+    run = subprocess.run(["node", "-e", script], cwd=ROOT, capture_output=True, text=True, timeout=30)
+    assert run.returncode == 0, run.stderr or run.stdout
+
+
+def test_asset_warranty_setup_is_offered_on_the_plant_page_only():
+    """The sheet records the equipment AT a plant, so Set up belongs on the plant page.
+
+    The Views tab is portfolio-wide: there is no single plant to set up there, and offering the
+    control would upload against whichever plant happened to be selected last.
+    """
+    module = (PORTAL_ASSETS / "js" / "asset-warranty.js").read_text(encoding="utf-8")
+    register = (PORTAL_ASSETS / "js" / "register-io.js").read_text(encoding="utf-8")
+    assert 'options.plantCode && global.Solar91RegisterIO' in module
+    assert 'Solar91RegisterIO.controls("warranty"' in module
+    # The upload and both downloads are scoped to that plant.
+    assert "siteCode: options.plantCode" in module
+    for url in ("/api/asset-warranty/import", "/api/asset-warranty/import/template",
+                "/api/asset-warranty/export"):
+        assert url in register, url
+
+
+def test_asset_warranty_sheet_reserves_a_certification_file_column():
+    """The certificate comes from an API that is not built yet; the column exists so the sheet
+    people fill in today still works once it is, with nothing to re-import."""
+    from app.warranty import sheets as warranty_sheets
+    assert "Certification file" in warranty_sheets.HEADERS
+    for column in ("Equipment", "Part", "Part number", "Warranty start", "Warranty end",
+                   "Certification date", "Certification expiry"):
+        assert column in warranty_sheets.HEADERS, column
 
 
 # ── Asset & Warranty does not imply an inventory register ───────────────────

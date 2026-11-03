@@ -85,6 +85,11 @@
         pmSetupPlant: "",
         pmSetupItems: [],
         washingReports: [],
+        washingSummary: null,
+        // Daily summary -> Filter by status -> Not recorded: who washed on that date, and who did not.
+        dayFilter: null,        // the API's answer, tagged with the date it is for
+        dayFilterLoading: false,
+        dayFilterError: "",
         recordOpen: false,
         recordCycle: 1,
         recordDrafts: {},
@@ -127,19 +132,30 @@
       }).join("");
   }
 
-  function renderStatusOptions(events, selected) {
+  // A plant with no entry has no event to carry a status, so "Not recorded" cannot come from the
+  // events list the way every other status does. It is offered explicitly and answered by
+  // /api/scheduled/washing/day-activity, which reports every visible plant for a date including
+  // the ones that reported nothing.
+  var NOT_RECORDED = "__not_recorded";
+
+  function renderStatusOptions(events, selected, options) {
     var statuses = [];
     events.forEach(function (event) {
       if (statuses.indexOf(event.status) === -1) statuses.push(event.status);
     });
     if (selected !== "all" && statuses.indexOf(selected) === -1) statuses.push(selected);
+    statuses = statuses.filter(function (status) { return status !== NOT_RECORDED; });
     statuses.sort();
     return '<option value="all">All statuses</option>' +
       statuses.map(function (status) {
         return '<option value="' + escape(status) + '"' +
           (status === selected ? " selected" : "") + ">" +
           escape(status) + "</option>";
-      }).join("");
+      }).join("") +
+      (options && options.offerNotRecorded
+        ? '<option value="' + NOT_RECORDED + '"' +
+          (selected === NOT_RECORDED ? " selected" : "") + ">Not recorded</option>"
+        : "");
   }
 
   function equipmentLabel(event, context) {
@@ -159,6 +175,87 @@
           (selected === label ? " selected" : "") + ">" + escape(label) + "</option>";
       }).join("");
   }
+
+  var DAY_STATUS_LABEL = {
+    confirmed: "Recorded", awaiting: "Awaiting review", not_done: "Not done",
+    rejected: "Rejected", not_reported: "Not recorded", upcoming: "Upcoming", paused: "Paused"
+  };
+
+  /**
+   * The plants with nothing recorded for the summary's date.
+   *
+   * "Not done, with a reason" is a report; it is kept out of this list, which is only the plants
+   * that said nothing at all, because those are the ones that still need chasing. A plant whose
+   * washing is paused is left out for the same reason: nothing is expected of it.
+   */
+  function renderNotRecorded(state) {
+    if (state.dayFilterLoading) {
+      return '<p class="ep-calendar__empty">Checking which plants have not recorded…</p>';
+    }
+    if (state.dayFilterError) {
+      return '<p class="ep-calendar__message ep-calendar__message--error" role="alert">' +
+        escape(state.dayFilterError) + '</p>';
+    }
+    var all = (state.dayFilter && state.dayFilter.plants) || [];
+    var missing = all.filter(function (row) { return row.status === "not_reported"; });
+    if (!all.length) {
+      return '<p class="ep-calendar__empty">No washing plants are visible for this date.</p>';
+    }
+    if (!missing.length) {
+      return '<p class="ep-calendar__empty">Every plant has recorded washing for this date.</p>';
+    }
+    return '<section class="ep-calendar__pm-summary-group ep-calendar__portfolio-summary-group">' +
+      '<header><span><i aria-hidden="true"></i><strong>Not recorded</strong></span>' +
+        '<span class="ep-calendar__pm-summary-count">' + missing.length + '</span></header>' +
+      '<div class="ep-calendar__pm-summary-list">' +
+        missing.map(function (row) {
+          return '<div class="ep-calendar__pm-summary-item ep-calendar__pm-summary-item--static">' +
+            '<span class="ep-calendar__pm-summary-badge ep-calendar__pm-summary-badge--washing">WASH</span>' +
+            '<strong>' + escape(row.plant) + '</strong>' +
+            '<span class="ep-calendar__pm-summary-meta">' + escape(row.site_code) +
+              ' · No cleaning details entered</span>' +
+            '<span class="ep-calendar__day-chip ep-calendar__day-chip--not_reported">Not recorded</span>' +
+          '</div>';
+        }).join("") +
+      '</div>' +
+    '</section>';
+  }
+
+  /**
+   * Which plants recorded washing on the summary's date, and which did not.
+   *
+   * Loaded only when the Not recorded filter is chosen, and keyed on the date it was asked for, so
+   * clicking through several dates cannot leave an earlier answer on screen.
+   */
+  function loadDayActivity(host, state, context) {
+    var wanted = state.modalDate;
+    if (!wanted) return;
+    if (state.dayFilter && state.dayFilter.day === wanted) return;   // already have this date
+    var api = global.Solar91PortalAPI;
+    if (!api) {
+      state.dayFilterError = "The portal API client is not loaded.";
+      renderView(host, state, context);
+      return;
+    }
+    state.dayFilterLoading = true;
+    state.dayFilterError = "";
+    renderView(host, state, context);
+    api.request("/api/scheduled/washing/day-activity?day=" + encodeURIComponent(wanted))
+      .then(function (body) {
+        if (state.modalDate !== wanted) return;   // a different date was opened meanwhile
+        body.day = wanted;
+        state.dayFilter = body;
+        state.dayFilterLoading = false;
+        renderView(host, state, context);
+      })
+      .catch(function (error) {
+        if (state.modalDate !== wanted) return;
+        state.dayFilterLoading = false;
+        state.dayFilterError = error.message || "Washing for this date could not be loaded.";
+        renderView(host, state, context);
+      });
+  }
+
 
   function renderToolbar(state, context) {
     var isPortfolio = !context.plantCode;
@@ -635,10 +732,13 @@
                 renderEquipmentOptions(availableEvents, state.modalEquipment, context) +
               '</select></label>' +
               '<label><span class="ep-sr-only">Filter by status</span><select data-calendar-filter="modal-status">' +
-                renderStatusOptions(availableEvents, state.modalStatus) +
+                renderStatusOptions(availableEvents, state.modalStatus,
+                                    { offerNotRecorded: context.type === "washing" }) +
               '</select></label>' +
             '</div>' +
-            renderPortfolioSummaryEvents(events, context, state) +
+            (state.modalStatus === NOT_RECORDED
+              ? renderNotRecorded(state)
+              : renderPortfolioSummaryEvents(events, context, state)) +
           '</div>' +
         '</section>' +
       '</div>';
@@ -970,7 +1070,15 @@
     var completedOn = cycleReports.reduce(function (latest, report) {
       return !latest || report.report_date > latest ? report.report_date : latest;
     }, "");
-    if (completedOn && completedOn < lastDate) lastDate = completedOn;
+    // Cycles 1 and 2 hand the month over to the next cycle on the day they fill, so their
+    // grid stops there. The last cycle has nothing to hand over to: the backend keeps any
+    // later day on it as extra washing (_cycle_sequence in app/scheduled/washing_cycles.py).
+    // Closing its grid on the completion date hid that work — plants that washed again after
+    // all three cycles were done had days with no row to show them on, and no row to record
+    // the next one. The last cycle therefore stays open to today or the end of the month.
+    var cycleCount = (state.washingPlant.cycles || []).length || 3;
+    var isLastCycle = Number(cycle.cycle_no) >= cycleCount;
+    if (completedOn && completedOn < lastDate && !isLastCycle) lastDate = completedOn;
     if (Number(cycle.cycle_no) > 1) {
       var previousCompletion = (state.washingReports || []).filter(function (report) {
         return Number(report.cycle_no) === Number(cycle.cycle_no) - 1 &&
@@ -1032,6 +1140,9 @@
     var cycles = state.washingPlant.cycles || [];
     var cycle = recordCycle(state);
     var rows = recordRows(state);
+    var summary = state.washingSummary || {};
+    var isLast = Number(state.recordCycle) >= (cycles.length || 3);
+    var extraTables = isLast ? Number(summary.extra_tables) || 0 : 0;
     var days = rows.map(function (row) {
       var dateLabel = new Intl.DateTimeFormat("en-IN", {
         weekday: "short", day: "2-digit", month: "short"
@@ -1080,7 +1191,11 @@
           '<button type="button" class="ep-calendar__close" data-calendar-action="close-record" aria-label="Close">×</button></header>' +
         '<div class="ep-calendar__record-progress"><strong>Cycle ' + Number(state.recordCycle) + '</strong>' +
           '<span>' + escape(cycle ? cycle.confirmed : 0) + " of " + escape(state.washingPlant.table_count) +
-          " tables · due " + (cycle && cycle.due_date ? escape(displayDate(cycle.due_date)) : "—") + '</span>' +
+          " tables · due " + (cycle && cycle.due_date ? escape(displayDate(cycle.due_date)) : "—") +
+          // Washing done after all three cycles were complete is recorded on the last cycle and
+          // counted by the API (summary.extra_tables). Showing it stops that work looking lost.
+          (extraTables ? " · " + escape(extraTables) + " extra table" + (extraTables === 1 ? "" : "s") +
+            " washed after cycle " + ((state.washingPlant.cycles || []).length || 3) : "") + '</span>' +
           '<i><span style="width:' + (cycle && state.washingPlant.table_count
             ? Math.min(100, Math.round(100 * Number(cycle.confirmed || 0) / Number(state.washingPlant.table_count)))
             : 0) + '%"></span></i></div>' +
@@ -1320,6 +1435,7 @@
           }
         }
         state.washingPlant.monthly_target = 3;
+        state.washingSummary = cyclesData.summary || null;
         state.washingPlant.cycles_this_month = (cyclesData.cycles || []).filter(function (cycle) {
           return cycle.state === "Completed";
         }).length;
@@ -1817,9 +1933,17 @@
       var filter = event.target.dataset.calendarFilter;
       if (filter === "plant") active.state.plantFilter = event.target.value;
       else if (filter === "status") active.state.statusFilter = event.target.value;
+
       else if (filter === "modal-plant") active.state.modalPlant = event.target.value;
       else if (filter === "modal-equipment") active.state.modalEquipment = event.target.value;
-      else if (filter === "modal-status") active.state.modalStatus = event.target.value;
+      else if (filter === "modal-status") {
+        active.state.modalStatus = event.target.value;
+        // Not recorded is an absence, so it needs the server's list of every visible plant.
+        if (event.target.value === NOT_RECORDED) {
+          loadDayActivity(host, active.state, active.context);
+          return;
+        }
+      }
       else {
         // PM setup cascade: a new Equipment changes which Parts are offered, and
         // a new Part changes which Maintenance tasks are offered. Clear the
