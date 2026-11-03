@@ -93,7 +93,8 @@ def template_bytes(db: Session, user: User) -> bytes:
     guide.title = "How to fill"
     for text in (
         "One row is one issue (ticket). Fill the 'Site issues' sheet; the lists for drop-downs are on the 'Lists' sheet.",
-        "Required: Site code, Issue category, Description and Severity (Critical or Medium; an old 'Low' is read as Medium).",
+        "Required: Site code, Issue category and Description.",
+        "Severity: optional. Blank is read as Medium, which is what every ticket is filed as.",
         "Occurred on: the day the fault happened (DD-MM-YYYY). Blank means today.",
         "Target date: when it should be fixed. Blank uses the usual deadline ("+_deadline_text(deadline_hours(db))+").",
         "Serial number, Supplier / Maker and Units: optional. What the fault was found on, who made or supplied it, and how many units it covers.",
@@ -235,8 +236,10 @@ def import_issues(db: Session, user: User, filename: str, content: bytes, *, dry
     headers, rows = read_upload_rows(filename, content, sheet=SHEET, max_bytes=MAX_ISSUE_BYTES,
                                      max_rows=MAX_ISSUE_ROWS, row_label="issue rows")
     columns = map_columns(headers, ALIASES)
+    # Severity is not required: every ticket is filed at the same priority, so a
+    # sheet without the column (or with it left blank) imports as Medium.
     missing = [label for field, label in (("site_code", "Site code"), ("category", "Issue category"),
-                                          ("description", "Description"), ("severity", "Severity")) if field not in columns]
+                                          ("description", "Description")) if field not in columns]
     if missing:
         raise HTTPException(422, "The file needs these columns: " + ", ".join(missing))
     if not dry_run:
@@ -292,7 +295,8 @@ def import_issues(db: Session, user: User, filename: str, content: bytes, *, dry
         elif len(description) > 4000:
             errors.append("Description must be 4000 characters or fewer")
         severity_text = cell_text(get("severity"))
-        severity = normalize_issue_severity(severity_text)
+        # Blank means Medium, matching how tickets raised in the portal are filed.
+        severity = normalize_issue_severity(severity_text) if severity_text else "Medium"
         if severity not in ISSUE_SEVERITIES:
             errors.append("Severity must be Critical or Medium")
         problem = cell_text(get("problem"))

@@ -64,6 +64,9 @@
     requestId: 0,
     liveMode: false,
     canRaise: false,
+    // Correcting a stored ticket is the O&M Head's job. The API would also allow
+    // an Assignee on an open ticket of theirs; the register deliberately does not.
+    canEdit: false,
     assignees: [],
     submitError: "",
     submitNotice: "",
@@ -201,7 +204,10 @@
       return '<div class="ep-issues__empty"><strong>No issues found</strong>' +
         '<button type="button" class="ep-issues__button" data-issue-action="clear">Clear filters</button></div>';
     }
-    var headers = ["Issue ID", "Equipment", "Maker / Supplier", "Problem", "Plant", "Assigned to", "Status", "Action"];
+    // Sub-problem sits in its own column beside Equipment, the same pair the
+    // Raise issue form captures, so the register reads the way tickets are filed.
+    var headers = ["Issue ID", "Equipment", "Sub-problem", "Maker / Supplier", "Problem",
+                   "Plant", "Assigned to", "Status", "Action"];
     return '<div class="ep-issues__table-wrap"><table class="ep-issues__table"><thead><tr>' +
       headers.map(function (header) { return "<th>" + header + "</th>"; }).join("") +
       '</tr></thead><tbody>' + rows.map(function (issue) {
@@ -209,26 +215,62 @@
         return '<tr>' +
           '<td data-label="' + labels[0] + '"><button type="button" class="ep-issues__ticket-link" data-issue-open="' +
             escape(issue.id) + '">' + escape(issue.id) + '</button></td>' +
-          '<td data-label="' + labels[1] + '"><strong>' + escape(issue.equipment) + '</strong>' +
-            (issue.subpart ? "<small>" + escape(issue.subpart) + "</small>" : "") + '</td>' +
-          '<td data-label="' + labels[2] + '">' + (issue.supplierMaker
+          '<td data-label="' + labels[1] + '"><strong>' + escape(issue.equipment) + '</strong></td>' +
+          '<td data-label="' + labels[2] + '">' + (issue.subpart
+            ? escape(issue.subpart)
+            : '<span class="ep-issues__unassigned">Not recorded</span>') + '</td>' +
+          '<td data-label="' + labels[3] + '">' + (issue.supplierMaker
             ? '<strong>' + escape(issue.supplierMaker) + '</strong>' +
               (issue.serialNo ? "<small>S/N " + escape(issue.serialNo) + "</small>" : "")
             : '<span class="ep-issues__unassigned">Not recorded</span>') + '</td>' +
-          '<td data-label="' + labels[3] + '" class="ep-issues__problem">' + escape(issue.problem) + '</td>' +
-          '<td data-label="' + labels[4] + '"><strong>' + escape(issue.plantCode) + '</strong><small>' + escape(issue.plantName) + '</small></td>' +
-          '<td data-label="' + labels[5] + '">' + (issue.assignee
+          '<td data-label="' + labels[4] + '" class="ep-issues__problem">' + escape(issue.problem) + '</td>' +
+          '<td data-label="' + labels[5] + '"><strong>' + escape(issue.plantCode) + '</strong><small>' + escape(issue.plantName) + '</small></td>' +
+          '<td data-label="' + labels[6] + '">' + (issue.assignee
             ? '<span class="ep-issues__assignee"><i>' + escape(issue.assignee.split(/\s+/).map(function (part) { return part[0]; }).join("").slice(0, 2)) +
               '</i>' + escape(issue.assignee) + '</span>'
             : '<span class="ep-issues__unassigned">Unassigned</span>') + '</td>' +
-          '<td data-label="' + labels[6] + '"><span class="ep-issues__status ep-issues__status--' +
+          '<td data-label="' + labels[7] + '"><span class="ep-issues__status ep-issues__status--' +
             statusTone(issue.status) + '"><i></i>' + escape(issue.status) + '</span></td>' +
-          '<td data-label="' + labels[7] + '">' + (state.liveMode
+          '<td data-label="' + labels[8] + '">' + (state.liveMode && !state.canEdit
             ? '<span aria-label="Manage this saved ticket in Solar91 O&M">Saved</span>'
             : '<button type="button" class="ep-issues__button ep-issues__button--small" data-issue-edit="' +
               escape(issue.id) + '">Edit</button>') + '</td>' +
         '</tr>';
       }).join("") + '</tbody></table></div>';
+  }
+
+  /** The edit form: the stored details of one ticket, corrected in place. */
+  function renderEditForm(issue) {
+    if (!issue) return '<p class="ep-issues__empty">This ticket is no longer in the list.</p>';
+    var field = function (name, label, value, attrs) {
+      return '<label class="ep-issues__wizard-field">' + escape(label) +
+        '<input name="' + name + '" value="' + escape(value || "") + '" ' + (attrs || "") + ' /></label>';
+    };
+    return '<form class="ep-issues__wizard" data-issue-form data-issue-edit-form="' + escape(issue.dbId) + '">' +
+      '<p class="ep-issues__wizard-info"><strong>' + escape(issue.id) + '</strong> · ' +
+        escape(issue.plantCode) + ' ' + escape(issue.plantName) + '</p>' +
+      '<label class="ep-issues__wizard-field">Equipment / category' +
+        '<select name="equipment" required>' + renderEquipmentOptions(issue.equipment) + '</select></label>' +
+      '<label class="ep-issues__wizard-field">Sub-problem' +
+        '<select name="subpart">' + renderSubpartOptions(issue.subpart, issue.equipment) + '</select>' +
+        '<small>The fault for this category, the same list the Raise issue form offers.</small></label>' +
+      field("supplierMaker", "Maker / Supplier", issue.supplierMaker, 'maxlength="160"') +
+      field("serialNo", "Serial number", issue.serialNo, 'maxlength="120"') +
+      field("unitCount", "Units", issue.unitCount, 'type="number" min="1" max="100000"') +
+      // No severity field. Raise issue does not ask for one either (every ticket is
+      // filed as Medium), so the register does not offer a way to diverge from that.
+      // Where a ticket stands is its Status, not its severity.
+      '<label class="ep-issues__wizard-field">Issue details' +
+        '<textarea name="problem" required rows="4" maxlength="4000">' + escape(issue.problem || "") + '</textarea></label>' +
+      '<label class="ep-issues__wizard-field">Reason for the change' +
+        '<input name="changeReason" maxlength="500" placeholder="Why the ticket is being corrected (optional)" /></label>' +
+      '<p class="ep-issues__wizard-error" data-issue-edit-error hidden></p>' +
+      '<div class="ep-issues__wizard-actions">' +
+        '<button type="button" class="ep-issues__button" data-issue-action="close">Cancel</button>' +
+        '<button type="submit" class="ep-issues__button ep-issues__button--primary"' +
+          (state.submitting ? " disabled" : "") + '>' +
+          (state.submitting ? "Saving…" : "Save changes") + '</button>' +
+      '</div></form>';
   }
 
   function formatIssueDate(value) {
@@ -257,7 +299,8 @@
         field("Reported", formatIssueDate(issue.reportedAt)) +
         field("Reported by", issue.reportedBy) +
         field("Assigned to", issue.assignee || "Unassigned") +
-        field("Severity", issue.severity) +
+        // Severity is not shown: every ticket is filed as Medium, so it carried no
+        // information. Status is what says where a ticket stands.
         field("Status", issue.status) +
         field("Issue details", issue.problem) +
         field("Evidence photos", issue.evidenceFiles && issue.evidenceFiles.length
@@ -465,7 +508,9 @@
           '<button type="button" class="ep-issues__drawer-x" data-issue-action="close" aria-label="Close">×</button></header>' +
         (isWizard
           ? '<div class="ep-issues__drawer-content">' + renderRaiseWizard(context) + '</div>'
-          : isForm ? '<div class="ep-issues__drawer-content"></div>' : renderDetails(issue || {
+          : isForm
+          ? '<div class="ep-issues__drawer-content">' + renderEditForm(issue) + '</div>'
+          : renderDetails(issue || {
           id: "Issue unavailable", plantCode: "", plantName: "", equipment: "", status: "Unhealthy",
           problem: "", reportedAt: "", reportedBy: "", assignee: "", notes: ""
         })) +
@@ -569,6 +614,7 @@
       state.assignees = result.assignees || [];
       state.canRaise = ["O&M Head", "Assignee", "Site Engineer"].indexOf(result.role) !== -1 &&
         state.plants.length > 0;
+      state.canEdit = result.role === "O&M Head";
       state.liveMode = true;
       state.loaded = true;
       state.loading = false;
@@ -599,6 +645,14 @@
     });
     host.addEventListener("change", function (event) {
       if (!active || active.host !== host) return;
+      // Edit form: a new Equipment changes which sub-problems apply, so refill
+      // that list in place rather than redrawing and losing what is typed.
+      if (event.target.name === "equipment" && state.modalMode === "edit") {
+        var editForm = event.target.closest("[data-issue-edit-form]");
+        var subpartSelect = editForm && editForm.querySelector('[name="subpart"]');
+        if (subpartSelect) subpartSelect.innerHTML = renderSubpartOptions("", event.target.value);
+        return;
+      }
       if (event.target.name === "equipment" && state.modalMode === "create" && state.draft) {
         var currentWizard = host.querySelector("[data-issue-wizard]");
         if (currentWizard) syncWizardDraft(currentWizard);
@@ -775,8 +829,14 @@
         submitLiveIssue(form);
         return;
       }
-      // There is no local write path: every ticket is created through submitLiveIssue
-      // above, and edits/workflow actions stay in the main O&M app.
+      if (form.hasAttribute("data-issue-edit-form")) {
+        if (!form.reportValidity()) return;
+        saveIssueEdit(form);
+        return;
+      }
+      // Nothing else writes locally: tickets are created through submitLiveIssue
+      // above, edited through saveIssueEdit, and the rest of the workflow
+      // (progress, resolution, closing) stays in the main O&M app.
     });
     host.addEventListener("keydown", function (event) {
       if (event.key === "Escape" && active && active.host === host && state.modalMode) {
@@ -806,6 +866,78 @@
       : value + (value.length === 16 ? ":00" : "") + "+05:30";
     var date = new Date(local);
     return isNaN(date.getTime()) ? null : date.toISOString();
+  }
+
+  /**
+   * Save a correction to a stored ticket: PATCH /api/issues/{id}.
+   *
+   * Only the fields that actually changed are sent, so an edit never overwrites
+   * something another person changed in the meantime. The API allows this for the
+   * O&M Head, which is the only role the register offers the Edit button to.
+   */
+  function saveIssueEdit(form) {
+    var api = global.Solar91PortalAPI;
+    var issue = state.rows.find(function (row) { return row.dbId === form.dataset.issueEditForm; });
+    var errorEl = form.querySelector("[data-issue-edit-error]");
+
+    function fail(message) {
+      if (errorEl) { errorEl.textContent = message; errorEl.hidden = false; }
+    }
+    if (!issue) return fail("This ticket is no longer in the list. Close and reopen the register.");
+    if (!state.liveMode) return fail("This preview cannot save changes. Open the signed-in Solar91 O&M app.");
+
+    var read = function (name) { return (form.elements[name] && form.elements[name].value || "").trim(); };
+    var units = parseInt(read("unitCount"), 10);
+    var next = {
+      vertical: read("equipment"),
+      subcategory: read("subpart") || null,
+      supplier_maker: read("supplierMaker") || null,
+      serial_no: read("serialNo") || null,
+      unit_count: isNaN(units) ? null : units,
+      description: read("problem")
+    };
+    var before = {
+      vertical: issue.equipment,
+      subcategory: issue.subpart || null,
+      supplier_maker: issue.supplierMaker || null,
+      serial_no: issue.serialNo || null,
+      unit_count: issue.unitCount === "" ? null : parseInt(issue.unitCount, 10),
+      description: issue.problem
+    };
+    var payload = {};
+    Object.keys(next).forEach(function (key) {
+      if (next[key] !== before[key]) payload[key] = next[key];
+    });
+    if (!Object.keys(payload).length) {
+      state.modalMode = "details";
+      state.modalId = issue.id;
+      renderView();
+      return;
+    }
+    var reason = read("changeReason");
+    if (reason) payload.change_reason = reason;
+
+    state.submitting = true;
+    if (errorEl) errorEl.hidden = true;
+    renderView();
+    api.request("/api/issues/" + encodeURIComponent(issue.dbId), { method: "PATCH", body: payload })
+      .then(function (updated) {
+        var plantsById = {};
+        state.plants.forEach(function (item) { plantsById[item.dbId] = item; });
+        var saved = mapApiIssue(updated, plantsById);
+        var index = state.rows.findIndex(function (row) { return row.dbId === saved.dbId; });
+        if (index !== -1) state.rows.splice(index, 1, saved);
+        state.submitting = false;
+        state.modalMode = "details";
+        state.modalId = saved.id;
+        state.submitNotice = saved.id + " updated.";
+        renderView();
+      })
+      .catch(function (error) {
+        state.submitting = false;
+        renderView();
+        fail(error.message || "Could not save these changes.");
+      });
   }
 
   function submitLiveIssue(form) {
