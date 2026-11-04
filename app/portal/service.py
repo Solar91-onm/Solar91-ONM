@@ -1020,12 +1020,14 @@ def calendar(db: Session, user: User, kind: str, month: str, plant_ids: list[UUI
         return out
 
     from app.core.models import WashingDailyReport
+    from app.scheduled.washing_cycles import format_table_codes
 
     rows = db.execute(
         select(WashingDailyReport.id, WashingDailyReport.plant_id, WashingDailyReport.report_date,
                WashingDailyReport.job_status, WashingDailyReport.cycle_no, WashingDailyReport.tables_cleaned,
                WashingDailyReport.review_status, WashingDailyReport.reported_by,
-               WashingDailyReport.exception_reason, WashingDailyReport.cycle_completed)
+               WashingDailyReport.exception_reason, WashingDailyReport.cycle_completed,
+               WashingDailyReport.cleaned_table_codes)
         .where(
             WashingDailyReport.plant_id.in_(plant_ids),
             WashingDailyReport.report_date >= first,
@@ -1046,6 +1048,8 @@ def calendar(db: Session, user: User, kind: str, month: str, plant_ids: list[UUI
             "assignee": row.reported_by or "",
             "date": row.report_date.isoformat(),
             "exceptionReason": row.exception_reason,
+            "tablesCleaned": row.tables_cleaned,
+            "tablesList": format_table_codes(row.cleaned_table_codes),
             "plantSiteCode": codes.get(row.plant_id),
             "plantName": names.get(row.plant_id),
             "source": "database",

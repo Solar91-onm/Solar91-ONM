@@ -722,7 +722,7 @@ def test_plant_washing_range_sheet_and_health_issue_wizard_are_wired():
     calendar_styles = (PORTAL_ASSETS / "css" / "calendar.css").read_text(encoding="utf-8")
     assert 'data-calendar-action="open-record">Record module cleaning' in calendar
     assert '"/api/scheduled/washing/daily-reports/sheet"' in calendar
-    assert "table_start: row.start" in calendar and "table_end: end" in calendar
+    assert "table_numbers: row.numbers" in calendar  # the sheet now sends the exact tables of each day
     assert "function syncRecordRangeInputs" in calendar
     assert "previousCompletion" in calendar and "startDate = afterPrevious" in calendar
     assert "ep-calendar__record-modal" in calendar_styles
@@ -845,7 +845,7 @@ def test_record_sheet_lets_managers_edit_saved_days_through_the_report_patch():
     # Saving goes through the existing report PATCH, with the table range for numbered days.
     assert '"/api/scheduled/washing/daily-reports/" + encodeURIComponent(pending.id)' in calendar
     assert 'method: "PATCH"' in calendar
-    assert "body.table_start = edit.start;" in calendar and "body.table_end = end;" in calendar
+    assert "body.table_numbers = parsed.numbers;" in calendar  # an edited day sends the exact tables
     # A failed save stays visible in the editor and is never reported as success.
     assert 'saveState.recordEdit.error = "Not saved. "' in calendar
     assert 'saveState.recordNotice = "Day updated.";' in calendar
@@ -860,4 +860,21 @@ def test_record_sheet_saves_a_zero_tables_day_like_the_excel_upload():
     assert 'job_status: "Not done",' in calendar and 'exception_reason: "Other",' in calendar
     assert "tables_cleaned: 0," in calendar
     # Save is enabled for a zero day even though no last table number was typed
-    assert "function rowEntered(row, total)" in calendar and "row.draft.zero" in calendar
+    assert "function rowEntered(row)" in calendar and "row.zero" in calendar
+
+
+def test_record_sheet_tracks_exactly_which_tables_were_cleaned():
+    calendar = (PORTAL_ASSETS / "js" / "operations-calendar.js").read_text(encoding="utf-8")
+    # three ways to enter a day: from the start, from the end, or any list such as 1, 2, 4, 7-8, 13 / 100-91
+    assert 'modes = [["start", "From start"], ["end", "From end"], ["pick", "Pick tables"]]' in calendar
+    assert "function parseTableList(text, total)" in calendar and "function planDay(state, draft, used, total)" in calendar
+    # the exact tables are sent, shown for every saved day, and summarised for the cycle
+    assert "table_numbers: row.numbers," in calendar
+    assert "formatTableList(row.numbers)" in calendar
+    assert "Cleaned this cycle:" in calendar and "Not cleaned yet:" in calendar
+
+
+def test_calendar_day_detail_lists_the_cleaned_tables():
+    calendar = (PORTAL_ASSETS / "js" / "operations-calendar.js").read_text(encoding="utf-8")
+    assert '["Which tables", event.tablesList]' in calendar
+    assert "tablesList: formatTableList(tableNumbersOf(report))" in calendar

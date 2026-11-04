@@ -152,18 +152,34 @@ class WashingDailyReportRequest(BaseModel):
         return self
 
 
+def _check_table_numbers(numbers: list[int]) -> None:
+    if any(number < 1 or number > 5000 for number in numbers):
+        raise ValueError("Table numbers must be between 1 and 5000")
+    if len(set(numbers)) != len(numbers):
+        raise ValueError("A table can be listed only once in a day")
+
+
 class WashingSheetEntry(BaseModel):
     """One day of a cycle sheet: cleaned tables, an optional inclusive table-number range, or an exception."""
     report_date: date
     tables_cleaned: int = Field(default=0, ge=0, le=5000)
     table_start: int | None = Field(default=None, ge=1, le=5000)
     table_end: int | None = Field(default=None, ge=1, le=5000)
+    table_numbers: list[int] | None = Field(default=None, max_length=5000)
     job_status: Literal["Done", "Not done"]
     exception_reason: Literal["Rain", "Water shortage", "Machine breakdown", "Access restriction", "Safety stand-down", "Other"] | None = None
     remarks: str | None = Field(default=None, max_length=4000)
 
     @model_validator(mode="after")
     def validate_entry(self):
+        if self.table_numbers is not None:
+            if self.table_start is not None or self.table_end is not None:
+                raise ValueError("Send either a table range or a list of table numbers, not both")
+            _check_table_numbers(self.table_numbers)
+            if self.job_status == "Done" and self.tables_cleaned != len(self.table_numbers):
+                raise ValueError("Tables cleaned must match the listed table numbers")
+            if self.job_status == "Not done" and self.table_numbers:
+                raise ValueError("A not-done exception cannot include cleaned tables")
         if self.job_status == "Not done" and self.exception_reason is None:
             raise ValueError("Choose an exception reason for work that was not done")
         if self.job_status == "Done" and self.exception_reason is not None:
@@ -216,11 +232,19 @@ class WashingReportUpdateRequest(BaseModel):
     tables_cleaned: int | None = Field(default=None, ge=0, le=5000)
     table_start: int | None = Field(default=None, ge=1, le=5000)
     table_end: int | None = Field(default=None, ge=1, le=5000)
+    table_numbers: list[int] | None = Field(default=None, max_length=5000)
     exception_reason: Literal["Rain", "Water shortage", "Machine breakdown", "Access restriction", "Safety stand-down", "Other"] | None = None
     remarks: str | None = Field(default=None, max_length=4000)
 
     @model_validator(mode="after")
     def validate_range(self):
+        if self.table_numbers is not None:
+            if self.table_start is not None or self.table_end is not None:
+                raise ValueError("Send either a table range or a list of table numbers, not both")
+            _check_table_numbers(self.table_numbers)
+            if self.tables_cleaned is not None and self.tables_cleaned != len(self.table_numbers):
+                raise ValueError("Tables cleaned must match the listed table numbers")
+            return self
         if (self.table_start is None) != (self.table_end is None):
             raise ValueError("Enter both the first and last table numbers")
         if self.table_start is not None:

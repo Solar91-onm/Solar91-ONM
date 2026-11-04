@@ -1289,17 +1289,19 @@ def create_sheet_reports(db: Session, user: User, payload: WashingSheetRequest) 
                 422,
                 f"Table number {entry.table_end} exceeds this plant's configured table count ({total_tables})",
             )
-        cleaned_codes = (
-            [f"Table {number:03d}" for number in range(entry.table_start, entry.table_end + 1)]
-            if entry.table_start is not None and entry.table_end is not None
-            else []
-        )
+        if entry.table_numbers is not None:
+            cleaned_codes = _numbered_codes(entry.table_numbers, total_tables)
+        elif entry.table_start is not None and entry.table_end is not None:
+            cleaned_codes = [f"Table {number:03d}" for number in range(entry.table_start, entry.table_end + 1)]
+        else:
+            cleaned_codes = []
         report, _completed = _add_report(
             db, user, plant, manager, total_tables,
             report_date=entry.report_date, job_status=entry.job_status, tables_cleaned=entry.tables_cleaned,
             exception_reason=entry.exception_reason, remarks=entry.remarks, cleaned_codes=cleaned_codes,
         )
         created.append(report)
+    _assert_distinct_tables(db, plant.id, [report.cycle_month for report in created], total_tables, {report.id for report in created})
     pending = [report for report in created if report.review_status == "Pending"]
     if pending:
         done = [report for report in pending if report.job_status == "Done"]
@@ -1343,31 +1345,51 @@ def _code_number(code: object) -> int | None:
     return int(match.group(1)) if match else None
 
 
-def _shift_following_codes(db: Session, report: WashingDailyReport, delta: int, total_tables: int) -> None:
-    """Keep a cycle's table numbers contiguous after one day's count changed by `delta`.
+def format_table_codes(codes) -> str:
+    """["Table 001", "Table 002", "Table 007"] -> "1-2, 7": which tables a day covered, for people reading the record."""
+    numbers = sorted({n for n in (_code_number(code) for code in (codes or [])) if n is not None})
+    parts, i = [], 0
+    while i < len(numbers):
+        j = i
+        while j + 1 < len(numbers) and numbers[j + 1] == numbers[j] + 1:
+            j += 1
+        parts.append(f"{numbers[i]}–{numbers[j]}" if j > i else str(numbers[i]))
+        i = j + 1
+    return ", ".join(parts)
 
-    Later days of the same plant-month cycle that already carry a numbered range move by the same amount. A range that
-    would fall outside 1..total_tables cannot be shown as numbers any more, so that day keeps its count and loses only
-    the numbers."""
-    if not delta:
-        return
-    later = db.scalars(select(WashingDailyReport).where(
-        WashingDailyReport.plant_id == report.plant_id,
-        WashingDailyReport.cycle_month == report.cycle_month,
-        WashingDailyReport.cycle_no == report.cycle_no,
-        WashingDailyReport.id != report.id,
-        WashingDailyReport.report_date > report.report_date,
-        WashingDailyReport.review_status.in_(["Pending", "Confirmed"]),
-    ).with_for_update())
-    for row in later:
-        numbers = [_code_number(code) for code in (row.cleaned_table_codes or [])]
-        if not numbers or None in numbers:
-            continue
-        start, end = min(numbers) + delta, max(numbers) + delta
-        row.cleaned_table_codes = (
-            [f"Table {number:03d}" for number in range(start, end + 1)] if start >= 1 and end <= total_tables else []
-        )
-        db.add(row)
+
+def _numbered_codes(numbers: list[int], total_tables: int) -> list[str]:
+    """Codes for an explicit list of table numbers (a range from the start, from the end, or scattered tables)."""
+    too_high = [number for number in numbers if number > total_tables]
+    if too_high:
+        raise HTTPException(422, f"Table number {max(too_high)} exceeds this plant's configured table count ({total_tables})")
+    return [f"Table {number:03d}" for number in sorted(set(numbers))]
+
+
+def _assert_distinct_tables(db: Session, plant_id: UUID, months, total_tables: int, touched: set) -> None:
+    """A table is cleaned once per cycle. Refuses (so the caller's transaction rolls back) when a day that was just
+    saved or edited lists a table that another day of the same cycle already has. Days beyond the three cycles are extra
+    washing and may repeat tables; older days that already overlap are left alone unless they are being changed."""
+    for month in dict.fromkeys(months):
+        rows = list(db.scalars(select(WashingDailyReport).where(
+            WashingDailyReport.plant_id == plant_id, WashingDailyReport.cycle_month == month,
+        ).order_by(WashingDailyReport.report_date, WashingDailyReport.created_at)))
+        sequence = _cycle_sequence([(row.tables_cleaned, row.review_status in ("Pending", "Confirmed")) for row in rows], total_tables)
+        seen: dict[tuple[int, int], WashingDailyReport] = {}
+        for row, (cycle_no, extra) in zip(rows, sequence):
+            if extra or row.review_status not in ("Pending", "Confirmed"):
+                continue
+            for code in row.cleaned_table_codes or []:
+                number = _code_number(code)
+                if number is None:
+                    continue
+                other = seen.get((cycle_no, number))
+                if other is not None and (row.id in touched or other.id in touched):
+                    raise HTTPException(409, (
+                        f"Table {number} is already recorded in cycle {cycle_no} on {_day_label(other.report_date)}. "
+                        "A table can be cleaned only once per cycle; change that day or leave the table out."
+                    ))
+                seen.setdefault((cycle_no, number), row)
 
 
 def update_daily_report(db: Session, user: User, report_id: UUID, payload: WashingReportUpdateRequest) -> dict:
@@ -1375,8 +1397,7 @@ def update_daily_report(db: Session, user: User, report_id: UUID, payload: Washi
     total_tables = _plant_table_count(db, plant.id, config)
     before = {"report_date": report.report_date.isoformat(), "tables_cleaned": report.tables_cleaned, "job_status": report.job_status,
               "exception_reason": report.exception_reason, "remarks": report.remarks, "cycle_no": report.cycle_no, "cycle_month": report.cycle_month,
-              "table_codes": [report.cleaned_table_codes[0], report.cleaned_table_codes[-1]] if report.cleaned_table_codes else []}
-    old_count = report.tables_cleaned if report.job_status == "Done" and report.review_status in ("Pending", "Confirmed") else 0
+              "table_codes": list(report.cleaned_table_codes or [])}
     old_month = report.cycle_month
 
     new_date = payload.report_date or report.report_date
@@ -1384,7 +1405,10 @@ def update_daily_report(db: Session, user: User, report_id: UUID, payload: Washi
     status = payload.job_status or report.job_status
     codes: list[str] = []
     if status == "Done":
-        if payload.table_start is not None:
+        if payload.table_numbers is not None:
+            codes = _numbered_codes(payload.table_numbers, total_tables)
+            tables = len(codes)
+        elif payload.table_start is not None:
             if payload.table_end > total_tables:
                 raise HTTPException(422, f"Table number {payload.table_end} exceeds this plant's configured table count ({total_tables})")
             tables = payload.table_end - payload.table_start + 1
@@ -1401,8 +1425,6 @@ def update_daily_report(db: Session, user: User, report_id: UUID, payload: Washi
             raise HTTPException(422, "Choose the reason the work was not done")
 
     new_month = _month_key(new_date)
-    if new_date == report.report_date and report.review_status in ("Pending", "Confirmed"):
-        _shift_following_codes(db, report, tables - old_count, total_tables)
 
     report.report_date = new_date
     report.cycle_month = new_month
@@ -1427,6 +1449,7 @@ def update_daily_report(db: Session, user: User, report_id: UUID, payload: Washi
     for month in dict.fromkeys((old_month, new_month)):
         moved = _resequence_month(db, plant.id, month, total_tables)
         _audit_moves(db, user, plant, month, moved, f"{before['report_date']} edited")
+    _assert_distinct_tables(db, plant.id, (old_month, new_month), total_tables, {report.id})
     cycle_no = report.cycle_no
     db.add(AuditLog(
         user_id=user.id, actor_name=user.display_name, action="Edited daily washing report",

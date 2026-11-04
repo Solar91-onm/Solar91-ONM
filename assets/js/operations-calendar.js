@@ -98,6 +98,7 @@
         recordCycle: 1,
         recordDrafts: {},
         recordEdit: null,
+        recordMode: "start",
         recordSaving: false,
         recordError: "",
         recordNotice: "",
@@ -663,6 +664,7 @@
       ["Completed on", event.completedOn ? displayDate(event.completedOn) : ""],
       ["Cycle", event.cycleNo ? "Cycle " + event.cycleNo : ""],
       ["Tables cleaned", event.tablesCleaned],
+      ["Which tables", event.tablesList],
       ["Exception", event.exceptionReason],
       ["Remarks", event.remarks]
     ].filter(function (field) {
@@ -1049,17 +1051,6 @@
     return cycles.find(function (cycle) { return Number(cycle.cycle_no) === Number(state.recordCycle); });
   }
 
-  function cycleStartTable(state, cycle, date, carry) {
-    var reports = (state.washingReports || []).filter(function (report) {
-      return Number(report.cycle_no) === Number(cycle.cycle_no) &&
-        report.report_date < date && report.review_status !== "Rejected";
-    });
-    var used = reports.reduce(function (sum, report) {
-      return sum + (Number(report.tables_cleaned) || 0);
-    }, 0);
-    return Math.max(1, (carry || 0) + used + 1);
-  }
-
   function recordRows(state) {
     var cycle = recordCycle(state);
     if (!cycle || !state.washingPlant) return [];
@@ -1116,32 +1107,144 @@
       reportsByDate[report.report_date] = report;
     });
     var total = Number(state.washingPlant.table_count) || 0;
-    var next = cycleStartTable(state, cycle, startDate, 0);
-    return dates.map(function (date) {
+    // Tables already cleaned in this cycle. Days are walked in date order, so each unsaved day sees every table the
+    // saved days before it (and the unsaved days above it) have taken. `savedUsed` leaves the unsaved drafts out.
+    var used = {};
+    var savedUsed = {};
+    (state.washingReports || []).forEach(function (report) {
+      if (Number(report.cycle_no) === Number(cycle.cycle_no) && report.report_date < startDate &&
+          report.review_status !== "Rejected") {
+        markUsed(used, total, report);
+        markUsed(savedUsed, total, report);
+      }
+    });
+    var rows = dates.map(function (date) {
       var report = reportsByDate[date];
       if (report && report.review_status !== "Rejected") {
-        var savedCodes = report.cleaned_table_codes || [];
-        var start = savedCodes.length ? tableNumber(savedCodes[0]) : null;
-        var end = savedCodes.length ? tableNumber(savedCodes[savedCodes.length - 1]) : null;
-        next = end ? (end >= total ? total + 1 : end + 1) : next + (Number(report.tables_cleaned) || 0);
-        return { date: date, report: report, start: start, end: end };
+        markUsed(used, total, report);
+        markUsed(savedUsed, total, report);
+        return { date: date, report: report, numbers: tableNumbersOf(report) };
       }
-
       var draft = state.recordDrafts[date] || {};
-      var start = next;
-      var end = draft.end === undefined || draft.end === "" ? "" : Number(draft.end);
-      if (end && end >= start && end <= total) {
-        next = end >= total ? total + 1 : end + 1;
-      }
-      return { date: date, report: null, start: start, end: end, draft: draft };
+      var plan = planDay(state, draft, used, total);
+      plan.numbers.forEach(function (number) { used[number] = true; });
+      return {
+        date: date, report: null, draft: draft, mode: plan.mode, numbers: plan.numbers, first: plan.first,
+        error: plan.error, full: plan.full, zero: plan.zero
+      };
     });
+    rows.cleanedTables = [];
+    rows.openTables = [];
+    for (var n = 1; n <= total; n += 1) (savedUsed[n] ? rows.cleanedTables : rows.openTables).push(n);
+    return rows;
   }
 
-  /** An unsaved day is ready to save with a valid last table number, or as a zero-tables day. */
-  function rowEntered(row, total) {
-    if (row.report) return false;
-    if (row.draft && row.draft.zero) return row.start <= total;
-    return Number(row.end) >= row.start && Number(row.end) <= total;
+  function tableNumbersOf(report) {
+    return (report.cleaned_table_codes || []).map(tableNumber).filter(function (number) { return number !== null; });
+  }
+
+  /** Reports saved before table numbers were stored only have a count: they used the lowest free tables. */
+  function markUsed(used, total, report) {
+    var numbers = tableNumbersOf(report);
+    if (numbers.length) {
+      numbers.forEach(function (number) { used[number] = true; });
+      return;
+    }
+    var left = report.job_status === "Done" ? Number(report.tables_cleaned) || 0 : 0;
+    for (var n = 1; n <= total && left > 0; n += 1) {
+      if (!used[n]) { used[n] = true; left -= 1; }
+    }
+  }
+
+  /** "1, 2, 4, 7-8, 13" or "100-91" (either direction) -> ascending unique numbers, or an error message. */
+  function parseTableList(text, total) {
+    var cleaned = String(text || "").replace(/\s*([-\u2013\u2014])\s*/g, "$1");
+    var parts = cleaned.split(/[,;\s]+/).filter(Boolean);
+    var numbers = [];
+    var seen = {};
+    for (var i = 0; i < parts.length; i += 1) {
+      var match = parts[i].match(/^(\d+)(?:[-\u2013\u2014](\d+))?$/);
+      if (!match) return { numbers: [], error: "\u201c" + parts[i] + "\u201d is not a table number or range." };
+      var from = Number(match[1]);
+      var to = match[2] === undefined ? from : Number(match[2]);
+      if (from < 1 || to < 1 || from > total || to > total) {
+        return { numbers: [], error: "Table numbers must be between 1 and " + total + "." };
+      }
+      var step = from <= to ? 1 : -1;
+      for (var number = from; ; number += step) {
+        if (seen[number]) return { numbers: [], error: "Table " + number + " is listed twice." };
+        seen[number] = true;
+        numbers.push(number);
+        if (number === to) break;
+      }
+    }
+    numbers.sort(function (a, b) { return a - b; });
+    return { numbers: numbers, error: "" };
+  }
+
+  /** [1,2,3,7,9,10] -> "1\u20133, 7, 9\u201310" */
+  function formatTableList(numbers) {
+    var sorted = (numbers || []).slice().sort(function (a, b) { return a - b; });
+    var parts = [];
+    for (var i = 0; i < sorted.length;) {
+      var j = i;
+      while (j + 1 < sorted.length && sorted[j + 1] === sorted[j] + 1) j += 1;
+      parts.push(j > i ? sorted[i] + "\u2013" + sorted[j] : String(sorted[i]));
+      i = j + 1;
+    }
+    return parts.join(", ");
+  }
+
+  function dayHasInput(draft) {
+    return !!(draft && (draft.zero || (draft.end !== undefined && draft.end !== "" && draft.end !== null) ||
+      String(draft.list || "").trim() !== ""));
+  }
+
+  /** Which tables an unsaved day covers, given what the cycle has already used. Modes: "start" (the lowest free table
+   *  up to the last one typed), "end" (the highest free table down to the lowest one typed) and "pick" (any list). */
+  function planDay(state, draft, used, total) {
+    var mode = draft.mode || (dayHasInput(draft) ? "start" : (state.recordMode || "start"));
+    var free = [];
+    for (var n = 1; n <= total; n += 1) if (!used[n]) free.push(n);
+    var plan = { mode: mode, numbers: [], first: null, error: "", full: free.length === 0, zero: !!draft.zero };
+    if (plan.zero || plan.full) return plan;
+    if (mode === "pick") {
+      var text = String(draft.list || "").trim();
+      if (!text) return plan;
+      var parsed = parseTableList(text, total);
+      if (parsed.error) { plan.error = parsed.error; return plan; }
+      var taken = parsed.numbers.filter(function (number) { return used[number]; });
+      if (taken.length) plan.error = "Table " + taken[0] + " is already cleaned in this cycle.";
+      else plan.numbers = parsed.numbers;
+      return plan;
+    }
+    var typed = draft.end;
+    var has = typed !== undefined && typed !== "" && typed !== null;
+    if (mode === "end") {
+      plan.first = free[free.length - 1];
+      if (!has) return plan;
+      var low = Number(typed);
+      if (!Number.isInteger(low) || low < 1 || low > plan.first) {
+        plan.error = "Use a number from 1 to " + plan.first + ".";
+        return plan;
+      }
+      plan.numbers = free.filter(function (number) { return number >= low; });
+      return plan;
+    }
+    plan.first = free[0];
+    if (!has) return plan;
+    var last = Number(typed);
+    if (!Number.isInteger(last) || last < plan.first || last > total) {
+      plan.error = "Use a number from " + plan.first + " to " + total + ".";
+      return plan;
+    }
+    plan.numbers = free.filter(function (number) { return number <= last; });
+    return plan;
+  }
+
+  /** An unsaved day is ready to save with valid tables, or as a zero-tables day. */
+  function rowEntered(row) {
+    return !row.report && !row.error && !row.full && (row.zero || row.numbers.length > 0);
   }
 
   function tableNumber(code) {
@@ -1156,7 +1259,6 @@
   function renderRecordEditRow(state, row, dateLabel) {
     var edit = state.recordEdit;
     var total = Number(state.washingPlant.table_count) || 0;
-    var ranged = edit.start !== null;
     var disabled = edit.saving ? " disabled" : "";
     var done = edit.status === "Done";
     return '<div class="ep-calendar__record-row ep-calendar__record-row--editing" data-record-edit-row="' + escape(edit.id) + '">' +
@@ -1165,14 +1267,15 @@
         '<option value="Done"' + (done ? " selected" : "") + '>Done</option>' +
         '<option value="Not done"' + (done ? "" : " selected") + '>Not done</option></select>' +
       (done
-        ? (ranged
-            ? '<div class="ep-calendar__record-range"><span>' + escape(edit.start) + '</span><span>–</span>' +
-              '<input type="number" min="' + edit.start + '" max="' + total + '" step="1" data-record-edit-end value="' +
-              escape(edit.end) + '" aria-label="Last table number for ' + escape(dateLabel) + '"' + disabled + ' /></div>'
-            : '<div class="ep-calendar__record-range"><input type="number" min="1" max="' + total + '" step="1" ' +
-              'data-record-edit-count value="' + escape(edit.count) + '" aria-label="Tables cleaned on ' + escape(dateLabel) + '"' + disabled + ' /></div>')
+        ? '<div class="ep-calendar__record-range">' +
+            '<input type="text" data-record-edit-list placeholder="e.g. 1-5, 9, 12 or 100-91" value="' + escape(edit.list) +
+            '" aria-label="Table numbers cleaned on ' + escape(dateLabel) + '"' + disabled + ' />' +
+            (edit.legacy
+              ? '<input type="number" min="1" max="' + total + '" step="1" data-record-edit-count value="' + escape(edit.count) +
+                '" aria-label="Tables cleaned on ' + escape(dateLabel) + ' (no numbers saved)"' + disabled + ' />'
+              : "") + '</div>'
         : '<select data-record-edit-reason aria-label="Reason for ' + escape(dateLabel) + '"' + disabled + '>' +
-            '<option value="">Reason…</option>' + NOT_DONE_REASONS.map(function (reason) {
+            '<option value="">Reason\u2026</option>' + NOT_DONE_REASONS.map(function (reason) {
               return '<option value="' + escape(reason) + '"' + (edit.reason === reason ? " selected" : "") + '>' + escape(reason) + '</option>';
             }).join("") + '</select>') +
       '<input type="text" data-record-edit-remarks maxlength="4000" placeholder="Remarks" value="' + escape(edit.remarks) +
@@ -1180,7 +1283,7 @@
       '<div class="ep-calendar__record-edit-actions">' +
         '<button type="button" class="ep-calendar__close-button" data-record-edit-cancel' + disabled + '>Cancel</button>' +
         '<button type="button" class="ep-calendar__setup-submit" data-record-edit-save' + disabled + '>' +
-          (edit.saving ? "Saving…" : "Save changes") + '</button></div>' +
+          (edit.saving ? "Saving\u2026" : "Save changes") + '</button></div>' +
       (edit.error ? '<span class="ep-calendar__record-error" role="alert">' + escape(edit.error) + '</span>' : "") +
     '</div>';
   }
@@ -1198,12 +1301,7 @@
         weekday: "short", day: "2-digit", month: "short"
       }).format(new Date(row.date + "T12:00:00"));
       if (row.report) {
-        var codes = row.report.cleaned_table_codes || [];
-        var numberStart = codes.length ? tableNumber(codes[0]) : null;
-        var numberEnd = codes.length ? tableNumber(codes[codes.length - 1]) : null;
-        var numbers = numberStart && numberEnd
-          ? numberStart + " – " + numberEnd
-          : "—";
+        var numbers = row.numbers && row.numbers.length ? formatTableList(row.numbers) : "\u2014";
         var edit = state.recordEdit;
         if (edit && edit.id === row.report.id) return renderRecordEditRow(state, row, dateLabel);
         return '<div class="ep-calendar__record-row ep-calendar__record-row--saved">' +
@@ -1217,28 +1315,39 @@
               '" aria-label="Edit ' + escape(dateLabel) + '">Edit</button>'
             : "") + '</span></div>';
       }
-      var zero = !!(row.draft && row.draft.zero);
-      var count = Number(row.end) >= row.start ? Number(row.end) - row.start + 1 : 0;
-      var overLimit = Number(row.end) > Number(state.washingPlant.table_count);
-      var unavailable = row.start > Number(state.washingPlant.table_count);
+      var zero = row.zero;
+      var off = row.full || state.recordSaving ? " disabled" : "";
+      var count = row.numbers.length;
+      var total = Number(state.washingPlant.table_count) || 0;
+      var modes = [["start", "From start"], ["end", "From end"], ["pick", "Pick tables"]];
+      var inputs;
+      if (row.mode === "pick") {
+        inputs = '<input type="text" data-record-list placeholder="e.g. 1-5, 9, 12" value="' + escape(row.draft.list || "") +
+          '" aria-label="Table numbers for ' + escape(dateLabel) + '"' + (zero ? " disabled" : off) + ' />';
+      } else {
+        inputs = '<span data-record-start>' + (row.full || row.first === null ? "\u2014" : row.first) + '</span>' +
+          '<span>' + (row.mode === "end" ? "\u2193" : "\u2013") + '</span>' +
+          '<input type="number" min="' + (row.mode === "end" ? 1 : (row.first || 1)) + '" max="' +
+          (row.mode === "end" ? (row.first || total) : total) + '" step="1" data-record-end value="' +
+          (zero ? "" : escape(row.draft.end === undefined ? "" : row.draft.end)) +
+          '" aria-label="' + (row.mode === "end" ? "Lowest" : "Last") + ' table number for ' + escape(dateLabel) + '"' +
+          (zero ? " disabled" : off) + ' />';
+      }
       return '<div class="ep-calendar__record-row" data-record-date="' + row.date + '">' +
         '<label><span class="ep-calendar__record-mobile-label">Day</span><strong>' + escape(dateLabel) + '</strong></label>' +
         '<span class="ep-calendar__record-count" data-record-count>' +
-          (zero ? "0" : (count ? count : '<span aria-label="Not entered">—</span>')) + '</span>' +
-        '<div class="ep-calendar__record-range"><span data-record-start>' + (unavailable ? "—" : row.start) +
-          '</span><span>–</span><input type="number" min="' + row.start + '" max="' +
-          state.washingPlant.table_count + '" step="1" data-record-end value="' + (zero ? "" : (row.end || "")) +
-          '" aria-label="Last table number for ' + escape(dateLabel) + '"' +
-          (unavailable || zero || state.recordSaving ? " disabled" : "") + ' />' +
-          '<label class="ep-calendar__record-zero"><input type="checkbox" data-record-zero' + (zero ? " checked" : "") +
-          (unavailable || state.recordSaving ? " disabled" : "") + ' aria-label="No tables cleaned on ' + escape(dateLabel) +
-          '" /> 0 cleaned</label></div>' +
+          (zero ? "0" : (count ? count : '<span aria-label="Not entered">\u2014</span>')) + '</span>' +
+        '<div class="ep-calendar__record-range">' +
+          '<select data-record-mode class="ep-calendar__record-mode" aria-label="How tables were cleaned on ' + escape(dateLabel) + '"' +
+            (zero ? " disabled" : off) + '>' + modes.map(function (mode) {
+              return '<option value="' + mode[0] + '"' + (row.mode === mode[0] ? " selected" : "") + '>' + mode[1] + '</option>';
+            }).join("") + '</select>' + inputs +
+          '<label class="ep-calendar__record-zero"><input type="checkbox" data-record-zero' + (zero ? " checked" : "") + off +
+          ' aria-label="No tables cleaned on ' + escape(dateLabel) + '" /> 0 cleaned</label></div>' +
         '<input type="text" data-record-remarks maxlength="4000" placeholder="Remarks" value="' +
-          escape(row.draft.remarks || "") + '" aria-label="Remarks for ' + escape(dateLabel) + '"' +
-          (unavailable || state.recordSaving ? " disabled" : "") + ' />' +
-        '<span class="ep-calendar__record-error" data-record-error' +
-          (overLimit ? "" : " hidden") + '>Use a number up to ' +
-          state.washingPlant.table_count + '.</span>' +
+          escape(row.draft.remarks || "") + '" aria-label="Remarks for ' + escape(dateLabel) + '"' + off + ' />' +
+        '<span class="ep-calendar__record-error" data-record-error' + (row.error ? "" : " hidden") + '>' +
+          escape(row.error) + '</span>' +
       '</div>';
     }).join("");
 
@@ -1270,16 +1379,20 @@
         '<div class="ep-calendar__record-body">' +
           (state.recordError ? '<p class="ep-calendar__record-error" role="alert">' + escape(state.recordError) + '</p>' : "") +
           (state.recordNotice ? '<p class="ep-calendar__record-notice" role="status">' + escape(state.recordNotice) + '</p>' : "") +
+          '<p class="ep-calendar__record-tables"><strong>Cleaned this cycle:</strong> ' +
+            escape(rows.cleanedTables && rows.cleanedTables.length ? formatTableList(rows.cleanedTables) : "none yet") +
+            '<br><strong>Not cleaned yet:</strong> ' +
+            escape(rows.openTables && rows.openTables.length ? formatTableList(rows.openTables) : "none") + '</p>' +
           (rows.length
             ? '<div class="ep-calendar__record-table"><div class="ep-calendar__record-head"><span>Day</span><span>Tables</span><span>Table numbers</span><span>Remarks</span></div>' +
               days + '</div>'
             : '<p class="ep-calendar__empty">No reportable days for this cycle yet.</p>') +
-          '<p class="ep-calendar__record-help">Enter the last table number cleaned. The next day starts from the next table number. Tick 0 cleaned when no tables were cleaned that day; add the reason in Remarks.</p>' +
+          '<p class="ep-calendar__record-help">From start: enter the last table cleaned. From end: enter the lowest table reached, counting down from the highest table not yet cleaned. Pick tables: type numbers or ranges, e.g. 1, 2, 4, 7-8, 13 or 100-91. Each table counts once per cycle. Tick 0 cleaned when nothing was cleaned that day; add the reason in Remarks.</p>' +
         '</div>' +
         '<footer class="ep-calendar__record-footer"><button type="button" class="ep-calendar__close-button" data-calendar-action="close-record"' +
           (state.recordSaving ? " disabled" : "") + '>Cancel</button>' +
           '<button type="button" class="ep-calendar__setup-submit" data-calendar-action="save-record"' +
-            (state.recordSaving || !rows.some(function (row) { return rowEntered(row, Number(state.washingPlant.table_count)); }) ? " disabled" : "") + '>' +
+            (state.recordSaving || !rows.some(rowEntered) ? " disabled" : "") + '>' +
             (state.recordSaving ? "Saving…" : "Save") + '</button></footer>' +
       '</section>' +
     '</div>';
@@ -1535,6 +1648,7 @@
             plantName: selected.plantName,
             cycleNo: report.cycle_no,
             tablesCleaned: report.tables_cleaned,
+            tablesList: formatTableList(tableNumbersOf(report)),
             reviewStatus: report.review_status,
             jobStatus: report.job_status,
             reportedBy: report.reported_by,
@@ -1666,7 +1780,7 @@
     if (!form) return;
     var value = function (selector) { var node = form.querySelector(selector); return node ? node.value : null; };
     edit.status = value("[data-record-edit-status]") || edit.status;
-    var end = value("[data-record-edit-end]"); if (end !== null) edit.end = end;
+    var list = value("[data-record-edit-list]"); if (list !== null) edit.list = list;
     var count = value("[data-record-edit-count]"); if (count !== null) edit.count = count;
     var reason = value("[data-record-edit-reason]"); if (reason !== null) edit.reason = reason;
     var remarks = value("[data-record-edit-remarks]"); if (remarks !== null) edit.remarks = remarks;
@@ -1677,19 +1791,18 @@
     var total = Number(state.washingPlant.table_count) || 0;
     var body = { job_status: edit.status, remarks: edit.remarks || "" };
     if (edit.status === "Done") {
-      if (edit.start !== null) {
-        var end = Number(edit.end);
-        if (edit.end === "" || !Number.isInteger(end) || end < edit.start || end > total) {
-          return { error: "Enter a last table number from " + edit.start + " to " + total + "." };
-        }
-        body.table_start = edit.start;
-        body.table_end = end;
-      } else {
+      if (String(edit.list || "").trim()) {
+        var parsed = parseTableList(edit.list, total);
+        if (parsed.error) return { error: parsed.error };
+        body.table_numbers = parsed.numbers;
+      } else if (edit.legacy) {
         var count = Number(edit.count);
         if (edit.count === "" || !Number.isInteger(count) || count < 1 || count > 5000) {
-          return { error: "Enter the number of tables cleaned (1 or more)." };
+          return { error: "Enter the table numbers cleaned, or how many tables were cleaned." };
         }
         body.tables_cleaned = count;
+      } else {
+        return { error: "Enter the tables cleaned that day, e.g. 1-10, 100-91 or 1, 2, 4, 7-8, 13." };
       }
     } else {
       if (!edit.reason) return { error: "Choose the reason the work was not done." };
@@ -1700,45 +1813,60 @@
 
   function syncRecordRangeInputs(host, state) {
     host.querySelectorAll("[data-record-date]").forEach(function (row) {
+      var date = row.dataset.recordDate;
       var endInput = row.querySelector("[data-record-end]");
+      var listInput = row.querySelector("[data-record-list]");
       var remarksInput = row.querySelector("[data-record-remarks]");
       var zeroInput = row.querySelector("[data-record-zero]");
+      var modeInput = row.querySelector("[data-record-mode]");
+      var previous = state.recordDrafts[date] || {};
       var zero = !!(zeroInput && zeroInput.checked);
-      state.recordDrafts[row.dataset.recordDate] = {
-        end: zero ? "" : (endInput ? endInput.value : ""),
+      var draft = {
+        end: zero || !endInput ? "" : endInput.value,
+        list: zero || !listInput ? "" : listInput.value,
         zero: zero,
         remarks: remarksInput ? remarksInput.value : ""
       };
+      // A day keeps its own way of entering once it has been chosen or filled; empty days follow the last choice.
+      if (modeInput && (previous.mode || dayHasInput(draft))) draft.mode = modeInput.value;
+      state.recordDrafts[date] = draft;
     });
     var rows = recordRows(state);
     rows.forEach(function (item) {
       if (item.report) return;
       var row = host.querySelector('[data-record-date="' + item.date + '"]');
       if (!row) return;
-      var endInput = row.querySelector("[data-record-end]");
-      var count = Number(item.end) >= item.start ? Number(item.end) - item.start + 1 : 0;
-      var overLimit = Number(item.end) > Number(state.washingPlant.table_count);
-      var unavailable = item.start > Number(state.washingPlant.table_count);
-      row.querySelector("[data-record-start]").textContent = unavailable ? "—" : item.start;
-      var zeroDay = !!(item.draft && item.draft.zero);
-      row.querySelector("[data-record-count]").textContent = zeroDay ? "0" : (count || "—");
+      var start = row.querySelector("[data-record-start]");
+      if (start) start.textContent = item.full || item.first === null ? "\u2014" : item.first;
+      row.querySelector("[data-record-count]").textContent = item.zero ? "0" : (item.numbers.length || "\u2014");
       var error = row.querySelector("[data-record-error]");
       if (error) {
-        error.hidden = !overLimit;
-        if (overLimit) error.textContent = "Use a number up to " + state.washingPlant.table_count + ".";
+        error.hidden = !item.error;
+        error.textContent = item.error;
       }
+      var endInput = row.querySelector("[data-record-end]");
       if (endInput) {
-        endInput.min = item.start;
-        endInput.disabled = unavailable || zeroDay || state.recordSaving;
-        if (zeroDay) endInput.value = "";
+        endInput.min = item.mode === "end" ? 1 : (item.first || 1);
+        endInput.disabled = item.full || item.zero || state.recordSaving;
+        if (item.zero) endInput.value = "";
       }
+      var listInput = row.querySelector("[data-record-list]");
+      if (listInput) {
+        listInput.disabled = item.full || item.zero || state.recordSaving;
+        if (item.zero) listInput.value = "";
+      }
+      var mode = row.querySelector("[data-record-mode]");
+      if (mode) mode.disabled = item.full || item.zero || state.recordSaving;
     });
-    var save = host.querySelector('[data-calendar-action="save-record"]');
-    if (save) {
-      save.disabled = state.recordSaving || !rows.some(function (row) {
-        return rowEntered(row, Number(state.washingPlant.table_count));
-      });
+    var summary = host.querySelector(".ep-calendar__record-tables");
+    if (summary) {
+      summary.innerHTML = "<strong>Cleaned this cycle:</strong> " +
+        escape(rows.cleanedTables.length ? formatTableList(rows.cleanedTables) : "none yet") +
+        "<br><strong>Not cleaned yet:</strong> " +
+        escape(rows.openTables.length ? formatTableList(rows.openTables) : "none");
     }
+    var save = host.querySelector('[data-calendar-action="save-record"]');
+    if (save) save.disabled = state.recordSaving || !rows.some(rowEntered);
   }
 
   function wire(host) {
@@ -1768,8 +1896,8 @@
         editState.recordEdit = {
           id: saved.id,
           status: saved.job_status,
-          start: editRow.start || null,
-          end: editRow.end ? String(editRow.end) : "",
+          list: formatTableList(editRow.numbers || []),
+          legacy: saved.job_status === "Done" && !(editRow.numbers || []).length && Number(saved.tables_cleaned) > 0,
           count: saved.job_status === "Done" ? String(saved.tables_cleaned || "") : "",
           reason: saved.exception_reason || "",
           remarks: saved.remarks || "",
@@ -1957,9 +2085,9 @@
         var invalidRange = false;
         rows.forEach(function (row) {
           if (row.report) return;
-          if (row.draft && row.draft.zero) {
+          if (row.zero) {
             // Same convention as the daily Excel upload: a day with nothing cleaned is saved as not done, reason
-            // "Other", and what happened goes in Remarks. It never moves the next day's first table number.
+            // "Other", and what happened goes in Remarks. It never takes a table number.
             entries.push({
               report_date: row.date,
               job_status: "Not done",
@@ -1969,25 +2097,19 @@
             });
             return;
           }
-          if (row.end === "" || row.end === null || row.end === undefined) return;
-          var end = Number(row.end);
-          if (!Number.isInteger(end) || end < row.start ||
-              end > Number(state.washingPlant.table_count)) {
-            invalidRange = true;
-            return;
-          }
+          if (row.error) { invalidRange = true; return; }
+          if (!row.numbers.length) return;
           entries.push({
             report_date: row.date,
             job_status: "Done",
-            table_start: row.start,
-            table_end: end,
-            tables_cleaned: end - row.start + 1,
+            tables_cleaned: row.numbers.length,
+            table_numbers: row.numbers,
             remarks: row.draft.remarks || null
           });
         });
         if (invalidRange || !entries.length) {
           state.recordError = invalidRange
-            ? "Check each table range. The last table must be at least the first and no greater than the plant's table count."
+            ? "Check the days marked in red: a table can be cleaned only once per cycle, and each number must be a table of this plant."
             : "Enter a last table number, or tick 0 cleaned, for at least one day.";
           renderView(host, state, context);
           return;
@@ -2112,7 +2234,7 @@
       } else if (filter === "modal-search") {
         active.state.modalSearch = event.target.value;
         refreshKeepingFocus(host, active.state, active.context, '[data-calendar-filter="modal-search"]');
-      } else if (event.target.matches("[data-record-end], [data-record-remarks], [data-record-zero]") &&
+      } else if (event.target.matches("[data-record-end], [data-record-list], [data-record-remarks], [data-record-zero]") &&
                  active.state.recordOpen) {
         syncRecordRangeInputs(host, active.state);
       }
@@ -2154,6 +2276,24 @@
       }
       if (filter.indexOf("modal-") === 0) active.state.detailEventIndex = null;
       renderView(host, active.state, active.context);
+    });
+
+    host.addEventListener("change", function (event) {
+      if (!active || active.host !== host || !active.state.recordOpen) return;
+      if (event.target.matches("[data-record-mode]")) {
+        var modeState = active.state;
+        syncRecordRangeInputs(host, modeState);
+        var modeRow = event.target.closest("[data-record-date]");
+        if (!modeRow) return;
+        // Switching how a day is entered clears that day's numbers, which mean something different in each mode.
+        var draft = modeState.recordDrafts[modeRow.dataset.recordDate] || {};
+        draft.mode = event.target.value;
+        draft.end = "";
+        draft.list = "";
+        modeState.recordDrafts[modeRow.dataset.recordDate] = draft;
+        modeState.recordMode = event.target.value;
+        renderView(host, modeState, active.context);
+      }
     });
 
     host.addEventListener("change", function (event) {

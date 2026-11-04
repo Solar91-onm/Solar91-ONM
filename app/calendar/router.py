@@ -18,7 +18,7 @@ from app.core.models import Issue, OMTask, Plant, User, WashingConfig, WashingDa
 from app.core.security import (WASHING_TYPE, ROLE_PERMISSIONS, get_current_user,
     user_scoped_plant_ids)
 from app.core.timeutil import BUSINESS_TZ, business_today
-from app.scheduled.washing_cycles import _cycle_due_dates, _cycle_start_dates, month_cycles
+from app.scheduled.washing_cycles import _cycle_due_dates, _cycle_start_dates, format_table_codes, month_cycles
 
 router = APIRouter(prefix="/api/operations-calendar", tags=["Operations Calendar"])
 MAX_DAYS = 93
@@ -140,6 +140,7 @@ def _event_wash(r: WashingDailyReport, p: Plant) -> dict:
         "assignee": r.reported_by, "engineer": p.assigned_engineer,
         "status": r.review_status, "job_status": r.job_status, "severity": None,
         "tables_cleaned": r.tables_cleaned,
+        "tables_list": format_table_codes(r.cleaned_table_codes),
         "tone": _tone("washing", r.review_status, None, r.report_date, r.job_status)}
 
 

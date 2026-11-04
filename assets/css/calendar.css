@@ -1552,6 +1552,28 @@
   font: inherit;
 }
 .ep-calendar__record-range { flex-wrap: wrap; }
+.ep-calendar__record-mode {
+  flex-basis: 100%;
+  min-height: 30px;
+  padding: 0 6px;
+  border: 1px solid var(--ep-border);
+  border-radius: var(--ep-radius-sm);
+  background: var(--ep-bg);
+  color: var(--ep-text);
+  font: inherit;
+  font-size: var(--ep-fs-xs);
+}
+.ep-calendar__record-tables {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--ep-border-soft);
+  border-radius: var(--ep-radius-sm);
+  background: var(--ep-bg-muted);
+  color: var(--ep-text);
+  font-size: var(--ep-fs-sm);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
 .ep-calendar__record-zero {
   display: flex;
   flex-basis: 100%;
