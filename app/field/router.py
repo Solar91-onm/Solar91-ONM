@@ -569,7 +569,7 @@ def _assistant_fact_answer(db: Session, user: User, question: str) -> dict | Non
     review_intent = any(word in q for word in ("confirm", "review", "approval")) and any(word in q for word in ("awaiting", "pending", "requires", "require"))
     if washing_question and review_intent:
         if user.role == "Administration":
-            return {"answer": "Washing review records are outside the data scope available to your role.", "summary": None, "breakdown": [], "records": [], "source": "Role permissions", "total": 0, "scope": role_scope, "limited": False, "structured": True}
+            return {"answer": "Module Cleaning review records are outside the data scope available to your role.", "summary": None, "breakdown": [], "records": [], "source": "Role permissions", "total": 0, "scope": role_scope, "limited": False, "structured": True}
         stmt = select(WashingDailyReport, Plant).join(Plant, Plant.id == WashingDailyReport.plant_id).where(
             WashingDailyReport.review_status == "Pending", *plant_clause
         ).order_by(WashingDailyReport.report_date, WashingDailyReport.created_at)
@@ -578,18 +578,18 @@ def _assistant_fact_answer(db: Session, user: User, question: str) -> dict | Non
         records = [{"module": "washing", "id": str(report.id), "title": f"{report.tables_cleaned} tables · {report.report_date.isoformat()}",
                     "plant": site.plant_name, "site_code": site.site_code, "status": report.review_status,
                     "due": report.report_date.isoformat(), "reporter": report.reported_by} for report, site in rows]
-        return {"answer": f"{count} washing report(s) are awaiting O&M review in your permitted scope.",
+        return {"answer": f"{count} module cleaning report(s) are awaiting O&M review in your permitted scope.",
                 "summary": {"label": "Awaiting review", "value": count}, "breakdown": [], "records": records,
-                "source": f"Washing daily reports · pending status · as of {now_local:%Y-%m-%d %H:%M} IST", "total": count,
+                "source": f"Module Cleaning daily reports · pending status · as of {now_local:%Y-%m-%d %H:%M} IST", "total": count,
                 "scope": role_scope, "limited": count > len(records), "structured": True}
 
     if washing_question and (explicit_date or "tables cleaned" in q or "table count" in q):
         if explicit_date is None:
             return {"answer": "Which date should I check? Include a date such as 2026-10-16.", "summary": None,
-                    "breakdown": [], "records": [], "source": "Washing daily reports use the recorded report date", "total": 0,
+                    "breakdown": [], "records": [], "source": "Module Cleaning daily reports use the recorded report date", "total": 0,
                     "scope": role_scope, "limited": False, "structured": True}
         if user.role == "Administration":
-            return {"answer": "Washing records are outside the data scope available to your role.", "summary": None, "breakdown": [], "records": [], "source": "Role permissions", "total": 0, "scope": role_scope, "limited": False, "structured": True}
+            return {"answer": "Module Cleaning records are outside the data scope available to your role.", "summary": None, "breakdown": [], "records": [], "source": "Role permissions", "total": 0, "scope": role_scope, "limited": False, "structured": True}
         stmt = select(WashingDailyReport, Plant).join(Plant, Plant.id == WashingDailyReport.plant_id).where(
             WashingDailyReport.report_date == explicit_date, WashingDailyReport.review_status.in_(["Confirmed", "Pending"]), *plant_clause
         ).order_by(Plant.site_code, WashingDailyReport.created_at)
@@ -608,7 +608,7 @@ def _assistant_fact_answer(db: Session, user: User, question: str) -> dict | Non
         return {"answer": f"{confirmed} tables are confirmed as cleaned{plant_label} on {explicit_date.isoformat()}; {pending} more are pending review.",
                 "summary": {"label": "Confirmed tables cleaned", "value": confirmed},
                 "breakdown": [{"label": "Confirmed", "value": confirmed}, {"label": "Pending review", "value": pending}],
-                "records": records, "source": f"Washing daily reports · report date {explicit_date.isoformat()} · excludes rejected reports · {role_scope}",
+                "records": records, "source": f"Module Cleaning daily reports · report date {explicit_date.isoformat()} · excludes rejected reports · {role_scope}",
                 "total": report_count, "scope": role_scope, "limited": report_count > len(rows), "structured": True}
 
     if any(phrase in q for phrase in ("my assigned work", "my pending work", "work assigned to me")):

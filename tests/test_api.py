@@ -527,7 +527,7 @@ def test_washing_domain_endpoint_is_plant_scoped(client, db):
     assert denied.status_code == 403, denied.text
     logged = client.post('/api/scheduled/washing/WAPI-OWN/log')
     assert logged.status_code == 409, logged.text
-    assert 'daily washing report' in logged.json()['detail'].lower()
+    assert 'daily module cleaning report' in logged.json()['detail'].lower()
 
 
 def test_site_engineer_multiple_assignments_fails_closed(client, db):

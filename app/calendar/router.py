@@ -135,7 +135,7 @@ def _event_wash(r: WashingDailyReport, p: Plant) -> dict:
         "reference": f"Cycle {r.cycle_no} · {r.cycle_month}",
         "date": r.report_date.isoformat(), "until": r.report_date.isoformat(),
         "done": (r.review_status or "").casefold() == "confirmed" and (r.job_status or "").casefold() == "done",
-        **_plant_fields(p), "title": "Panel washing",
+        **_plant_fields(p), "title": "Module Cleaning",
         "category": WASHING_TYPE, "subpart": None,
         "assignee": r.reported_by, "engineer": p.assigned_engineer,
         "status": r.review_status, "job_status": r.job_status, "severity": None,
@@ -417,7 +417,7 @@ def cycle_detail(plant_id: UUID, month: str, cycle_no: int,
                  user: Annotated[User, Depends(get_current_user)]):
     _allowed(db, user, plant_id)
     if user.role == "Administration":
-        raise HTTPException(403, "Washing is outside your assigned scope")
+        raise HTTPException(403, "Module Cleaning is outside your assigned scope")
     if cycle_no not in (1, 2, 3): raise HTTPException(404, "Cycle not found")
     try:
         value = date.fromisoformat(month + "-01")
@@ -451,7 +451,7 @@ def event_detail(kind: str, record_id: UUID, db: Annotated[Session, Depends(get_
     if row is None or (kind == "issue" and row.deleted_at is not None): raise HTTPException(404, "Event not found")
     if scope is not None and row.plant_id not in scope: raise HTTPException(403, "Plant is outside your assigned scope")
     if kind == "washing" and user.role == "Administration":
-        raise HTTPException(403, "Washing is outside your assigned scope")
+        raise HTTPException(403, "Module Cleaning is outside your assigned scope")
     plant = db.get(Plant, row.plant_id) if row.plant_id else None
     if plant is None: raise HTTPException(404, "Plant not found")
     if kind == "issue":

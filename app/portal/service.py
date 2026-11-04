@@ -832,7 +832,7 @@ def portfolio_trend(
         "series": [
             {
                 "key": "washing",
-                "label": "Washing compliance",
+                "label": "Module Cleaning compliance",
                 "axis": "percent",
                 "values": compliance(washing_on_time, washing_expected),
             },

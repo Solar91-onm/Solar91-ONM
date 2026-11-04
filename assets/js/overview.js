@@ -409,7 +409,7 @@
     // min-height:0 overrides the stylesheet's 220px floor, which would otherwise
     // keep the chart taller than the viewBox needs.
     host.innerHTML = '<svg class="ep-overview-trend__svg" style="min-height:0" viewBox="0 0 ' + width + " " + height +
-      '" role="img" aria-label="Washing compliance, PM compliance and active site issues from ' +
+      '" role="img" aria-label="Module Cleaning compliance, PM compliance and active site issues from ' +
       fmt.escape(trend.startDate) + " to " + fmt.escape(trend.endDate) +
       '. Left axis: compliance percentage. Right axis: active issue count.">' + grid + lines + xLabels +
       '<text class="ep-overview-trend__axis-label" x="' + left + '" y="12">Compliance (%)</text>' +
@@ -477,7 +477,7 @@
       const plantName = filters.plant !== "__all"
         ? (trendRows[0].plant.displayName || filters.plant)
         : trendRows.length === state.allRows.length ? "all plants" : trendRows.length + " filtered plants";
-      trendStatus("Showing washing compliance, PM compliance and active site issues for " + plantName +
+      trendStatus("Showing module cleaning compliance, PM compliance and active site issues for " + plantName +
         " · " + trend.startDate + " to " + trend.endDate + ".", false);
     }).catch((error) => {
       if (requestId !== trendRequest) return;
@@ -556,7 +556,7 @@
     }
 
     const pmP  = pill("PM", pmPct, totals.pmOverdue);
-    const wshP = pill("Washing", wshPct, totals.washingOverdue);
+    const wshP = pill("Module Cleaning", wshPct, totals.washingOverdue);
     const isP  = issuePill(totals.criticalIssues, openIss);
 
     const ICON_PM = `<svg class="ep-metric__icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"></rect><path d="M16 2v4M8 2v4M3 10h18"></path><path d="m9 16 2 2 4-4"></path></svg>`;
@@ -576,7 +576,7 @@
         ]
       },
       {
-        title: "Washing Compliance",
+        title: "Module Cleaning Compliance",
         destination: "washing",
         icon: ICON_WASH,
         value: wshPct === null ? "—" : wshPct + "%",
@@ -678,7 +678,7 @@
   function renderWashingCompliance({ rows, totals }) {
     document.querySelector("[data-washing-summary]").innerHTML = `
       <div class="ep-kv">
-        <div class="ep-kv__item"><span class="ep-kv__k">Portfolio Washing Compliance</span><span class="ep-kv__v">${totals.washingCompliancePercent === null ? "N/A" : totals.washingCompliancePercent + "%"}</span></div>
+        <div class="ep-kv__item"><span class="ep-kv__k">Portfolio Module Cleaning Compliance</span><span class="ep-kv__v">${totals.washingCompliancePercent === null ? "N/A" : totals.washingCompliancePercent + "%"}</span></div>
         <div class="ep-kv__item"><span class="ep-kv__k">Completed Cycles</span><span class="ep-kv__v">${fmt.formatNumber(totals.washingCompleted)}</span></div>
         <div class="ep-kv__item"><span class="ep-kv__k">Pending Cycles</span><span class="ep-kv__v">${fmt.formatNumber(totals.washingPending)}</span></div>
         <div class="ep-kv__item"><span class="ep-kv__k">Overdue Cycles</span><span class="ep-kv__v">${fmt.formatNumber(totals.washingOverdue)}</span></div>

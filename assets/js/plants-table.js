@@ -25,12 +25,12 @@
   var mode = { kind: "all", siteCode: null };
   var detailSection = "details";
   var ui = { search: "", spv: "__all", district: "__all", sort: "name" };
-  var DETAIL_SECTIONS = ["details", "design-mdl", "purchase", "liaisoning", "bom"];
+  var DETAIL_SECTIONS = ["details", "design-mdl", "purchase", "liasoning", "bom"];
   var DETAIL_SECTION_LABELS = {
     details: "Details",
     "design-mdl": "Design/MDL",
     purchase: "Purchase",
-    liaisoning: "Liaisoning",
+    liasoning: "Liasoning",
     bom: "BOM"
   };
 
@@ -39,7 +39,7 @@
   // projectCompany string contains "Solar91", so a loose \d+ match on it would
   // silently render 91 for every plant.
   function spvNumber(plant) {
-    var m = String(plant.projectCompanyShort || "").match(/^Project\s+(\d+)$/i);
+    var m = String(plant.projectCompanyShort || "").match(/^(?:SPV|Project)\s+(\d+)$/i);
     return m ? m[1] : "—";
   }
 
@@ -114,7 +114,7 @@
   // ─── Columns (fixed order, both views) ───────────────────────────────
   var COLUMNS = [
     { key: "code",      label: "Plant Code" },
-    { key: "spv",       label: "SPV / Project", align: "num" },
+    { key: "spv",       label: "SPV", align: "num" },
     { key: "ac",        label: "AC (KW)",       align: "num" },
     { key: "dc",        label: "DC (KWP)",      align: "num" },
     { key: "district",  label: "District" },
@@ -169,7 +169,7 @@
         "<td>" + ((p.siteEngineers && p.siteEngineers.length)
             ? fmt.escape(p.siteEngineers.join(", "))
             : (p.assignedEngineer ? fmt.escape(p.assignedEngineer) : dash("No Site Engineer assigned"))) + "</td>" +
-        "<td>" + (p.washingAssignee ? fmt.escape(p.washingAssignee) : dash("Washing not set up")) + "</td>" +
+        "<td>" + (p.washingAssignee ? fmt.escape(p.washingAssignee) : dash("Module Cleaning not set up")) + "</td>" +
         '<td class="num mono">' + fmt.escape(formatCOD(p.commissionedOn)) + "</td>" +
         locationCell +
         cctvCell +
@@ -218,8 +218,11 @@
           '<input type="text" placeholder="Search plant code, name, project, district..." data-pt-search value="' + fmt.escape(ui.search) + '" autocomplete="off" />' +
         "</div>" +
         '<select class="ep-pt__select" data-pt-filter="spv" aria-label="Filter by SPV or project">' +
-          '<option value="__all">All SPV / projects</option>' +
-          opts(spvs, ui.spv, function (v) { var m = v.match(/\d+/); return m ? "Project " + m[0] : v; }) +
+          '<option value="__all">All SPV</option>' +
+          opts(spvs, ui.spv, function (v) {
+            var row = allRows.find(function (r) { return r.plant.projectCompany === v; });
+            return (row && row.plant.projectCompanyShort) || v;
+          }) +
         "</select>" +
         '<select class="ep-pt__select" data-pt-filter="district" aria-label="Filter by district">' +
           '<option value="__all">All districts</option>' +

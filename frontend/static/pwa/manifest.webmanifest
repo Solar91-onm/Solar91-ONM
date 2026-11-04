@@ -2,7 +2,7 @@
   "id": "/",
   "name": "SOLAR 91 \u2014 O&M Plant Operations",
   "short_name": "SOLAR 91 O&M",
-  "description": "Solar91 O&M portal: portfolio overview, plant details, site issues, preventive maintenance and washing",
+  "description": "Solar91 O&M portal: portfolio overview, plant details, site issues, preventive maintenance and module cleaning",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
@@ -35,7 +35,7 @@
     {
       "name": "Operations Calendar",
       "short_name": "Calendar",
-      "description": "Site issues, preventive maintenance and washing by date",
+      "description": "Site issues, preventive maintenance and module cleaning by date",
       "url": "/#/calendar",
       "icons": [
         {

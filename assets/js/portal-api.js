@@ -98,7 +98,7 @@
     return "https://www.google.com/maps/search/?api=1&query=" + encodeURIComponent(parts.join(", "));
   }
 
-  // "Solar91 Project Thirty Five Private Limited" → "Project 35".
+  // "Solar91 Project Thirty Five Private Limited" → "SPV 35".
   var ONES = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9 };
   var TEENS = { ten: 10, eleven: 11, twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15,
                 sixteen: 16, seventeen: 17, eighteen: 18, nineteen: 19 };
@@ -108,7 +108,7 @@
     var match = full.match(/Solar91\s+Project\s+(.+?)(?:\s+(?:Pvt\.?|Private|Limited|Ltd\.?)\b|$)/i);
     if (!match) return full;
     var projectNumber = match[1].trim();
-    if (/^\d+$/.test(projectNumber)) return "Project " + projectNumber;
+    if (/^\d+$/.test(projectNumber)) return "SPV " + projectNumber;
 
     var total = 0;
     var words = projectNumber.toLowerCase().split(/\s+/);
@@ -119,7 +119,7 @@
       else if (ONES[word] !== undefined) total += ONES[word];
       else return full;
     }
-    return total > 0 ? "Project " + total : full;
+    return total > 0 ? "SPV " + total : full;
   }
 
   /**

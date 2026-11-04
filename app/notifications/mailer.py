@@ -58,7 +58,7 @@ ROLE_POINTS = {
     ],
     "Site Engineer": [
         "Raise and resolve issues at your plant",
-        "Complete scheduled maintenance and washing jobs",
+        "Complete scheduled maintenance and module cleaning jobs",
         "Log your work with before / after photos as proof",
     ],
     "O&M Head": [

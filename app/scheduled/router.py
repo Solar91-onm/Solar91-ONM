@@ -63,7 +63,7 @@ def _ensure_washing_scope(db: Session, user: User, table: WashingTable) -> None:
         return
     allowed = user_scoped_plant_ids(db, user) or set()
     if table.plant_id not in allowed:
-        raise HTTPException(403, "This washing table is outside your assigned scope")
+        raise HTTPException(403, "This module cleaning table is outside your assigned scope")
 
 
 def _can_view_task(db: Session, user: User, task: OMTask) -> bool:
@@ -736,12 +736,12 @@ def upload_washing_evidence(
 
     report = db.scalar(select(WashingDailyReport).where(WashingDailyReport.id == report_id).with_for_update())
     if not report:
-        raise HTTPException(404, "Daily washing report not found")
+        raise HTTPException(404, "Daily module cleaning report not found")
     config = db.scalar(select(WashingConfig).where(WashingConfig.plant_id == report.plant_id))
     if not config or not _can_access_plant(db, user, report.plant_id, config):
-        raise HTTPException(403, "This washing report is outside your plant scope")
+        raise HTTPException(403, "This module cleaning report is outside your plant scope")
     if not _can_add_washing_evidence(user, report, config):
-        raise HTTPException(403, "Only the report submitter, the O&M Head or this plant's washing Assignee can add evidence before review")
+        raise HTTPException(403, "Only the report submitter, the O&M Head or this plant's module cleaning Assignee can add evidence before review")
     if not files:
         raise HTTPException(422, "Choose at least one photo")
     kind = (kind or "other").strip().lower()
@@ -749,7 +749,7 @@ def upload_washing_evidence(
         raise HTTPException(422, "Photo kind must be before, after or other")
     existing = [dict(entry) for entry in (report.evidence or []) if isinstance(entry, dict)]
     if len(existing) + len(files) > 10:
-        raise HTTPException(422, "A washing report can have no more than 10 evidence photos")
+        raise HTTPException(422, "A module cleaning report can have no more than 10 evidence photos")
     accepted = {"image/jpeg": "jpg", "image/png": "png", "image/webp": "webp"}
     max_bytes = settings.max_upload_mb * 1024 * 1024
     prepared = []
@@ -804,13 +804,13 @@ def get_washing_evidence(
 
     report = db.get(WashingDailyReport, report_id)
     if not report:
-        raise HTTPException(404, "Daily washing report not found")
+        raise HTTPException(404, "Daily module cleaning report not found")
     config = db.get(WashingConfig, report.plant_id)
     if not config or not _can_access_plant(db, user, report.plant_id, config):
-        raise HTTPException(403, "This washing report is outside your plant scope")
+        raise HTTPException(403, "This module cleaning report is outside your plant scope")
     entry = next((item for item in (report.evidence or []) if item.get("id") == evidence_id), None)
     if not entry or not entry.get("storage_path"):
-        raise HTTPException(404, "Washing photo evidence not found")
+        raise HTTPException(404, "Module Cleaning photo evidence not found")
     release_connection(db)  # the Storage download can be slow; do not hold a pooled connection through it
     data, content_type = SupabaseStorage().download(str(entry["storage_path"]))
     return Response(content=data, media_type=content_type, headers={"Cache-Control": "private, max-age=60"})
@@ -855,17 +855,17 @@ def confirm_washing_report(report_id: UUID, payload: WashingReportReviewRequest,
 def log_washing(legacy_id: str, db: Annotated[Session, Depends(get_db)], user: Annotated[User, Depends(require_permission("washing.log"))]):
     table = db.scalar(select(WashingTable).where(WashingTable.legacy_id == legacy_id))
     if not table:
-        raise HTTPException(404, "Washing table not found")
+        raise HTTPException(404, "Module Cleaning table not found")
     _ensure_washing_scope(db,user,table)
-    raise HTTPException(409, "Individual table logging is retired; submit a plant daily washing report for review")
+    raise HTTPException(409, "Individual table logging is retired; submit a plant daily module cleaning report for review")
 
 @router.post("/washing/{legacy_id}/exception", dependencies=[Depends(require_csrf)])
 def log_washing_exception(legacy_id: str, payload: dict, db: Annotated[Session, Depends(get_db)], user: Annotated[User, Depends(require_permission("washing.log"))]):
     table = db.scalar(select(WashingTable).where(WashingTable.legacy_id == legacy_id))
     if not table:
-        raise HTTPException(404, "Washing table not found")
+        raise HTTPException(404, "Module Cleaning table not found")
     _ensure_washing_scope(db,user,table)
-    raise HTTPException(409, "Use the plant daily washing report to record completed or not-done work and remarks")
+    raise HTTPException(409, "Use the plant daily module cleaning report to record completed or not-done work and remarks")
 
 
 
@@ -1276,7 +1276,7 @@ def add_washing_table(payload: dict, db: Annotated[Session, Depends(get_db)], us
 def edit_washing_table(legacy_id: str, payload: dict, db: Annotated[Session, Depends(get_db)], user: Annotated[User, Depends(require_permission("washing.manage"))]):
     w = db.scalar(select(WashingTable).where(WashingTable.legacy_id == legacy_id))
     if not w:
-        raise HTTPException(404, "Washing table not found")
+        raise HTTPException(404, "Module Cleaning table not found")
     plant, code, inv, sec, nd = _wash_fields(db, payload, w)
     before = {"plant_id": str(w.plant_id) if w.plant_id else None, "table": w.table_code, "inv": w.inverter_no, "sec": w.secondary_inverter_no}
     w.plant_id, w.table_code, w.inverter_no, w.secondary_inverter_no, w.next_due_on = plant.id, code, inv, sec, nd
@@ -1294,7 +1294,7 @@ def edit_washing_table(legacy_id: str, payload: dict, db: Annotated[Session, Dep
 def delete_washing_table(legacy_id: str, db: Annotated[Session, Depends(get_db)], user: Annotated[User, Depends(require_permission("washing.manage"))]):
     w = db.scalar(select(WashingTable).where(WashingTable.legacy_id == legacy_id))
     if not w:
-        raise HTTPException(404, "Washing table not found")
+        raise HTTPException(404, "Module Cleaning table not found")
     info = {"table": w.table_code, "plant_id": str(w.plant_id) if w.plant_id else None}
     db.execute(delete(WashingHistory).where(WashingHistory.washing_table_id == w.id))
     db.delete(w)
@@ -1328,7 +1328,7 @@ def move_washing_tables(payload: dict, db: Annotated[Session, Depends(get_db)], 
         ):
             moving.append(w)
     if not moving:
-        raise HTTPException(404, "No washing tables found under that plant")
+        raise HTTPException(404, "No module cleaning tables found under that plant")
     if src_plant is not None and src_plant.id == target.id:
         raise HTTPException(422, "Source and target plant are the same")
     existing = {_wkey(o.table_code) for o in db.scalars(select(WashingTable).where(WashingTable.plant_id == target.id))}
@@ -1376,7 +1376,7 @@ def bulk_delete_washing(payload: dict, db: Annotated[Session, Depends(get_db)], 
     else:
         raise HTTPException(422, "Nothing to delete")
     if not rows:
-        raise HTTPException(404, "No washing tables found")
+        raise HTTPException(404, "No module cleaning tables found")
     ids = [w.legacy_id for w in rows]
     for w in rows:
         db.execute(delete(WashingHistory).where(WashingHistory.washing_table_id == w.id))

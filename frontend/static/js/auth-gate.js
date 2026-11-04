@@ -194,7 +194,7 @@ function s91Alive(canvas){
   const still=window.matchMedia&&matchMedia("(prefers-reduced-motion: reduce)").matches;
   /* 1. typing "AI" status line */
   const el=document.getElementById("s91-typed");
-  const msgs=["Scanning plant health…","Scheduling today’s O&M visits…","Predicting the next panel wash…","Prioritising open site issues…","Syncing every site team…"];
+  const msgs=["Scanning plant health…","Scheduling today’s O&M visits…","Predicting the next module cleaning…","Prioritising open site issues…","Syncing every site team…"];
   let mi=0,ci=0,del=false;
   (function type(){
     if(!el||!document.body.contains(el)) return;

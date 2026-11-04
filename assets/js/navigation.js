@@ -18,7 +18,7 @@
     { id: "details",         label: "Details" },
     { id: "health",          label: "Health" },
     { id: "pm",              label: "Preventive Maintenance" },
-    { id: "washing",         label: "Washing" },
+    { id: "washing",         label: "Module Cleaning" },
     { id: "asset-warranty",  label: "Asset & Warranty" }
   ];
 
@@ -26,14 +26,14 @@
     { id: "details",         label: "Details" },
     { id: "health",          label: "Health" },
     { id: "pm",              label: "Preventive Maintenance" },
-    { id: "washing",         label: "Washing" },
+    { id: "washing",         label: "Module Cleaning" },
     { id: "asset-warranty",  label: "Asset & Warranty" }
   ];
 
   var DETAIL_SECTIONS = [
     { id: "design-mdl", label: "Design/MDL" },
     { id: "purchase", label: "Purchase" },
-    { id: "liaisoning", label: "Liaisoning" },
+    { id: "liasoning", label: "Liasoning" },
     { id: "bom", label: "BOM" }
   ];
 

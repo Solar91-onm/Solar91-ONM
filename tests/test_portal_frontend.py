@@ -64,7 +64,7 @@ def test_login_access_uses_real_users_and_hides_categories_from_settings(client)
     assert "Arun Demo" not in settings and "Demo invite" not in settings
     assert "Solar91PortalCategories" not in settings
     assert "data-categories-host" not in settings
-    assert "Equipment scope · Washing" in settings
+    assert "Equipment scope · Module Cleaning" in settings
     assert "washing_plant_ids" in settings
     assert "Role &amp; plant assignments" not in settings
 
@@ -151,8 +151,8 @@ def test_overview_filters_keep_full_options_and_metric_tiles_open_scoped_pages()
     assert 'role="link" tabindex="0"' in overview
     navigation = (PORTAL_ASSETS / "js" / "navigation.js").read_text(encoding="utf-8")
     assert "selectView: selectView" in navigation
-    assert ">All projects</option>" in page
-    assert 'Filter by project' in page
+    assert ">All SPV</option>" in page
+    assert 'Filter by SPV' in page
 
 
 def test_overview_range_and_trend_requests_are_cached_deduped_and_bounded():
@@ -483,7 +483,7 @@ def test_plant_and_portfolio_details_sections_are_in_left_navigation():
     table = (PORTAL_ASSETS / "js" / "plants-table.js").read_text(encoding="utf-8")
     navigation = (PORTAL_ASSETS / "js" / "navigation.js").read_text(encoding="utf-8")
     page = TEMPLATE.read_text(encoding="utf-8")
-    for section in ("design-mdl", "purchase", "liaisoning", "bom"):
+    for section in ("design-mdl", "purchase", "liasoning", "bom"):
         assert section in navigation
         assert f'data-nav="view:details:{section}"' in page
     assert 'var navId = "plant:" + siteCode + ":" + page.id;' in navigation
@@ -491,7 +491,7 @@ def test_plant_and_portfolio_details_sections_are_in_left_navigation():
     assert 'section: navState.selectedDetailSection' in navigation
     assert "data-pt-detail-tab" not in table
     assert "ep-pt__detail-tabs" not in table
-    assert 'var DETAIL_SECTIONS = ["details", "design-mdl", "purchase", "liaisoning", "bom"];' in table
+    assert 'var DETAIL_SECTIONS = ["details", "design-mdl", "purchase", "liasoning", "bom"];' in table
     assert 'detailSection === "details"' in table
     assert 'data-detail-section="' in table
     assert 'if (loaded) {' in table
@@ -531,7 +531,7 @@ def test_plant_table_uses_balanced_shared_columns_and_numeric_spv_label():
         project_company: 'Solar91 Project Thirty Five Private Limited',
         custom_fields: { cctv_url: 'https://cctv.example.invalid/feed' }
       });
-      if (plant.projectCompanyShort !== 'Project 35') {
+      if (plant.projectCompanyShort !== 'SPV 35') {
         throw new Error('Expected numeric project label, got ' + plant.projectCompanyShort);
       }
       const source = fs.readFileSync('assets/js/plants-table.js', 'utf8');
@@ -572,7 +572,7 @@ def test_plant_washing_calendar_has_date_cycle_hover_and_setup_action():
     assert "ep-wash-cycle-card__ring" in calendar
     assert "ep-calendar__wash-tip-foot" in calendar and "plant.assignee_name" in calendar
     assert 'tooltip.dataset.requestId === String(state.requestId)' in calendar
-    assert 'data-calendar-action="open-setup">Set up washing' in calendar
+    assert 'data-calendar-action="open-setup">Set up module cleaning' in calendar
     assert '"/api/scheduled/washing/assignees"' in calendar
     assert '"/api/scheduled/washing/setup"' in calendar
     assert "ep-calendar__wash-hover-card" in styles
@@ -720,7 +720,7 @@ def test_portfolio_pm_and_washing_use_centered_daily_summary_not_side_drawer():
 def test_plant_washing_range_sheet_and_health_issue_wizard_are_wired():
     calendar = (PORTAL_ASSETS / "js" / "operations-calendar.js").read_text(encoding="utf-8")
     calendar_styles = (PORTAL_ASSETS / "css" / "calendar.css").read_text(encoding="utf-8")
-    assert 'data-calendar-action="open-record">Record washing' in calendar
+    assert 'data-calendar-action="open-record">Record module cleaning' in calendar
     assert '"/api/scheduled/washing/daily-reports/sheet"' in calendar
     assert "table_start: row.start" in calendar and "table_end: end" in calendar
     assert "function syncRecordRangeInputs" in calendar

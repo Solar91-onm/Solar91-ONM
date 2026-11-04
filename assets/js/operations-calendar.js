@@ -165,7 +165,7 @@
   }
 
   function equipmentLabel(event, context) {
-    return event.equipmentType || (context.type === "washing" ? "Panel washing" : "Preventive maintenance");
+    return event.equipmentType || (context.type === "washing" ? "Module Cleaning" : "Preventive maintenance");
   }
 
   function renderEquipmentOptions(events, selected, context) {
@@ -205,10 +205,10 @@
     var all = (state.dayFilter && state.dayFilter.plants) || [];
     var missing = all.filter(function (row) { return row.status === "not_reported"; });
     if (!all.length) {
-      return '<p class="ep-calendar__empty">No washing plants are visible for this date.</p>';
+      return '<p class="ep-calendar__empty">No module cleaning plants are visible for this date.</p>';
     }
     if (!missing.length) {
-      return '<p class="ep-calendar__empty">Every plant has recorded washing for this date.</p>';
+      return '<p class="ep-calendar__empty">Every plant has recorded module cleaning for this date.</p>';
     }
     return '<section class="ep-calendar__pm-summary-group ep-calendar__portfolio-summary-group">' +
       '<header><span><i aria-hidden="true"></i><strong>Not recorded</strong></span>' +
@@ -216,7 +216,7 @@
       '<div class="ep-calendar__pm-summary-list">' +
         missing.map(function (row) {
           return '<div class="ep-calendar__pm-summary-item ep-calendar__pm-summary-item--static">' +
-            '<span class="ep-calendar__pm-summary-badge ep-calendar__pm-summary-badge--washing">WASH</span>' +
+            '<span class="ep-calendar__pm-summary-badge ep-calendar__pm-summary-badge--washing">CLEAN</span>' +
             '<strong>' + escape(row.plant) + '</strong>' +
             '<span class="ep-calendar__pm-summary-meta">' + escape(row.site_code) +
               ' · No cleaning details entered</span>' +
@@ -257,7 +257,7 @@
       .catch(function (error) {
         if (state.modalDate !== wanted) return;
         state.dayFilterLoading = false;
-        state.dayFilterError = error.message || "Washing for this date could not be loaded.";
+        state.dayFilterError = error.message || "Module Cleaning for this date could not be loaded.";
         renderView(host, state, context);
       });
   }
@@ -518,7 +518,7 @@
       var tooltip = date
         ? (state.tooltips[date] || (dayEvents.length
           ? dayEvents.map(function (event) { return event.title; }).join("; ")
-          : "No washing report or cycle deadline recorded for this date."))
+          : "No module cleaning report or cycle deadline recorded for this date."))
         : "";
       var classes = "ep-calendar__day";
       if (!inMonth) classes += " ep-calendar__day--outside";
@@ -555,7 +555,7 @@
         "No saved records match this date and filter." + '</p>';
     }
     return '<div class="ep-calendar__event-list">' + events.map(function (event) {
-      var typeLabel = context.type === "pm" ? "Preventive maintenance" : "Panel washing";
+      var typeLabel = context.type === "pm" ? "Preventive maintenance" : "Module Cleaning";
       var activityDay = Number(event.date.slice(8, 10));
       var cycleNumber = event.cycleNo || (activityDay <= 10 ? 1 : (activityDay <= 20 ? 2 : 3));
       var cycle = context.type === "washing"
@@ -608,7 +608,7 @@
   }
 
   function renderPortfolioSummaryEvents(events, context, state) {
-    var title = context.type === "pm" ? "Preventive Maintenance" : "Washing";
+    var title = context.type === "pm" ? "Preventive Maintenance" : "Module Cleaning";
     if (!events.length) {
       return '<p class="ep-calendar__empty">No saved records match these filters.</p>';
     }
@@ -634,7 +634,7 @@
             eventIndex + '">' +
             '<span class="ep-calendar__pm-summary-badge' +
               (context.type === "washing" ? " ep-calendar__pm-summary-badge--washing" : "") + '">' +
-              (context.type === "pm" ? "PM" : "WASH") + '</span>' +
+              (context.type === "pm" ? "PM" : "CLEAN") + '</span>' +
             '<strong>' + escape(equipmentLabel(event, context)) + '</strong>' +
             '<span class="ep-calendar__pm-summary-meta">' + escape(meta) + '</span>' +
             '<span class="ep-calendar__pm-summary-status">' + escape(event.status) + '</span>' +
@@ -651,7 +651,7 @@
     var fields = [
       ["Plant", event.plantName || "Plant not provided"],
       ["Site code", event.plantSiteCode],
-      ["Activity", context.type === "pm" ? "Preventive maintenance" : "Panel washing"],
+      ["Activity", context.type === "pm" ? "Preventive maintenance" : "Module Cleaning"],
       ["Equipment", equipmentLabel(event, context)],
       ["Reference", event.reference],
       ["Date", displayDate(event.date)],
@@ -671,7 +671,7 @@
       '<button class="ep-calendar__backdrop" type="button" data-calendar-action="close-event-detail" aria-label="Close activity details"></button>' +
       '<section class="ep-calendar__dialog ep-calendar__event-detail-dialog" role="dialog" aria-modal="true" aria-labelledby="calendar-event-detail-title">' +
         '<header class="ep-calendar__dialog-head"><div>' +
-          '<h2 id="calendar-event-detail-title">' + escape(context.type === "pm" ? "Preventive Maintenance activity" : "Washing activity") + '</h2>' +
+          '<h2 id="calendar-event-detail-title">' + escape(context.type === "pm" ? "Preventive Maintenance activity" : "Module Cleaning activity") + '</h2>' +
         '</div><button type="button" class="ep-calendar__close" data-calendar-action="close-event-detail" aria-label="Close">×</button></header>' +
         '<div class="ep-calendar__event-detail-body">' +
           '<button type="button" class="ep-calendar__close-button" data-calendar-action="close-event-detail">‹ Back to the day</button>' +
@@ -708,7 +708,7 @@
   function renderModal(state, context) {
     if (!state.modalDate) return "";
     var events = modalEvents(state, context);
-    var typeLabel = context.type === "pm" ? "Preventive Maintenance" : "Washing";
+    var typeLabel = context.type === "pm" ? "Preventive Maintenance" : "Module Cleaning";
     if (!context.plantCode) {
       var totalActivities = state.events.filter(function (event) {
         return event.date === state.modalDate;
@@ -1188,7 +1188,7 @@
     }).join("");
 
     return '<div class="ep-calendar__modal ep-calendar__record-modal" data-calendar-record-modal>' +
-      '<button class="ep-calendar__backdrop" type="button" data-calendar-action="close-record" aria-label="Close record washing"></button>' +
+      '<button class="ep-calendar__backdrop" type="button" data-calendar-action="close-record" aria-label="Close record module cleaning"></button>' +
       '<section class="ep-calendar__dialog" role="dialog" aria-modal="true" aria-labelledby="washing-record-title">' +
         '<header class="ep-calendar__dialog-head"><div><h2 id="washing-record-title">' +
           escape(state.washingPlant.plant) + '</h2><p>' + escape(state.washingPlant.site_code) + " · " +
@@ -1201,11 +1201,11 @@
           // Washing done after all three cycles were complete is recorded on the last cycle and
           // counted by the API (summary.extra_tables). Showing it stops that work looking lost.
           (extraTables ? " · " + escape(extraTables) + " extra table" + (extraTables === 1 ? "" : "s") +
-            " washed after cycle " + ((state.washingPlant.cycles || []).length || 3) : "") + '</span>' +
+            " cleaned after cycle " + ((state.washingPlant.cycles || []).length || 3) : "") + '</span>' +
           '<i><span style="width:' + (cycle && state.washingPlant.table_count
             ? Math.min(100, Math.round(100 * Number(cycle.confirmed || 0) / Number(state.washingPlant.table_count)))
             : 0) + '%"></span></i></div>' +
-        '<nav class="ep-calendar__record-tabs" aria-label="Washing cycle">' +
+        '<nav class="ep-calendar__record-tabs" aria-label="Module Cleaning cycle">' +
           cycles.map(function (item) {
             return '<button type="button" data-record-cycle="' + item.cycle_no + '"' +
               (Number(item.cycle_no) === Number(state.recordCycle) ? ' aria-current="true"' : "") + '>' +
@@ -1236,10 +1236,10 @@
     var assignees = state.setupAssignees || [];
     var noAssignees = state.setupAssigneesLoaded && !assignees.length;
     return '<div class="ep-calendar__modal ep-calendar__setup-modal" data-calendar-setup-modal>' +
-      '<button class="ep-calendar__backdrop" type="button" data-calendar-action="close-setup" aria-label="Close washing setup"></button>' +
+      '<button class="ep-calendar__backdrop" type="button" data-calendar-action="close-setup" aria-label="Close module cleaning setup"></button>' +
       '<section class="ep-calendar__dialog" role="dialog" aria-modal="true" aria-labelledby="washing-setup-title">' +
         '<header class="ep-calendar__dialog-head"><div>' +
-          '<h2 id="washing-setup-title">Set up washing</h2>' +
+          '<h2 id="washing-setup-title">Set up module cleaning</h2>' +
           '<p>' + escape(setup.plantName || "Selected plant") + " · " + escape(setup.siteCode || "") + '</p>' +
         '</div><button type="button" class="ep-calendar__close" data-calendar-action="close-setup" aria-label="Close">×</button></header>' +
         (state.setupLoading
@@ -1248,7 +1248,7 @@
               '<label><span>Tables in each cycle</span>' +
                 '<input type="number" name="table_count" min="1" max="5000" step="1" required value="' +
                   escape(setup.tableCount || "") + '"' + (state.setupSaving ? " disabled" : "") + ' /></label>' +
-              '<label><span>Washing Assignee</span><select name="assignee_user_id" required' +
+              '<label><span>Module Cleaning Assignee</span><select name="assignee_user_id" required' +
                 (state.setupSaving || noAssignees ? " disabled" : "") + '>' +
                 '<option value="">Choose an Assignee</option>' +
                 assignees.map(function (assignee) {
@@ -1276,7 +1276,7 @@
   }
 
   function renderView(host, state, context) {
-    var typeLabel = context.type === "pm" ? "Preventive Maintenance" : "Washing";
+    var typeLabel = context.type === "pm" ? "Preventive Maintenance" : "Module Cleaning";
     var plant = context.plantCode && state.plants.find(function (item) {
       return item.siteCode === context.plantCode;
     });
@@ -1317,14 +1317,14 @@
         (context.plantCode ? "Plant view" : "Views") + '</p><h1>' + escape(typeLabel) +
         '</h1><p class="ep-calendar__subtitle">' + escape(subtitle) +
         (state.liveWashing
-          ? " Cycle progress and dates come from saved washing records. Hover a date for its reports and deadline."
+          ? " Cycle progress and dates come from saved module cleaning records. Hover a date for its reports and deadline."
           : " Entries are saved records on their scheduled date.") + '</p></div>' +
         '<div class="ep-calendar__head-actions"><span class="ep-calendar__count">' + escape(statusCounts) + '</span>' +
           (showRecordButton
-            ? '<button type="button" class="ep-calendar__setup-button" data-calendar-action="open-record">Record washing</button>'
+            ? '<button type="button" class="ep-calendar__setup-button" data-calendar-action="open-record">Record module cleaning</button>'
             : "") +
           (showSetupButton
-            ? '<button type="button" class="ep-calendar__setup-button" data-calendar-action="open-setup">Set up washing</button>'
+            ? '<button type="button" class="ep-calendar__setup-button" data-calendar-action="open-setup">Set up module cleaning</button>'
             : "") +
           (showPMSetupButton
             ? '<button type="button" class="ep-calendar__setup-button" data-calendar-action="open-pm-setup">Set up PM</button>'
@@ -1473,8 +1473,8 @@
           events.push({
             date: report.report_date,
             title: report.job_status === "Done"
-              ? Number(report.tables_cleaned || 0) + " tables washed"
-              : "No washing reported",
+              ? Number(report.tables_cleaned || 0) + " tables cleaned"
+              : "No module cleaning reported",
             status: status,
             plantSiteCode: selected.siteCode,
             plantName: selected.plantName,
@@ -1513,7 +1513,7 @@
     }).catch(function (error) {
       if (requestId !== state.requestId) return;
       state.loading = false;
-      state.error = error.message || "Could not load saved washing cycle data.";
+      state.error = error.message || "Could not load saved module cleaning cycle data.";
       if (active && active.host === host && active.state === state) renderView(host, state, context);
     });
   }
@@ -1827,13 +1827,13 @@
           if (!active || active.host !== host || active.state !== state) return;
           state.recordSaving = false;
           state.recordDrafts = {};
-          state.recordNotice = "Saved " + result.saved + " washing day" +
+          state.recordNotice = "Saved " + result.saved + " module cleaning day" +
             (result.saved === 1 ? "" : "s") + ".";
           loadEvents(host, state, active.context, true);
         }).catch(function (error) {
           if (!active || active.host !== host || active.state !== state) return;
           state.recordSaving = false;
-          state.recordError = "Washing was not saved. " +
+          state.recordError = "Module Cleaning was not saved. " +
             (error && error.message ? error.message : "Please retry.");
           renderView(host, state, active.context);
         });
@@ -2003,7 +2003,7 @@
   function render(host, context) {
     if (!host) throw new Error("Calendar host element is missing.");
     if (!context || (context.type !== "pm" && context.type !== "washing")) {
-      throw new Error("Calendar requires a PM or Washing context.");
+      throw new Error("Calendar requires a PM or Module Cleaning context.");
     }
     var key = contextKey(context);
     if (active && active.state !== states[key]) active.state.modalDate = "";

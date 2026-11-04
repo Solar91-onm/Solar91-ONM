@@ -67,7 +67,7 @@ def _resolve_link(db: Session, plant_id: uuid.UUID, kind: str | None, ref: str |
         try:
             val = uuid.UUID(ref)
         except ValueError:
-            raise HTTPException(422, "Choose a valid washing report") from None
+            raise HTTPException(422, "Choose a valid module cleaning report") from None
     else:
         val = ref
     obj = db.scalar(select(model).where(model.plant_id == plant_id, field == val))

@@ -205,10 +205,10 @@
         '<p data-plant-help>' + (role === "Site Engineer" ? "Select exactly one plant." :
           role === "Assignee" ? "Select one or more plants." : "Portfolio roles have access to all plants.") + '</p>' +
         '<label class="ep-settings__plant-field' + (role === "Assignee" ? "" : " is-hidden") + '" data-washing-field>' +
-          'Equipment scope · Washing<select name="washing_plants" multiple size="5" data-settings-washing-plants>' +
+          'Equipment scope · Module Cleaning<select name="washing_plants" multiple size="5" data-settings-washing-plants>' +
           selectedPlantOptions(plantList, selectedWashingIds, false) + '</select></label>' +
         '<p class="ep-settings__washing-help' + (role === "Assignee" ? "" : " is-hidden") +
-          '" data-washing-help>Assign Washing responsibility for plants with Washing set up. Selected plants are also included in the person’s plant access.</p>';
+          '" data-washing-help>Assign Module Cleaning responsibility for plants with Module Cleaning set up. Selected plants are also included in the person’s plant access.</p>';
     }
     return '<div class="ep-settings__modal" data-settings-modal>' +
       '<button class="ep-settings__backdrop" type="button" data-settings-action="close" aria-label="Close dialog"></button>' +
@@ -377,7 +377,7 @@
           method: "PUT",
           body: { role: role, plant_ids: plantIds, washing_plant_ids: washingPlantIds }
         }).then(function () {
-          statusMessage = "Role, plant access, and Washing scope saved.";
+          statusMessage = "Role, plant access, and Module Cleaning scope saved.";
         });
       } else {
         var profile = {
