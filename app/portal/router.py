@@ -39,12 +39,11 @@ def _plant_or_404(db: Session, user: User, site_code: str) -> Plant:
 
 @router.get("/plants")
 def list_plants(db: DB, user: CurrentUser):
-    """Every plant the user may see, with its full stored record."""
-    plants = service.visible_plants(db, user)
-    ids = [p.id for p in plants]
-    engineers = service.site_engineers_by_plant(db, ids)
-    washers = service.washing_assignees_by_plant(db, ids)
-    return {"plants": [service.plant_out(p, engineers.get(p.id, []), washers.get(p.id, "")) for p in plants]}
+    """Every plant the user may see, with its full stored record (one query for plants and people)."""
+    return {"plants": [
+        service.plant_out(plant, engineers, washer)
+        for plant, engineers, washer in service.visible_plants_with_people(db, user)
+    ]}
 
 
 @router.get("/overview")

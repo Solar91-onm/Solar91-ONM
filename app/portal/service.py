@@ -25,8 +25,8 @@ from datetime import date, datetime, time, timedelta, timezone
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import case, func, or_, select
-from sqlalchemy.orm import Session
+from sqlalchemy import and_, case, func, or_, select
+from sqlalchemy.orm import Session, aliased
 
 from app.core.models import (
     Issue,
@@ -72,15 +72,21 @@ ACTIVITY_WINDOW_DAYS = 45
 
 # ── Scope ───────────────────────────────────────────────────────────────────
 
-def visible_plants(db: Session, user: User) -> list[Plant]:
-    """Plants this user may see, ordered by name. Server-side scope only."""
+def _visible_plants_stmt(db: Session, user: User):
+    """The scoped plant SELECT, or None when the user may see no plant at all."""
     allowed = user_scoped_plant_ids(db, user)
     stmt = select(Plant).order_by(Plant.plant_name)
     if allowed is not None:
         if not allowed:
-            return []
+            return None
         stmt = stmt.where(Plant.id.in_(allowed))
-    return list(db.scalars(stmt))
+    return stmt
+
+
+def visible_plants(db: Session, user: User) -> list[Plant]:
+    """Plants this user may see, ordered by name. Server-side scope only."""
+    stmt = _visible_plants_stmt(db, user)
+    return [] if stmt is None else list(db.scalars(stmt))
 
 
 def overview_plants(db: Session, user: User) -> list[Plant]:
@@ -88,6 +94,65 @@ def overview_plants(db: Session, user: User) -> list[Plant]:
     if user.role not in {"O&M Head", "Assignee", "Administration"}:
         return visible_plants(db, user)
     return list(db.scalars(select(Plant).order_by(Plant.plant_name)))
+
+
+def _plants_with_people(db: Session, stmt) -> list[tuple[Plant, list[str], str]]:
+    """Plants from ``stmt`` with their Site Engineers and washing assignee, in **one** query.
+
+    This used to be three statements (plants, then engineers, then washing assignees). Every
+    statement costs a full round trip to Supabase, which is the dominant cost of these routes,
+    so the two people lookups are outer-joined onto the plant select and folded here instead.
+
+    A plant repeats once per ``user_plant_assignments`` row, which is a handful at most;
+    ``washing_config.plant_id`` is that table's primary key, so washing never multiplies the
+    result. Name handling is identical to the per-metric helpers this replaces: only active
+    Site Engineers count, and the names are sorted.
+    """
+    engineer = aliased(User)
+    washer = aliased(User)
+    rows = db.execute(
+        stmt.outerjoin(UserPlantAssignment, UserPlantAssignment.plant_id == Plant.id)
+        .outerjoin(
+            engineer,
+            and_(
+                engineer.id == UserPlantAssignment.user_id,
+                engineer.is_active.is_(True),
+                engineer.role == "Site Engineer",
+            ),
+        )
+        .outerjoin(WashingConfig, WashingConfig.plant_id == Plant.id)
+        .outerjoin(washer, washer.id == WashingConfig.assigned_user_id)
+        .add_columns(engineer.display_name, washer.display_name)
+    ).all()
+
+    order: list[Plant] = []
+    seen: set[UUID] = set()
+    engineers: dict[UUID, list[str]] = {}
+    washers: dict[UUID, str] = {}
+    for plant, engineer_name, washer_name in rows:
+        if plant.id not in seen:
+            seen.add(plant.id)
+            order.append(plant)
+        if engineer_name:
+            engineers.setdefault(plant.id, []).append(engineer_name)
+        if washer_name:
+            washers[plant.id] = washer_name
+    for names in engineers.values():
+        names.sort()
+    return [(plant, engineers.get(plant.id, []), washers.get(plant.id, "")) for plant in order]
+
+
+def visible_plants_with_people(db: Session, user: User) -> list[tuple[Plant, list[str], str]]:
+    """``visible_plants`` plus each plant's Site Engineers and washing assignee, in one query."""
+    stmt = _visible_plants_stmt(db, user)
+    return [] if stmt is None else _plants_with_people(db, stmt)
+
+
+def overview_plants_with_people(db: Session, user: User) -> list[tuple[Plant, list[str], str]]:
+    """``overview_plants`` plus each plant's Site Engineers and washing assignee, in one query."""
+    if user.role not in {"O&M Head", "Assignee", "Administration"}:
+        return visible_plants_with_people(db, user)
+    return _plants_with_people(db, select(Plant).order_by(Plant.plant_name))
 
 
 def _plant_ids(plants: list[Plant]) -> list[UUID]:
@@ -384,22 +449,20 @@ def washing_assignees_by_plant(db: Session, plant_ids: list[UUID]) -> dict[UUID,
 def portfolio(db: Session, user: User) -> dict[str, Any]:
     """Every visible plant with its profile, plus portfolio totals.
 
-    Bounded cost: five grouped queries plus the washing overview, regardless of
+    Bounded cost: four grouped queries plus the washing overview, regardless of
     how many plants the user can see.
     """
-    plants = overview_plants(db, user)
-    ids = _plant_ids(plants)
+    people = overview_plants_with_people(db, user)
+    ids = _plant_ids([plant for plant, _engineers, _washer in people])
     today = business_today()
 
     issues = _issue_counts(db, ids)
     pm = _pm_counts(db, ids, today)
     washing = _washing_rows(db, user)
     last_at = _last_activity(db, ids)
-    engineers = site_engineers_by_plant(db, ids)
-    wash_assignees = washing_assignees_by_plant(db, ids)
 
     rows = []
-    for plant in plants:
+    for plant, engineers, washer in people:
         profile = build_profile(
             plant,
             issues.get(plant.id),
@@ -408,7 +471,7 @@ def portfolio(db: Session, user: User) -> dict[str, Any]:
             last_at.get(plant.id),
         )
         rows.append({
-            "plant": plant_out(plant, engineers.get(plant.id, []), wash_assignees.get(plant.id, "")),
+            "plant": plant_out(plant, engineers, washer),
             "profile": profile,
         })
 

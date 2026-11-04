@@ -96,6 +96,7 @@ class UserPlantAssignment(Base):
     plant_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("plants.id", ondelete="CASCADE"), primary_key=True)
     assignment_role: Mapped[str | None] = mapped_column(String(80))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    __table_args__ = (Index("ix_user_plant_assignments_plant", "plant_id"),)  # database/migrations/036
 
 
 
