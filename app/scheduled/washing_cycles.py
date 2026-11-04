@@ -1338,18 +1338,59 @@ def _load_report_for_change(db: Session, user: User, report_id: UUID):
     return report, plant, config, manager
 
 
+def _code_number(code: object) -> int | None:
+    match = re.search(r"(\d+)$", str(code or ""))
+    return int(match.group(1)) if match else None
+
+
+def _shift_following_codes(db: Session, report: WashingDailyReport, delta: int, total_tables: int) -> None:
+    """Keep a cycle's table numbers contiguous after one day's count changed by `delta`.
+
+    Later days of the same plant-month cycle that already carry a numbered range move by the same amount. A range that
+    would fall outside 1..total_tables cannot be shown as numbers any more, so that day keeps its count and loses only
+    the numbers."""
+    if not delta:
+        return
+    later = db.scalars(select(WashingDailyReport).where(
+        WashingDailyReport.plant_id == report.plant_id,
+        WashingDailyReport.cycle_month == report.cycle_month,
+        WashingDailyReport.cycle_no == report.cycle_no,
+        WashingDailyReport.id != report.id,
+        WashingDailyReport.report_date > report.report_date,
+        WashingDailyReport.review_status.in_(["Pending", "Confirmed"]),
+    ).with_for_update())
+    for row in later:
+        numbers = [_code_number(code) for code in (row.cleaned_table_codes or [])]
+        if not numbers or None in numbers:
+            continue
+        start, end = min(numbers) + delta, max(numbers) + delta
+        row.cleaned_table_codes = (
+            [f"Table {number:03d}" for number in range(start, end + 1)] if start >= 1 and end <= total_tables else []
+        )
+        db.add(row)
+
+
 def update_daily_report(db: Session, user: User, report_id: UUID, payload: WashingReportUpdateRequest) -> dict:
     report, plant, config, manager = _load_report_for_change(db, user, report_id)
     total_tables = _plant_table_count(db, plant.id, config)
     before = {"report_date": report.report_date.isoformat(), "tables_cleaned": report.tables_cleaned, "job_status": report.job_status,
-              "exception_reason": report.exception_reason, "remarks": report.remarks, "cycle_no": report.cycle_no, "cycle_month": report.cycle_month}
+              "exception_reason": report.exception_reason, "remarks": report.remarks, "cycle_no": report.cycle_no, "cycle_month": report.cycle_month,
+              "table_codes": [report.cleaned_table_codes[0], report.cleaned_table_codes[-1]] if report.cleaned_table_codes else []}
+    old_count = report.tables_cleaned if report.job_status == "Done" and report.review_status in ("Pending", "Confirmed") else 0
     old_month = report.cycle_month
 
     new_date = payload.report_date or report.report_date
     _validate_report_date(user, manager, new_date)
     status = payload.job_status or report.job_status
+    codes: list[str] = []
     if status == "Done":
-        tables = payload.tables_cleaned if payload.tables_cleaned is not None else report.tables_cleaned
+        if payload.table_start is not None:
+            if payload.table_end > total_tables:
+                raise HTTPException(422, f"Table number {payload.table_end} exceeds this plant's configured table count ({total_tables})")
+            tables = payload.table_end - payload.table_start + 1
+            codes = [f"Table {number:03d}" for number in range(payload.table_start, payload.table_end + 1)]
+        else:
+            tables = payload.tables_cleaned if payload.tables_cleaned is not None else report.tables_cleaned
         if tables < 1:
             raise HTTPException(422, "Enter at least one cleaned table for a Done report")
         reason = None
@@ -1360,7 +1401,8 @@ def update_daily_report(db: Session, user: User, report_id: UUID, payload: Washi
             raise HTTPException(422, "Choose the reason the work was not done")
 
     new_month = _month_key(new_date)
-    codes: list[str] = []
+    if new_date == report.report_date and report.review_status in ("Pending", "Confirmed"):
+        _shift_following_codes(db, report, tables - old_count, total_tables)
 
     report.report_date = new_date
     report.cycle_month = new_month

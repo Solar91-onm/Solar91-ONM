@@ -834,3 +834,20 @@ def test_issue_dates_typed_in_india_reach_the_api_as_exact_utc_instants():
     """
     run = subprocess.run(["node", "-e", script], cwd=ROOT, capture_output=True, text=True, timeout=20)
     assert run.returncode == 0, run.stderr
+
+def test_record_sheet_lets_managers_edit_saved_days_through_the_report_patch():
+    calendar = (PORTAL_ASSETS / "js" / "operations-calendar.js").read_text(encoding="utf-8")
+    styles = (PORTAL_ASSETS / "css" / "calendar.css").read_text(encoding="utf-8")
+
+    # The Edit button is offered only where the server says the viewer may change the day.
+    assert "row.report.can_edit && !state.recordSaving" in calendar
+    assert 'data-record-edit="' in calendar
+    # Saving goes through the existing report PATCH, with the table range for numbered days.
+    assert '"/api/scheduled/washing/daily-reports/" + encodeURIComponent(pending.id)' in calendar
+    assert 'method: "PATCH"' in calendar
+    assert "body.table_start = edit.start;" in calendar and "body.table_end = end;" in calendar
+    # A failed save stays visible in the editor and is never reported as success.
+    assert 'saveState.recordEdit.error = "Not saved. "' in calendar
+    assert 'saveState.recordNotice = "Day updated.";' in calendar
+    assert "if (pending.saving) return;" in calendar  # no double submit
+    assert ".ep-calendar__record-row--editing" in styles and ".ep-calendar__record-edit" in styles

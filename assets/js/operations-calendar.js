@@ -97,6 +97,7 @@
         recordOpen: false,
         recordCycle: 1,
         recordDrafts: {},
+        recordEdit: null,
         recordSaving: false,
         recordError: "",
         recordNotice: "",
@@ -1141,6 +1142,42 @@
     return match ? Number(match[1]) : null;
   }
 
+  var NOT_DONE_REASONS = ["Rain", "Water shortage", "Machine breakdown", "Access restriction", "Safety stand-down", "Other"];
+
+  /** Inline editor for one saved day. Confirmed days stay confirmed: the server keeps the review, audits the change and
+   *  moves the following days' table numbers and cycles to match. */
+  function renderRecordEditRow(state, row, dateLabel) {
+    var edit = state.recordEdit;
+    var total = Number(state.washingPlant.table_count) || 0;
+    var ranged = edit.start !== null;
+    var disabled = edit.saving ? " disabled" : "";
+    var done = edit.status === "Done";
+    return '<div class="ep-calendar__record-row ep-calendar__record-row--editing" data-record-edit-row="' + escape(edit.id) + '">' +
+      '<label><span class="ep-calendar__record-mobile-label">Day</span><strong>' + escape(dateLabel) + '</strong></label>' +
+      '<select data-record-edit-status aria-label="Status for ' + escape(dateLabel) + '"' + disabled + '>' +
+        '<option value="Done"' + (done ? " selected" : "") + '>Done</option>' +
+        '<option value="Not done"' + (done ? "" : " selected") + '>Not done</option></select>' +
+      (done
+        ? (ranged
+            ? '<div class="ep-calendar__record-range"><span>' + escape(edit.start) + '</span><span>–</span>' +
+              '<input type="number" min="' + edit.start + '" max="' + total + '" step="1" data-record-edit-end value="' +
+              escape(edit.end) + '" aria-label="Last table number for ' + escape(dateLabel) + '"' + disabled + ' /></div>'
+            : '<div class="ep-calendar__record-range"><input type="number" min="1" max="' + total + '" step="1" ' +
+              'data-record-edit-count value="' + escape(edit.count) + '" aria-label="Tables cleaned on ' + escape(dateLabel) + '"' + disabled + ' /></div>')
+        : '<select data-record-edit-reason aria-label="Reason for ' + escape(dateLabel) + '"' + disabled + '>' +
+            '<option value="">Reason…</option>' + NOT_DONE_REASONS.map(function (reason) {
+              return '<option value="' + escape(reason) + '"' + (edit.reason === reason ? " selected" : "") + '>' + escape(reason) + '</option>';
+            }).join("") + '</select>') +
+      '<input type="text" data-record-edit-remarks maxlength="4000" placeholder="Remarks" value="' + escape(edit.remarks) +
+        '" aria-label="Remarks for ' + escape(dateLabel) + '"' + disabled + ' />' +
+      '<div class="ep-calendar__record-edit-actions">' +
+        '<button type="button" class="ep-calendar__close-button" data-record-edit-cancel' + disabled + '>Cancel</button>' +
+        '<button type="button" class="ep-calendar__setup-submit" data-record-edit-save' + disabled + '>' +
+          (edit.saving ? "Saving…" : "Save changes") + '</button></div>' +
+      (edit.error ? '<span class="ep-calendar__record-error" role="alert">' + escape(edit.error) + '</span>' : "") +
+    '</div>';
+  }
+
   function renderRecordModal(state) {
     if (!state.recordOpen || !state.washingPlant) return "";
     var cycles = state.washingPlant.cycles || [];
@@ -1160,11 +1197,18 @@
         var numbers = numberStart && numberEnd
           ? numberStart + " – " + numberEnd
           : "—";
+        var edit = state.recordEdit;
+        if (edit && edit.id === row.report.id) return renderRecordEditRow(state, row, dateLabel);
         return '<div class="ep-calendar__record-row ep-calendar__record-row--saved">' +
           '<span>' + escape(dateLabel) + '</span><strong>' +
           (row.report.job_status === "Done" ? Number(row.report.tables_cleaned || 0) : "Not done") +
-          '</strong><span>' + escape(numbers) + '</span><span>' +
-          escape(row.report.remarks || row.report.exception_reason || row.report.review_status) + '</span></div>';
+          '</strong><span>' + escape(numbers) + '</span>' +
+          '<span class="ep-calendar__record-remark-cell"><span>' +
+          escape(row.report.remarks || row.report.exception_reason || row.report.review_status) + '</span>' +
+          (row.report.can_edit && !state.recordSaving
+            ? '<button type="button" class="ep-calendar__record-edit" data-record-edit="' + escape(row.report.id) +
+              '" aria-label="Edit ' + escape(dateLabel) + '">Edit</button>'
+            : "") + '</span></div>';
       }
       var count = Number(row.end) >= row.start ? Number(row.end) - row.start + 1 : 0;
       var overLimit = Number(row.end) > Number(state.washingPlant.table_count);
@@ -1543,6 +1587,7 @@
       state.recordError = "";
       state.recordNotice = "";
       state.recordDrafts = {};
+      state.recordEdit = null;
     }
     state.washingDataToday = "";
     state.tooltips = {};
@@ -1604,6 +1649,44 @@
     }
   }
 
+  function syncRecordEdit(host, state) {
+    var edit = state.recordEdit;
+    var form = edit && host.querySelector("[data-record-edit-row]");
+    if (!form) return;
+    var value = function (selector) { var node = form.querySelector(selector); return node ? node.value : null; };
+    edit.status = value("[data-record-edit-status]") || edit.status;
+    var end = value("[data-record-edit-end]"); if (end !== null) edit.end = end;
+    var count = value("[data-record-edit-count]"); if (count !== null) edit.count = count;
+    var reason = value("[data-record-edit-reason]"); if (reason !== null) edit.reason = reason;
+    var remarks = value("[data-record-edit-remarks]"); if (remarks !== null) edit.remarks = remarks;
+  }
+
+  function recordEditBody(state) {
+    var edit = state.recordEdit;
+    var total = Number(state.washingPlant.table_count) || 0;
+    var body = { job_status: edit.status, remarks: edit.remarks || "" };
+    if (edit.status === "Done") {
+      if (edit.start !== null) {
+        var end = Number(edit.end);
+        if (edit.end === "" || !Number.isInteger(end) || end < edit.start || end > total) {
+          return { error: "Enter a last table number from " + edit.start + " to " + total + "." };
+        }
+        body.table_start = edit.start;
+        body.table_end = end;
+      } else {
+        var count = Number(edit.count);
+        if (edit.count === "" || !Number.isInteger(count) || count < 1 || count > 5000) {
+          return { error: "Enter the number of tables cleaned (1 or more)." };
+        }
+        body.tables_cleaned = count;
+      }
+    } else {
+      if (!edit.reason) return { error: "Choose the reason the work was not done." };
+      body.exception_reason = edit.reason;
+    }
+    return { body: body };
+  }
+
   function syncRecordRangeInputs(host, state) {
     host.querySelectorAll("[data-record-date]").forEach(function (row) {
       var endInput = row.querySelector("[data-record-end]");
@@ -1653,8 +1736,70 @@
       if (cycleTab && active.state.recordOpen) {
         active.state.recordCycle = Number(cycleTab.dataset.recordCycle);
         active.state.recordDrafts = {};
+        active.state.recordEdit = null;
         active.state.recordError = "";
         renderView(host, active.state, active.context);
+        return;
+      }
+      var editButton = event.target.closest("[data-record-edit]");
+      if (editButton && active.state.recordOpen && !active.state.recordSaving) {
+        var editState = active.state;
+        var editRow = recordRows(editState).filter(function (item) {
+          return item.report && item.report.id === editButton.dataset.recordEdit;
+        })[0];
+        if (!editRow) return;
+        syncRecordRangeInputs(host, editState);
+        var saved = editRow.report;
+        editState.recordEdit = {
+          id: saved.id,
+          status: saved.job_status,
+          start: editRow.start || null,
+          end: editRow.end ? String(editRow.end) : "",
+          count: saved.job_status === "Done" ? String(saved.tables_cleaned || "") : "",
+          reason: saved.exception_reason || "",
+          remarks: saved.remarks || "",
+          saving: false,
+          error: ""
+        };
+        editState.recordError = "";
+        editState.recordNotice = "";
+        renderView(host, editState, active.context);
+        return;
+      }
+      if (event.target.closest("[data-record-edit-cancel]") && active.state.recordEdit &&
+          !active.state.recordEdit.saving) {
+        active.state.recordEdit = null;
+        renderView(host, active.state, active.context);
+        return;
+      }
+      if (event.target.closest("[data-record-edit-save]") && active.state.recordEdit) {
+        var saveState = active.state;
+        var pending = saveState.recordEdit;
+        if (pending.saving) return;
+        syncRecordEdit(host, saveState);
+        var built = recordEditBody(saveState);
+        if (built.error) {
+          pending.error = built.error;
+          renderView(host, saveState, active.context);
+          return;
+        }
+        pending.saving = true;
+        pending.error = "";
+        renderView(host, saveState, active.context);
+        global.Solar91PortalAPI.request("/api/scheduled/washing/daily-reports/" + encodeURIComponent(pending.id), {
+          method: "PATCH",
+          body: built.body
+        }).then(function () {
+          if (!active || active.host !== host || active.state !== saveState) return;
+          saveState.recordEdit = null;
+          saveState.recordNotice = "Day updated.";
+          loadEvents(host, saveState, active.context, true);
+        }).catch(function (error) {
+          if (!active || active.host !== host || active.state !== saveState || !saveState.recordEdit) return;
+          saveState.recordEdit.saving = false;
+          saveState.recordEdit.error = "Not saved. " + (error && error.message ? error.message : "Please retry.");
+          renderView(host, saveState, active.context);
+        });
         return;
       }
       var eventCard = event.target.closest("[data-calendar-event-index]");
@@ -1777,13 +1922,15 @@
           cycles.find(function (cycle) { return cycle.state === "Missed"; }) || cycles[0];
         state.recordCycle = selectedCycle ? Number(selectedCycle.cycle_no) : 1;
         state.recordOpen = true;
+        state.recordEdit = null;
         state.recordDrafts = {};
         state.recordError = "";
         state.recordNotice = "";
         renderView(host, state, context);
       } else if (action.dataset.calendarAction === "close-record") {
-        if (state.recordSaving) return;
+        if (state.recordSaving || (state.recordEdit && state.recordEdit.saving)) return;
         state.recordOpen = false;
+        state.recordEdit = null;
         state.recordError = "";
         state.recordNotice = "";
         renderView(host, state, context);
@@ -1978,6 +2125,14 @@
         return;
       }
       if (filter.indexOf("modal-") === 0) active.state.detailEventIndex = null;
+      renderView(host, active.state, active.context);
+    });
+
+    host.addEventListener("change", function (event) {
+      if (!active || active.host !== host || !active.state.recordEdit) return;
+      if (!event.target.matches("[data-record-edit-status]")) return;
+      syncRecordEdit(host, active.state);
+      active.state.recordEdit.error = "";
       renderView(host, active.state, active.context);
     });
 

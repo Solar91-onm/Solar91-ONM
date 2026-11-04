@@ -214,8 +214,22 @@ class WashingReportUpdateRequest(BaseModel):
     report_date: date | None = None
     job_status: Literal["Done", "Not done"] | None = None
     tables_cleaned: int | None = Field(default=None, ge=0, le=5000)
+    table_start: int | None = Field(default=None, ge=1, le=5000)
+    table_end: int | None = Field(default=None, ge=1, le=5000)
     exception_reason: Literal["Rain", "Water shortage", "Machine breakdown", "Access restriction", "Safety stand-down", "Other"] | None = None
     remarks: str | None = Field(default=None, max_length=4000)
+
+    @model_validator(mode="after")
+    def validate_range(self):
+        if (self.table_start is None) != (self.table_end is None):
+            raise ValueError("Enter both the first and last table numbers")
+        if self.table_start is not None:
+            if self.table_end < self.table_start:
+                raise ValueError("Last table number must be at least the first table number")
+            count = self.table_end - self.table_start + 1
+            if self.tables_cleaned is not None and self.tables_cleaned != count:
+                raise ValueError("Tables cleaned must match the selected table-number range")
+        return self
 
 
 class WashingCycleDates(BaseModel):
