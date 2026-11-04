@@ -851,3 +851,13 @@ def test_record_sheet_lets_managers_edit_saved_days_through_the_report_patch():
     assert 'saveState.recordNotice = "Day updated.";' in calendar
     assert "if (pending.saving) return;" in calendar  # no double submit
     assert ".ep-calendar__record-row--editing" in styles and ".ep-calendar__record-edit" in styles
+
+
+def test_record_sheet_saves_a_zero_tables_day_like_the_excel_upload():
+    calendar = (PORTAL_ASSETS / "js" / "operations-calendar.js").read_text(encoding="utf-8")
+    assert "data-record-zero" in calendar and "0 cleaned" in calendar
+    # a ticked day is sent as not done / "Other" / 0 tables and never carries a table range
+    assert 'job_status: "Not done",' in calendar and 'exception_reason: "Other",' in calendar
+    assert "tables_cleaned: 0," in calendar
+    # Save is enabled for a zero day even though no last table number was typed
+    assert "function rowEntered(row, total)" in calendar and "row.draft.zero" in calendar

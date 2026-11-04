@@ -100,3 +100,23 @@ def test_viewer_cannot_edit(client, db):
     login_user(client, db, role="Viewer", name="Edit Viewer", email="edit-viewer@example.com")
 
     assert client.patch(f"{BASE}/daily-reports/{d1}", json={"remarks": "x"}).status_code == 403
+
+
+def test_zero_tables_day_is_saved_by_the_team_and_does_not_move_the_next_range(client, db):
+    plant = _plant(db)
+    head, assignee = _setup_cycle_users(client, db, plant)
+    d1, d2 = _days(2, back=60)
+    zero = {"report_date": d1.isoformat(), "job_status": "Not done", "exception_reason": "Other",
+            "tables_cleaned": 0, "remarks": "No water"}
+
+    for who in (head, assignee):
+        conftest._CURRENT_USER = who
+        saved = _sheet(client, plant, [zero, _ranged(d2, 1, 2)])
+        assert saved.status_code == 200, saved.text
+        first, second = saved.json()["reports"]
+        assert first["tables_cleaned"] == 0 and first["job_status"] == "Not done"
+        assert first["review_status"] == "Confirmed" and first["remarks"] == "No water"
+        assert second["cleaned_table_codes"] == ["Table 001", "Table 002"]  # the zero day used no table numbers
+        for report in (first, second):
+            assert client.delete(f"{BASE}/daily-reports/{report['id']}").status_code == 200  # reset for the next user
+

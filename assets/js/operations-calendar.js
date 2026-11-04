@@ -1137,6 +1137,13 @@
     });
   }
 
+  /** An unsaved day is ready to save with a valid last table number, or as a zero-tables day. */
+  function rowEntered(row, total) {
+    if (row.report) return false;
+    if (row.draft && row.draft.zero) return row.start <= total;
+    return Number(row.end) >= row.start && Number(row.end) <= total;
+  }
+
   function tableNumber(code) {
     var match = String(code || "").match(/(?:Table\s*)?(\d+)$/i);
     return match ? Number(match[1]) : null;
@@ -1210,18 +1217,22 @@
               '" aria-label="Edit ' + escape(dateLabel) + '">Edit</button>'
             : "") + '</span></div>';
       }
+      var zero = !!(row.draft && row.draft.zero);
       var count = Number(row.end) >= row.start ? Number(row.end) - row.start + 1 : 0;
       var overLimit = Number(row.end) > Number(state.washingPlant.table_count);
       var unavailable = row.start > Number(state.washingPlant.table_count);
       return '<div class="ep-calendar__record-row" data-record-date="' + row.date + '">' +
         '<label><span class="ep-calendar__record-mobile-label">Day</span><strong>' + escape(dateLabel) + '</strong></label>' +
         '<span class="ep-calendar__record-count" data-record-count>' +
-          (count ? count : '<span aria-label="Not entered">—</span>') + '</span>' +
+          (zero ? "0" : (count ? count : '<span aria-label="Not entered">—</span>')) + '</span>' +
         '<div class="ep-calendar__record-range"><span data-record-start>' + (unavailable ? "—" : row.start) +
           '</span><span>–</span><input type="number" min="' + row.start + '" max="' +
-          state.washingPlant.table_count + '" step="1" data-record-end value="' + (row.end || "") +
+          state.washingPlant.table_count + '" step="1" data-record-end value="' + (zero ? "" : (row.end || "")) +
           '" aria-label="Last table number for ' + escape(dateLabel) + '"' +
-          (unavailable || state.recordSaving ? " disabled" : "") + ' /></div>' +
+          (unavailable || zero || state.recordSaving ? " disabled" : "") + ' />' +
+          '<label class="ep-calendar__record-zero"><input type="checkbox" data-record-zero' + (zero ? " checked" : "") +
+          (unavailable || state.recordSaving ? " disabled" : "") + ' aria-label="No tables cleaned on ' + escape(dateLabel) +
+          '" /> 0 cleaned</label></div>' +
         '<input type="text" data-record-remarks maxlength="4000" placeholder="Remarks" value="' +
           escape(row.draft.remarks || "") + '" aria-label="Remarks for ' + escape(dateLabel) + '"' +
           (unavailable || state.recordSaving ? " disabled" : "") + ' />' +
@@ -1263,12 +1274,12 @@
             ? '<div class="ep-calendar__record-table"><div class="ep-calendar__record-head"><span>Day</span><span>Tables</span><span>Table numbers</span><span>Remarks</span></div>' +
               days + '</div>'
             : '<p class="ep-calendar__empty">No reportable days for this cycle yet.</p>') +
-          '<p class="ep-calendar__record-help">Enter the last table number cleaned. The next day starts from the next table number.</p>' +
+          '<p class="ep-calendar__record-help">Enter the last table number cleaned. The next day starts from the next table number. Tick 0 cleaned when no tables were cleaned that day; add the reason in Remarks.</p>' +
         '</div>' +
         '<footer class="ep-calendar__record-footer"><button type="button" class="ep-calendar__close-button" data-calendar-action="close-record"' +
           (state.recordSaving ? " disabled" : "") + '>Cancel</button>' +
           '<button type="button" class="ep-calendar__setup-submit" data-calendar-action="save-record"' +
-            (state.recordSaving || !rows.some(function (row) { return !row.report && row.end; }) ? " disabled" : "") + '>' +
+            (state.recordSaving || !rows.some(function (row) { return rowEntered(row, Number(state.washingPlant.table_count)); }) ? " disabled" : "") + '>' +
             (state.recordSaving ? "Saving…" : "Save") + '</button></footer>' +
       '</section>' +
     '</div>';
@@ -1691,8 +1702,11 @@
     host.querySelectorAll("[data-record-date]").forEach(function (row) {
       var endInput = row.querySelector("[data-record-end]");
       var remarksInput = row.querySelector("[data-record-remarks]");
+      var zeroInput = row.querySelector("[data-record-zero]");
+      var zero = !!(zeroInput && zeroInput.checked);
       state.recordDrafts[row.dataset.recordDate] = {
-        end: endInput ? endInput.value : "",
+        end: zero ? "" : (endInput ? endInput.value : ""),
+        zero: zero,
         remarks: remarksInput ? remarksInput.value : ""
       };
     });
@@ -1706,7 +1720,8 @@
       var overLimit = Number(item.end) > Number(state.washingPlant.table_count);
       var unavailable = item.start > Number(state.washingPlant.table_count);
       row.querySelector("[data-record-start]").textContent = unavailable ? "—" : item.start;
-      row.querySelector("[data-record-count]").textContent = count || "—";
+      var zeroDay = !!(item.draft && item.draft.zero);
+      row.querySelector("[data-record-count]").textContent = zeroDay ? "0" : (count || "—");
       var error = row.querySelector("[data-record-error]");
       if (error) {
         error.hidden = !overLimit;
@@ -1714,14 +1729,14 @@
       }
       if (endInput) {
         endInput.min = item.start;
-        endInput.disabled = unavailable || state.recordSaving;
+        endInput.disabled = unavailable || zeroDay || state.recordSaving;
+        if (zeroDay) endInput.value = "";
       }
     });
     var save = host.querySelector('[data-calendar-action="save-record"]');
     if (save) {
       save.disabled = state.recordSaving || !rows.some(function (row) {
-        return !row.report && Number(row.end) >= row.start &&
-          Number(row.end) <= Number(state.washingPlant.table_count);
+        return rowEntered(row, Number(state.washingPlant.table_count));
       });
     }
   }
@@ -1941,7 +1956,20 @@
         var entries = [];
         var invalidRange = false;
         rows.forEach(function (row) {
-          if (row.report || row.end === "" || row.end === null || row.end === undefined) return;
+          if (row.report) return;
+          if (row.draft && row.draft.zero) {
+            // Same convention as the daily Excel upload: a day with nothing cleaned is saved as not done, reason
+            // "Other", and what happened goes in Remarks. It never moves the next day's first table number.
+            entries.push({
+              report_date: row.date,
+              job_status: "Not done",
+              exception_reason: "Other",
+              tables_cleaned: 0,
+              remarks: row.draft.remarks || null
+            });
+            return;
+          }
+          if (row.end === "" || row.end === null || row.end === undefined) return;
           var end = Number(row.end);
           if (!Number.isInteger(end) || end < row.start ||
               end > Number(state.washingPlant.table_count)) {
@@ -1960,7 +1988,7 @@
         if (invalidRange || !entries.length) {
           state.recordError = invalidRange
             ? "Check each table range. The last table must be at least the first and no greater than the plant's table count."
-            : "Enter a last table number for at least one day.";
+            : "Enter a last table number, or tick 0 cleaned, for at least one day.";
           renderView(host, state, context);
           return;
         }
@@ -2084,7 +2112,7 @@
       } else if (filter === "modal-search") {
         active.state.modalSearch = event.target.value;
         refreshKeepingFocus(host, active.state, active.context, '[data-calendar-filter="modal-search"]');
-      } else if (event.target.matches("[data-record-end], [data-record-remarks]") &&
+      } else if (event.target.matches("[data-record-end], [data-record-remarks], [data-record-zero]") &&
                  active.state.recordOpen) {
         syncRecordRangeInputs(host, active.state);
       }
