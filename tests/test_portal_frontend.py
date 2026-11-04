@@ -135,6 +135,26 @@ def test_overview_area_filter_and_operational_trend_controls_are_wired(client):
     assert ".ep-overview-trend__svg" in styles
 
 
+def test_overview_filters_keep_full_options_and_metric_tiles_open_scoped_pages():
+    overview = (PORTAL_ASSETS / "js" / "overview.js").read_text(encoding="utf-8")
+    page = TEMPLATE.read_text(encoding="utf-8")
+
+    assert "syncDependentOptions" not in overview
+    assert "const matched = allRows.filter(({ plant }) =>" in overview
+    assert 'filters[filterName] = ev.target.value;' in overview
+    assert 'data-overview-destination="${c.destination}"' in overview
+    assert 'destination: "pm"' in overview
+    assert 'destination: "washing"' in overview
+    assert 'destination: "health"' in overview
+    assert "global.Solar91PortalNav.selectView(destination, dateRange)" in overview
+    assert "global.Solar91PortalNav.selectPlantPage(filters.plant, destination, dateRange, row.plant)" in overview
+    assert 'role="link" tabindex="0"' in overview
+    navigation = (PORTAL_ASSETS / "js" / "navigation.js").read_text(encoding="utf-8")
+    assert "selectView: selectView" in navigation
+    assert ">All projects</option>" in page
+    assert 'Filter by project' in page
+
+
 def test_overview_range_and_trend_requests_are_cached_deduped_and_bounded():
     """The Overview refetches on every filter change, so repeats must not reach the API.
 
@@ -430,7 +450,8 @@ def test_plant_details_page_is_wired_up():
     # Details is the plant table either way: one plant's row when a plant is
     # selected, every plant's row portfolio-wide.
     assert "Solar91PortalPlantsTable" in nav
-    assert '{ siteCode: plantCode }' in nav
+    assert "siteCode: plantCode" in nav
+    assert "section: navState.selectedDetailSection" in nav
     assert "data-plant-details-host" in nav
 
 
@@ -458,17 +479,22 @@ def test_single_plant_details_shows_only_that_plant_row():
     assert "Solar91PortalPlantDetails" not in editor
 
 
-def test_plant_and_portfolio_details_have_nested_design_purchase_liaisoning_bom_tabs():
+def test_plant_and_portfolio_details_sections_are_in_left_navigation():
     table = (PORTAL_ASSETS / "js" / "plants-table.js").read_text(encoding="utf-8")
-    assert '{ id: "design-mdl", label: "Design/MDL" }' in table
-    assert '{ id: "purchase", label: "Purchase" }' in table
-    assert '{ id: "liaisoning", label: "Liaisoning" }' in table
-    assert '{ id: "bom", label: "BOM" }' in table
-    assert 'role="tablist" aria-label="Plant details sections"' in table
-    assert 'data-pt-detail-tab="' + "' + tab.id" in table
-    assert 'detailTab === "design-mdl"' in table
-    assert 'role="tabpanel" id="plant-detail-panel"' in table
-    assert "DETAIL_TABS.length" in table
+    navigation = (PORTAL_ASSETS / "js" / "navigation.js").read_text(encoding="utf-8")
+    page = TEMPLATE.read_text(encoding="utf-8")
+    for section in ("design-mdl", "purchase", "liaisoning", "bom"):
+        assert section in navigation
+        assert f'data-nav="view:details:{section}"' in page
+    assert 'var navId = "plant:" + siteCode + ":" + page.id;' in navigation
+    assert "(parts.length === 3 || parts.length === 4)" in navigation
+    assert 'section: navState.selectedDetailSection' in navigation
+    assert "data-pt-detail-tab" not in table
+    assert "ep-pt__detail-tabs" not in table
+    assert 'var DETAIL_SECTIONS = ["details", "design-mdl", "purchase", "liaisoning", "bom"];' in table
+    assert 'detailSection === "details"' in table
+    assert 'data-detail-section="' in table
+    assert 'if (loaded) {' in table
 
 
 def test_plant_table_uses_balanced_shared_columns_and_numeric_spv_label():
@@ -488,17 +514,46 @@ def test_plant_table_uses_balanced_shared_columns_and_numeric_spv_label():
     assert '{ key: "assignee",  label: "Assignee" }' in table
     assert table.index('{ key: "location",  label: "Location" }') < table.index('{ key: "cctv",      label: "CCTV" }')
     assert table.index('{ key: "cctv",      label: "CCTV" }') < table.index('{ key: "activity",  label: "Last Activity" }')
-    assert '<span class="ep-pt__cctv-placeholder">Coming soon</span>' in table
+    assert 'plant.customFields && plant.customFields.cctv_url' in table
+    assert 'url.protocol === "http:" || url.protocol === "https:"' in table
+    assert '<span class="ep-pt__cctv-placeholder">Add link</span>' in table
+    assert 'class="ep-pt__loc" href="' in table
+    assert 'aria-label="Open CCTV feed for ' in table
+    assert "cctvUrl(p)" in table
 
     script = """
+      const fs = require('fs');
+      const vm = require('vm');
       global.window = global;
       require('./assets/js/portal-api.js');
       const plant = Solar91PortalAPI.normalizePlant({
         id: 1, site_code: 'ABH01',
-        project_company: 'Solar91 Project Thirty Five Private Limited'
+        project_company: 'Solar91 Project Thirty Five Private Limited',
+        custom_fields: { cctv_url: 'https://cctv.example.invalid/feed' }
       });
       if (plant.projectCompanyShort !== 'Project 35') {
         throw new Error('Expected numeric project label, got ' + plant.projectCompanyShort);
+      }
+      const source = fs.readFileSync('assets/js/plants-table.js', 'utf8');
+      const start = source.indexOf('function cctvUrl(plant)');
+      if (start < 0) throw new Error('CCTV URL resolver is missing');
+      const open = source.indexOf('{', start);
+      let depth = 0, end = -1;
+      for (let i = open; i < source.length; i++) {
+        if (source[i] === '{') depth++;
+        if (source[i] === '}' && --depth === 0) { end = i + 1; break; }
+      }
+      const box = { URL };
+      vm.createContext(box);
+      vm.runInContext(source.slice(start, end) + ';this.resolve=cctvUrl;', box);
+      if (box.resolve(plant) !== 'https://cctv.example.invalid/feed') {
+        throw new Error('Configured CCTV URL was not preserved');
+      }
+      if (box.resolve({ customFields: { cctv_url: 'javascript:alert(1)' } }) !== '') {
+        throw new Error('Unsafe CCTV URL protocol was accepted');
+      }
+      if (box.resolve({ customFields: {} }) !== '') {
+        throw new Error('Missing CCTV URL should not create a link');
       }
     """
     run = subprocess.run(["node", "-e", script], cwd=ROOT, capture_output=True, text=True, timeout=20)
@@ -701,16 +756,36 @@ def test_portfolio_health_hides_hero_and_summary_and_calendar_has_nested_detail(
     assert "ep-calendar__event-detail-modal" in styles
 
 
-def test_health_issue_date_filter_is_local_and_supports_single_date_or_range():
+def test_health_issue_date_filter_is_local_and_supports_a_date_range():
     issues = (PORTAL_ASSETS / "js" / "site-issues.js").read_text(encoding="utf-8")
     styles = (PORTAL_ASSETS / "css" / "site-issues.css").read_text(encoding="utf-8")
-    assert 'data-issue-date-single' in issues
+    header = issues[issues.index("function renderHeader"):issues.index("function renderFilters")]
+    assert 'aria-label="Filter issues by occurrence date"' in header
+    assert ">Range</span>" in header
+    assert 'data-issue-date-mode' in header and 'data-issue-date-period' in header
+    assert 'value="month"' in header and "This month</option>" in header
+    assert 'data-issue-date-start' in header and 'data-issue-date-end' in header
     assert 'data-issue-date-start' in issues and 'data-issue-date-end' in issues
-    assert 'data-issue-date-apply' in issues and 'data-issue-date-clear' in issues
+    assert 'data-issue-date-apply' not in issues
+    assert 'data-issue-date-clear' in issues
+    assert 'state.issueDateRangeMode = event.target.checked;' in issues
+    assert 'datePeriodRange(state.issueDatePeriod, localDate(new Date()))' in issues
+    assert 'return { start: today.slice(0, 8) + "01", end: today };' in issues
+    assert 'event.target.matches("[data-issue-date-start]") ||' in issues
+    assert 'state.issueDateStart = dateStart;' in issues
+    assert 'state.issueDateEnd = dateEnd;' in issues
     assert "issue.occurredAt < state.issueDateStart" in issues
     assert "issue.occurredAt > state.issueDateEnd" in issues
+    assert "state.issueDateStart = context.startDate || \"\";" in issues
+    assert "state.issueDateDraftStart = state.issueDateStart;" in issues
+    clear_action = issues[issues.index('action === "clear"'):issues.index("renderView();", issues.index('action === "clear"'))]
+    assert 'state.issueDatePeriod = "all";' in clear_action
+    assert 'state.issueDateRangeMode = false;' in clear_action
     assert "issue.occurredAt < context.startDate" not in issues
-    assert ".ep-issues__date-filter" in styles
+    assert ".ep-issues__date-filter" in styles and ".ep-issues__date-separator" in styles
+    assert "min-height: 62px;" in styles and "border-radius: 15px;" in styles
+    assert ".ep-issues__date-period" in styles
+    assert "renderHeader(context)" in issues
 
 
 def test_health_loading_does_not_wait_for_categories_and_table_search_is_debounced():

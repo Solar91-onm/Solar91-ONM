@@ -43,7 +43,8 @@ assets/                          the portal design system, served at /assets
   sortable comparison table, Critical Issues and Recent Activity.
 - **Plants → <plant> →** Details · Health · Preventive Maintenance · Washing
 - **Views →** Details (every plant) · Health · Preventive Maintenance · Washing
-- **Details →** Design/MDL · Purchase · Liaisoning · BOM. Design/MDL retains the current plant details table; the other sections are empty until their data workflows are implemented.
+- **Details navigation →** The existing Details table remains under Details. Design/MDL, Purchase, Liaisoning, and BOM are separate destinations beneath it in the left navigation for both an individual plant and portfolio Views; their data views remain empty until their workflows are implemented.
+- The Details table's CCTV **View** link opens the plant's `custom_fields.cctv_url` in a new tab when configured; without a URL, it shows **Add link**.
 - **Settings** — Team access, and **Categories** (the work-category list).
 
 ## Sign-in

@@ -12,9 +12,8 @@
  * then refreshes both the tiles and the chart from them. The chart has no
  * dates of its own, so the two can never disagree.
  *
- * The plant / project / district filters narrow both as well: the tiles
- * re-aggregate locally from the rows already loaded, the chart refetches for
- * the matching site codes over the same range.
+ * The plant / project / district filters narrow the tiles and chart to the
+ * selected plants, while each filter keeps its full set of available options.
  */
 (function (global) {
   "use strict";
@@ -149,44 +148,10 @@
     const companySel = document.querySelector("[data-filter=\"company\"]");
     const districtSel = document.querySelector("[data-filter=\"district\"]");
 
-    function rowsForOptions(excludedFilter) {
-      return allRows.filter(({ plant, profile }) => {
-        if (excludedFilter !== "plant" && filters.plant !== "__all" && plant.siteCode !== filters.plant) return false;
-        if (filters.health !== "__all" && profile.derivedCondition !== filters.health) return false;
-        if (excludedFilter !== "company" && filters.company !== "__all" && (plant.projectCompany || "") !== filters.company) return false;
-        if (excludedFilter !== "district" && filters.district !== "__all" && (plant.district || "") !== filters.district) return false;
-        return true;
-      });
-    }
-
-    function valuesForFilter(filterName, rows) {
-      return rows.map(({ plant }) => {
-        if (filterName === "plant") return plant.siteCode;
-        if (filterName === "company") return plant.projectCompany || "";
-        return (plant.district || "").trim();
-      }).filter(Boolean);
-    }
-
-    function renderSelectOptions(select, label, options, selected) {
-      if (!select) return;
-      select.replaceChildren();
-      const allOption = document.createElement("option");
-      allOption.value = "__all";
-      allOption.textContent = label;
-      select.appendChild(allOption);
-      options.forEach((option) => {
-        const opt = document.createElement("option");
-        opt.value = option.value;
-        opt.textContent = option.label;
-        select.appendChild(opt);
-      });
-      select.value = selected;
-    }
-
     if (plantInput && plantPanel) {
       function renderPlantOptions(term) {
         const t = (term || "").trim().toLowerCase();
-        const matched = rowsForOptions("plant").filter(({ plant }) => {
+        const matched = allRows.filter(({ plant }) => {
           if (!t) return true;
           return (plant.displayName || plant.plantName).toLowerCase().indexOf(t) !== -1 ||
                  plant.displayCode.toLowerCase().indexOf(t) !== -1 ||
@@ -217,7 +182,6 @@
         if (!opt) return;
         const code = opt.getAttribute("data-plant-opt");
         filters.plant = code;
-        syncDependentOptions("plant");
         if (code === "__all") {
           plantInput.value = "";
           plantInput.placeholder = "All plants";
@@ -235,52 +199,37 @@
       });
     }
 
-    function syncDependentOptions(changedFilter) {
-      const previousFilters = {
-        plant: filters.plant,
-        company: filters.company,
-        district: filters.district
-      };
-      ["plant", "company", "district"].forEach((filterName) => {
-        if (filterName === changedFilter || filters[filterName] === "__all") return;
-        const available = new Set(valuesForFilter(filterName, rowsForOptions(filterName)));
-        if (!available.has(filters[filterName])) filters[filterName] = "__all";
-      });
-      const trendFiltersChanged = ["plant", "company", "district"]
-        .some((filterName) => filters[filterName] !== previousFilters[filterName]);
-
-      const companies = new Map();
-      rowsForOptions("company").forEach(({ plant }) => {
-        const fullName = plant.projectCompany || "";
-        if (fullName && !companies.has(fullName)) {
-          companies.set(fullName, (plant.projectCompanyShort || fullName).replace(/^Project\s+/i, "SPV "));
-        }
-      });
-      const companyOptions = Array.from(companies, ([value, label]) => ({ value, label }))
-        .sort((a, b) => a.label.localeCompare(b.label, undefined, { numeric: true }));
-      renderSelectOptions(companySel, "All SPVs", companyOptions, filters.company);
-
-      const districtsByKey = new Map();
-      rowsForOptions("district").forEach(({ plant }) => {
-        const district = (plant.district || "").trim();
-        const key = district.toLocaleLowerCase();
-        if (district && !districtsByKey.has(key)) districtsByKey.set(key, district);
-      });
-      const districtOptions = Array.from(districtsByKey.values())
-        .sort((a, b) => a.localeCompare(b))
-        .map((district) => ({ value: district, label: district }));
-      renderSelectOptions(districtSel, "All districts", districtOptions, filters.district);
-
-      if (plantInput && plantPanel) {
-        if (previousFilters.plant !== "__all" && filters.plant === "__all") {
-          plantInput.value = "";
-          plantInput.placeholder = "All plants";
-        }
-        renderPlantOptions(plantInput.value);
+    const companies = new Map();
+    const districtsByKey = new Map();
+    allRows.forEach(({ plant }) => {
+      const company = plant.projectCompany || "";
+      if (company && !companies.has(company)) {
+        companies.set(company, plant.projectCompanyShort || company);
       }
-      return trendFiltersChanged;
+      const district = (plant.district || "").trim();
+      const districtKey = district.toLocaleLowerCase();
+      if (district && !districtsByKey.has(districtKey)) districtsByKey.set(districtKey, district);
+    });
+    if (companySel) {
+      Array.from(companies, ([value, label]) => ({ value, label }))
+        .sort((a, b) => a.label.localeCompare(b.label, undefined, { numeric: true }))
+        .forEach((company) => {
+          const option = document.createElement("option");
+          option.value = company.value;
+          option.textContent = company.label;
+          companySel.appendChild(option);
+        });
     }
-    syncDependentOptions(null);
+    if (districtSel) {
+      Array.from(districtsByKey.values())
+        .sort((a, b) => a.localeCompare(b))
+        .forEach((district) => {
+          const option = document.createElement("option");
+          option.value = district;
+          option.textContent = district;
+          districtSel.appendChild(option);
+        });
+    }
 
     document.querySelectorAll("[data-filter]").forEach((sel) => {
       sel.addEventListener("change", (ev) => {
@@ -290,9 +239,8 @@
           return;
         }
         filters[filterName] = ev.target.value;
-        const dependentTrendFiltersChanged = syncDependentOptions(filterName);
         recomputeAndRender();
-        if (filterName === "district" || filterName === "company" || dependentTrendFiltersChanged) {
+        if (filterName === "plant" || filterName === "district" || filterName === "company") {
           reloadTrendForFilters();
         }
       });
@@ -652,7 +600,7 @@
     ];
 
     document.querySelector("[data-overview-metrics]").innerHTML = cards.map((c) => `
-      <div class="ep-metric" role="link" tabindex="0" data-overview-destination="${c.destination}" aria-label="Open ${fmt.escape(c.title)}">
+      <div class="ep-metric" role="link" tabindex="0" data-overview-destination="${c.destination}" aria-label="${fmt.escape(c.title)}">
         <div class="ep-metric__head">
           <span class="ep-metric__title">${c.icon || ""}${fmt.escape(c.title)}</span>
         </div>

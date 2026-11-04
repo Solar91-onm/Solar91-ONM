@@ -20,16 +20,19 @@
 
   var allRows = [];            // [{ plant, profile }]
   var loadPromise = null;
+  var loaded = false;
   var searchTimer = null;
   var mode = { kind: "all", siteCode: null };
-  var detailTab = "design-mdl";
+  var detailSection = "details";
   var ui = { search: "", spv: "__all", district: "__all", sort: "name" };
-  var DETAIL_TABS = [
-    { id: "design-mdl", label: "Design/MDL" },
-    { id: "purchase", label: "Purchase" },
-    { id: "liaisoning", label: "Liaisoning" },
-    { id: "bom", label: "BOM" }
-  ];
+  var DETAIL_SECTIONS = ["details", "design-mdl", "purchase", "liaisoning", "bom"];
+  var DETAIL_SECTION_LABELS = {
+    details: "Details",
+    "design-mdl": "Design/MDL",
+    purchase: "Purchase",
+    liaisoning: "Liaisoning",
+    bom: "BOM"
+  };
 
   // ─── Field helpers ───────────────────────────────────────────────────
   // Only ever read the number out of the shortened "Project N" form. The raw
@@ -129,6 +132,17 @@
     return !!(global.Solar91PortalAPI && global.Solar91PortalAPI.can("plants.manage"));
   }
 
+  function cctvUrl(plant) {
+    var value = plant.customFields && plant.customFields.cctv_url;
+    if (typeof value !== "string" || !value.trim()) return "";
+    try {
+      var url = new URL(value.trim());
+      return url.protocol === "http:" || url.protocol === "https:" ? url.href : "";
+    } catch (error) {
+      return "";
+    }
+  }
+
   function rowHTML(entry) {
     var p = entry.plant;
     var locationCell = "<td>" + (p.mapsUrl
@@ -136,6 +150,11 @@
             fmt.escape(p.location || p.district || "View plant location") + '">' +
             "View</a>"
         : dash()) + "</td>";
+    var cameraUrl = cctvUrl(p);
+    var cctvCell = "<td>" + (cameraUrl
+        ? '<a class="ep-pt__loc" href="' + fmt.escape(cameraUrl) + '" target="_blank" rel="noopener" aria-label="Open CCTV feed for ' +
+            fmt.escape(p.displayName || p.plantName) + '" title="Open CCTV feed">View</a>'
+        : '<span class="ep-pt__cctv-placeholder">Add link</span>') + "</td>";
     return "" +
       "<tr>" +
         '<td class="ep-pt__codecell">' +
@@ -153,7 +172,7 @@
         "<td>" + (p.washingAssignee ? fmt.escape(p.washingAssignee) : dash("Washing not set up")) + "</td>" +
         '<td class="num mono">' + fmt.escape(formatCOD(p.commissionedOn)) + "</td>" +
         locationCell +
-        '<td><span class="ep-pt__cctv-placeholder">Coming soon</span></td>' +
+        cctvCell +
         '<td class="mono">' + fmt.escape(lastActivity(entry.profile)) + "</td>" +
         '<td class="num">' +
           (canEdit()
@@ -224,8 +243,9 @@
     var plant = single && rows[0] ? rows[0].plant : null;
 
     var title = single
-      ? (plant ? fmt.escape(plant.displayName || plant.plantName) + " · Details" : "Plant Details")
-      : "Plants table";
+      ? (plant ? fmt.escape(plant.displayName || plant.plantName) + " · " +
+        fmt.escape(DETAIL_SECTION_LABELS[detailSection]) : "Plant Details")
+      : (detailSection === "details" ? "Plants table" : fmt.escape(DETAIL_SECTION_LABELS[detailSection]));
 
     var subtitle = single
       ? (plant ? fmt.escape(plant.siteCode) + " · " + fmt.escape(plant.district || "") : "")
@@ -244,21 +264,8 @@
           '<p class="ep-pt__sub">' + subtitle + "</p>" +
         "</div>" +
 
-        '<div class="ep-pt__detail-tabs" role="tablist" aria-label="Plant details sections">' +
-          DETAIL_TABS.map(function (tab) {
-            var selected = detailTab === tab.id;
-            return '<button type="button" class="ep-pt__detail-tab' +
-              (selected ? ' is-active' : '') + '" role="tab" id="plant-detail-tab-' + tab.id +
-              '" aria-selected="' + selected + '" aria-controls="plant-detail-panel" tabindex="' +
-              (selected ? "0" : "-1") + '" data-pt-detail-tab="' + tab.id + '">' +
-              fmt.escape(tab.label) + "</button>";
-          }).join("") +
-        "</div>" +
-
-        '<div class="ep-pt__card"' +
-          (detailTab === "design-mdl"
-            ? ' role="tabpanel" id="plant-detail-panel" aria-labelledby="plant-detail-tab-design-mdl"'
-            : " hidden") + '>' +
+        (detailSection === "details"
+          ? '<div class="ep-pt__card">' +
           // One plant has nothing to search, filter or sort.
           (single ? "" : toolbarHTML()) +
           (single ? "" :
@@ -295,10 +302,9 @@
               "</table>" +
             "</div>" +
           "</div>" +
-        "</div>" +
-        (detailTab === "design-mdl" ? "" :
-          '<section class="ep-pt__detail-empty" role="tabpanel" id="plant-detail-panel" aria-labelledby="plant-detail-tab-' +
-          detailTab + '"></section>') +
+        "</div>"
+          : '<section class="ep-pt__detail-empty" data-detail-section="' +
+            detailSection + '" aria-label="' + fmt.escape(DETAIL_SECTION_LABELS[detailSection]) + '"></section>') +
       "</div>";
 
     wire(container);
@@ -310,7 +316,11 @@
     if (!entry || !global.Solar91PortalPlantEditor) return;
     global.Solar91PortalPlantEditor.open(entry.plant, function () {
       loadPromise = null;          // the saved row must be re-read, not patched in memory
-      show(container, mode.kind === "single" ? { siteCode: mode.siteCode } : null);
+      loaded = false;
+      show(container, {
+        siteCode: mode.kind === "single" ? mode.siteCode : null,
+        section: detailSection
+      });
     });
   }
 
@@ -331,7 +341,7 @@
         p.washingAssignee || "",
         formatCOD(p.commissionedOn),
         p.location || p.mapsUrl || "",
-        "Coming soon",
+        cctvUrl(p),
         lastActivity(entry.profile)
       ];
     });
@@ -374,29 +384,6 @@
 
   // ─── Wiring ──────────────────────────────────────────────────────────
   function wire(container) {
-    container.querySelectorAll("[data-pt-detail-tab]").forEach(function (tab) {
-      tab.addEventListener("click", function () {
-        detailTab = tab.getAttribute("data-pt-detail-tab");
-        render(container);
-        var activeTab = container.querySelector('[data-pt-detail-tab="' + detailTab + '"]');
-        if (activeTab) activeTab.focus();
-      });
-      tab.addEventListener("keydown", function (event) {
-        var current = DETAIL_TABS.findIndex(function (item) { return item.id === detailTab; });
-        var next = current;
-        if (event.key === "ArrowRight") next = (current + 1) % DETAIL_TABS.length;
-        else if (event.key === "ArrowLeft") next = (current + DETAIL_TABS.length - 1) % DETAIL_TABS.length;
-        else if (event.key === "Home") next = 0;
-        else if (event.key === "End") next = DETAIL_TABS.length - 1;
-        else return;
-        event.preventDefault();
-        detailTab = DETAIL_TABS[next].id;
-        render(container);
-        var activeTab = container.querySelector('[data-pt-detail-tab="' + detailTab + '"]');
-        if (activeTab) activeTab.focus();
-      });
-    });
-
     var search = container.querySelector("[data-pt-search]");
     if (search) {
       search.addEventListener("input", function () {
@@ -445,6 +432,7 @@
     if (!loadPromise) {
       loadPromise = data.fetchPortfolio().then(function (portfolio) {
         allRows = portfolio.rows;
+        loaded = true;
         return allRows;
       });
     }
@@ -453,11 +441,16 @@
 
   function show(container, opts) {
     if (!container) return;
-    detailTab = "design-mdl";
+    detailSection = opts && DETAIL_SECTIONS.indexOf(opts.section) !== -1
+      ? opts.section : "details";
     mode = {
       kind: (opts && opts.siteCode) ? "single" : "all",
       siteCode: opts ? opts.siteCode : null
     };
+    if (loaded) {
+      render(container);
+      return;
+    }
     container.innerHTML = '<div class="ep-pt__loading">Loading plants…</div>';
     ensureLoaded().then(function () {
       render(container);

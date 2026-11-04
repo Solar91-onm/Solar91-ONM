@@ -63,7 +63,8 @@
     sort: "recent",
     issueDateStart: "",
     issueDateEnd: "",
-    issueDateDraftSingle: "",
+    issueDatePeriod: "month",
+    issueDateRangeMode: false,
     issueDateDraftStart: "",
     issueDateDraftEnd: "",
     issueDateError: "",
@@ -95,6 +96,27 @@
 
   function plantLabel(plant) {
     return plant.displayName || plant.plantName;
+  }
+
+  function localDate(date) {
+    return date.getFullYear() + "-" + String(date.getMonth() + 1).padStart(2, "0") +
+      "-" + String(date.getDate()).padStart(2, "0");
+  }
+
+  function datePeriodRange(period, today) {
+    var date = new Date(today + "T00:00:00");
+    if (period === "all") return { start: "", end: "" };
+    if (period === "today") return { start: today, end: today };
+    if (period === "yesterday") {
+      date.setDate(date.getDate() - 1);
+      var yesterday = localDate(date);
+      return { start: yesterday, end: yesterday };
+    }
+    if (period === "week") {
+      date.setDate(date.getDate() - ((date.getDay() + 6) % 7));
+      return { start: localDate(date), end: today };
+    }
+    return { start: today.slice(0, 8) + "01", end: today };
   }
 
   function mapApiIssue(issue, plantsById) {
@@ -190,15 +212,30 @@
       ? '<button class="ep-issues__button ep-issues__button--primary" type="button" data-issue-action="raise">+ Raise issue</button>'
       : "";
     return '<div class="ep-issues__portfolio-actions">' +
-      '<div class="ep-issues__date-filter" aria-label="Filter issues by occurrence date">' +
-        '<label><span>On</span><input type="date" data-issue-date-single value="' +
-          escape(state.issueDateDraftSingle) + '" aria-label="Issues on date" /></label>' +
-        '<label><span>From</span><input type="date" data-issue-date-start value="' +
-          escape(state.issueDateDraftStart) + '" aria-label="Issue date from" /></label>' +
-        '<label><span>To</span><input type="date" data-issue-date-end value="' +
-          escape(state.issueDateDraftEnd) + '" aria-label="Issue date to" /></label>' +
-        '<button type="button" class="ep-issues__button ep-issues__button--small" data-issue-date-apply>Apply</button>' +
-        '<button type="button" class="ep-issues__button ep-issues__button--small" data-issue-date-clear>Clear</button>' +
+      '<div class="ep-issues__date-filter" role="group" aria-label="Filter issues by occurrence date">' +
+        '<span class="ep-issues__date-label">Range</span>' +
+        '<label class="ep-toggle" title="Toggle custom date range">' +
+          '<input type="checkbox" data-issue-date-mode' + (state.issueDateRangeMode ? " checked" : "") +
+            ' aria-label="Toggle custom date range" />' +
+          '<span class="ep-toggle__track"><span class="ep-toggle__thumb"></span></span>' +
+        '</label>' +
+        '<div class="ep-issues__date-quick"' + (state.issueDateRangeMode ? ' hidden' : "") + '>' +
+          '<select class="ep-issues__date-period" data-issue-date-period aria-label="Issue date period">' +
+            '<option value="all"' + (state.issueDatePeriod === "all" ? " selected" : "") + '>All time</option>' +
+            '<option value="today"' + (state.issueDatePeriod === "today" ? " selected" : "") + '>Today</option>' +
+            '<option value="yesterday"' + (state.issueDatePeriod === "yesterday" ? " selected" : "") + '>Yesterday</option>' +
+            '<option value="week"' + (state.issueDatePeriod === "week" ? " selected" : "") + '>This week</option>' +
+            '<option value="month"' + (state.issueDatePeriod === "month" ? " selected" : "") + '>This month</option>' +
+          '</select>' +
+        '</div>' +
+        '<div class="ep-issues__date-custom"' + (!state.issueDateRangeMode ? ' hidden' : "") + '>' +
+          '<label><span>From</span><input type="date" data-issue-date-start value="' +
+            escape(state.issueDateDraftStart) + '" aria-label="Issue date from" /></label>' +
+          '<span class="ep-issues__date-separator" aria-hidden="true">–</span>' +
+          '<label><span>To</span><input type="date" data-issue-date-end value="' +
+            escape(state.issueDateDraftEnd) + '" aria-label="Issue date to" /></label>' +
+          '<button type="button" class="ep-issues__button ep-issues__button--small" data-issue-date-clear>Clear</button>' +
+        '</div>' +
         (state.issueDateError
           ? '<span class="ep-issues__date-error" role="alert">' + escape(state.issueDateError) + '</span>'
           : "") +
@@ -438,11 +475,6 @@
     return "<div><dt>" + escape(label) + "</dt><dd>" + escape(value || "—") + "</dd></div>";
   }
 
-  function localDate(date) {
-    return date.getFullYear() + "-" + String(date.getMonth() + 1).padStart(2, "0") + "-" +
-      String(date.getDate()).padStart(2, "0");
-  }
-
   function createDraft(context) {
     return {
       plantCode: context.plantCode || state.plantFilter || "",
@@ -655,10 +687,17 @@
       : null;
     var nextRange = (context.startDate || "") + ":" + (context.endDate || "");
     if (!active || previousScope !== nextScope || previousRange !== nextRange) {
-      state.issueDateStart = context.startDate || "";
-      state.issueDateEnd = context.endDate || "";
-      state.issueDateDraftSingle = state.issueDateStart &&
-        state.issueDateStart === state.issueDateEnd ? state.issueDateStart : "";
+      if (context.startDate || context.endDate) {
+        state.issueDateStart = context.startDate || "";
+        state.issueDateEnd = context.endDate || "";
+        state.issueDateRangeMode = true;
+      } else {
+        var defaultRange = datePeriodRange("month", localDate(new Date()));
+        state.issueDateStart = defaultRange.start;
+        state.issueDateEnd = defaultRange.end;
+        state.issueDatePeriod = "month";
+        state.issueDateRangeMode = false;
+      }
       state.issueDateDraftStart = state.issueDateStart;
       state.issueDateDraftEnd = state.issueDateEnd;
       state.issueDateError = "";
@@ -792,22 +831,11 @@
       if (!active || active.host !== host) return;
       if (event.target.matches("[data-issue-date-start]")) {
         state.issueDateDraftStart = event.target.value;
-        state.issueDateDraftSingle = "";
         state.issueDateError = "";
         return;
       }
       if (event.target.matches("[data-issue-date-end]")) {
         state.issueDateDraftEnd = event.target.value;
-        state.issueDateDraftSingle = "";
-        state.issueDateError = "";
-        return;
-      }
-      if (event.target.matches("[data-issue-date-single]")) {
-        state.issueDateDraftSingle = event.target.value;
-        if (state.issueDateDraftSingle) {
-          state.issueDateDraftStart = "";
-          state.issueDateDraftEnd = "";
-        }
         state.issueDateError = "";
         return;
       }
@@ -829,6 +857,43 @@
     });
     host.addEventListener("change", function (event) {
       if (!active || active.host !== host) return;
+      if (event.target.matches("[data-issue-date-mode]")) {
+        state.issueDateRangeMode = event.target.checked;
+        state.issueDateError = "";
+        renderView();
+        return;
+      }
+      if (event.target.matches("[data-issue-date-period]")) {
+        state.issueDatePeriod = event.target.value;
+        var range = datePeriodRange(state.issueDatePeriod, localDate(new Date()));
+        state.issueDateStart = range.start;
+        state.issueDateEnd = range.end;
+        state.issueDateDraftStart = range.start;
+        state.issueDateDraftEnd = range.end;
+        state.issueDateError = "";
+        renderView();
+        return;
+      }
+      if (event.target.matches("[data-issue-date-start]") ||
+          event.target.matches("[data-issue-date-end]")) {
+        if (event.target.matches("[data-issue-date-start]")) {
+          state.issueDateDraftStart = event.target.value;
+        } else {
+          state.issueDateDraftEnd = event.target.value;
+        }
+        var dateStart = state.issueDateDraftStart;
+        var dateEnd = state.issueDateDraftEnd;
+        if (dateStart && dateEnd && dateStart > dateEnd) {
+          state.issueDateError = "The start date must be on or before the end date.";
+          renderView();
+          return;
+        }
+        state.issueDateStart = dateStart;
+        state.issueDateEnd = dateEnd;
+        state.issueDateError = "";
+        renderView();
+        return;
+      }
       // Edit form: the resolution fields only apply when the ticket is being
       // resolved, so they appear with that choice and hide again otherwise.
       if (event.target.name === "status" && state.modalMode === "edit") {
@@ -879,26 +944,13 @@
     });
     host.addEventListener("click", function (event) {
       if (!active || active.host !== host) return;
-      if (event.target.closest("[data-issue-date-apply]")) {
-        var dateStart = state.issueDateDraftSingle || state.issueDateDraftStart;
-        var dateEnd = state.issueDateDraftSingle || state.issueDateDraftEnd;
-        if (dateStart && dateEnd && dateStart > dateEnd) {
-          state.issueDateError = "The start date must be on or before the end date.";
-          renderView();
-          return;
-        }
-        state.issueDateStart = dateStart;
-        state.issueDateEnd = dateEnd;
-        state.issueDateError = "";
-        renderView();
-        return;
-      }
       if (event.target.closest("[data-issue-date-clear]")) {
         state.issueDateStart = "";
         state.issueDateEnd = "";
-        state.issueDateDraftSingle = "";
         state.issueDateDraftStart = "";
         state.issueDateDraftEnd = "";
+        state.issueDatePeriod = "all";
+        state.issueDateRangeMode = false;
         state.issueDateError = "";
         renderView();
         return;
@@ -1001,6 +1053,14 @@
         state.search = "";
         state.plantFilter = "";
         state.statusFilter = "All";
+        state.issueDatePeriod = "all";
+        state.issueDateRangeMode = false;
+        var allDates = datePeriodRange("all", localDate(new Date()));
+        state.issueDateStart = allDates.start;
+        state.issueDateEnd = allDates.end;
+        state.issueDateDraftStart = allDates.start;
+        state.issueDateDraftEnd = allDates.end;
+        state.issueDateError = "";
       } else if (action === "close") {
         if (state.submitting) return;
         state.modalId = "";

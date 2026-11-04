@@ -30,6 +30,13 @@
     { id: "asset-warranty",  label: "Asset & Warranty" }
   ];
 
+  var DETAIL_SECTIONS = [
+    { id: "design-mdl", label: "Design/MDL" },
+    { id: "purchase", label: "Purchase" },
+    { id: "liaisoning", label: "Liaisoning" },
+    { id: "bom", label: "BOM" }
+  ];
+
   var ROLE_TAB_VISIBILITY = {
     "O&M Head":        "*",
     "Assignee":        "*",
@@ -44,6 +51,7 @@
     selectedPlant: null,         // siteCode
     selectedSubPage: null,       // e.g. "details", "health"
     selectedViewPage: null,      // e.g. "details", "health"
+    selectedDetailSection: "details",
     selectedRange: null,         // { startDate, endDate } when opened from Overview
     expandedGroups: {}           // { plants: true/false, views: true/false }
   };
@@ -104,10 +112,24 @@
         var navId = "plant:" + siteCode + ":" + page.id;
         var isActive = navState.activeView === "plant-sub" &&
                        navState.selectedPlant === siteCode &&
-                       navState.selectedSubPage === page.id;
-        return '<button class="ep-nav-item ep-nav-item--sub' + (isActive ? ' is-active' : '') + '" type="button" data-nav="' + navId + '">' +
+                       navState.selectedSubPage === page.id &&
+                       (page.id !== "details" || navState.selectedDetailSection === "details");
+        var item = '<button class="ep-nav-item ep-nav-item--sub' + (isActive ? ' is-active' : '') + '" type="button" data-nav="' + navId + '">' +
           '<span class="ep-nav-item__label">' + page.label + '</span>' +
         '</button>';
+        if (page.id === "details") {
+          item += '<div class="ep-nav-detail-sub">' + DETAIL_SECTIONS.map(function (section) {
+            var sectionActive = navState.activeView === "plant-sub" &&
+              navState.selectedPlant === siteCode &&
+              navState.selectedSubPage === "details" &&
+              navState.selectedDetailSection === section.id;
+            return '<button class="ep-nav-item ep-nav-item--sub ep-nav-item--detail' +
+              (sectionActive ? ' is-active' : '') + '" type="button" data-nav="' +
+              navId + ":" + section.id + '">' +
+              '<span class="ep-nav-item__label">' + section.label + '</span></button>';
+          }).join("") + '</div>';
+        }
+        return item;
       }).join("") +
     '</div>';
   }
@@ -120,6 +142,7 @@
     navState.selectedRange = null;
     navState.selectedPlant = siteCode;
     navState.selectedSubPage = "details";
+    navState.selectedDetailSection = "details";
     navState.activeView = "plant-sub";
     navState.selectedViewPage = null;
 
@@ -130,9 +153,11 @@
   }
 
   // ─── View selection ─────────────────────────────────────────────────
-  function selectView(pageId, dateRange) {
+  function selectView(pageId, dateRange, detailSection) {
     navState.activeView = "view-sub";
     navState.selectedViewPage = pageId;
+    navState.selectedDetailSection = pageId === "details" && detailSection
+      ? detailSection : "details";
     navState.selectedPlant = null;
     navState.selectedSubPage = null;
     navState.selectedRange = dateRange || null;
@@ -153,6 +178,7 @@
     var page = PLANT_SUB_PAGES.find(function (s) { return s.id === pageId; });
     navState.selectedPlant = siteCode;
     navState.selectedSubPage = page ? page.id : "details";
+    navState.selectedDetailSection = "details";
     navState.activeView = "plant-sub";
     navState.selectedViewPage = null;
     navState.selectedRange = dateRange || null;
@@ -231,6 +257,12 @@
       var plant = allPlants.find(function (p) { return p.siteCode === navState.selectedPlant; });
       var subPage = PLANT_SUB_PAGES.find(function (s) { return s.id === navState.selectedSubPage; });
       pageLabel = subPage ? subPage.label : "Details";
+      if (navState.selectedSubPage === "details" && navState.selectedDetailSection !== "details") {
+        var plantDetailSection = DETAIL_SECTIONS.find(function (section) {
+          return section.id === navState.selectedDetailSection;
+        });
+        if (plantDetailSection) pageLabel = plantDetailSection.label;
+      }
       pageId = navState.selectedSubPage;
       contextText = plant ? (plant.displayName || plant.plantName) + " · " + plant.displayCode : "";
       isDetails = navState.selectedSubPage === "details";
@@ -241,6 +273,12 @@
     } else if (navState.activeView === "view-sub") {
       var viewPage = VIEW_SUB_PAGES.find(function (s) { return s.id === navState.selectedViewPage; });
       pageLabel = viewPage ? viewPage.label : "Details";
+      if (navState.selectedViewPage === "details" && navState.selectedDetailSection !== "details") {
+        var viewDetailSection = DETAIL_SECTIONS.find(function (section) {
+          return section.id === navState.selectedDetailSection;
+        });
+        if (viewDetailSection) pageLabel = viewDetailSection.label;
+      }
       pageId = navState.selectedViewPage;
       contextText = "Portfolio-wide View";
       isDetails = navState.selectedViewPage === "details";
@@ -268,7 +306,10 @@
       showOnly(plantCode ? detailsEl : tableEl);
       global.Solar91PortalPlantsTable.show(
         document.querySelector(plantCode ? "[data-plant-details-host]" : "[data-plants-table-host]"),
-        plantCode ? { siteCode: plantCode } : null
+        {
+          siteCode: plantCode,
+          section: navState.selectedDetailSection
+        }
       );
     } else if (pageId === "health" && global.Solar91PortalIssues) {
       showOnly(healthEl);
@@ -314,8 +355,12 @@
 
       var isActive = false;
       if (nav.indexOf("view:") === 0) {
-        var viewId = nav.substring(5);
-        isActive = navState.activeView === "view-sub" && navState.selectedViewPage === viewId;
+        var viewParts = nav.substring(5).split(":");
+        isActive = navState.activeView === "view-sub" &&
+          navState.selectedViewPage === viewParts[0] &&
+          (viewParts[0] !== "details" ||
+            (viewParts.length === 1 && navState.selectedDetailSection === "details") ||
+            (viewParts.length === 2 && navState.selectedDetailSection === viewParts[1]));
       }
       // plant sub-items are handled in renderPlantSubNav
       btn.classList.toggle("is-active", isActive);
@@ -377,10 +422,12 @@
         if (subBtn) {
           var nav = subBtn.getAttribute("data-nav");
           var parts = nav.split(":");
-          if (parts[0] === "plant" && parts.length === 3) {
+          if (parts[0] === "plant" && (parts.length === 3 || parts.length === 4)) {
             navState.selectedRange = null;
             navState.selectedPlant = parts[1];
             navState.selectedSubPage = parts[2];
+            navState.selectedDetailSection = parts[2] === "details" && parts[3]
+              ? parts[3] : "details";
             navState.activeView = "plant-sub";
             navState.selectedViewPage = null;
             renderPlantList(searchInput ? searchInput.value : "");
@@ -419,7 +466,8 @@
       btn.addEventListener("click", function () {
         var nav = btn.getAttribute("data-nav");
         if (nav.indexOf("view:") === 0) {
-          selectView(nav.substring(5));
+          var parts = nav.substring(5).split(":");
+          selectView(parts[0], null, parts[1]);
         }
       });
     });
@@ -464,6 +512,7 @@
     wire: wire,
     loadPlants: loadPlants,
     selectPlant: selectPlant,
+    selectView: selectView,
     selectPlantPage: selectPlantPage,
     refresh: refresh,
     getState: function () { return navState; }

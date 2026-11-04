@@ -67,11 +67,73 @@
 .ep-issues__date-filter {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 14px;
+  min-height: 62px;
+  padding: 10px 20px;
+  border: 1px solid #e2e8e3;
+  border-radius: 15px;
+  background: #fff;
+  box-shadow: 0 2px 6px rgba(24, 46, 31, .06);
   flex-wrap: wrap;
 }
 
-.ep-issues__date-filter label {
+.ep-issues__date-label {
+  color: #7d8b82;
+  font-size: 14px;
+  font-weight: 650;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+}
+
+.ep-issues__date-filter .ep-toggle {
+  margin: 0 1px;
+}
+
+.ep-issues__date-filter .ep-toggle__track {
+  width: 54px;
+  height: 30px;
+  padding: 3px;
+}
+
+.ep-issues__date-filter .ep-toggle__thumb {
+  width: 24px;
+  height: 24px;
+}
+
+.ep-issues__date-filter .ep-toggle input:checked + .ep-toggle__track .ep-toggle__thumb {
+  transform: translateX(24px);
+}
+
+.ep-issues__date-quick,
+.ep-issues__date-custom {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ep-issues__date-quick[hidden],
+.ep-issues__date-custom[hidden] {
+  display: none;
+}
+
+.ep-issues__date-period {
+  width: 142px;
+  padding: 4px 20px 4px 0;
+  border: 0;
+  outline: 0;
+  appearance: none;
+  background-color: transparent;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%235B6761' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right center;
+  color: #111a14;
+  font: inherit;
+  font-size: 19px;
+  font-weight: 550;
+  cursor: pointer;
+}
+
+.ep-issues__date-custom label {
   display: flex;
   align-items: center;
   gap: 5px;
@@ -80,9 +142,14 @@
   font-weight: 650;
 }
 
-.ep-issues__date-filter input {
+.ep-issues__date-separator {
+  color: #98a49c;
+  font-size: 12px;
+}
+
+.ep-issues__date-custom input {
   min-height: 32px;
-  width: 132px;
+  width: 138px;
   padding: 5px 7px;
   border: 1px solid #dfe6e1;
   border-radius: 5px;
@@ -91,7 +158,8 @@
   font-size: 11px;
 }
 
-.ep-issues__date-filter input:focus-visible {
+.ep-issues__date-custom input:focus-visible,
+.ep-issues__date-period:focus-visible {
   outline: 3px solid rgba(29, 125, 80, .18);
   border-color: #4a9b70;
 }
@@ -804,7 +872,9 @@
   .ep-issues__hero { align-items: flex-start; flex-direction: column; min-height: 0; padding: 22px; }
   .ep-issues__hero-actions { width: 100%; justify-content: space-between; }
   .ep-issues__portfolio-actions { justify-content: flex-start; }
-  .ep-issues__date-filter { flex: 1 1 100%; }
+  .ep-issues__date-filter { flex: 1 1 100%; justify-content: space-between; gap: 8px; padding: 10px 12px; }
+  .ep-issues__date-period { width: 124px; font-size: 16px; }
+  .ep-issues__date-custom { flex-wrap: wrap; }
   .ep-issues__filter-row { flex-wrap: wrap; }
   .ep-issues__search { flex-basis: 100%; }
   .ep-issues__select { flex: 1 1 150px; }

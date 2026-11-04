@@ -939,36 +939,8 @@
 }
 .ep-pt__export:hover { background: var(--ep-accent-soft); }
 
-/* Nested sections available from both plant and portfolio Details pages. */
-.ep-pt__detail-tabs {
-  display: flex;
-  gap: 4px;
-  min-width: 0;
-  margin-bottom: var(--ep-s-3);
-  overflow-x: auto;
-  border-bottom: 1px solid var(--ep-border);
-}
-.ep-pt__detail-tab {
-  flex: 0 0 auto;
-  padding: 10px 14px;
-  border: 0;
-  border-bottom: 2px solid transparent;
-  background: transparent;
-  color: var(--ep-text-muted);
-  font: inherit;
-  font-size: var(--ep-fs-sm);
-  font-weight: 600;
-  cursor: pointer;
-}
-.ep-pt__detail-tab:hover { color: var(--ep-text-strong); }
-.ep-pt__detail-tab.is-active {
-  border-bottom-color: var(--ep-accent);
-  color: var(--ep-accent-strong);
-}
-.ep-pt__detail-tab:focus-visible {
-  outline: 2px solid var(--ep-accent);
-  outline-offset: -2px;
-}
+.ep-nav-detail-sub { padding: 0 0 2px; }
+.ep-nav-item--detail { padding-left: 60px; font-size: var(--ep-fs-xs); }
 .ep-pt__detail-empty { min-height: 120px; }
 
 /* ─── Table ───────────────────────────────────────────────────────── */
