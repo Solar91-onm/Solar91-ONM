@@ -44,6 +44,7 @@
     selectedPlant: null,         // siteCode
     selectedSubPage: null,       // e.g. "details", "health"
     selectedViewPage: null,      // e.g. "details", "health"
+    selectedRange: null,         // { startDate, endDate } when opened from Overview
     expandedGroups: {}           // { plants: true/false, views: true/false }
   };
 
@@ -116,6 +117,7 @@
     var plant = allPlants.find(function (p) { return p.siteCode === siteCode; });
     if (!plant) return;
 
+    navState.selectedRange = null;
     navState.selectedPlant = siteCode;
     navState.selectedSubPage = "details";
     navState.activeView = "plant-sub";
@@ -128,11 +130,12 @@
   }
 
   // ─── View selection ─────────────────────────────────────────────────
-  function selectView(pageId) {
+  function selectView(pageId, dateRange) {
     navState.activeView = "view-sub";
     navState.selectedViewPage = pageId;
     navState.selectedPlant = null;
     navState.selectedSubPage = null;
+    navState.selectedRange = dateRange || null;
 
     renderPlantList(document.querySelector("[data-plant-search]")?.value || "");
     updateContentArea();
@@ -140,14 +143,19 @@
   }
 
   /** Open a plant's sub-page (details, health, pm, washing) programmatically. */
-  function selectPlantPage(siteCode, pageId) {
-    var plant = allPlants.find(function (p) { return p.siteCode === siteCode; });
+  function selectPlantPage(siteCode, pageId, dateRange, plantRecord) {
+    var plant = allPlants.find(function (p) { return p.siteCode === siteCode; }) ||
+      (plantRecord && plantRecord.siteCode === siteCode ? plantRecord : null);
     if (!plant) return;
+    if (!allPlants.some(function (item) { return item.siteCode === siteCode; })) {
+      allPlants.push(plant);
+    }
     var page = PLANT_SUB_PAGES.find(function (s) { return s.id === pageId; });
     navState.selectedPlant = siteCode;
     navState.selectedSubPage = page ? page.id : "details";
     navState.activeView = "plant-sub";
     navState.selectedViewPage = null;
+    navState.selectedRange = dateRange || null;
     setGroupExpanded("plants", true);
     renderPlantList(document.querySelector("[data-plant-search]")?.value || "");
     updateContentArea();
@@ -165,6 +173,7 @@
     navState.selectedPlant = null;
     navState.selectedSubPage = null;
     navState.selectedViewPage = null;
+    navState.selectedRange = null;
 
     renderPlantList(document.querySelector("[data-plant-search]")?.value || "");
     updateContentArea();
@@ -205,6 +214,7 @@
     if (navState.activeView === "settings") {
       showOnly(settingsEl);
       if (titleEl) titleEl.textContent = "Login access";
+      navState.selectedRange = null;
       global.Solar91PortalSettings.render(document.querySelector("[data-settings-host]"));
       try { sessionStorage.setItem("solar91Portal.navState", JSON.stringify(navState)); } catch (_) {}
       return;
@@ -245,7 +255,12 @@
       showOnly(calendarEl);
       global.Solar91PortalCalendar.render(
         document.querySelector("[data-calendar-host]"),
-        { type: calendarType, plantCode: plantCode }
+        {
+          type: calendarType,
+          plantCode: plantCode,
+          startDate: navState.selectedRange && navState.selectedRange.startDate,
+          endDate: navState.selectedRange && navState.selectedRange.endDate
+        }
       );
     } else if (isDetails && global.Solar91PortalPlantsTable) {
       // Details is one table of stored plant fields: this plant's single row
@@ -259,7 +274,11 @@
       showOnly(healthEl);
       global.Solar91PortalIssues.render(
         document.querySelector("[data-issues-host]"),
-        { plantCode: plantCode }
+        {
+          plantCode: plantCode,
+          startDate: navState.selectedRange && navState.selectedRange.startDate,
+          endDate: navState.selectedRange && navState.selectedRange.endDate
+        }
       );
     } else if (pageId === "asset-warranty" && global.Solar91PortalAssetWarranty) {
       showOnly(assetWarrantyEl);
@@ -327,6 +346,7 @@
       navState.selectedPlant = null;
       navState.selectedSubPage = null;
       navState.selectedViewPage = null;
+      navState.selectedRange = null;
       renderPlantList(document.querySelector("[data-plant-search]")?.value || "");
       updateContentArea();
       updateHighlights();
@@ -358,6 +378,7 @@
           var nav = subBtn.getAttribute("data-nav");
           var parts = nav.split(":");
           if (parts[0] === "plant" && parts.length === 3) {
+            navState.selectedRange = null;
             navState.selectedPlant = parts[1];
             navState.selectedSubPage = parts[2];
             navState.activeView = "plant-sub";

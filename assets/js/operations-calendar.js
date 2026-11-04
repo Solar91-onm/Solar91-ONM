@@ -54,7 +54,11 @@
     var key = contextKey(context);
     if (!states[key]) {
       states[key] = {
-        month: monthKey(new Date()),
+        month: context.startDate
+          ? context.startDate.slice(0, 7)
+          : monthKey(new Date()),
+        rangeStart: context.startDate || "",
+        rangeEnd: context.endDate || "",
         plants: [],
         events: [],
         loaded: false,
@@ -115,6 +119,8 @@
   function visibleEvents(state) {
     var term = state.search.trim().toLowerCase();
     return state.events.filter(function (event) {
+      if (state.rangeStart && event.date < state.rangeStart) return false;
+      if (state.rangeEnd && event.date > state.rangeEnd) return false;
       if (state.plantFilter && event.plantSiteCode !== state.plantFilter) return false;
       if (state.statusFilter !== "all" && event.status !== state.statusFilter) return false;
       if (!term) return true;
@@ -1277,6 +1283,9 @@
     var subtitle = context.plantCode
       ? "Plant calendar for " + (plant ? plantLabel(plant) : context.plantCode) + "."
       : "Portfolio calendar across all plants.";
+    if (state.rangeStart && state.rangeEnd) {
+      subtitle += " Showing records from " + state.rangeStart + " through " + state.rangeEnd + ".";
+    }
     var events = visibleEvents(state);
     var statusCounts = events.length + (events.length === 1
       ? " saved record"
@@ -1482,7 +1491,10 @@
         events.sort(function (a, b) {
           return a.date.localeCompare(b.date) || a.title.localeCompare(b.title);
         });
-        state.events = events;
+        state.events = events.filter(function (event) {
+          return (!state.rangeStart || event.date >= state.rangeStart) &&
+            (!state.rangeEnd || event.date <= state.rangeEnd);
+        });
         state.tooltips = {};
         events.forEach(function (event) {
           var detail = event.title + " · Cycle " + event.cycleNo + " · " + event.status;
@@ -1558,7 +1570,10 @@
       if (requestId !== state.requestId) return;
       state.events = eventGroups.reduce(function (all, group) {
         return all.concat(group);
-      }, []).sort(function (a, b) {
+      }, []).filter(function (event) {
+        return (!state.rangeStart || event.date >= state.rangeStart) &&
+          (!state.rangeEnd || event.date <= state.rangeEnd);
+      }).sort(function (a, b) {
         return a.date.localeCompare(b.date) ||
           a.plantName.localeCompare(b.plantName) ||
           a.title.localeCompare(b.title);
@@ -1994,6 +2009,14 @@
     if (active && active.state !== states[key]) active.state.modalDate = "";
     wire(host);
     var state = getState(context);
+    var rangeStart = context.startDate || "";
+    var rangeEnd = context.endDate || "";
+    if (state.rangeStart !== rangeStart || state.rangeEnd !== rangeEnd) {
+      state.rangeStart = rangeStart;
+      state.rangeEnd = rangeEnd;
+      if (rangeStart) state.month = rangeStart.slice(0, 7);
+      state.loaded = false;
+    }
     active = { host: host, state: state, context: context };
     if (state.loaded) {
       renderView(host, state, context);

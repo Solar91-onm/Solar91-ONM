@@ -55,6 +55,7 @@ Savings depend on the photo; most come from limiting display copies to 2048 px. 
 | `release_connection()` before Storage I/O | `app/core/database.py`, issues/scheduled/plants/photos routers |
 | Text-only gzip level 6 | `app/core/compression.py`, `app/main.py` |
 | Smaller lists: washing day summary (50 + Show more), PM task-record drawer (40 + Show more); plant-link repair uses lookup maps | `26-washing-cycles.js`, `29-pm-live-dashboard.js`, `08-actions-exports-and-submission.js` |
+| Health issue rows load without waiting for issue-raising categories; category failures are shown in the wizard and can be retried. Health and plant-table search rerenders are debounced by 120 ms | `site-issues.js`, `plants-table.js` |
 | Benchmarks: transfer (gzip) bytes, live-refresh and photo endpoints; serializer benchmark | `scripts/benchmark_api_latency.py`, `scripts/benchmark_json.py` |
 
 Old JPEG/PNG photo objects and thumbnails are not converted and keep working (content type comes from Storage).

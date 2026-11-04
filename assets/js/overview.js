@@ -146,10 +146,47 @@
     const plantCombo = document.querySelector("[data-plant-filter-combo]");
     const plantInput = document.querySelector("[data-plant-filter-input]");
     const plantPanel = document.querySelector("[data-plant-filter-panel]");
+    const companySel = document.querySelector("[data-filter=\"company\"]");
+    const districtSel = document.querySelector("[data-filter=\"district\"]");
+
+    function rowsForOptions(excludedFilter) {
+      return allRows.filter(({ plant, profile }) => {
+        if (excludedFilter !== "plant" && filters.plant !== "__all" && plant.siteCode !== filters.plant) return false;
+        if (filters.health !== "__all" && profile.derivedCondition !== filters.health) return false;
+        if (excludedFilter !== "company" && filters.company !== "__all" && (plant.projectCompany || "") !== filters.company) return false;
+        if (excludedFilter !== "district" && filters.district !== "__all" && (plant.district || "") !== filters.district) return false;
+        return true;
+      });
+    }
+
+    function valuesForFilter(filterName, rows) {
+      return rows.map(({ plant }) => {
+        if (filterName === "plant") return plant.siteCode;
+        if (filterName === "company") return plant.projectCompany || "";
+        return (plant.district || "").trim();
+      }).filter(Boolean);
+    }
+
+    function renderSelectOptions(select, label, options, selected) {
+      if (!select) return;
+      select.replaceChildren();
+      const allOption = document.createElement("option");
+      allOption.value = "__all";
+      allOption.textContent = label;
+      select.appendChild(allOption);
+      options.forEach((option) => {
+        const opt = document.createElement("option");
+        opt.value = option.value;
+        opt.textContent = option.label;
+        select.appendChild(opt);
+      });
+      select.value = selected;
+    }
+
     if (plantInput && plantPanel) {
       function renderPlantOptions(term) {
         const t = (term || "").trim().toLowerCase();
-        const matched = allRows.filter(({ plant }) => {
+        const matched = rowsForOptions("plant").filter(({ plant }) => {
           if (!t) return true;
           return (plant.displayName || plant.plantName).toLowerCase().indexOf(t) !== -1 ||
                  plant.displayCode.toLowerCase().indexOf(t) !== -1 ||
@@ -180,6 +217,7 @@
         if (!opt) return;
         const code = opt.getAttribute("data-plant-opt");
         filters.plant = code;
+        syncDependentOptions("plant");
         if (code === "__all") {
           plantInput.value = "";
           plantInput.placeholder = "All plants";
@@ -196,43 +234,54 @@
         if (!plantCombo.contains(ev.target)) plantCombo.classList.remove("is-open");
       });
     }
-    const companySel = document.querySelector("[data-filter=\"company\"]");
-    if (companySel && companySel.options.length <= 1) {
-      const seen = new Map();
-      allRows.forEach(({ plant }) => {
-        const full = plant.projectCompany || "";
-        if (full && !seen.has(full)) seen.set(full, plant.projectCompanyShort || full);
+
+    function syncDependentOptions(changedFilter) {
+      const previousFilters = {
+        plant: filters.plant,
+        company: filters.company,
+        district: filters.district
+      };
+      ["plant", "company", "district"].forEach((filterName) => {
+        if (filterName === changedFilter || filters[filterName] === "__all") return;
+        const available = new Set(valuesForFilter(filterName, rowsForOptions(filterName)));
+        if (!available.has(filters[filterName])) filters[filterName] = "__all";
       });
-      Array.from(seen.entries())
-        .sort((a, b) => {
-          const na = parseInt((a[1].match(/\d+/) || [0])[0]) || 0;
-          const nb = parseInt((b[1].match(/\d+/) || [0])[0]) || 0;
-          return na - nb;
-        })
-        .forEach(([fullName, shortName]) => {
-          const opt = document.createElement("option");
-          opt.value = fullName;
-          opt.textContent = shortName;
-          companySel.appendChild(opt);
-        });
-    }
-    const districtSel = document.querySelector("[data-filter=\"district\"]");
-    if (districtSel && districtSel.options.length <= 1) {
+      const trendFiltersChanged = ["plant", "company", "district"]
+        .some((filterName) => filters[filterName] !== previousFilters[filterName]);
+
+      const companies = new Map();
+      rowsForOptions("company").forEach(({ plant }) => {
+        const fullName = plant.projectCompany || "";
+        if (fullName && !companies.has(fullName)) {
+          companies.set(fullName, (plant.projectCompanyShort || fullName).replace(/^Project\s+/i, "SPV "));
+        }
+      });
+      const companyOptions = Array.from(companies, ([value, label]) => ({ value, label }))
+        .sort((a, b) => a.label.localeCompare(b.label, undefined, { numeric: true }));
+      renderSelectOptions(companySel, "All SPVs", companyOptions, filters.company);
+
       const districtsByKey = new Map();
-      allRows.forEach(({ plant }) => {
+      rowsForOptions("district").forEach(({ plant }) => {
         const district = (plant.district || "").trim();
         const key = district.toLocaleLowerCase();
         if (district && !districtsByKey.has(key)) districtsByKey.set(key, district);
       });
-      const districts = Array.from(districtsByKey.values())
-        .sort((a, b) => a.localeCompare(b));
-      districts.forEach((district) => {
-        const opt = document.createElement("option");
-        opt.value = district;
-        opt.textContent = district;
-        districtSel.appendChild(opt);
-      });
+      const districtOptions = Array.from(districtsByKey.values())
+        .sort((a, b) => a.localeCompare(b))
+        .map((district) => ({ value: district, label: district }));
+      renderSelectOptions(districtSel, "All districts", districtOptions, filters.district);
+
+      if (plantInput && plantPanel) {
+        if (previousFilters.plant !== "__all" && filters.plant === "__all") {
+          plantInput.value = "";
+          plantInput.placeholder = "All plants";
+        }
+        renderPlantOptions(plantInput.value);
+      }
+      return trendFiltersChanged;
     }
+    syncDependentOptions(null);
+
     document.querySelectorAll("[data-filter]").forEach((sel) => {
       sel.addEventListener("change", (ev) => {
         const filterName = sel.getAttribute("data-filter");
@@ -241,8 +290,11 @@
           return;
         }
         filters[filterName] = ev.target.value;
+        const dependentTrendFiltersChanged = syncDependentOptions(filterName);
         recomputeAndRender();
-        if (filterName === "district" || filterName === "company") reloadTrendForFilters();
+        if (filterName === "district" || filterName === "company" || dependentTrendFiltersChanged) {
+          reloadTrendForFilters();
+        }
       });
     });
 
@@ -566,6 +618,7 @@
     const cards = [
       {
         title: "PM Compliance",
+        destination: "pm",
         icon: ICON_PM,
         value: pmPct === null ? "—" : pmPct + "%",
         pill: pmP,
@@ -576,6 +629,7 @@
       },
       {
         title: "Washing Compliance",
+        destination: "washing",
         icon: ICON_WASH,
         value: wshPct === null ? "—" : wshPct + "%",
         pill: wshP,
@@ -586,6 +640,7 @@
       },
       {
         title: "Open Site Issues",
+        destination: "health",
         icon: ICON_ISSUES,
         value: fmt.formatNumber(openIss),
         pill: isP,
@@ -597,7 +652,7 @@
     ];
 
     document.querySelector("[data-overview-metrics]").innerHTML = cards.map((c) => `
-      <div class="ep-metric">
+      <div class="ep-metric" role="link" tabindex="0" data-overview-destination="${c.destination}" aria-label="Open ${fmt.escape(c.title)}">
         <div class="ep-metric__head">
           <span class="ep-metric__title">${c.icon || ""}${fmt.escape(c.title)}</span>
         </div>
@@ -819,6 +874,32 @@
   }
 
   function wireInteractions() {
+    const metrics = document.querySelector("[data-overview-metrics]");
+    function openMetricDestination(card) {
+      if (!state || !state.rangeStart || !state.rangeEnd) return;
+      const destination = card.getAttribute("data-overview-destination");
+      const dateRange = { startDate: state.rangeStart, endDate: state.rangeEnd };
+      if (filters.plant !== "__all") {
+        const row = state.allRows.find(({ plant }) => plant.siteCode === filters.plant);
+        if (row) global.Solar91PortalNav.selectPlantPage(filters.plant, destination, dateRange, row.plant);
+      } else {
+        global.Solar91PortalNav.selectView(destination, dateRange);
+      }
+    }
+    if (metrics) {
+      metrics.addEventListener("click", (ev) => {
+        const card = ev.target.closest("[data-overview-destination]");
+        if (card) openMetricDestination(card);
+      });
+      metrics.addEventListener("keydown", (ev) => {
+        if (ev.key !== "Enter" && ev.key !== " ") return;
+        const card = ev.target.closest("[data-overview-destination]");
+        if (!card) return;
+        ev.preventDefault();
+        openMetricDestination(card);
+      });
+    }
+
     document.addEventListener("click", (ev) => {
       // Comparison column header sort.
       const sortHeader = ev.target.closest("[data-comparison-sort]");

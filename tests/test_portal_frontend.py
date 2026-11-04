@@ -458,6 +458,19 @@ def test_single_plant_details_shows_only_that_plant_row():
     assert "Solar91PortalPlantDetails" not in editor
 
 
+def test_plant_and_portfolio_details_have_nested_design_purchase_liaisoning_bom_tabs():
+    table = (PORTAL_ASSETS / "js" / "plants-table.js").read_text(encoding="utf-8")
+    assert '{ id: "design-mdl", label: "Design/MDL" }' in table
+    assert '{ id: "purchase", label: "Purchase" }' in table
+    assert '{ id: "liaisoning", label: "Liaisoning" }' in table
+    assert '{ id: "bom", label: "BOM" }' in table
+    assert 'role="tablist" aria-label="Plant details sections"' in table
+    assert 'data-pt-detail-tab="' + "' + tab.id" in table
+    assert 'detailTab === "design-mdl"' in table
+    assert 'role="tabpanel" id="plant-detail-panel"' in table
+    assert "DETAIL_TABS.length" in table
+
+
 def test_plant_table_uses_balanced_shared_columns_and_numeric_spv_label():
     styles = (PORTAL_ASSETS / "css" / "components.css").read_text(encoding="utf-8")
     widths = [
@@ -466,16 +479,16 @@ def test_plant_table_uses_balanced_shared_columns_and_numeric_spv_label():
             styles,
         )
     ]
-    assert len(widths) == 12
+    assert len(widths) == 13
     assert sum(widths) == 100
     assert widths[9] >= 7, "the Location column should not wrap its heading"
-    assert "min-width: 1080px" in styles and "overflow-x: auto" in styles
-    assert "function spvNumber(plant)" in (
-        PORTAL_ASSETS / "js" / "plants-table.js"
-    ).read_text(encoding="utf-8")
-    assert '{ key: "assignee",  label: "Assignee" }' in (
-        PORTAL_ASSETS / "js" / "plants-table.js"
-    ).read_text(encoding="utf-8")
+    assert "min-width: 1200px" in styles and "overflow-x: auto" in styles
+    table = (PORTAL_ASSETS / "js" / "plants-table.js").read_text(encoding="utf-8")
+    assert "function spvNumber(plant)" in table
+    assert '{ key: "assignee",  label: "Assignee" }' in table
+    assert table.index('{ key: "location",  label: "Location" }') < table.index('{ key: "cctv",      label: "CCTV" }')
+    assert table.index('{ key: "cctv",      label: "CCTV" }') < table.index('{ key: "activity",  label: "Last Activity" }')
+    assert '<span class="ep-pt__cctv-placeholder">Coming soon</span>' in table
 
     script = """
       global.window = global;
@@ -686,6 +699,31 @@ def test_portfolio_health_hides_hero_and_summary_and_calendar_has_nested_detail(
     assert "renderEventDetail(state, context)" in calendar
     assert 'data-calendar-action="close-event-detail"' in calendar
     assert "ep-calendar__event-detail-modal" in styles
+
+
+def test_health_issue_date_filter_is_local_and_supports_single_date_or_range():
+    issues = (PORTAL_ASSETS / "js" / "site-issues.js").read_text(encoding="utf-8")
+    styles = (PORTAL_ASSETS / "css" / "site-issues.css").read_text(encoding="utf-8")
+    assert 'data-issue-date-single' in issues
+    assert 'data-issue-date-start' in issues and 'data-issue-date-end' in issues
+    assert 'data-issue-date-apply' in issues and 'data-issue-date-clear' in issues
+    assert "issue.occurredAt < state.issueDateStart" in issues
+    assert "issue.occurredAt > state.issueDateEnd" in issues
+    assert "issue.occurredAt < context.startDate" not in issues
+    assert ".ep-issues__date-filter" in styles
+
+
+def test_health_loading_does_not_wait_for_categories_and_table_search_is_debounced():
+    issues = (PORTAL_ASSETS / "js" / "site-issues.js").read_text(encoding="utf-8")
+    plants = (PORTAL_ASSETS / "js" / "plants-table.js").read_text(encoding="utf-8")
+
+    issue_load = issues[issues.index("function load()"):issues.index("function loadCategoriesForWizard")]
+    assert "loadLiveIssues(requestId)" in issue_load
+    assert "loadCategories()" not in issue_load
+    assert "loadCategoriesForWizard(host)" in issues
+    assert 'data-issue-action="retry-categories"' in issues
+    assert "setTimeout(function ()" in issues and "}, 120);" in issues
+    assert "setTimeout(function ()" in plants and "}, 120);" in plants
 
 
 # ── Syntax ───────────────────────────────────────────────────────────────────

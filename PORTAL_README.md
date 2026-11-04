@@ -43,6 +43,7 @@ assets/                          the portal design system, served at /assets
   sortable comparison table, Critical Issues and Recent Activity.
 - **Plants → <plant> →** Details · Health · Preventive Maintenance · Washing
 - **Views →** Details (every plant) · Health · Preventive Maintenance · Washing
+- **Details →** Design/MDL · Purchase · Liaisoning · BOM. Design/MDL retains the current plant details table; the other sections are empty until their data workflows are implemented.
 - **Settings** — Team access, and **Categories** (the work-category list).
 
 ## Sign-in

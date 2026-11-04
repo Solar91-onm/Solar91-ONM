@@ -14,6 +14,8 @@
   // Categories and their sub-problems come from /api/categories (Settings -> Categories).
   // Empty until that list is filled; nothing here is hard-coded any more.
   var CATEGORIES = [];
+  var categoriesPromise = null;
+  var searchTimer = null;
 
   function categoryNames() {
     return CATEGORIES.map(function (c) { return c.name; });
@@ -25,13 +27,15 @@
   }
 
   function loadCategories() {
-    return global.Solar91PortalAPI.request("/api/categories").then(function (body) {
+    if (categoriesPromise) return categoriesPromise;
+    categoriesPromise = global.Solar91PortalAPI.request("/api/categories").then(function (body) {
       CATEGORIES = body.categories || [];
       return CATEGORIES;
-    }).catch(function () {
-      CATEGORIES = [];
-      return CATEGORIES;
+    }).catch(function (error) {
+      categoriesPromise = null;
+      throw error;
     });
+    return categoriesPromise;
   }
   /**
    * Quick templates are derived from the configured categories and their
@@ -57,6 +61,14 @@
     plantFilter: "",
     statusFilter: "All",
     sort: "recent",
+    issueDateStart: "",
+    issueDateEnd: "",
+    issueDateDraftSingle: "",
+    issueDateDraftStart: "",
+    issueDateDraftEnd: "",
+    issueDateError: "",
+    categoryLoading: false,
+    categoryError: "",
     modalId: "",
     modalMode: "",
     wizardStep: 1,
@@ -99,7 +111,7 @@
       serialNo: issue.serial_no || "",
       supplierMaker: issue.supplier_maker || "",
       unitCount: issue.unit_count == null ? "" : String(issue.unit_count),
-      occurredAt: issue.occurred_at || "",
+      occurredAt: String(issue.occurred_at || "").slice(0, 10),
       dueAt: issue.etc_at || "",
       problem: issue.description,
       status: issue.status,
@@ -117,6 +129,10 @@
   function rowsFor(context, ignoreStatus) {
     var rows = state.rows.filter(function (issue) {
       if (context.plantCode && issue.plantCode !== context.plantCode) return false;
+      if ((state.issueDateStart || state.issueDateEnd) &&
+          (!issue.occurredAt ||
+            (state.issueDateStart && issue.occurredAt < state.issueDateStart) ||
+            (state.issueDateEnd && issue.occurredAt > state.issueDateEnd))) return false;
       if (state.plantFilter && issue.plantCode !== state.plantFilter) return false;
       if (!ignoreStatus && state.statusFilter !== "All" && statusGroup(issue.status) !== state.statusFilter) return false;
       var term = state.search.trim().toLowerCase();
@@ -173,8 +189,20 @@
     var raise = state.canRaise
       ? '<button class="ep-issues__button ep-issues__button--primary" type="button" data-issue-action="raise">+ Raise issue</button>'
       : "";
-    if (!sheets && !raise) return "";
-    return '<div class="ep-issues__portfolio-actions">' + raise + sheets + '</div>';
+    return '<div class="ep-issues__portfolio-actions">' +
+      '<div class="ep-issues__date-filter" aria-label="Filter issues by occurrence date">' +
+        '<label><span>On</span><input type="date" data-issue-date-single value="' +
+          escape(state.issueDateDraftSingle) + '" aria-label="Issues on date" /></label>' +
+        '<label><span>From</span><input type="date" data-issue-date-start value="' +
+          escape(state.issueDateDraftStart) + '" aria-label="Issue date from" /></label>' +
+        '<label><span>To</span><input type="date" data-issue-date-end value="' +
+          escape(state.issueDateDraftEnd) + '" aria-label="Issue date to" /></label>' +
+        '<button type="button" class="ep-issues__button ep-issues__button--small" data-issue-date-apply>Apply</button>' +
+        '<button type="button" class="ep-issues__button ep-issues__button--small" data-issue-date-clear>Clear</button>' +
+        (state.issueDateError
+          ? '<span class="ep-issues__date-error" role="alert">' + escape(state.issueDateError) + '</span>'
+          : "") +
+      '</div>' + raise + sheets + '</div>';
   }
 
   function renderFilters(context, unfilteredRows) {
@@ -566,6 +594,15 @@
   }
 
   function renderRaiseWizard(context) {
+    if (state.categoryLoading) {
+      return '<div class="ep-issues__message" role="status">Loading issue categories…</div>';
+    }
+    if (state.categoryError) {
+      return '<div class="ep-issues__message ep-issues__message--error" role="alert">' +
+        "Issue categories could not be loaded: " + escape(state.categoryError) +
+        '<button type="button" class="ep-issues__button" data-issue-action="retry-categories">Try again</button>' +
+        "</div>";
+    }
     if (!state.draft) state.draft = createDraft(context);
     var stepContent = state.wizardStep === 1
       ? renderWizardStepOne(context, state.draft)
@@ -613,6 +650,19 @@
     context = context || {};
     var previousScope = active ? active.context.plantCode || "" : null;
     var nextScope = context.plantCode || "";
+    var previousRange = active
+      ? (active.context.startDate || "") + ":" + (active.context.endDate || "")
+      : null;
+    var nextRange = (context.startDate || "") + ":" + (context.endDate || "");
+    if (!active || previousScope !== nextScope || previousRange !== nextRange) {
+      state.issueDateStart = context.startDate || "";
+      state.issueDateEnd = context.endDate || "";
+      state.issueDateDraftSingle = state.issueDateStart &&
+        state.issueDateStart === state.issueDateEnd ? state.issueDateStart : "";
+      state.issueDateDraftStart = state.issueDateStart;
+      state.issueDateDraftEnd = state.issueDateEnd;
+      state.issueDateError = "";
+    }
     if (active && previousScope !== nextScope) {
       state.modalId = "";
       state.modalMode = "";
@@ -653,6 +703,10 @@
       content = '<section class="ep-issues__results"><div class="ep-issues__section-head">' +
             '<h2>Issues <span>' + rows.length + '</span></h2>' +
             '<span>' + (state.statusFilter === "All" ? "All statuses" : escape(state.statusFilter)) +
+            (state.issueDateStart || state.issueDateEnd
+              ? " · Occurred " + escape(state.issueDateStart || "any date") +
+                " to " + escape(state.issueDateEnd || "any date")
+              : "") +
             (state.liveMode && state.rows.length >= 200 ? " · latest 200" : "") + '</span></div>' +
           renderTable(rows) + '</section>';
     }
@@ -676,9 +730,22 @@
     state.submitError = "";
     state.submitNotice = "";
     renderView();
+    loadLiveIssues(requestId);
+  }
+
+  function loadCategoriesForWizard(host) {
+    state.categoryLoading = true;
+    state.categoryError = "";
+    renderView();
     loadCategories().then(function () {
-      if (requestId !== state.requestId) return;
-      loadLiveIssues(requestId);
+      if (!active || active.host !== host || state.modalMode !== "create") return;
+      state.categoryLoading = false;
+      renderView();
+    }).catch(function (error) {
+      if (!active || active.host !== host || state.modalMode !== "create") return;
+      state.categoryLoading = false;
+      state.categoryError = error.message || "Please try again.";
+      renderView();
     });
   }
 
@@ -723,15 +790,41 @@
     wiredHost = host;
     host.addEventListener("input", function (event) {
       if (!active || active.host !== host) return;
+      if (event.target.matches("[data-issue-date-start]")) {
+        state.issueDateDraftStart = event.target.value;
+        state.issueDateDraftSingle = "";
+        state.issueDateError = "";
+        return;
+      }
+      if (event.target.matches("[data-issue-date-end]")) {
+        state.issueDateDraftEnd = event.target.value;
+        state.issueDateDraftSingle = "";
+        state.issueDateError = "";
+        return;
+      }
+      if (event.target.matches("[data-issue-date-single]")) {
+        state.issueDateDraftSingle = event.target.value;
+        if (state.issueDateDraftSingle) {
+          state.issueDateDraftStart = "";
+          state.issueDateDraftEnd = "";
+        }
+        state.issueDateError = "";
+        return;
+      }
       if (event.target.dataset.issueFilter === "search") {
         var pos = event.target.selectionStart;
         state.search = event.target.value;
-        renderView();
-        var search = host.querySelector('[data-issue-filter="search"]');
-        if (search) {
-          search.focus();
-          if (typeof search.setSelectionRange === "function") search.setSelectionRange(pos, pos);
-        }
+        if (searchTimer) clearTimeout(searchTimer);
+        searchTimer = setTimeout(function () {
+          searchTimer = null;
+          if (!active || active.host !== host) return;
+          renderView();
+          var search = host.querySelector('[data-issue-filter="search"]');
+          if (search) {
+            search.focus();
+            if (typeof search.setSelectionRange === "function") search.setSelectionRange(pos, pos);
+          }
+        }, 120);
       }
     });
     host.addEventListener("change", function (event) {
@@ -786,6 +879,30 @@
     });
     host.addEventListener("click", function (event) {
       if (!active || active.host !== host) return;
+      if (event.target.closest("[data-issue-date-apply]")) {
+        var dateStart = state.issueDateDraftSingle || state.issueDateDraftStart;
+        var dateEnd = state.issueDateDraftSingle || state.issueDateDraftEnd;
+        if (dateStart && dateEnd && dateStart > dateEnd) {
+          state.issueDateError = "The start date must be on or before the end date.";
+          renderView();
+          return;
+        }
+        state.issueDateStart = dateStart;
+        state.issueDateEnd = dateEnd;
+        state.issueDateError = "";
+        renderView();
+        return;
+      }
+      if (event.target.closest("[data-issue-date-clear]")) {
+        state.issueDateStart = "";
+        state.issueDateEnd = "";
+        state.issueDateDraftSingle = "";
+        state.issueDateDraftStart = "";
+        state.issueDateDraftEnd = "";
+        state.issueDateError = "";
+        renderView();
+        return;
+      }
       var templateButton = event.target.closest("[data-issue-template]");
       if (templateButton && state.modalMode === "create" && state.draft) {
         var template = templates()[Number(templateButton.dataset.issueTemplate)];
@@ -868,10 +985,18 @@
         if (!state.liveMode || !state.canRaise) return;
         state.submitError = "";
         state.submitNotice = "";
+        state.categoryError = "";
+        state.categoryLoading = false;
         state.modalId = "";
         state.modalMode = "create";
         state.wizardStep = 1;
         state.draft = createDraft(active.context);
+        loadCategoriesForWizard(host);
+        return;
+      } else if (action === "retry-categories") {
+        if (state.modalMode !== "create" || state.categoryLoading) return;
+        loadCategoriesForWizard(host);
+        return;
       } else if (action === "clear") {
         state.search = "";
         state.plantFilter = "";
@@ -883,6 +1008,8 @@
         state.submitNotice = "";
         state.draft = null;
         state.wizardStep = 1;
+        state.categoryLoading = false;
+        state.categoryError = "";
       } else if (action === "retry") {
         state.loaded = false;
         load();

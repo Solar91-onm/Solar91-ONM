@@ -20,8 +20,16 @@
 
   var allRows = [];            // [{ plant, profile }]
   var loadPromise = null;
+  var searchTimer = null;
   var mode = { kind: "all", siteCode: null };
+  var detailTab = "design-mdl";
   var ui = { search: "", spv: "__all", district: "__all", sort: "name" };
+  var DETAIL_TABS = [
+    { id: "design-mdl", label: "Design/MDL" },
+    { id: "purchase", label: "Purchase" },
+    { id: "liaisoning", label: "Liaisoning" },
+    { id: "bom", label: "BOM" }
+  ];
 
   // ─── Field helpers ───────────────────────────────────────────────────
   // Only ever read the number out of the shortened "Project N" form. The raw
@@ -112,6 +120,7 @@
     { key: "assignee",  label: "Assignee" },
     { key: "cod",       label: "COD",           align: "num" },
     { key: "location",  label: "Location" },
+    { key: "cctv",      label: "CCTV" },
     { key: "activity",  label: "Last Activity" },
     { key: "edit",      label: "Edit",          align: "num" }
   ];
@@ -144,6 +153,7 @@
         "<td>" + (p.washingAssignee ? fmt.escape(p.washingAssignee) : dash("Washing not set up")) + "</td>" +
         '<td class="num mono">' + fmt.escape(formatCOD(p.commissionedOn)) + "</td>" +
         locationCell +
+        '<td><span class="ep-pt__cctv-placeholder">Coming soon</span></td>' +
         '<td class="mono">' + fmt.escape(lastActivity(entry.profile)) + "</td>" +
         '<td class="num">' +
           (canEdit()
@@ -234,7 +244,21 @@
           '<p class="ep-pt__sub">' + subtitle + "</p>" +
         "</div>" +
 
-        '<div class="ep-pt__card">' +
+        '<div class="ep-pt__detail-tabs" role="tablist" aria-label="Plant details sections">' +
+          DETAIL_TABS.map(function (tab) {
+            var selected = detailTab === tab.id;
+            return '<button type="button" class="ep-pt__detail-tab' +
+              (selected ? ' is-active' : '') + '" role="tab" id="plant-detail-tab-' + tab.id +
+              '" aria-selected="' + selected + '" aria-controls="plant-detail-panel" tabindex="' +
+              (selected ? "0" : "-1") + '" data-pt-detail-tab="' + tab.id + '">' +
+              fmt.escape(tab.label) + "</button>";
+          }).join("") +
+        "</div>" +
+
+        '<div class="ep-pt__card"' +
+          (detailTab === "design-mdl"
+            ? ' role="tabpanel" id="plant-detail-panel" aria-labelledby="plant-detail-tab-design-mdl"'
+            : " hidden") + '>' +
           // One plant has nothing to search, filter or sort.
           (single ? "" : toolbarHTML()) +
           (single ? "" :
@@ -272,6 +296,9 @@
             "</div>" +
           "</div>" +
         "</div>" +
+        (detailTab === "design-mdl" ? "" :
+          '<section class="ep-pt__detail-empty" role="tabpanel" id="plant-detail-panel" aria-labelledby="plant-detail-tab-' +
+          detailTab + '"></section>') +
       "</div>";
 
     wire(container);
@@ -304,6 +331,7 @@
         p.washingAssignee || "",
         formatCOD(p.commissionedOn),
         p.location || p.mapsUrl || "",
+        "Coming soon",
         lastActivity(entry.profile)
       ];
     });
@@ -346,17 +374,45 @@
 
   // ─── Wiring ──────────────────────────────────────────────────────────
   function wire(container) {
+    container.querySelectorAll("[data-pt-detail-tab]").forEach(function (tab) {
+      tab.addEventListener("click", function () {
+        detailTab = tab.getAttribute("data-pt-detail-tab");
+        render(container);
+        var activeTab = container.querySelector('[data-pt-detail-tab="' + detailTab + '"]');
+        if (activeTab) activeTab.focus();
+      });
+      tab.addEventListener("keydown", function (event) {
+        var current = DETAIL_TABS.findIndex(function (item) { return item.id === detailTab; });
+        var next = current;
+        if (event.key === "ArrowRight") next = (current + 1) % DETAIL_TABS.length;
+        else if (event.key === "ArrowLeft") next = (current + DETAIL_TABS.length - 1) % DETAIL_TABS.length;
+        else if (event.key === "Home") next = 0;
+        else if (event.key === "End") next = DETAIL_TABS.length - 1;
+        else return;
+        event.preventDefault();
+        detailTab = DETAIL_TABS[next].id;
+        render(container);
+        var activeTab = container.querySelector('[data-pt-detail-tab="' + detailTab + '"]');
+        if (activeTab) activeTab.focus();
+      });
+    });
+
     var search = container.querySelector("[data-pt-search]");
     if (search) {
       search.addEventListener("input", function () {
         ui.search = search.value;
         var pos = search.selectionStart;
-        render(container);
-        var again = container.querySelector("[data-pt-search]");
-        if (again) {
-          again.focus();
-          try { again.setSelectionRange(pos, pos); } catch (_) {}
-        }
+        if (searchTimer) clearTimeout(searchTimer);
+        searchTimer = setTimeout(function () {
+          searchTimer = null;
+          if (!container.isConnected) return;
+          render(container);
+          var again = container.querySelector("[data-pt-search]");
+          if (again) {
+            again.focus();
+            try { again.setSelectionRange(pos, pos); } catch (_) {}
+          }
+        }, 120);
       });
     }
 
@@ -397,6 +453,7 @@
 
   function show(container, opts) {
     if (!container) return;
+    detailTab = "design-mdl";
     mode = {
       kind: (opts && opts.siteCode) ? "single" : "all",
       siteCode: opts ? opts.siteCode : null
