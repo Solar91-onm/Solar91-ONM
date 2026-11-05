@@ -438,7 +438,7 @@ def test_plant_and_view_sub_pages_include_asset_warranty():
         start = nav.index(block)
         section = nav[start:nav.index("];", start)]
         ids = re.findall(r'id:\s*"([a-z-]+)"', section)
-        assert ids == ["details", "health", "pm", "washing", "asset-warranty"], (block, ids)
+        assert ids == ["details", "health", "pm", "washing", "asset-warranty", "movable-assets"], (block, ids)
 
 
 def test_plant_details_page_is_wired_up():

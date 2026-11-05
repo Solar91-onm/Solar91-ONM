@@ -149,6 +149,9 @@
             <button class="ep-nav-item ep-nav-item--sub" type="button" data-nav="view:asset-warranty">
               <span class="ep-nav-item__label">Asset &amp; Warranty</span>
             </button>
+            <button class="ep-nav-item ep-nav-item--sub" type="button" data-nav="view:movable-assets">
+  <span class="ep-nav-item__label">Movable Assets</span>
+</button>
           </div>
         </div>
       </div>
@@ -293,6 +296,10 @@
           <section class="ep-tab-view" data-tab-view="asset-warranty">
             <div data-asset-warranty-host></div>
           </section>
+          <!-- MOVABLE ASSETS -->
+<section class="ep-tab-view" data-tab-view="movable-assets">
+  <div data-movable-assets-host></div>
+</section>
 
           <!-- ═════════════ PLANT DETAILS (one plant's row) ═════════════ -->
           <section class="ep-tab-view" data-tab-view="plant-details">
@@ -351,6 +358,7 @@ window.S91_CONFIG = JSON.parse(document.getElementById("s91-config").textContent
 <script defer src="/assets/js/plants-table.js"></script>
 <script defer src="/assets/js/site-issues.js"></script>
 <script defer src="/assets/js/asset-warranty.js"></script>
+<script defer src="/assets/js/movable-assets.js"></script>
 <script defer src="/assets/js/operations-calendar.js"></script>
 <script defer src="/assets/js/categories.js"></script>
 <script defer src="/assets/js/settings.js"></script>

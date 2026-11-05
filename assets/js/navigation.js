@@ -19,7 +19,8 @@
     { id: "health",          label: "Health" },
     { id: "pm",              label: "Preventive Maintenance" },
     { id: "washing",         label: "Module Cleaning" },
-    { id: "asset-warranty",  label: "Asset & Warranty" }
+    { id: "asset-warranty",  label: "Asset & Warranty" },
+    { id: "movable-assets",  label: "Movable Assets" }
   ];
 
   var VIEW_SUB_PAGES = [
@@ -27,7 +28,8 @@
     { id: "health",          label: "Health" },
     { id: "pm",              label: "Preventive Maintenance" },
     { id: "washing",         label: "Module Cleaning" },
-    { id: "asset-warranty",  label: "Asset & Warranty" }
+    { id: "asset-warranty",  label: "Asset & Warranty" },
+    { id: "movable-assets",  label: "Movable Assets" }
   ];
 
   var DETAIL_SECTIONS = [
@@ -217,6 +219,7 @@
     var calendarEl = document.querySelector('[data-tab-view="calendar"]');
     var healthEl = document.querySelector('[data-tab-view="health"]');
     var assetWarrantyEl = document.querySelector('[data-tab-view="asset-warranty"]');
+    var movableAssetsEl = document.querySelector('[data-tab-view="movable-assets"]');
     var detailsEl = document.querySelector('[data-tab-view="plant-details"]');
     var settingsEl = document.querySelector('[data-tab-view="settings"]');
     var placeholderEl = document.querySelector('[data-tab-view="placeholder"]');
@@ -326,6 +329,12 @@
       global.Solar91PortalAssetWarranty.render(
         document.querySelector("[data-asset-warranty-host]"),
         { plantCode: plantCode }
+      );
+          } else if (pageId === "movable-assets" && global.Solar91PortalMovableAssets) {
+      showOnly(movableAssetsEl);
+      global.Solar91PortalMovableAssets.show(
+        document.querySelector("[data-movable-assets-host]"),
+        { siteCode: plantCode }
       );
     } else {
       showOnly(placeholderEl);

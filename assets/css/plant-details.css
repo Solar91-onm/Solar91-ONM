@@ -78,3 +78,12 @@
 @media (max-width: 760px) {
   .ep-pd__modal-body { grid-template-columns: 1fr; }
 }
+/* Movable Assets: editable unit cells and the add/remove part controls */
+.ep-ma__cell { width: 72px; padding: 4px 6px; text-align: right; font: inherit; font-family: var(--font-mono, "JetBrains Mono", monospace); border: 1px solid var(--border, #d8dde6); border-radius: 6px; background: transparent; color: inherit; }
+.ep-ma__cell:focus { outline: 2px solid var(--accent, #2563eb); outline-offset: 1px; }
+.ep-ma__cell:disabled { opacity: .55; }
+.ep-ma__part { display: inline-block; max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
+.ep-ma__remove { margin-left: 6px; border: 0; background: transparent; color: inherit; opacity: .5; cursor: pointer; font-size: 15px; line-height: 1; }
+.ep-ma__remove:hover, .ep-ma__remove:focus { opacity: 1; }
+.ep-ma__status { font-size: 12px; opacity: .85; }
+.ep-ma__status.is-error { color: #b42318; opacity: 1; }

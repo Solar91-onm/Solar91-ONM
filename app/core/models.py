@@ -749,3 +749,13 @@ class AssetWarranty(Base, TimestampMixin):
     remarks: Mapped[str | None] = mapped_column(Text)
     created_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
     __table_args__ = (UniqueConstraint("plant_id", "equipment", "part", "part_number"),)
+
+class MovableAsset(Base, TimestampMixin):
+    """Units of one named part held at one plant (Movable Assets page). Migration 037."""
+    __tablename__ = "movable_assets"
+    id: Mapped[uuid.UUID] = uuid_pk()
+    plant_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("plants.id", ondelete="CASCADE"), nullable=False, index=True)
+    part: Mapped[str] = mapped_column(String(160), nullable=False)
+    units: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    updated_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    __table_args__ = (UniqueConstraint("plant_id", "part"),)
