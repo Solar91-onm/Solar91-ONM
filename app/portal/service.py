@@ -708,6 +708,7 @@ def portfolio_trend(
     washing_expected = [0] * len(dates)
     washing_on_time = [0] * len(dates)
     active_issues = [0] * len(dates)
+    solved_issues = [0] * len(dates)
     if plant_ids:
         due_day = func.coalesce(OMTask.planned_due_on, OMTask.due_on)
         pm_rows = db.execute(
@@ -833,6 +834,7 @@ def portfolio_trend(
             raised_so_far += raised[index]
             solved_so_far += solved[index]
             active_issues[index] = max(0, raised_so_far - solved_so_far)
+            solved_issues[index] = solved_so_far      # running total: the "solved so far" line
 
     def compliance(numerator: list[int], denominator: list[int]) -> list[int | None]:
         """Compliance so far, bucket by bucket: on-time to date over expected to date.
@@ -882,6 +884,12 @@ def portfolio_trend(
                 "label": "Active site issues",
                 "axis": "count",
                 "values": active_issues,
+            },
+            {
+                "key": "solved",
+                "label": "Solved site issues",
+                "axis": "count",
+                "values": solved_issues,
             },
         ],
     }

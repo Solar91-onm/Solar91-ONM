@@ -316,9 +316,11 @@
 .ep-overview-trend__line--washing { stroke: #16803c; }
 .ep-overview-trend__line--pm { stroke: #4b79a1; }
 .ep-overview-trend__line--issues { stroke: #c65a20; }
+.ep-overview-trend__line--solved { stroke: #7a5cb5; stroke-dasharray: 6 4; }
 .ep-overview-trend__dot--washing { fill: #16803c; }
 .ep-overview-trend__dot--pm { fill: #4b79a1; }
 .ep-overview-trend__dot--issues { fill: #c65a20; }
+.ep-overview-trend__dot--solved { fill: #7a5cb5; }
 /* Transparent, not fill:none — a none fill takes no pointer events, so the
    per-bucket tooltip target would never be hovered. */
 .ep-overview-trend__hover { fill: transparent; }
@@ -330,6 +332,7 @@
 .ep-overview-trend__legend-mark--washing { background: #16803c; }
 .ep-overview-trend__legend-mark--pm { background: #4b79a1; }
 .ep-overview-trend__legend-mark--issues { background: #c65a20; }
+.ep-overview-trend__legend-mark--solved { background: repeating-linear-gradient(90deg, #7a5cb5 0 5px, transparent 5px 8px); }
 .ep-overview-trend__empty { margin: 0; padding: var(--ep-s-6); color: var(--ep-text-faint); text-align: center; }
 @media (max-width: 760px) {
   .ep-overview-trend__head { flex-direction: column; }

@@ -134,3 +134,15 @@ def test_open_issue_counts_split_into_unsolved_and_in_progress(client, db):
     counts = service._issue_counts(db, [UUID(plant["id"])])[UUID(plant["id"])]
     assert counts["unsolvedIssues"] == 2 and counts["inProgressIssues"] == 2, counts
     assert counts["openIssues"] == 4 and counts["closedIssues"] == 1, counts
+
+
+def test_solved_line_adds_up_the_issues_fixed_so_far_and_mirrors_the_active_drop(client, db):
+    """Solved is a running total: it rises on the day an issue is fixed, the day Active falls."""
+    login_user(client, db, role="O&M Head", name="Trend Head 7", email="trend-head7@example.com")
+    plant = _plant(client, "TR07")
+    _raise_issue(client, db, plant, occurred_days_ago=4, status="Resolved", fixed_days_ago=2, note="Solved one")
+    _raise_issue(client, db, plant, occurred_days_ago=3, status="Open", note="Still open")
+    today = business_today()
+    payload = service.portfolio_trend(db, [UUID(plant["id"])], today - timedelta(days=5), today)
+    assert _series(payload, "issues")["values"] == [0, 1, 2, 1, 1, 1]
+    assert _series(payload, "solved")["values"] == [0, 0, 0, 1, 1, 1]

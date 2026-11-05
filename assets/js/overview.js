@@ -313,12 +313,13 @@
     const bottom = 34;
     const plotWidth = width - left - right;
     const plotHeight = height - top - bottom;
-    const issueSeries = series.find((item) => item.axis === "count");
-    const issueMax = Math.max(0, ...(issueSeries ? issueSeries.values : []));
+    // Active and Solved issues share the right-hand axis, so it must fit the larger of the two.
+    const issueMax = Math.max(0, ...series.filter((item) => item.axis === "count")
+      .flatMap((item) => item.values.map(Number)));
     const issueStep = Math.max(1, Math.ceil(issueMax / 4));
     const issueAxisMax = issueStep * 4;
     const bucketWidth = plotWidth / trend.labels.length;
-    const colors = { washing: "washing", pm: "pm", issues: "issues" };
+    const colors = { washing: "washing", pm: "pm", issues: "issues", solved: "solved" };
     const grid = [0, 25, 50, 75, 100].map((value, index) => {
       const y = top + plotHeight - value * plotHeight / 100;
       const issueValue = index * issueStep;
@@ -409,11 +410,11 @@
     // min-height:0 overrides the stylesheet's 220px floor, which would otherwise
     // keep the chart taller than the viewBox needs.
     host.innerHTML = '<svg class="ep-overview-trend__svg" style="min-height:0" viewBox="0 0 ' + width + " " + height +
-      '" role="img" aria-label="Module Cleaning compliance, PM compliance and active site issues from ' +
+      '" role="img" aria-label="Module Cleaning compliance, PM compliance, active and solved site issues from ' +
       fmt.escape(trend.startDate) + " to " + fmt.escape(trend.endDate) +
-      '. Left axis: compliance percentage. Right axis: active issue count.">' + grid + lines + xLabels +
+      '. Left axis: compliance percentage. Right axis: issue count.">' + grid + lines + xLabels +
       '<text class="ep-overview-trend__axis-label" x="' + left + '" y="12">Compliance (%)</text>' +
-      '<text class="ep-overview-trend__axis-label" x="' + (width - right) + '" y="12" text-anchor="end">Active issues</text>' +
+      '<text class="ep-overview-trend__axis-label" x="' + (width - right) + '" y="12" text-anchor="end">Issues</text>' +
       hovers + '</svg><div class="ep-overview-trend__legend">' +
       legend + '</div>';
   }

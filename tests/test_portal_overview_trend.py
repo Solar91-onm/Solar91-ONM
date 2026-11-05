@@ -83,8 +83,8 @@ def test_overview_trend_returns_grouped_compliance_and_active_issue_series(clien
     body = response.json()
     assert body["bucket"] == "day"
     assert len(body["labels"]) == (today - start).days + 1
-    assert [series["key"] for series in body["series"]] == ["washing", "pm", "issues"]
-    assert [series["axis"] for series in body["series"]] == ["percent", "percent", "count"]
+    assert [series["key"] for series in body["series"]] == ["washing", "pm", "issues", "solved"]
+    assert [series["axis"] for series in body["series"]] == ["percent", "percent", "count", "count"]
     assert body["series"][0]["values"][-1] == 100
     assert body["series"][1]["values"][-1] == 100
     assert body["series"][2]["values"][-1] == 2
