@@ -42,6 +42,30 @@ def test_setting_units_updates_one_cell_and_reuses_the_existing_spelling(client,
     assert one["records"] == [{"siteCode": "MA01", "part": "Ladder", "units": 4}]
 
 
+def test_plant_dialog_saves_many_parts_at_once_and_rejects_unknown_parts(client, db):
+    _head(client, db)
+    _plants(client)
+    client.post("/api/movable-assets/parts", json={"part": "Ladder"})
+    client.post("/api/movable-assets/parts", json={"part": "Drill"})
+    saved = client.put("/api/movable-assets/plant", json={
+        "site_code": "MA01", "items": [{"part": "ladder", "units": 3}, {"part": "Drill", "units": 5}]})
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["changed"] == 2
+    one = client.get("/api/movable-assets?site_code=MA01").json()
+    assert sorted((r["part"], r["units"]) for r in one["records"]) == [("Drill", 5), ("Ladder", 3)]
+    other = client.get("/api/movable-assets?site_code=MA02").json()
+    assert all(r["units"] == 0 for r in other["records"]), "another plant must not change"
+    # nothing is written when any part is unknown or repeated
+    bad = client.put("/api/movable-assets/plant", json={
+        "site_code": "MA01", "items": [{"part": "Ladder", "units": 9}, {"part": "Ghost", "units": 1}]})
+    assert bad.status_code == 422
+    dup = client.put("/api/movable-assets/plant", json={
+        "site_code": "MA01", "items": [{"part": "Ladder", "units": 9}, {"part": "ladder", "units": 1}]})
+    assert dup.status_code == 422
+    again = client.get("/api/movable-assets?site_code=MA01").json()
+    assert sorted((r["part"], r["units"]) for r in again["records"]) == [("Drill", 5), ("Ladder", 3)]
+
+
 def test_units_must_be_a_non_negative_whole_number(client, db):
     _head(client, db)
     _plants(client)
@@ -64,6 +88,8 @@ def test_a_role_without_plants_manage_can_read_but_not_write(client, db):
     client.post("/api/movable-assets/parts", json={"part": "Ladder"})
     login_user(client, db, role="Viewer", name="MA Viewer", email="ma-viewer@example.com")
     assert client.put("/api/movable-assets", json={"site_code": "MA01", "part": "Ladder", "units": 9}).status_code == 403
+    assert client.put("/api/movable-assets/plant", json={
+        "site_code": "MA01", "items": [{"part": "Ladder", "units": 9}]}).status_code == 403
     assert client.post("/api/movable-assets/parts", json={"part": "Drill"}).status_code == 403
     assert client.delete("/api/movable-assets/parts?part=Ladder").status_code == 403
 

@@ -78,31 +78,56 @@
 @media (max-width: 760px) {
   .ep-pd__modal-body { grid-template-columns: 1fr; }
 }
-/* Movable Assets: editable unit cells and the add/remove part controls */
-.ep-ma__cell { width: 72px; padding: 4px 6px; text-align: right; font: inherit; font-family: var(--font-mono, "JetBrains Mono", monospace); border: 1px solid var(--border, #d8dde6); border-radius: 6px; background: transparent; color: inherit; }
-.ep-ma__cell:focus { outline: 2px solid var(--accent, #2563eb); outline-offset: 1px; }
-.ep-ma__cell:disabled { opacity: .55; }
-.ep-ma__part { display: inline-block; max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
-.ep-ma__remove { margin-left: 6px; border: 0; background: transparent; color: inherit; opacity: .5; cursor: pointer; font-size: 15px; line-height: 1; }
-.ep-ma__remove:hover, .ep-ma__remove:focus { opacity: 1; }
+/* Movable Assets: part-column header, remove control, status line */
+.ep-ma__part { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; overflow: hidden; overflow-wrap: anywhere; text-align: center; }
+.ep-ma__remove { position: absolute; top: 2px; right: 3px; padding: 0 2px; border: 0; background: var(--ep-bg-muted); color: inherit; opacity: 0; cursor: pointer; font-size: 13px; line-height: 1; }
+.ep-ma__th:hover .ep-ma__remove, .ep-ma__remove:focus-visible { opacity: .75; }
+.ep-ma__remove:hover { opacity: 1; }
+@media (hover: none) { .ep-ma__remove { opacity: .5; } }
 .ep-ma__status { font-size: 12px; opacity: .85; }
 .ep-ma__status.is-error { color: #b42318; opacity: 1; }
 
-/* ─── Movable Assets: wide table, one column per part ─── */
-.ep-pt__table.ep-ma__table { table-layout: auto; width: max-content; min-width: 100%; }
-.ep-pt__table.ep-ma__table th:nth-child(n),
-.ep-pt__table.ep-ma__table td:nth-child(n) { width: auto; }
-.ep-pt__table.ep-ma__table thead th { min-width: 124px; vertical-align: bottom; line-height: 1.25; }
-.ep-pt__table.ep-ma__table .ep-ma__part { display: inline; max-width: none; overflow: visible; white-space: normal; text-overflow: clip; }
-.ep-pt__table.ep-ma__table .ep-ma__remove { vertical-align: baseline; }
-
-/* Keep the plant code visible while scrolling sideways. */
-.ep-pt__table.ep-ma__table thead th:first-child,
-.ep-pt__table.ep-ma__table tbody td:first-child {
-  position: sticky; left: 0; min-width: 170px; box-shadow: 1px 0 0 var(--ep-border);
+/* Movable Assets table: fixed layout like Details. Every part column is the same width,
+   sized so 13 of them fill the frame (never narrower than 72px); the rest scroll sideways. */
+.ep-pt__scroll.ep-ma__scroll { container-type: inline-size; }
+.ep-pt__table.ep-ma__table {
+  --ma-code: 150px; --ma-total: 60px; --ma-edit: 76px;
+  --ma-col: 84px;                                   /* fallback where container units are missing */
+  table-layout: fixed; min-width: 100%;
+  width: calc(var(--ma-code) + var(--ma-total) + var(--ma-edit) + var(--ma-n, 1) * var(--ma-col));
 }
-.ep-pt__table.ep-ma__table tbody td:first-child { z-index: 1; background: var(--ep-bg, #fff); }
-.ep-pt__table.ep-ma__table thead th:first-child { z-index: 3; }
-.ep-pt__table.ep-ma__table tbody tr:hover td:first-child { background: var(--ep-bg-subtle, #f6f7f9); }
+@supports (width: 1cqw) {
+  .ep-pt__table.ep-ma__table {
+    --ma-col: max(72px, calc((100cqw - var(--ma-code) - var(--ma-total) - var(--ma-edit) - 18px) / 13));
+  }
+}
+.ep-ma__col-code { width: var(--ma-code); }
+.ep-ma__col-part { width: var(--ma-col); }
+.ep-ma__col-total { width: var(--ma-total); }
+.ep-ma__col-edit { width: var(--ma-edit); }
+.ep-pt__table.ep-ma__table th:nth-child(n),
+.ep-pt__table.ep-ma__table td:nth-child(n) { width: auto; }   /* beat the Details column percentages */
+.ep-pt__table.ep-ma__table thead th { padding: 8px 4px; vertical-align: bottom; line-height: 1.25; }
+.ep-pt__table.ep-ma__table thead th:first-child { padding-left: 10px; }
+.ep-pt__table.ep-ma__table tbody td { padding: 7px 4px; }
+.ep-pt__table.ep-ma__table tbody td:first-child { padding-left: 10px; }
+
+/* Plant code stays visible on the left, Edit on the right, while scrolling sideways. */
+.ep-pt__table.ep-ma__table thead th:first-child,
+.ep-pt__table.ep-ma__table tbody td:first-child { position: sticky; left: 0; box-shadow: 1px 0 0 var(--ep-border); }
 .ep-pt__table.ep-ma__table thead th:last-child,
-.ep-pt__table.ep-ma__table tbody td:last-child { min-width: 80px; }
+.ep-pt__table.ep-ma__table tbody td:last-child { position: sticky; right: 0; box-shadow: -1px 0 0 var(--ep-border); }
+.ep-pt__table.ep-ma__table tbody td:first-child,
+.ep-pt__table.ep-ma__table tbody td:last-child { z-index: 1; background: var(--ep-bg, #fff); }
+.ep-pt__table.ep-ma__table thead th:first-child,
+.ep-pt__table.ep-ma__table thead th:last-child { z-index: 3; }
+.ep-pt__table.ep-ma__table tbody tr:hover td:first-child,
+.ep-pt__table.ep-ma__table tbody tr:hover td:last-child { background: var(--ep-bg-subtle, #f6f7f9); }
+
+/* Edit dialog: wide, three columns, the parts list scrolls inside it. */
+.ep-pd__modal.ep-ma__modal { width: min(900px, 100%); display: flex; flex-direction: column; overflow: hidden; }
+.ep-ma__modal-tools { padding: 0 var(--ep-s-5) var(--ep-s-3); }
+.ep-ma__modal-filter { width: 100%; min-height: 36px; padding: 0 12px; border: 1px solid var(--ep-border-strong); border-radius: var(--ep-radius-md); background: var(--ep-bg); color: var(--ep-text); font: inherit; }
+.ep-ma__modal-body { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--ep-s-3) var(--ep-s-4); padding: 0 var(--ep-s-5); overflow-y: auto; min-height: 0; }
+.ep-ma__modal-body .ep-pd__field[hidden] { display: none; }
+@media (max-width: 760px) { .ep-ma__modal-body { grid-template-columns: 1fr; } }

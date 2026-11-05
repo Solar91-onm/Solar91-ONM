@@ -7,9 +7,9 @@
  *   Views -> Movable Assets   every plant's row (search, SPV, district, part filters)
  *   Plant -> Movable Assets   that plant's single row
  *
- * Same look as the Details table (it reuses the ep-pt__ classes). Data comes from
- * GET /api/movable-assets; roles holding plants.manage can edit a cell, add a part
- * column or remove one. The API enforces every permission; the UI only hides buttons.
+ * Same look as the Details table (it reuses the ep-pt__ classes), sized so 13 part columns fit the frame. Data comes from
+ * GET /api/movable-assets; cells are read-only. Roles holding plants.manage use the Edit
+ * column (one dialog per plant, PUT /api/movable-assets/plant), add a part column or remove one. The API enforces every permission; the UI only hides buttons.
  */
 (function (global) {
   "use strict";
@@ -116,39 +116,47 @@
       "</select></div>";
   }
 
-  function cellHTML(siteCode, part, index) {
+  // Read-only: the number, or a dash when the plant has no record for this part.
+  // Units are changed from the Edit column's dialog, never inline.
+  function cellHTML(siteCode, part) {
     var value = unitsOf(siteCode, part);
-    if (canEdit()) {
-      return '<td class="num"><input class="ep-ma__cell" type="number" min="0" max="1000000" step="1" inputmode="numeric"' +
-        ' data-ma-cell data-site="' + fmt.escape(siteCode) + '" data-part="' + index + '"' +
-        ' value="' + (value === null ? "" : value) + '" placeholder="—"' +
-        ' aria-label="Units of ' + fmt.escape(part) + " at " + fmt.escape(siteCode) + '"></td>';
-    }
-    return '<td class="num mono">' + (value === null ? '<span class="ep-pt__dash">—</span>' : fmt.formatNumber(value)) + "</td>";
+    return '<td class="num mono">' + (value === null ? '<span class="ep-pt__dash">\u2014</span>' : fmt.formatNumber(value)) + "</td>";
   }
 
-  function render(container) {
+  function render(container, keepScroll) {
+    var oldScroll = keepScroll ? container.querySelector(".ep-ma__scroll") : null;
+    var keepLeft = oldScroll ? oldScroll.scrollLeft : 0, keepTop = oldScroll ? oldScroll.scrollTop : 0;
     var rows = visibleRows();
     var single = mode.kind === "single";
     var parts = shownParts();
     var plant = single && rows[0] ? rows[0].plant : null;
     var editor = canEdit();
-    var colCount = parts.length + 2;
+    var colCount = parts.length + 3;   // plant code + parts + total + edit
 
     var head = '<th>Plant Code</th>' + parts.map(function (part) {
-      return '<th class="num"><span class="ep-ma__part">' + fmt.escape(part) + "</span>" +
+      return '<th class="num ep-ma__th" title="' + fmt.escape(part) + '"><span class="ep-ma__part">' + fmt.escape(part) + "</span>" +
         (editor ? '<button type="button" class="ep-ma__remove" data-ma-remove="' +
           state.parts.indexOf(part) + '" aria-label="Remove part ' + fmt.escape(part) + '" title="Remove this part">&times;</button>' : "") +
         "</th>";
-    }).join("") + '<th class="num">Total</th>';
+    }).join("") + '<th class="num">Total</th><th class="num">Edit</th>';
+
+    var colgroup = "<colgroup><col class=\"ep-ma__col-code\">" +
+      (parts.length ? '<col class="ep-ma__col-part" span="' + parts.length + '">' : "") +
+      '<col class="ep-ma__col-total"><col class="ep-ma__col-edit"></colgroup>';
+
+    var editIcon = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"></path><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"></path></svg>';
 
     var body = rows.map(function (entry) {
       var p = entry.plant;
       return "<tr>" +
         '<td class="ep-pt__codecell"><span class="ep-pt__code">' + fmt.escape(p.siteCode) + "</span>" +
           '<span class="ep-pt__name">' + fmt.escape(p.displayName || p.plantName) + "</span></td>" +
-        parts.map(function (part) { return cellHTML(p.siteCode, part, state.parts.indexOf(part)); }).join("") +
-        '<td class="num mono" data-ma-total="' + fmt.escape(p.siteCode) + '">' + fmt.formatNumber(total(p.siteCode, parts)) + "</td>" +
+        parts.map(function (part) { return cellHTML(p.siteCode, part); }).join("") +
+        '<td class="num mono">' + fmt.formatNumber(total(p.siteCode, parts)) + "</td>" +
+        '<td class="num">' + (editor
+          ? '<button class="ep-pt__edit" type="button" data-ma-edit="' + fmt.escape(p.siteCode) + '" aria-label="Edit movable assets of ' +
+              fmt.escape(p.siteCode) + '">' + editIcon + "Edit</button>"
+          : '<span class="ep-pt__dash" title="Your role cannot edit movable assets">\u2014</span>') + "</td>" +
       "</tr>";
     }).join("");
 
@@ -172,12 +180,16 @@
           (single ? "" : '<button class="ep-pt__export" type="button" data-ma-export="csv">CSV</button>' +
             '<button class="ep-pt__export" type="button" data-ma-export="excel">Excel</button>') +
         "</div>" +
-        '<div class="ep-pt__table-wrap"><div class="ep-pt__scroll" tabindex="0" role="region" aria-label="Movable assets table">' +
-          '<table class="ep-pt__table ep-ma__table"><thead><tr>' + head + "</tr></thead><tbody>" +
+        '<div class="ep-pt__table-wrap"><div class="ep-pt__scroll ep-ma__scroll" tabindex="0" role="region" aria-label="Movable assets table">' +
+          '<table class="ep-pt__table ep-ma__table" style="--ma-n:' + parts.length + '">' + colgroup + "<thead><tr>" + head + "</tr></thead><tbody>" +
           (rows.length && parts.length ? body
             : '<tr><td colspan="' + colCount + '" class="ep-pt__empty">' + empty + "</td></tr>") +
           "</tbody></table></div></div></div></div>";
     wire(container);
+    if (keepScroll) {
+      var scroller = container.querySelector(".ep-ma__scroll");
+      if (scroller) { scroller.scrollLeft = keepLeft; scroller.scrollTop = keepTop; }
+    }
   }
 
   // --- Actions --------------------------------------------------------
@@ -192,32 +204,109 @@
     return load().then(function () { if (container.isConnected) render(container); });
   }
 
-  function saveCell(container, input) {
-    var site = input.getAttribute("data-site");
-    var part = state.parts[Number(input.getAttribute("data-part"))];
-    var raw = input.value.trim();
-    var previous = unitsOf(site, part);
-    if (raw === "" || !/^\d+$/.test(raw) || Number(raw) > 1000000) {
-      input.value = previous === null ? "" : previous;
-      setStatus(container, "Enter a whole number from 0 to 1,000,000.", true);
-      return;
+  // Edit dialog: every part for one plant, saved together in one request.
+  function openEditor(container, siteCode, trigger) {
+    var entry = state.rows.filter(function (r) { return r.plant.siteCode === siteCode; })[0];
+    if (!entry || !state.parts.length) return;
+    var plant = entry.plant;
+    var overlay = document.createElement("div");
+    overlay.className = "ep-pd__overlay";
+    overlay.innerHTML =
+      '<form class="ep-pd__modal ep-ma__modal" role="dialog" aria-modal="true" aria-labelledby="ma-edit-title" novalidate>' +
+        '<header class="ep-pd__modal-head"><div>' +
+          '<h2 id="ma-edit-title">Edit ' + fmt.escape(plant.displayName || plant.plantName) + " \u00b7 Movable Assets</h2>" +
+          '<p class="ep-pd__mono">' + fmt.escape(plant.siteCode) + "</p></div>" +
+          '<button class="ep-pd__x" type="button" data-ma-close aria-label="Close">\u00d7</button></header>' +
+        '<div class="ep-ma__modal-tools"><input type="search" class="ep-ma__modal-filter" data-ma-modal-filter ' +
+          'placeholder="Filter parts..." autocomplete="off" aria-label="Filter parts" /></div>' +
+        '<div class="ep-ma__modal-body">' + state.parts.map(function (part, i) {
+          var v = unitsOf(siteCode, part);
+          return '<label class="ep-pd__field" data-ma-name="' + fmt.escape(part.toLowerCase()) + '"><span>' + fmt.escape(part) + "</span>" +
+            '<input type="number" min="0" max="1000000" step="1" inputmode="numeric" data-ma-input="' + i + '" value="' +
+            (v === null ? "" : v) + '" placeholder="\u2014" /></label>';
+        }).join("") + "</div>" +
+        '<p class="ep-pd__form-error" role="alert"></p>' +
+        '<footer class="ep-pd__modal-foot">' +
+          '<button class="ep-pd__btn" type="button" data-ma-close>Cancel</button>' +
+          '<button class="ep-pd__btn ep-pd__btn--primary" type="submit">Save changes</button></footer>' +
+      "</form>";
+    document.body.appendChild(overlay);
+
+    var form = overlay.querySelector("form");
+    var errorEl = overlay.querySelector(".ep-pd__form-error");
+    var saving = false;
+
+    function close() {
+      if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+      document.removeEventListener("keydown", onKey);
+      if (trigger && trigger.isConnected) trigger.focus();
     }
-    var units = Number(raw);
-    if (units === previous) return;
-    input.disabled = true;
-    setStatus(container, "Saving…");
-    api().request("/api/movable-assets", {
-      method: "PUT", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ site_code: site, part: part, units: units })
-    }).then(function () {
-      (state.units[site] = state.units[site] || {})[part] = units;
-      var cell = container.querySelector('[data-ma-total="' + site + '"]');
-      if (cell) cell.textContent = fmt.formatNumber(total(site, shownParts()));
-      setStatus(container, "Saved.");
-    }).catch(function (err) {
-      input.value = previous === null ? "" : previous;
-      setStatus(container, "Could not save: " + (err && err.message ? err.message : "try again"), true);
-    }).then(function () { input.disabled = false; });
+    function onKey(ev) { if (ev.key === "Escape" && !saving) close(); }
+    document.addEventListener("keydown", onKey);
+    overlay.addEventListener("click", function (ev) {
+      if (saving) return;
+      if (ev.target === overlay || ev.target.closest("[data-ma-close]")) close();
+    });
+
+    var filter = overlay.querySelector("[data-ma-modal-filter]");
+    filter.addEventListener("input", function () {
+      var term = filter.value.trim().toLowerCase();
+      overlay.querySelectorAll("[data-ma-name]").forEach(function (label) {
+        label.hidden = !!term && label.getAttribute("data-ma-name").indexOf(term) === -1;
+      });
+    });
+
+    form.addEventListener("submit", function (ev) {
+      ev.preventDefault();
+      if (saving) return;               // no double submissions
+      errorEl.textContent = "";
+      var items = [];
+      var inputs = form.querySelectorAll("[data-ma-input]");
+      for (var k = 0; k < inputs.length; k++) {
+        var part = state.parts[Number(inputs[k].getAttribute("data-ma-input"))];
+        var raw = inputs[k].value.trim();
+        var previous = unitsOf(siteCode, part);
+        if (raw === "") {
+          if (previous === null) continue;           // never set, still not set
+          errorEl.textContent = part + ": enter a whole number from 0 to 1,000,000.";
+          inputs[k].focus();
+          return;
+        }
+        if (!/^\d+$/.test(raw) || Number(raw) > 1000000) {
+          errorEl.textContent = part + ": enter a whole number from 0 to 1,000,000.";
+          inputs[k].focus();
+          return;
+        }
+        if (Number(raw) !== previous) items.push({ part: part, units: Number(raw) });   // only what changed
+      }
+      if (!items.length) { close(); return; }
+
+      saving = true;
+      var submit = form.querySelector('[type="submit"]');
+      submit.disabled = true;
+      submit.textContent = "Saving\u2026";
+      api().request("/api/movable-assets/plant", {
+        method: "PUT", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ site_code: siteCode, items: items })
+      }).then(function () {
+        var byPlant = (state.units[siteCode] = state.units[siteCode] || {});
+        items.forEach(function (it) { byPlant[it.part] = it.units; });
+        saving = false;
+        close();
+        if (container.isConnected) {
+          render(container, true);
+          setStatus(container, items.length === 1 ? "Saved 1 change." : "Saved " + items.length + " changes.");
+        }
+      }).catch(function (err) {
+        saving = false;
+        submit.disabled = false;
+        submit.textContent = "Save changes";
+        errorEl.textContent = "Not saved. " + (err && err.message ? err.message : "Please retry.");
+      });
+    });
+
+    var first = form.querySelector("[data-ma-input]");
+    if (first) first.focus();
   }
 
   function addPart(container) {
@@ -307,9 +396,8 @@
     container.querySelectorAll("[data-ma-export]").forEach(function (btn) {
       btn.addEventListener("click", function () { exportFile(btn.getAttribute("data-ma-export")); });
     });
-    container.querySelectorAll("[data-ma-cell]").forEach(function (input) {
-      input.addEventListener("change", function () { saveCell(container, input); });
-      input.addEventListener("keydown", function (ev) { if (ev.key === "Enter") input.blur(); });
+    container.querySelectorAll("[data-ma-edit]").forEach(function (btn) {
+      btn.addEventListener("click", function () { openEditor(container, btn.getAttribute("data-ma-edit"), btn); });
     });
     var add = container.querySelector("[data-ma-add]");
     if (add) add.addEventListener("click", function () { addPart(container); });
