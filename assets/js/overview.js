@@ -593,7 +593,7 @@
         value: fmt.formatNumber(openIss),
         pill: isP,
         hints: [
-          { strong: true,  dot: totals.criticalIssues > 0 ? "red" : "green", text: `${fmt.formatNumber(totals.criticalIssues)} critical · ${fmt.formatNumber(totals.mediumIssues)} medium` },
+          { strong: true,  dot: totals.unsolvedIssues > 0 ? "red" : "green", text: `${fmt.formatNumber(totals.unsolvedIssues)} unsolved · ${fmt.formatNumber(totals.inProgressIssues)} in progress` },
           { strong: false, text: `${fmt.formatNumber(totals.closedIssues)} closed to date · ${fmt.formatNumber(totals.plantsWithOpenIssues)} plants affected` }
         ]
       }

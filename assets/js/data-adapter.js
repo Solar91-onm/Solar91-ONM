@@ -252,6 +252,7 @@
       totalPlants: rows.length,
       healthyPlants: 0, attentionPlants: 0, criticalPlants: 0, unknownPlants: 0,
       openIssues: 0, closedIssues: 0, criticalIssues: 0, mediumIssues: 0,
+      unsolvedIssues: 0, inProgressIssues: 0,
       plantsWithOpenIssues: 0,
       pmCompleted: 0, pmPending: 0, pmOverdue: 0,
       washingCompleted: 0, washingPending: 0, washingOverdue: 0,
@@ -265,7 +266,7 @@
       else if (cond === "critical") totals.criticalPlants += 1;
       else totals.unknownPlants += 1;
 
-      ["openIssues", "closedIssues", "criticalIssues", "mediumIssues"].forEach(function (k) {
+      ["openIssues", "closedIssues", "criticalIssues", "mediumIssues", "unsolvedIssues", "inProgressIssues"].forEach(function (k) {
         if (typeof profile[k] === "number") totals[k] += profile[k];
       });
       if ((profile.openIssues || 0) > 0) totals.plantsWithOpenIssues += 1;

@@ -48,6 +48,9 @@ ISSUE_OPEN_STATES = (
     "Open", "Assigned", "Acknowledged", "In Progress", "Pending Vendor", "Pending Parts/Vendor",
 )
 ISSUE_CLOSED_STATES = ("Resolved", "Closed")
+# The same three groups the Site Issues screen shows: Unsolved, In Progress, Solved.
+ISSUE_UNSOLVED_STATES = ("Open", "Assigned", "Acknowledged")
+ISSUE_IN_PROGRESS_STATES = ("In Progress", "Pending Vendor", "Pending Parts/Vendor")
 
 # app/issues/schemas.py :: SEVERITY_STORED_AS — two levels, each with a legacy alias.
 SEVERITY_CRITICAL = ("Critical", "High")
@@ -174,6 +177,8 @@ def _issue_counts(db: Session, plant_ids: list[UUID]) -> dict[UUID, dict[str, in
             func.sum(case((Issue.status.in_(ISSUE_CLOSED_STATES), 1), else_=0)).label("closed"),
             func.sum(case((is_open & Issue.severity.in_(SEVERITY_CRITICAL), 1), else_=0)).label("critical"),
             func.sum(case((is_open & Issue.severity.in_(SEVERITY_MEDIUM), 1), else_=0)).label("medium"),
+            func.sum(case((Issue.status.in_(ISSUE_UNSOLVED_STATES), 1), else_=0)).label("unsolved"),
+            func.sum(case((Issue.status.in_(ISSUE_IN_PROGRESS_STATES), 1), else_=0)).label("in_progress"),
         )
         .where(Issue.plant_id.in_(plant_ids))
         .group_by(Issue.plant_id)
@@ -185,6 +190,8 @@ def _issue_counts(db: Session, plant_ids: list[UUID]) -> dict[UUID, dict[str, in
             "closedIssues": int(row.closed or 0),
             "criticalIssues": int(row.critical or 0),
             "mediumIssues": int(row.medium or 0),
+            "unsolvedIssues": int(row.unsolved or 0),
+            "inProgressIssues": int(row.in_progress or 0),
         }
         for row in rows
     }
@@ -310,6 +317,7 @@ def build_profile(
             "derivedCondition": "unknown",
             "openIssues": None, "closedIssues": None,
             "criticalIssues": None, "mediumIssues": None,
+            "unsolvedIssues": None, "inProgressIssues": None,
             "pm": dict(_EMPTY_BLOCK),
             "washing": dict(_EMPTY_BLOCK),
             "lastReportAt": None,
@@ -371,6 +379,8 @@ def build_profile(
         "closedIssues": (issues or {}).get("closedIssues", 0),
         "criticalIssues": (issues or {}).get("criticalIssues", 0),
         "mediumIssues": (issues or {}).get("mediumIssues", 0),
+        "unsolvedIssues": (issues or {}).get("unsolvedIssues", 0),
+        "inProgressIssues": (issues or {}).get("inProgressIssues", 0),
         "pm": {
             "completed": (pm or {}).get("completed", 0),
             "pending": (pm or {}).get("pending", 0),
@@ -502,6 +512,8 @@ def portfolio_for_range(db: Session, user: User, start: date, end: date) -> dict
             func.sum(case((Issue.status.in_(ISSUE_CLOSED_STATES), 1), else_=0)).label("closed"),
             func.sum(case((is_open_issue & Issue.severity.in_(SEVERITY_CRITICAL), 1), else_=0)).label("critical"),
             func.sum(case((is_open_issue & Issue.severity.in_(SEVERITY_MEDIUM), 1), else_=0)).label("medium"),
+            func.sum(case((Issue.status.in_(ISSUE_UNSOLVED_STATES), 1), else_=0)).label("unsolved"),
+            func.sum(case((Issue.status.in_(ISSUE_IN_PROGRESS_STATES), 1), else_=0)).label("in_progress"),
         )
         .where(
             Issue.plant_id.in_(plant_ids),
@@ -518,6 +530,8 @@ def portfolio_for_range(db: Session, user: User, start: date, end: date) -> dict
             "closedIssues": int(row.closed or 0),
             "criticalIssues": int(row.critical or 0),
             "mediumIssues": int(row.medium or 0),
+            "unsolvedIssues": int(row.unsolved or 0),
+            "inProgressIssues": int(row.in_progress or 0),
         }
         for row in issue_rows
     }
@@ -619,7 +633,8 @@ def portfolio_for_range(db: Session, user: User, start: date, end: date) -> dict
     for plant in plants:
         profile = build_profile(
             plant,
-            issue_counts.get(plant.id, {"openIssues": 0, "closedIssues": 0, "criticalIssues": 0, "mediumIssues": 0}),
+            issue_counts.get(plant.id, {"openIssues": 0, "closedIssues": 0, "criticalIssues": 0, "mediumIssues": 0,
+                                        "unsolvedIssues": 0, "inProgressIssues": 0}),
             pm_counts.get(plant.id),
             washing_counts.get(plant.id),
             None,
@@ -686,7 +701,7 @@ def portfolio_trend(
     start: date,
     end: date,
 ) -> dict[str, Any]:
-    """Return date buckets for PM/washing compliance and currently open issues."""
+    """Return date buckets for PM/washing compliance and the issues still active at the end of each bucket."""
     bucket, dates = _trend_buckets(start, end)
     pm_expected = [0] * len(dates)
     pm_on_time = [0] * len(dates)
@@ -782,22 +797,42 @@ def portfolio_trend(
                             washing_on_time[index] += 1
             month_cursor = (month_cursor.replace(day=28) + timedelta(days=4)).replace(day=1)
 
+        # Active issues is a running level, not a count of new tickets: an issue is active from the
+        # day it occurred until it is Resolved/Closed, so it keeps showing on every later bucket
+        # (including today) until then. Same scope as the Open Site Issues tile: issues that
+        # occurred inside the range, so the last bucket equals that tile when the range ends today.
         issue_day = _trend_day_expression(db, Issue.occurred_at)
         start_at = datetime.combine(start, time.min, tzinfo=BUSINESS_TZ)
         end_at = datetime.combine(end + timedelta(days=1), time.min, tzinfo=BUSINESS_TZ)
-        issue_rows = db.execute(
+        in_scope = (
+            Issue.plant_id.in_(plant_ids),
+            Issue.deleted_at.is_(None),
+            Issue.occurred_at >= start_at,
+            Issue.occurred_at < end_at,
+        )
+        raised_rows = db.execute(
             select(issue_day.label("event_day"), func.count().label("count"))
-            .where(
-                Issue.plant_id.in_(plant_ids),
-                Issue.deleted_at.is_(None),
-                Issue.status.in_(ISSUE_OPEN_STATES),
-                Issue.occurred_at >= start_at,
-                Issue.occurred_at < end_at,
-            )
-            .group_by(issue_day)
+            .where(*in_scope).group_by(issue_day)
         ).all()
-        for row in issue_rows:
-            _add_trend_value(active_issues, row.event_day, start, bucket, int(row.count or 0))
+        # Resolved on the day the fix was recorded; older rows without one fall back to the
+        # day the ticket was last updated. A resolution after the range end is outside the
+        # buckets, so the issue still counts as active at the end date.
+        solved_day = func.coalesce(Issue.fixed_on, Issue.closed_on, _trend_day_expression(db, Issue.updated_at))
+        solved_rows = db.execute(
+            select(solved_day.label("event_day"), func.count().label("count"))
+            .where(*in_scope, Issue.status.in_(ISSUE_CLOSED_STATES)).group_by(solved_day)
+        ).all()
+        raised = [0] * len(dates)
+        solved = [0] * len(dates)
+        for row in raised_rows:
+            _add_trend_value(raised, row.event_day, start, bucket, int(row.count or 0))
+        for row in solved_rows:
+            _add_trend_value(solved, row.event_day, start, bucket, int(row.count or 0))
+        raised_so_far = solved_so_far = 0
+        for index in range(len(dates)):
+            raised_so_far += raised[index]
+            solved_so_far += solved[index]
+            active_issues[index] = max(0, raised_so_far - solved_so_far)
 
     def compliance(numerator: list[int], denominator: list[int]) -> list[int | None]:
         """Compliance so far, bucket by bucket: on-time to date over expected to date.
@@ -858,6 +893,7 @@ def aggregate(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "totalPlants": len(rows),
         "healthyPlants": 0, "attentionPlants": 0, "criticalPlants": 0, "unknownPlants": 0,
         "openIssues": 0, "closedIssues": 0, "criticalIssues": 0, "mediumIssues": 0,
+        "unsolvedIssues": 0, "inProgressIssues": 0,
         "plantsWithOpenIssues": 0,
         "pmCompleted": 0, "pmPending": 0, "pmOverdue": 0,
         "washingCompleted": 0, "washingPending": 0, "washingOverdue": 0,
@@ -872,7 +908,7 @@ def aggregate(rows: list[dict[str, Any]]) -> dict[str, Any]:
             "critical": "criticalPlants",
         }.get(condition, "unknownPlants")] += 1
 
-        for key in ("openIssues", "closedIssues", "criticalIssues", "mediumIssues"):
+        for key in ("openIssues", "closedIssues", "criticalIssues", "mediumIssues", "unsolvedIssues", "inProgressIssues"):
             value = profile.get(key)
             if isinstance(value, int):
                 totals[key] += value

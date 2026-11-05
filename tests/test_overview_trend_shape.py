@@ -83,23 +83,54 @@ def test_a_range_with_nothing_due_stays_null_rather_than_claiming_zero_percent(c
         assert all(value is None for value in values), (key, values)
 
 
-def test_active_issue_counts_are_left_per_bucket_not_accumulated(client, db):
-    """Issues are a count on the day they were reported, not a ratio; accumulating would double-count."""
-    login_user(client, db, role="O&M Head", name="Trend Head 4", email="trend-head4@example.com")
-    plant = _plant(client, "TR04")
-    raised = client.post("/api/issues", json={"plant_id": plant["id"], "description": "Trend issue",
+def _raise_issue(client, db, plant, occurred_days_ago, status="Open", fixed_days_ago=None, note="Trend issue"):
+    from datetime import datetime, time
+    from app.core.models import Issue
+    from app.portal.service import BUSINESS_TZ
+    raised = client.post("/api/issues", json={"plant_id": plant["id"], "description": note,
                                               "vertical": "Inverter", "severity": "Medium"})
     assert raised.status_code == 201, raised.text
     today = business_today()
-    # The trend counts issues by the day the fault occurred; a ticket raised without one has
-    # occurred_at null, so give it a date inside the range.
-    from app.core.models import Issue
-    from datetime import datetime, time
-    from app.portal.service import BUSINESS_TZ
-    issue = db.query(Issue).one()
-    issue.occurred_at = datetime.combine(today - timedelta(days=2), time(9, 0), tzinfo=BUSINESS_TZ)
+    issue = db.query(Issue).filter(Issue.ticket_no == raised.json()["ticket_no"]).one()
+    # The trend counts issues by the day the fault occurred, so give it a date inside the range.
+    issue.occurred_at = datetime.combine(today - timedelta(days=occurred_days_ago), time(9, 0), tzinfo=BUSINESS_TZ)
+    issue.status = status
+    if fixed_days_ago is not None:
+        issue.fixed_on = today - timedelta(days=fixed_days_ago)
     db.commit()
+
+
+def test_an_open_issue_stays_active_on_every_bucket_until_today(client, db):
+    """Active issues is a level: raised two days ago and still open, it shows on today too (not 0)."""
+    login_user(client, db, role="O&M Head", name="Trend Head 4", email="trend-head4@example.com")
+    plant = _plant(client, "TR04")
+    _raise_issue(client, db, plant, occurred_days_ago=2)
+    today = business_today()
     values = _series(service.portfolio_trend(db, [UUID(plant["id"])], today - timedelta(days=5), today),
                      "issues")["values"]
-    # Exactly one issue, on one bucket - not carried forward across the rest of the range.
-    assert sum(values) == 1, values
+    assert values == [0, 0, 0, 1, 1, 1], values
+
+
+def test_a_resolved_issue_drops_out_of_active_on_the_day_it_was_fixed(client, db):
+    login_user(client, db, role="O&M Head", name="Trend Head 5", email="trend-head5@example.com")
+    plant = _plant(client, "TR05")
+    _raise_issue(client, db, plant, occurred_days_ago=3, status="Resolved", fixed_days_ago=1)
+    today = business_today()
+    values = _series(service.portfolio_trend(db, [UUID(plant["id"])], today - timedelta(days=5), today),
+                     "issues")["values"]
+    assert values == [0, 0, 1, 1, 0, 0], values
+    # Viewed as of an earlier end date, the fix had not happened yet, so it is still active.
+    earlier = _series(service.portfolio_trend(db, [UUID(plant["id"])], today - timedelta(days=5), today - timedelta(days=2)),
+                      "issues")["values"]
+    assert earlier[-1] == 1, earlier
+
+
+def test_open_issue_counts_split_into_unsolved_and_in_progress(client, db):
+    from app.core.models import Issue
+    login_user(client, db, role="O&M Head", name="Trend Head 6", email="trend-head6@example.com")
+    plant = _plant(client, "TR06")
+    for status in ("Open", "Assigned", "In Progress", "Pending Vendor", "Resolved"):
+        _raise_issue(client, db, plant, occurred_days_ago=1, status=status, note="Trend issue " + status)
+    counts = service._issue_counts(db, [UUID(plant["id"])])[UUID(plant["id"])]
+    assert counts["unsolvedIssues"] == 2 and counts["inProgressIssues"] == 2, counts
+    assert counts["openIssues"] == 4 and counts["closedIssues"] == 1, counts
