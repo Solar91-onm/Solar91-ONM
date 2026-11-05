@@ -165,9 +165,8 @@
       : (single ? "This plant was not found, or it is outside your assigned scope." : "No plants match these filters.");
 
     container.innerHTML = '<div class="ep-pt">' +
-      '<div class="ep-pt__head"><h1 class="ep-pt__title">' +
-        (single ? (plant ? fmt.escape(plant.displayName || plant.plantName) + " · Movable Assets" : "Movable Assets") : "Movable Assets") +
-        "</h1>" +
+      '<div class="ep-pt__head">' +
+        (single && plant ? '<h1 class="ep-pt__title">' + fmt.escape(plant.displayName || plant.plantName) + "</h1>" : "") +
         '<p class="ep-pt__sub">' + (single ? (plant ? fmt.escape(plant.siteCode) + " · " + fmt.escape(plant.district || "") : "")
           : state.rows.length + " plants · " + state.parts.length + " parts") + "</p></div>" +
       '<div class="ep-pt__card">' + (single ? "" : toolbarHTML()) +
