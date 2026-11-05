@@ -79,7 +79,7 @@
   .ep-pd__modal-body { grid-template-columns: 1fr; }
 }
 /* Movable Assets: part-column header, remove control, status line */
-.ep-ma__part { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; overflow: hidden; overflow-wrap: anywhere; text-align: center; }
+.ep-ma__part { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; line-clamp: 4; overflow: hidden; overflow-wrap: anywhere; text-align: center; }
 .ep-ma__remove { position: absolute; top: 2px; right: 3px; padding: 0 2px; border: 0; background: var(--ep-bg-muted); color: inherit; opacity: 0; cursor: pointer; font-size: 13px; line-height: 1; }
 .ep-ma__th:hover .ep-ma__remove, .ep-ma__remove:focus-visible { opacity: .75; }
 .ep-ma__remove:hover { opacity: 1; }
