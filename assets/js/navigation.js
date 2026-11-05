@@ -229,7 +229,7 @@
     var phContext = document.querySelector("[data-placeholder-context]");
 
     function showOnly(el) {
-      [overviewEl, tableEl, calendarEl, healthEl, assetWarrantyEl, movableAssetsEl,detailsEl, settingsEl, placeholderEl].forEach(function (section) {
+      [overviewEl, tableEl, calendarEl, healthEl, assetWarrantyEl, movableAssetsEl, detailsEl, settingsEl, placeholderEl].forEach(function (section) {
         if (section) section.classList.toggle("is-visible", section === el);
       });
     }

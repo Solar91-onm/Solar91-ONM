@@ -173,7 +173,7 @@
             '<button class="ep-pt__export" type="button" data-ma-export="excel">Excel</button>') +
         "</div>" +
         '<div class="ep-pt__table-wrap"><div class="ep-pt__scroll" tabindex="0" role="region" aria-label="Movable assets table">' +
-          '<table class="ep-pt__table"><thead><tr>' + head + "</tr></thead><tbody>" +
+          '<table class="ep-pt__table ep-ma__table"><thead><tr>' + head + "</tr></thead><tbody>" +
           (rows.length && parts.length ? body
             : '<tr><td colspan="' + colCount + '" class="ep-pt__empty">' + empty + "</td></tr>") +
           "</tbody></table></div></div></div></div>";

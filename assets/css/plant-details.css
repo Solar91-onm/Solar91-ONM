@@ -87,3 +87,22 @@
 .ep-ma__remove:hover, .ep-ma__remove:focus { opacity: 1; }
 .ep-ma__status { font-size: 12px; opacity: .85; }
 .ep-ma__status.is-error { color: #b42318; opacity: 1; }
+
+/* ─── Movable Assets: wide table, one column per part ─── */
+.ep-pt__table.ep-ma__table { table-layout: auto; width: max-content; min-width: 100%; }
+.ep-pt__table.ep-ma__table th:nth-child(n),
+.ep-pt__table.ep-ma__table td:nth-child(n) { width: auto; }
+.ep-pt__table.ep-ma__table thead th { min-width: 124px; vertical-align: bottom; line-height: 1.25; }
+.ep-pt__table.ep-ma__table .ep-ma__part { display: inline; max-width: none; overflow: visible; white-space: normal; text-overflow: clip; }
+.ep-pt__table.ep-ma__table .ep-ma__remove { vertical-align: baseline; }
+
+/* Keep the plant code visible while scrolling sideways. */
+.ep-pt__table.ep-ma__table thead th:first-child,
+.ep-pt__table.ep-ma__table tbody td:first-child {
+  position: sticky; left: 0; min-width: 170px; box-shadow: 1px 0 0 var(--ep-border);
+}
+.ep-pt__table.ep-ma__table tbody td:first-child { z-index: 1; background: var(--ep-bg, #fff); }
+.ep-pt__table.ep-ma__table thead th:first-child { z-index: 3; }
+.ep-pt__table.ep-ma__table tbody tr:hover td:first-child { background: var(--ep-bg-subtle, #f6f7f9); }
+.ep-pt__table.ep-ma__table thead th:last-child,
+.ep-pt__table.ep-ma__table tbody td:last-child { min-width: 80px; }
