@@ -462,6 +462,11 @@
       global.Solar91PortalBom.show(container, { siteCode: mode.siteCode });
       return;
     }
+    // Design/MDL: the design folder link and drawing index, read from the plant's custom_fields.
+    if (detailSection === "design-mdl" && global.Solar91PortalDesign) {
+      global.Solar91PortalDesign.show(container, { siteCode: mode.siteCode });
+      return;
+    }
     if (loaded) {
       render(container);
       return;

@@ -1,0 +1,50 @@
+/* design.css: Plant/Views -> Details -> Design/MDL (assets/js/design.js). Built on tokens.css; tables reuse ep-pt__. */
+
+/* Folder card: the plant code as a big link to the design folder, with the present counter. */
+.ep-dsn__folder { display: flex; align-items: center; justify-content: space-between; gap: var(--ep-s-4); flex-wrap: wrap; padding: var(--ep-s-5); overflow: visible; }
+.ep-dsn__folder-main { display: flex; flex-direction: column; gap: var(--ep-s-1); min-width: 0; }
+.ep-dsn__eyebrow { font-size: var(--ep-fs-xs); font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ep-text-muted); }
+.ep-dsn__code { font-family: var(--ep-font-mono); font-size: var(--ep-fs-2xl); font-weight: 700; letter-spacing: 0.02em; line-height: var(--ep-lh-tight); color: var(--ep-accent-strong); text-decoration: none; overflow-wrap: anywhere; }
+a.ep-dsn__code:hover { text-decoration: underline; }
+a.ep-dsn__code:focus-visible, .ep-dsn__codelink:focus-visible { outline: 2px solid var(--ep-accent); outline-offset: 2px; border-radius: var(--ep-radius-xs); }
+.ep-dsn__code.is-plain { color: var(--ep-text-strong); }
+.ep-dsn__nolink { font-size: var(--ep-fs-sm); color: var(--ep-text-faint); }
+.ep-dsn__counter { padding: var(--ep-s-2) var(--ep-s-4); border-radius: 999px; background: var(--ep-bg-muted); font-size: var(--ep-fs-md); color: var(--ep-text-muted); white-space: nowrap; }
+.ep-dsn__counter strong { font-size: var(--ep-fs-lg); color: var(--ep-text-strong); }
+
+/* Index table (single plant): two columns, so drop the 13-column widths of the Details table. */
+.ep-pt__table.ep-dsn__table.is-single { min-width: 0; }
+.ep-pt__table.ep-dsn__table.is-single th:nth-child(n), .ep-pt__table.ep-dsn__table.is-single td:nth-child(n) { width: auto; }
+.ep-pt__table.ep-dsn__table.is-single th:nth-child(2), .ep-pt__table.ep-dsn__table.is-single td:nth-child(2) { width: 160px; }
+.ep-dsn__table .ep-dsn__drawing { font-size: var(--ep-fs-sm); color: var(--ep-text); white-space: normal; }
+
+/* Section sub-headers inside tbody: "Key drawings" is highlighted, "Miscellaneous" is quiet. */
+.ep-dsn__section th { padding: 8px 10px; text-align: left; font-size: 10px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; border-bottom: 1px solid var(--ep-border); }
+.ep-dsn__section-count { margin-left: var(--ep-s-2); font-family: var(--ep-font-mono); font-weight: 600; letter-spacing: 0; }
+.ep-dsn__section--key th { background: var(--ep-accent-soft); color: var(--ep-accent-strong); border-top: 1px solid var(--ep-accent-ring); }
+.ep-dsn__section--misc th { background: var(--ep-bg-muted); color: var(--ep-text-muted); border-top: 1px solid var(--ep-border); }
+.ep-pt__table tbody tr.ep-dsn__section:hover { background: transparent; }
+.ep-dsn__row--key td:first-child { box-shadow: inset 3px 0 0 var(--ep-accent); }
+.ep-dsn__row--key .ep-dsn__drawing { font-weight: 600; color: var(--ep-text-strong); }
+
+/* Present / Not added. */
+.ep-dsn__tick { display: inline-flex; align-items: center; gap: 4px; font-size: var(--ep-fs-xs); font-weight: 600; white-space: nowrap; }
+.ep-dsn__tick.is-present { color: var(--ep-accent-strong); }
+.ep-dsn__tick.is-absent { color: var(--ep-text-faint); font-weight: 400; }
+.ep-dsn__table.is-portfolio .ep-dsn__tick.is-present { font-size: var(--ep-fs-md); }
+
+/* Edit mode: one checkbox per drawing. */
+.ep-dsn__check { display: inline-flex; align-items: center; gap: 6px; font-size: var(--ep-fs-xs); color: var(--ep-text-muted); cursor: pointer; }
+.ep-dsn__check input { width: 16px; height: 16px; margin: 0; accent-color: var(--ep-accent); cursor: pointer; }
+.ep-dsn__table.is-editing .ep-dsn__check input:checked + span { color: var(--ep-accent-strong); font-weight: 600; }
+
+/* Portfolio table: sticky plant column, columns sized to content, horizontal scroll is fine. */
+.ep-pt__table.ep-dsn__table.is-portfolio { table-layout: auto; min-width: 1200px; }
+.ep-pt__table.ep-dsn__table.is-portfolio th:nth-child(n), .ep-pt__table.ep-dsn__table.is-portfolio td:nth-child(n) { width: auto; }
+.ep-dsn__table.is-portfolio th.ep-dsn__keyhead { min-width: 78px; white-space: normal; }
+.ep-dsn__sticky { position: sticky; left: 0; z-index: 1; background: var(--ep-bg); box-shadow: inset -1px 0 0 var(--ep-border-soft); min-width: 140px; }
+.ep-dsn__table thead th.ep-dsn__sticky { z-index: 2; background: var(--ep-bg-muted); }
+.ep-pt__table tbody tr:hover .ep-dsn__sticky { background: var(--ep-bg-subtle); }
+.ep-dsn__codelink { text-decoration: none; color: var(--ep-accent-strong); }
+a.ep-dsn__codelink:hover { text-decoration: underline; }
+.ep-dsn__codelink.is-plain { color: inherit; }

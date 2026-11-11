@@ -497,6 +497,104 @@ def test_plant_and_portfolio_details_sections_are_in_left_navigation():
     assert 'if (loaded) {' in table
 
 
+def test_design_mdl_renders_empty_index_and_saves_a_merged_custom_fields_patch():
+    page = TEMPLATE.read_text(encoding="utf-8")
+    table = (PORTAL_ASSETS / "js" / "plants-table.js").read_text(encoding="utf-8")
+    module = (PORTAL_ASSETS / "js" / "design.js").read_text(encoding="utf-8")
+    assert (PORTAL_ASSETS / "css" / "design.css").exists()
+    assert page.index('/assets/js/bom.js"') < page.index('/assets/js/design.js"')
+    assert page.index('/assets/css/plant-details.css"') < page.index('/assets/css/design.css"')
+    assert 'detailSection === "design-mdl" && global.Solar91PortalDesign' in table
+    assert "global.Solar91PortalDesign.show(container, { siteCode: mode.siteCode });" in table
+    assert table.index("Solar91PortalBom.show") < table.index("Solar91PortalDesign.show") < table.index("if (loaded) {")
+    assert "global.Solar91PortalDesign = {" in module
+
+    script = r"""
+      global.window = global;
+      global.document = { activeElement: null };
+      require('./assets/js/format.js');
+      const plant = { dbId: '7', siteCode: 'ABH01', plantName: 'Abhaneri 01', displayName: 'Abhaneri',
+        district: 'Dausa', projectCompany: 'P1', customFields: { cctv_url: 'https://cctv.example.invalid/a' } };
+      let rows = [{ plant: plant, profile: {} }], invalidated = 0, patches = [];
+      global.Solar91PortalData = {
+        fetchPortfolio: () => Promise.resolve({ rows: rows }),
+        invalidate: () => { invalidated++; }
+      };
+      global.Solar91PortalAPI = {
+        can: (perm) => perm === 'plants.manage',
+        // The freshly read record carries a key this page has not seen; the save must keep it.
+        plants: () => Promise.resolve([Object.assign({}, plant, { customFields: { cctv_url: 'https://cctv.example.invalid/a',
+          design_link: 'https://folder.example.invalid/ABH01', design_index: { legacy_extra: true } } })]),
+        request: (url, opts) => { patches.push({ url, opts }); return Promise.resolve({}); }
+      };
+      require('./assets/js/design.js');
+
+      function container() {
+        const el = { isConnected: true, html: '', nodes: {}, checks: [] };
+        Object.defineProperty(el, 'innerHTML', {
+          get() { return el.html; },
+          set(v) {
+            el.html = v; el.nodes = {};
+            el.checks = [...v.matchAll(/data-dsn-check="([a-z0-9_]+)"( checked)?/g)].map(m => ({ checked: !!m[2], getAttribute: () => m[1] }));
+          }
+        });
+        el.querySelector = (sel) => {
+          const key = (sel.match(/^\[(data-dsn-[a-z]+)\]$/) || [])[1];
+          if (!key || el.html.indexOf(key) === -1) return null;
+          return el.nodes[key] || (el.nodes[key] = { on: {}, textContent: '', classList: { toggle() {} },
+            addEventListener(t, f) { this.on[t] = f; }, click() { this.on.click(); } });
+        };
+        el.querySelectorAll = (sel) => sel === '[data-dsn-check]' ? el.checks : [];
+        return el;
+      }
+      const tick = () => new Promise(r => setTimeout(r, 0));
+      const fail = (msg) => { throw new Error(msg); };
+
+      (async () => {
+        const reg = Solar91PortalDesign.REGISTER;
+        if (reg.length !== 32 || reg.filter(d => d.section === 'key').length !== 10) fail('register size changed');
+
+        // Portfolio with no design data: every plant row still renders with placeholders.
+        const all = container();
+        await Solar91PortalDesign.show(all, {});
+        if (!all.html.includes('Not set') || !all.html.includes('0/32') || !all.html.includes('0/22')) fail('portfolio placeholders missing');
+        if (!all.html.includes('data-dsn-export')) fail('portfolio CSV export missing');
+
+        // Single plant with no design data: full two-section index, every drawing "Not added".
+        const one = container();
+        await Solar91PortalDesign.show(one, { siteCode: 'ABH01' });
+        const html = one.html;
+        if (!html.includes('Abhaneri · Design/MDL')) fail('header missing');
+        if (!html.includes('Link not added yet') || html.includes('<a class="ep-dsn__code"')) fail('missing link should render plain');
+        if (!html.includes('<strong>0</strong>/32 present')) fail('counter missing');
+        if (html.indexOf('Key drawings') < 0 || html.indexOf('Key drawings') > html.indexOf('Miscellaneous')) fail('sections missing');
+        if ((html.match(/Not added<\/span>/g) || []).length !== 32) fail('every drawing should show Not added');
+        if (!html.includes('data-dsn-edit')) fail('edit toggle missing for plants.manage');
+
+        // Edit -> tick GA Layout -> Save sends the merged custom_fields.
+        one.querySelector('[data-dsn-edit]').click();
+        if (one.checks.length !== 32) fail('edit mode should show a checkbox per drawing');
+        one.checks.find(c => c.getAttribute() === 'ga').checked = true;
+        rows = [{ plant: Object.assign({}, plant, { customFields: { cctv_url: 'https://cctv.example.invalid/a',
+          design_link: 'https://folder.example.invalid/ABH01', design_index: { ga: true, legacy_extra: true } } }), profile: {} }];
+        one.querySelector('[data-dsn-save]').click();
+        for (let i = 0; i < 6; i++) await tick();
+        if (patches.length !== 1) fail('expected one PATCH, got ' + patches.length);
+        const p = patches[0];
+        if (p.url !== '/api/plants/7' || p.opts.method !== 'PATCH') fail('wrong PATCH target ' + p.url);
+        const cf = p.opts.body.custom_fields;
+        if (cf.cctv_url !== 'https://cctv.example.invalid/a') fail('cctv_url was dropped');
+        if (cf.design_link !== 'https://folder.example.invalid/ABH01') fail('design_link was dropped');
+        if (JSON.stringify(cf.design_index) !== JSON.stringify({ legacy_extra: true, ga: true })) fail('bad index ' + JSON.stringify(cf.design_index));
+        if (!invalidated) fail('cache not invalidated');
+        if (!one.html.includes('<strong>1</strong>/32 present') || !one.html.includes('href="https://folder.example.invalid/ABH01"')) fail('saved state not re-rendered');
+        if (one.nodes['data-dsn-status'].textContent !== 'Saved.') fail('success not shown');
+      })().catch(e => { console.error(e.message); process.exit(1); });
+    """
+    run = subprocess.run(["node", "-e", script], cwd=ROOT, capture_output=True, text=True, timeout=20)
+    assert run.returncode == 0, run.stderr
+
+
 def test_plant_table_uses_balanced_shared_columns_and_numeric_spv_label():
     styles = (PORTAL_ASSETS / "css" / "components.css").read_text(encoding="utf-8")
     widths = [
