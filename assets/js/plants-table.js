@@ -450,6 +450,11 @@
       kind: (opts && opts.siteCode) ? "single" : "all",
       siteCode: opts ? opts.siteCode : null
     };
+    // BOM is its own page (parts inventory); it reads /api/bom, not the plant catalogue.
+    if (detailSection === "bom" && global.Solar91PortalBom) {
+      global.Solar91PortalBom.show(container, { siteCode: mode.siteCode });
+      return;
+    }
     if (loaded) {
       render(container);
       return;

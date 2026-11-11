@@ -759,3 +759,27 @@ class MovableAsset(Base, TimestampMixin):
     units: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     updated_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
     __table_args__ = (UniqueConstraint("plant_id", "part"),)
+
+
+class BomItem(Base, TimestampMixin):
+    """One inventory line of a plant's Bill of Materials (BOM page). Migration 038.
+
+    What part is installed or held at the plant, who made or supplied it, how many, a short
+    description (specs), and its paperwork references. ``test_report`` (T.R.), ``warranty_cert``
+    (W.C.) and ``invoice`` are free-text references, not files. ``row_version`` is bumped on every
+    save so two people editing the same line cannot silently overwrite each other.
+    """
+    __tablename__ = "bom_items"
+    id: Mapped[uuid.UUID] = uuid_pk()
+    plant_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("plants.id", ondelete="CASCADE"), nullable=False, index=True)
+    item_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    maker_supplier: Mapped[str | None] = mapped_column(String(160))
+    quantity: Mapped[int | None] = mapped_column(Integer)
+    specs: Mapped[str | None] = mapped_column(Text)
+    test_report: Mapped[str | None] = mapped_column(String(200))
+    warranty_cert: Mapped[str | None] = mapped_column(String(200))
+    serial_no: Mapped[str | None] = mapped_column(String(120))
+    invoice: Mapped[str | None] = mapped_column(String(200))
+    invoice_url: Mapped[str | None] = mapped_column(Text)      # http(s) link to the invoice; the Invoice cell opens it
+    row_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    updated_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))

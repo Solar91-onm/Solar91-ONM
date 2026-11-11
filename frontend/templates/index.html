@@ -120,9 +120,14 @@
             </svg>
           </button>
           <div class="ep-nav-group__body">
-            <button class="ep-nav-item ep-nav-item--sub" type="button" data-nav="view:details">
-              <span class="ep-nav-item__label">Details</span>
-            </button>
+            <div class="ep-nav-details-row">
+              <button class="ep-nav-item ep-nav-item--sub" type="button" data-nav="view:details">
+                <span class="ep-nav-item__label">Details</span>
+              </button>
+              <button class="ep-nav-chevron ep-nav-details-toggle" type="button" data-details-toggle="view" aria-expanded="false" aria-label="Show or hide Details sections" title="Show or hide sections">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg>
+              </button>
+            </div>
             <div class="ep-nav-detail-sub">
               <button class="ep-nav-item ep-nav-item--sub ep-nav-item--detail" type="button" data-nav="view:details:design-mdl">
                 <span class="ep-nav-item__label">Design/MDL</span>
@@ -359,6 +364,7 @@ window.S91_CONFIG = JSON.parse(document.getElementById("s91-config").textContent
 <script defer src="/assets/js/site-issues.js"></script>
 <script defer src="/assets/js/asset-warranty.js"></script>
 <script defer src="/assets/js/movable-assets.js"></script>
+<script defer src="/assets/js/bom.js"></script>
 <script defer src="/assets/js/operations-calendar.js"></script>
 <script defer src="/assets/js/categories.js"></script>
 <script defer src="/assets/js/settings.js"></script>

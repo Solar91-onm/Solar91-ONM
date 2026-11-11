@@ -1,13 +1,13 @@
 /**
  * movable-assets.js
  * ---------------------------------------------------------------------
- * Movable Assets: one row per plant, one column per part, each cell the number
+ * Movable Assets: one column per plant, one row per part, each cell the number
  * of units of that part the plant holds.
  *
- *   Views -> Movable Assets   every plant's row (search, SPV, district, part filters)
- *   Plant -> Movable Assets   that plant's single row
+ *   Views -> Movable Assets   every plant's column (search, SPV, district, part filters)
+ *   Plant -> Movable Assets   that plant's single column
  *
- * Same look as the Details table (it reuses the ep-pt__ classes), sized so 13 part columns fit the frame. Data comes from
+ * Same look as the Details table (it reuses the ep-pt__ classes), one fixed-width column per plant. Data comes from
  * GET /api/movable-assets; cells are read-only. Roles holding plants.manage use the Edit
  * column (one dialog per plant, PUT /api/movable-assets/plant), add a part column or remove one. The API enforces every permission; the UI only hides buttons.
  */
@@ -131,37 +131,46 @@
     var parts = shownParts();
     var plant = single && rows[0] ? rows[0].plant : null;
     var editor = canEdit();
-    var colCount = parts.length + 3;   // plant code + parts + total + edit
-
-    var head = '<th>Plant Code</th>' + parts.map(function (part) {
-      return '<th class="num ep-ma__th" title="' + fmt.escape(part) + '"><span class="ep-ma__part">' + fmt.escape(part) + "</span>" +
-        (editor ? '<button type="button" class="ep-ma__remove" data-ma-remove="' +
-          state.parts.indexOf(part) + '" aria-label="Remove part ' + fmt.escape(part) + '" title="Remove this part">&times;</button>' : "") +
-        "</th>";
-    }).join("") + '<th class="num">Total</th><th class="num">Edit</th>';
-
-    var colgroup = "<colgroup><col class=\"ep-ma__col-code\">" +
-      (parts.length ? '<col class="ep-ma__col-part" span="' + parts.length + '">' : "") +
-      '<col class="ep-ma__col-total"><col class="ep-ma__col-edit"></colgroup>';
+    var colCount = rows.length + 2;   // part name + one column per plant + total
 
     var editIcon = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"></path><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"></path></svg>';
 
-    var body = rows.map(function (entry) {
+    // Plants run across the top (one column each); parts run down the side (one row each).
+    var head = '<th>Part</th>' + rows.map(function (entry) {
       var p = entry.plant;
+      return '<th class="num ep-ma__th" title="' + fmt.escape(p.displayName || p.plantName) + '">' +
+        '<span class="ep-pt__code">' + fmt.escape(p.siteCode) + "</span>" +
+        '<span class="ep-ma__plantname">' + fmt.escape(p.displayName || p.plantName) + "</span>" +
+        (editor ? '<button class="ep-pt__edit" type="button" data-ma-edit="' + fmt.escape(p.siteCode) +
+          '" aria-label="Edit movable assets of ' + fmt.escape(p.siteCode) + '">' + editIcon + "Edit</button>" : "") +
+        "</th>";
+    }).join("") + '<th class="num">Total</th>';
+
+    var colgroup = '<colgroup><col class="ep-ma__col-code">' +
+      (rows.length ? '<col class="ep-ma__col-part" span="' + rows.length + '">' : "") +
+      '<col class="ep-ma__col-total"></colgroup>';
+
+    var body = parts.map(function (part) {
+      var sum = 0;
+      var cells = rows.map(function (entry) {
+        sum += unitsOf(entry.plant.siteCode, part) || 0;
+        return cellHTML(entry.plant.siteCode, part);
+      }).join("");
       return "<tr>" +
-        '<td class="ep-pt__codecell"><span class="ep-pt__code">' + fmt.escape(p.siteCode) + "</span>" +
-          '<span class="ep-pt__name">' + fmt.escape(p.displayName || p.plantName) + "</span></td>" +
-        parts.map(function (part) { return cellHTML(p.siteCode, part); }).join("") +
-        '<td class="num mono">' + fmt.formatNumber(total(p.siteCode, parts)) + "</td>" +
-        '<td class="num">' + (editor
-          ? '<button class="ep-pt__edit" type="button" data-ma-edit="' + fmt.escape(p.siteCode) + '" aria-label="Edit movable assets of ' +
-              fmt.escape(p.siteCode) + '">' + editIcon + "Edit</button>"
-          : '<span class="ep-pt__dash" title="Your role cannot edit movable assets">\u2014</span>') + "</td>" +
-      "</tr>";
+        '<td class="ep-pt__codecell"><span class="ep-ma__part" title="' + fmt.escape(part) + '">' + fmt.escape(part) + "</span>" +
+          (editor ? '<button type="button" class="ep-ma__remove" data-ma-remove="' + state.parts.indexOf(part) +
+            '" aria-label="Remove part ' + fmt.escape(part) + '" title="Remove this part">&times;</button>' : "") + "</td>" +
+        cells + '<td class="num mono">' + fmt.formatNumber(sum) + "</td></tr>";
     }).join("");
 
+    var grand = 0;
+    var foot = rows.length && parts.length ? "<tfoot><tr><th>Total</th>" + rows.map(function (entry) {
+      var t = total(entry.plant.siteCode, parts); grand += t;
+      return '<td class="num mono">' + fmt.formatNumber(t) + "</td>";
+    }).join("") + '<td class="num mono">' + fmt.formatNumber(grand) + "</td></tr></tfoot>" : "";
+
     var empty = !parts.length
-      ? (editor ? 'No parts yet. Use "Add part" to create the first column.' : "No movable assets have been added yet.")
+      ? (editor ? 'No parts yet. Use "Add part" to create the first row.' : "No movable assets have been added yet.")
       : (single ? "This plant was not found, or it is outside your assigned scope." : "No plants match these filters.");
 
     container.innerHTML = '<div class="ep-pt">' +
@@ -180,10 +189,10 @@
             '<button class="ep-pt__export" type="button" data-ma-export="excel">Excel</button>') +
         "</div>" +
         '<div class="ep-pt__table-wrap"><div class="ep-pt__scroll ep-ma__scroll" tabindex="0" role="region" aria-label="Movable assets table">' +
-          '<table class="ep-pt__table ep-ma__table" style="--ma-n:' + parts.length + '">' + colgroup + "<thead><tr>" + head + "</tr></thead><tbody>" +
+          '<table class="ep-pt__table ep-ma__table" style="--ma-n:' + rows.length + '">' + colgroup + "<thead><tr>" + head + "</tr></thead><tbody>" +
           (rows.length && parts.length ? body
             : '<tr><td colspan="' + colCount + '" class="ep-pt__empty">' + empty + "</td></tr>") +
-          "</tbody></table></div></div></div></div>";
+          "</tbody>" + foot + "</table></div></div></div></div>";
     wire(container);
     if (keepScroll) {
       var scroller = container.querySelector(".ep-ma__scroll");

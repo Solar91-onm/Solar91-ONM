@@ -55,8 +55,29 @@
     selectedViewPage: null,      // e.g. "details", "health"
     selectedDetailSection: "details",
     selectedRange: null,         // { startDate, endDate } when opened from Overview
-    expandedGroups: {}           // { plants: true/false, views: true/false }
+    expandedGroups: {},          // { plants: true/false, views: true/false }
+    expandedPlants: {},          // { siteCode: true } plants whose sub-menu is open (user's choice)
+    detailsOpen: { plant: false, view: false }   // Details sub-sections dropdown, closed until the user opens it
   };
+
+  var CHEVRON_SVG = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg>';
+
+  function detailsToggleHTML(kind) {
+    var open = !!navState.detailsOpen[kind];
+    return '<button class="ep-nav-chevron ep-nav-details-toggle' + (open ? ' is-open' : '') + '" type="button" data-details-toggle="' + kind +
+      '" aria-expanded="' + open + '" aria-label="Show or hide Details sections" title="Show or hide sections">' + CHEVRON_SVG + '</button>';
+  }
+
+  function setDetailsOpen(kind, open) {
+    navState.detailsOpen[kind] = open;
+    document.querySelectorAll('[data-details-toggle="' + kind + '"]').forEach(function (btn) {
+      btn.classList.toggle("is-open", open);
+      btn.setAttribute("aria-expanded", String(open));
+      var sub = btn.closest(".ep-nav-details-row");
+      sub = sub && sub.nextElementSibling;
+      if (sub && sub.classList.contains("ep-nav-detail-sub")) sub.classList.toggle("is-open", open);
+    });
+  }
 
   var allPlants = [];            // populated from catalog
 
@@ -94,12 +115,18 @@
     var fmt = global.Solar91PortalFormat;
     container.innerHTML = filtered.map(function (plant) {
       var isSelected = navState.selectedPlant === plant.siteCode;
-      return '<div class="ep-nav-plant' + (isSelected ? ' is-selected' : '') + '" data-plant-code="' + plant.siteCode + '">' +
-        '<button class="ep-nav-plant__toggle" type="button">' +
-          '<span class="ep-nav-plant__name">' + fmt.escape(plant.displayName || plant.plantName) + '</span>' +
-          '<span class="ep-nav-plant__code">' + fmt.escape(plant.displayCode) + '</span>' +
-        '</button>' +
-        (isSelected ? renderPlantSubNav(plant.siteCode) : '') +
+      var isOpen = !!navState.expandedPlants[plant.siteCode];
+      return '<div class="ep-nav-plant' + (isSelected ? ' is-selected' : '') + (isOpen ? ' is-open' : '') + '" data-plant-code="' + plant.siteCode + '">' +
+        '<div class="ep-nav-plant__row">' +
+          '<button class="ep-nav-plant__toggle" type="button">' +
+            '<span class="ep-nav-plant__name">' + fmt.escape(plant.displayName || plant.plantName) + '</span>' +
+            '<span class="ep-nav-plant__code">' + fmt.escape(plant.displayCode) + '</span>' +
+          '</button>' +
+          '<button class="ep-nav-chevron ep-nav-plant__chevron' + (isOpen ? ' is-open' : '') + '" type="button" data-plant-chevron ' +
+            'aria-expanded="' + isOpen + '" aria-label="Show or hide pages of ' + fmt.escape(plant.displayName || plant.plantName) +
+            '" title="Show or hide pages">' + CHEVRON_SVG + '</button>' +
+        '</div>' +
+        (isOpen ? renderPlantSubNav(plant.siteCode) : '') +
       '</div>';
     }).join("");
 
@@ -120,7 +147,8 @@
           '<span class="ep-nav-item__label">' + page.label + '</span>' +
         '</button>';
         if (page.id === "details") {
-          item += '<div class="ep-nav-detail-sub">' + DETAIL_SECTIONS.map(function (section) {
+          item = '<div class="ep-nav-details-row">' + item + detailsToggleHTML("plant") + '</div>';
+          item += '<div class="ep-nav-detail-sub' + (navState.detailsOpen.plant ? ' is-open' : '') + '">' + DETAIL_SECTIONS.map(function (section) {
             var sectionActive = navState.activeView === "plant-sub" &&
               navState.selectedPlant === siteCode &&
               navState.selectedSubPage === "details" &&
@@ -143,6 +171,7 @@
 
     navState.selectedRange = null;
     navState.selectedPlant = siteCode;
+    navState.expandedPlants[siteCode] = true;
     navState.selectedSubPage = "details";
     navState.selectedDetailSection = "details";
     navState.activeView = "plant-sub";
@@ -179,6 +208,7 @@
     }
     var page = PLANT_SUB_PAGES.find(function (s) { return s.id === pageId; });
     navState.selectedPlant = siteCode;
+    navState.expandedPlants[siteCode] = true;
     navState.selectedSubPage = page ? page.id : "details";
     navState.selectedDetailSection = "details";
     navState.activeView = "plant-sub";
@@ -426,6 +456,18 @@
     var plantList = document.querySelector("[data-plant-nav-list]");
     if (plantList) {
       plantList.addEventListener("click", function (ev) {
+        var pChevron = ev.target.closest("[data-plant-chevron]");
+        if (pChevron) {
+          var pEl = pChevron.closest("[data-plant-code]");
+          if (pEl) {
+            var pCode = pEl.getAttribute("data-plant-code");
+            navState.expandedPlants[pCode] = !navState.expandedPlants[pCode];
+            renderPlantList(searchInput ? searchInput.value : "");
+          }
+          return;
+        }
+        var dToggle = ev.target.closest("[data-details-toggle]");
+        if (dToggle) { setDetailsOpen("plant", !navState.detailsOpen.plant); return; }
         // Sub-nav item click
         var subBtn = ev.target.closest("[data-nav]");
         if (subBtn) {
@@ -434,9 +476,11 @@
           if (parts[0] === "plant" && (parts.length === 3 || parts.length === 4)) {
             navState.selectedRange = null;
             navState.selectedPlant = parts[1];
+            navState.expandedPlants[parts[1]] = true;
             navState.selectedSubPage = parts[2];
             navState.selectedDetailSection = parts[2] === "details" && parts[3]
               ? parts[3] : "details";
+            if (parts[2] === "details" && parts[3]) navState.detailsOpen.plant = true;   // keep the chosen section visible
             navState.activeView = "plant-sub";
             navState.selectedViewPage = null;
             renderPlantList(searchInput ? searchInput.value : "");
@@ -453,7 +497,8 @@
           if (plantEl) {
             var code = plantEl.getAttribute("data-plant-code");
             if (navState.selectedPlant === code) {
-              // Clicking same plant again — deselect
+              // Clicking same plant again — deselect and close its menu
+              navState.expandedPlants[code] = false;
               navState.selectedPlant = null;
               navState.selectedSubPage = null;
               if (navState.activeView === "plant-sub") {
@@ -470,12 +515,20 @@
       });
     }
 
+    // Views > Details dropdown arrow (markup in index.html)
+    var viewsToggle = document.querySelector('[data-details-toggle="view"]');
+    if (viewsToggle) viewsToggle.addEventListener("click", function (ev) {
+      ev.stopPropagation();
+      setDetailsOpen("view", !navState.detailsOpen.view);
+    });
+
     // Views sub-nav items (static in HTML)
     document.querySelectorAll('[data-nav-group="views"] [data-nav]').forEach(function (btn) {
       btn.addEventListener("click", function () {
         var nav = btn.getAttribute("data-nav");
         if (nav.indexOf("view:") === 0) {
           var parts = nav.substring(5).split(":");
+          if (parts[0] === "details" && parts[1]) setDetailsOpen("view", true);   // keep the chosen section visible
           selectView(parts[0], null, parts[1]);
         }
       });

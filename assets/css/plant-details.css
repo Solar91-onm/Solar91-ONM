@@ -79,7 +79,16 @@
   .ep-pd__modal-body { grid-template-columns: 1fr; }
 }
 /* Movable Assets: part-column header, remove control, status line */
-.ep-ma__part { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; line-clamp: 4; overflow: hidden; overflow-wrap: anywhere; text-align: center; }
+.ep-ma__plantname { display: block; font-weight: 500; font-size: 11px; opacity: .8; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center; }
+.ep-ma__th .ep-pt__edit { margin-top: 4px; }
+.ep-pt__table.ep-ma__table .ep-pt__codecell { position: relative; padding-right: 22px; }
+.ep-pt__table.ep-ma__table .ep-ma__remove { top: 50%; transform: translateY(-50%); }
+.ep-pt__table.ep-ma__table tr:hover .ep-ma__remove, .ep-ma__remove:focus-visible { opacity: .75; }
+.ep-pt__table.ep-ma__table tfoot th, .ep-pt__table.ep-ma__table tfoot td { padding: 8px 6px; font-weight: 600; border-top: 1px solid var(--ep-border-strong, var(--ep-border)); background: var(--ep-bg, #fff); position: sticky; bottom: 0; z-index: 2; }
+.ep-pt__table.ep-ma__table tfoot th { text-align: left; padding-left: 10px; left: 0; z-index: 4; }
+.ep-pt__table.ep-ma__table tfoot td { text-align: center; }
+.ep-pt__table.ep-ma__table tfoot td:last-child { right: 0; z-index: 4; }
+.ep-ma__part { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; line-clamp: 4; overflow: hidden; overflow-wrap: anywhere; text-align: left; }
 .ep-ma__remove { position: absolute; top: 2px; right: 3px; padding: 0 2px; border: 0; background: var(--ep-bg-muted); color: inherit; opacity: 0; cursor: pointer; font-size: 13px; line-height: 1; }
 .ep-ma__th:hover .ep-ma__remove, .ep-ma__remove:focus-visible { opacity: .75; }
 .ep-ma__remove:hover { opacity: 1; }
@@ -91,23 +100,17 @@
    sized so 13 of them fill the frame (never narrower than 72px); the rest scroll sideways. */
 .ep-pt__scroll.ep-ma__scroll { container-type: inline-size; }
 .ep-pt__table.ep-ma__table {
-  --ma-code: 150px; --ma-total: 60px; --ma-edit: 76px;
-  --ma-col: 84px;                                   /* fallback where container units are missing */
+  --ma-code: 200px; --ma-total: 70px;
+  --ma-col: 120px;                                  /* one plant column */
   table-layout: fixed; min-width: 100%;
-  width: calc(var(--ma-code) + var(--ma-total) + var(--ma-edit) + var(--ma-n, 1) * var(--ma-col));
-}
-@supports (width: 1cqw) {
-  .ep-pt__table.ep-ma__table {
-    --ma-col: max(72px, calc((100cqw - var(--ma-code) - var(--ma-total) - var(--ma-edit) - 18px) / 13));
-  }
+  width: calc(var(--ma-code) + var(--ma-total) + var(--ma-n, 1) * var(--ma-col));
 }
 .ep-ma__col-code { width: var(--ma-code); }
 .ep-ma__col-part { width: var(--ma-col); }
 .ep-ma__col-total { width: var(--ma-total); }
-.ep-ma__col-edit { width: var(--ma-edit); }
 .ep-pt__table.ep-ma__table th:nth-child(n),
 .ep-pt__table.ep-ma__table td:nth-child(n) { width: auto; }   /* beat the Details column percentages */
-.ep-pt__table.ep-ma__table thead th { padding: 8px 4px; vertical-align: bottom; line-height: 1.25; }
+.ep-pt__table.ep-ma__table thead th { padding: 8px 6px; vertical-align: bottom; line-height: 1.25; }
 .ep-pt__table.ep-ma__table thead th:first-child { padding-left: 10px; }
 .ep-pt__table.ep-ma__table tbody td { padding: 7px 4px; }
 .ep-pt__table.ep-ma__table tbody td:first-child { padding-left: 10px; }
@@ -131,3 +134,28 @@
 .ep-ma__modal-body { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--ep-s-3) var(--ep-s-4); padding: 0 var(--ep-s-5); overflow-y: auto; min-height: 0; }
 .ep-ma__modal-body .ep-pd__field[hidden] { display: none; }
 @media (max-width: 760px) { .ep-ma__modal-body { grid-template-columns: 1fr; } }
+/* BOM (parts inventory): same table look as Details / Movable Assets; Specs is the wide, wrapping column. */
+.ep-pt__table.ep-bom__table { table-layout: fixed; width: 100%; min-width: 0; }   /* column widths come from the <colgroup>: all columns fit the frame */
+.ep-pt__table.ep-bom__table th:nth-child(n), .ep-pt__table.ep-bom__table td:nth-child(n) { width: auto; }
+.ep-bom__scroll { overflow-x: hidden; }
+.ep-bom__table thead th, .ep-bom__table tbody td { text-align: center; vertical-align: middle; padding: 10px 8px; overflow-wrap: anywhere; word-break: break-word; line-height: 1.35; }
+.ep-pt__table.ep-bom__table th:nth-child(n), .ep-pt__table.ep-bom__table td:nth-child(n) { padding: 10px 8px; white-space: normal; overflow: visible; text-overflow: clip; text-align: center; }
+.ep-pt__table.ep-bom__table td.ep-bom__specs { white-space: pre-line; color: var(--ep-text-muted); }
+.ep-bom__table .ep-pt__code, .ep-bom__table .ep-pt__name { display: block; }
+.ep-bom__actions { white-space: normal; }
+.ep-bom__invoice { font-weight: 600; text-decoration: none; }
+.ep-bom__invoice:hover { text-decoration: underline; }
+@media (max-width: 900px) {   /* phones: a readable width beats squeezing; only here may the table scroll sideways */
+  .ep-bom__scroll { overflow-x: auto; }
+  .ep-pt__table.ep-bom__table { min-width: 900px; }
+}
+.ep-bom__item { font-weight: 600; color: var(--ep-text-strong); }
+.ep-bom__del { margin-left: 6px; width: 24px; height: 24px; border: 1px solid var(--ep-border-soft, var(--ep-border)); border-radius: 999px; background: var(--ep-bg-muted); color: var(--ep-text-muted); cursor: pointer; font-size: 15px; line-height: 1; }
+.ep-bom__del:hover { color: #b42318; border-color: #b42318; }
+.ep-bom__more { display: flex; justify-content: center; padding: 10px; border-top: 1px solid var(--ep-border-soft, var(--ep-border)); }
+.ep-pt__empty.is-error { color: #b42318; }
+.ep-pd__modal.ep-bom__modal { width: min(760px, 100%); display: flex; flex-direction: column; overflow: hidden; }
+.ep-bom__modal-body { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--ep-s-3) var(--ep-s-4); padding: 0 var(--ep-s-5) var(--ep-s-3); overflow-y: auto; min-height: 0; }
+.ep-bom__modal-body .ep-bom__wide { grid-column: 1 / -1; }
+.ep-bom__modal-body textarea, .ep-bom__modal-body select { width: 100%; padding: 8px 12px; border: 1px solid var(--ep-border-strong); border-radius: var(--ep-radius-md); background: var(--ep-bg); color: var(--ep-text); font: inherit; resize: vertical; }
+@media (max-width: 760px) { .ep-bom__modal-body { grid-template-columns: 1fr; } }

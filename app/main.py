@@ -42,6 +42,7 @@ from app.users.invites import router as users_invites_router
 from app.users.router import router as users_router
 from app.warranty.router import router as warranty_router
 from app.movable_assets.router import router as movable_assets_router
+from app.bom.router import router as bom_router
 
 settings=get_settings()
 BASE=Path(__file__).resolve().parents[1]
@@ -318,6 +319,7 @@ app.include_router(users_router)
 app.include_router(users_invites_router)
 app.include_router(warranty_router)
 app.include_router(movable_assets_router)
+app.include_router(bom_router)
 
 @app.get("/",include_in_schema=False)
 def index(request:Request):
