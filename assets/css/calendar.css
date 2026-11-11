@@ -1696,3 +1696,6 @@
   .ep-calendar__day-row { grid-template-columns: minmax(0, 1fr) auto; }
   .ep-calendar__day-row p { grid-column: 1 / -1; }
 }
+
+/* A month with more entries than one response carries is labelled, never shown as complete. */
+.ep-calendar__truncated { margin: 0 0 10px; padding: 8px 12px; border: 1px solid #f5c26b; border-radius: var(--ep-radius-md, 8px); background: #fff8eb; color: #7a4a00; font-size: var(--ep-fs-sm, 13px); }

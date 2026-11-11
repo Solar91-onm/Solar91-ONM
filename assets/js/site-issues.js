@@ -75,6 +75,13 @@
     wizardStep: 1,
     draft: null,
     requestId: 0,
+    // Issues are read from the server for the scope on screen (one plant, or every plant) a page at a time, newest
+    // first. `scope` is the plant code the rows were loaded for ("" = all plants); `hasMore` = the last page was full.
+    scope: null,
+    pageSize: 200,
+    hasMore: false,
+    loadingMore: false,
+    moreError: "",
     liveMode: false,
     canRaise: false,
     // Correcting a stored ticket: the O&M Head on any ticket, an Assignee on an
@@ -713,7 +720,9 @@
     }
     active = { host: host, context: context };
     wire(host);
-    if (state.loaded) {
+    if ((state.loaded || state.loading) && state.scope !== nextScope) {
+      load();
+    } else if (state.loaded) {
       renderView();
     } else if (state.loading) {
       renderView();
@@ -723,6 +732,13 @@
   }
 
   function renderView() {
+    if (global.Solar91Perf && global.Solar91Perf.enabled) {
+      return global.Solar91Perf.time("render issues", renderIssuesView);
+    }
+    renderIssuesView();
+  }
+
+  function renderIssuesView() {
     if (!active) return;
     var host = active.host;
     var context = active.context;
@@ -746,8 +762,16 @@
               ? " · Occurred " + escape(state.issueDateStart || "any date") +
                 " to " + escape(state.issueDateEnd || "any date")
               : "") +
-            (state.liveMode && state.rows.length >= 200 ? " · latest 200" : "") + '</span></div>' +
-          renderTable(rows) + '</section>';
+            (state.liveMode && state.hasMore ? " · newest " + state.rows.length + " loaded" : "") + '</span></div>' +
+          renderTable(rows) +
+          (state.liveMode && state.hasMore
+            ? '<div class="ep-issues__more"><span>Showing the ' + state.rows.length + ' most recently raised issues' +
+              (context.plantCode ? " for this plant" : "") + '. Filters apply to the issues loaded so far.</span>' +
+              (state.moreError ? '<span class="ep-issues__more-error" role="alert">' + escape(state.moreError) + '</span>' : "") +
+              '<button type="button" class="ep-issues__button" data-issue-action="more"' + (state.loadingMore ? " disabled" : "") + '>' +
+              (state.loadingMore ? "Loading…" : "Load older issues") + '</button></div>'
+            : "") +
+          '</section>';
     }
     host.innerHTML = '<div class="ep-issues">' +
       renderHeader(context) +
@@ -764,6 +788,9 @@
   function load() {
     state.loading = true;
     state.error = "";
+    state.scope = active ? (active.context.plantCode || "") : "";
+    state.hasMore = false;
+    state.loadingMore = false;
     var requestId = ++state.requestId;
     state.liveMode = true;
     state.submitError = "";
@@ -788,6 +815,40 @@
     });
   }
 
+  function issuesUrl(offset) {
+    return "/api/issues?limit=" + state.pageSize + "&offset=" + offset +
+      (state.scope ? "&site_code=" + encodeURIComponent(state.scope) : "");
+  }
+
+  // Next page of the same scope. Rows already shown are kept; an issue that moved between pages (a new one was raised
+  // meanwhile) is not shown twice.
+  function loadMoreIssues() {
+    if (state.loadingMore || !state.hasMore) return;
+    var requestId = state.requestId;
+    state.loadingMore = true;
+    state.moreError = "";
+    renderView();
+    global.Solar91PortalAPI.request(issuesUrl(state.rows.length)).then(function (issues) {
+      if (requestId !== state.requestId) return;
+      var plantsById = {};
+      state.plants.forEach(function (plant) { plantsById[plant.dbId] = plant; });
+      var seen = {};
+      state.rows.forEach(function (row) { seen[row.id] = true; });
+      issues.forEach(function (issue) {
+        var row = mapApiIssue(issue, plantsById);
+        if (!seen[row.id]) state.rows.push(row);
+      });
+      state.hasMore = issues.length >= state.pageSize;
+      state.loadingMore = false;
+      renderView();
+    }).catch(function (error) {
+      if (requestId !== state.requestId) return;
+      state.loadingMore = false;
+      state.moreError = "Older issues could not be loaded: " + (error.message || "please retry.");
+      renderView();
+    });
+  }
+
   function loadLiveIssues(requestId) {
     var api = global.Solar91PortalAPI;
     api.session().then(function (session) {
@@ -795,7 +856,7 @@
       var canRaise = ["O&M Head", "Assignee", "Site Engineer"].indexOf(role) !== -1;
       var requests = [
         api.plants(),
-        api.request("/api/issues?limit=200"),
+        api.request(issuesUrl(0)),
         canRaise ? api.request("/api/issues/assignees") : Promise.resolve([])
       ];
       return Promise.all(requests).then(function (result) {
@@ -807,6 +868,7 @@
       var plantsById = {};
       state.plants.forEach(function (plant) { plantsById[plant.dbId] = plant; });
       state.rows = result.issues.map(function (issue) { return mapApiIssue(issue, plantsById); });
+      state.hasMore = result.issues.length >= state.pageSize;
       state.assignees = result.assignees || [];
       state.canRaise = ["O&M Head", "Assignee", "Site Engineer"].indexOf(result.role) !== -1 &&
         state.plants.length > 0;
@@ -1033,6 +1095,10 @@
       var actionButton = event.target.closest("[data-issue-action]");
       if (!actionButton) return;
       var action = actionButton.dataset.issueAction;
+      if (action === "more") {
+        loadMoreIssues();
+        return;
+      }
       if (action === "raise") {
         if (!state.liveMode || !state.canRaise) return;
         state.submitError = "";

@@ -57,20 +57,25 @@
     selectedRange: null,         // { startDate, endDate } when opened from Overview
     expandedGroups: {},          // { plants: true/false, views: true/false }
     expandedPlants: {},          // { siteCode: true } plants whose sub-menu is open (user's choice)
-    detailsOpen: { plant: false, view: false }   // Details sub-sections dropdown, closed until the user opens it
+    detailsOpen: { plant: {}, view: false }   // Details sub-sections dropdown: per plant ({siteCode: true}) and for Views; closed until the user opens it
   };
 
   var CHEVRON_SVG = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg>';
 
-  function detailsToggleHTML(kind) {
-    var open = !!navState.detailsOpen[kind];
-    return '<button class="ep-nav-chevron ep-nav-details-toggle' + (open ? ' is-open' : '') + '" type="button" data-details-toggle="' + kind +
+  function isDetailsOpen(kind, code) {
+    return kind === "plant" ? !!navState.detailsOpen.plant[code] : !!navState.detailsOpen.view;
+  }
+
+  function detailsToggleHTML(kind, code) {
+    var open = isDetailsOpen(kind, code);
+    return '<button class="ep-nav-chevron ep-nav-details-toggle' + (open ? ' is-open' : '') + '" type="button" data-details-toggle="' + kind + '" data-details-plant="' + (code || "") +
       '" aria-expanded="' + open + '" aria-label="Show or hide Details sections" title="Show or hide sections">' + CHEVRON_SVG + '</button>';
   }
 
-  function setDetailsOpen(kind, open) {
-    navState.detailsOpen[kind] = open;
+  function setDetailsOpen(kind, open, code) {
+    if (kind === "plant") navState.detailsOpen.plant[code] = open; else navState.detailsOpen.view = open;
     document.querySelectorAll('[data-details-toggle="' + kind + '"]').forEach(function (btn) {
+      if (kind === "plant" && btn.getAttribute("data-details-plant") !== code) return;
       btn.classList.toggle("is-open", open);
       btn.setAttribute("aria-expanded", String(open));
       var sub = btn.closest(".ep-nav-details-row");
@@ -147,8 +152,8 @@
           '<span class="ep-nav-item__label">' + page.label + '</span>' +
         '</button>';
         if (page.id === "details") {
-          item = '<div class="ep-nav-details-row">' + item + detailsToggleHTML("plant") + '</div>';
-          item += '<div class="ep-nav-detail-sub' + (navState.detailsOpen.plant ? ' is-open' : '') + '">' + DETAIL_SECTIONS.map(function (section) {
+          item = '<div class="ep-nav-details-row">' + item + detailsToggleHTML("plant", siteCode) + '</div>';
+          item += '<div class="ep-nav-detail-sub' + (isDetailsOpen('plant', siteCode) ? ' is-open' : '') + '">' + DETAIL_SECTIONS.map(function (section) {
             var sectionActive = navState.activeView === "plant-sub" &&
               navState.selectedPlant === siteCode &&
               navState.selectedSubPage === "details" &&
@@ -241,7 +246,19 @@
   }
 
   // ─── Content area routing ───────────────────────────────────────────
+  // With the opt-in monitor on (perf.js), each page switch's synchronous render time is recorded by page.
   function updateContentArea() {
+    var perf = global.Solar91Perf;
+    if (!perf || !perf.enabled) return renderContentArea();
+    var page = navState.activeView === "plant-sub" ? "plant " + navState.selectedSubPage
+      : navState.activeView === "view-sub" ? "view " + navState.selectedViewPage : navState.activeView;
+    if ((page === "plant details" || page === "view details") && navState.selectedDetailSection !== "details") {
+      page += ":" + navState.selectedDetailSection;
+    }
+    return perf.time("navigate " + page, renderContentArea);
+  }
+
+  function renderContentArea() {
     var shell = document.querySelector(".ep-shell");
     if (shell) shell.classList.toggle("is-login-access", navState.activeView === "settings");
     var overviewEl = document.querySelector('[data-tab-view="overview"]');
@@ -467,7 +484,11 @@
           return;
         }
         var dToggle = ev.target.closest("[data-details-toggle]");
-        if (dToggle) { setDetailsOpen("plant", !navState.detailsOpen.plant); return; }
+        if (dToggle) {
+          var dCode = dToggle.getAttribute("data-details-plant");
+          setDetailsOpen("plant", !isDetailsOpen("plant", dCode), dCode);
+          return;
+        }
         // Sub-nav item click
         var subBtn = ev.target.closest("[data-nav]");
         if (subBtn) {
@@ -480,7 +501,7 @@
             navState.selectedSubPage = parts[2];
             navState.selectedDetailSection = parts[2] === "details" && parts[3]
               ? parts[3] : "details";
-            if (parts[2] === "details" && parts[3]) navState.detailsOpen.plant = true;   // keep the chosen section visible
+            if (parts[2] === "details" && parts[3]) navState.detailsOpen.plant[parts[1]] = true;   // keep the chosen section visible
             navState.activeView = "plant-sub";
             navState.selectedViewPage = null;
             renderPlantList(searchInput ? searchInput.value : "");
@@ -519,7 +540,7 @@
     var viewsToggle = document.querySelector('[data-details-toggle="view"]');
     if (viewsToggle) viewsToggle.addEventListener("click", function (ev) {
       ev.stopPropagation();
-      setDetailsOpen("view", !navState.detailsOpen.view);
+      setDetailsOpen("view", !isDetailsOpen("view"));
     });
 
     // Views sub-nav items (static in HTML)

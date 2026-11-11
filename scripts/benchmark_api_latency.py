@@ -26,11 +26,54 @@ def _metric(header: str, name: str) -> float | None:
     return float(match.group(1)) if match else None
 
 
+def seed_daily_washing(db, days: int = 90) -> int:
+    """Realistic washing history: one report per plant per day for `days` days (synthetic, isolated SQLite only).
+
+    The base fixture spreads a handful of reports over a year, which hides the cost of the washing overview's
+    90-day window. Real plants report daily, each report naming the tables cleaned and carrying photo metadata.
+    """
+    from datetime import timedelta
+    from uuid import uuid4
+    from sqlalchemy import select
+    from app.core.models import Plant, WashingDailyReport, WashingTable
+    from app.core.timeutil import business_today
+
+    today = business_today()
+    added = 0
+    for plant in db.scalars(select(Plant)):
+        codes = [c for (c,) in db.execute(select(WashingTable.table_code).where(WashingTable.plant_id == plant.id))]
+        if not codes:
+            continue
+        per_day = max(1, len(codes) // 10)
+        for offset in range(days):
+            day = today - timedelta(days=offset)
+            cycle_no = 1 if day.day <= 10 else 2 if day.day <= 20 else 3
+            start = (offset * per_day) % len(codes)
+            db.add(WashingDailyReport(
+                plant_id=plant.id, cycle_month=day.strftime("%Y-%m"), cycle_no=cycle_no, report_date=day,
+                job_status="Done", tables_cleaned=per_day,
+                cleaned_table_codes=(codes[start:] + codes[:start])[:per_day],
+                remarks="Synthetic daily washing", evidence=[
+                    {"id": str(uuid4()), "kind": kind, "file_name": f"{kind}.jpg", "content_type": "image/jpeg",
+                     "storage_path": f"synthetic/{plant.site_code}/{day.isoformat()}-{kind}.jpg", "size": 182_000}
+                    for kind in ("before", "after")],
+                reported_by="Synthetic Washer", review_status="Pending" if offset < 2 else "Confirmed",
+                cycle_completed=day.day in (10, 20, 28),
+            ))
+            added += 1
+    db.commit()
+    return added
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Benchmark representative read APIs with isolated synthetic data.")
     parser.add_argument("--scale", type=int, choices=(1, 5, 10), required=True)
     parser.add_argument("--runs", type=int, default=20)
     parser.add_argument("--prefix", default="APILT")
+    parser.add_argument("--set", choices=("portal", "legacy", "all"), default="portal",
+                        help="portal = the endpoints the current portal calls (default); legacy = old bootstrap/state routes")
+    parser.add_argument("--daily-washing", action="store_true",
+                        help="add one washing report per plant per day for 90 days (realistic washing history)")
     args = parser.parse_args()
     if not 10 <= args.runs <= 200:
         parser.error("--runs must be between 10 and 200")
@@ -62,6 +105,8 @@ def main() -> int:
         with SessionLocal() as db:
             with redirect_stdout(io.StringIO()):
                 counts = seed_synthetic_data(db, args.scale, args.prefix)
+            if args.daily_washing:
+                counts["daily_washing_reports"] = seed_daily_washing(db)
             user = db.scalar(select(User).where(User.external_subject == f"{args.prefix}-assignee"))
             assert user is not None
             # Assignee scope is plant-based: give the benchmark user every seeded plant.
@@ -71,6 +116,8 @@ def main() -> int:
             ])
             db.commit()
             user_id = user.id
+            first_code = db.scalar(select(Plant.site_code).order_by(Plant.plant_name))
+            first_plant_id = db.scalar(select(Plant.id).order_by(Plant.plant_name))
 
         def synthetic_user():
             with SessionLocal() as db:
@@ -80,7 +127,30 @@ def main() -> int:
 
         old_override = fastapi_app.dependency_overrides.get(get_current_user)
         fastapi_app.dependency_overrides[get_current_user] = synthetic_user
-        paths = [
+        from datetime import timedelta
+        from app.core.timeutil import business_today
+        today = business_today()
+        month_start = today.replace(day=1)
+        portal_paths = [
+            # What the current portal requests: sign-in, Overview, Details, Health, PM/Washing calendars.
+            ("auth_session", "/api/auth/session"),
+            ("portal_plants", "/api/portal/plants"),
+            ("portal_overview", "/api/portal/overview"),
+            ("overview_range_month", f"/api/portal/overview/range?start_date={month_start}&end_date={today}"),
+            ("overview_trend_30d", f"/api/portal/overview/trend?start_date={today - timedelta(days=29)}&end_date={today}"),
+            ("portal_activity", "/api/portal/activity?limit=25"),
+            ("plant_details", f"/api/portal/plants/{first_code}"),
+            ("calendar_pm", f"/api/portal/calendar?kind=pm&month={today:%Y-%m}"),
+            ("calendar_washing", f"/api/portal/calendar?kind=washing&month={today:%Y-%m}"),
+            ("issues_health_page", "/api/issues?limit=200"),
+            ("issues_plant_tab", f"/api/issues?limit=200&site_code={first_code}"),
+            ("washing_page", f"/api/scheduled/washing/overview?month={today:%Y-%m}"),
+            # what the plant tab's Module Cleaning page asks for since the performance pass (one plant, no report list)
+            ("washing_plant_tab", f"/api/scheduled/washing/overview?month={today:%Y-%m}&plant_id={first_plant_id}&include_reports=false"),
+            ("bom_list", "/api/bom?limit=200"),
+            ("movable_assets", "/api/movable-assets"),
+        ]
+        legacy_paths = [
             ("bootstrap_full", "/api/bootstrap"),
             ("bootstrap_lite", "/api/bootstrap?lite=1"),
             ("state_collections_issues", "/api/state/collections?keys=issues"),
@@ -94,6 +164,7 @@ def main() -> int:
             ("plant_list", "/api/plants?limit=50"),
             ("photo_list", "/api/photos?limit=60"),
         ]
+        paths = {"portal": portal_paths, "legacy": legacy_paths, "all": portal_paths + legacy_paths}[args.set]
         samples: dict[str, dict[str, list[float]]] = {
             name: defaultdict(list) for name, _ in paths
         }
@@ -153,6 +224,8 @@ def main() -> int:
             print(json.dumps({
                 "environment": "local FastAPI TestClient + isolated SQLite; synthetic only",
                 "scale": args.scale,
+                "endpoint_set": args.set,
+                "daily_washing": args.daily_washing,
                 "runs_per_endpoint": args.runs,
                 "row_counts": row_counts,
                 "results": results,

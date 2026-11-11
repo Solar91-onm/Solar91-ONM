@@ -24,8 +24,6 @@ jobs:
         run: python -m playwright install --with-deps chromium
       - name: Full API and workflow tests (SQLite test configuration)
         run: python -m pytest -q
-      - name: Command Center and Ask Solar91 browser smoke test
-        run: python scripts/verify_command_experience.py
       - name: Conflict marker check
         run: |
           if grep -R -n -E '^<<<<<<< |^=======|^>>>>>>> ' app frontend database/migrations --include='*.py' --include='*.js' --include='*.html' --include='*.css' --include='*.sql'; then

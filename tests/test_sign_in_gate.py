@@ -70,3 +70,78 @@ def test_api_errors_read_as_sentences_not_bare_http_codes():
     run=subprocess.run(['node','-e',script],cwd=ROOT,capture_output=True,text=True,timeout=10)
     assert run.returncode==0,run.stderr
 
+
+CODE_FORM_HARNESS = r"""
+  const fs=require('fs'),vm=require('vm'),assert=require('assert');
+  const s=fs.readFileSync('frontend/static/js/auth-gate.js','utf8');
+  const a=s.indexOf('function s91CanonEmail('),b=s.indexOf('/* ---- sign-in page life');
+  assert(a>0&&b>a);
+  // A minimal page: the code form's elements, and a fake Clerk whose code check the scenario controls.
+  function page(attemptFirstFactor){
+    const els={},calls={attempts:0,setActive:[],started:0},handlers={};
+    const el=id=>els[id]||(els[id]={id,value:'',textContent:'',style:{},disabled:false,readOnly:false,focus(){},
+      addEventListener(type,fn){handlers[id+':'+type]=fn}});
+    const signInAttempt={status:'needs_first_factor',createdSessionId:null,
+      supportedFirstFactors:[{strategy:'email_code',emailAddressId:'ea_1'}],prepareFirstFactor:async()=>{},
+      attemptFirstFactor:async args=>{calls.attempts++;return attemptFirstFactor(signInAttempt,args)}};
+    const sandbox={setInterval:()=>1,clearInterval(){},esc:v=>String(v),S91_CODE_RESEND_SECONDS:60,
+      startSolar91App:async()=>{calls.started++},
+      document:{querySelector:()=>({set innerHTML(v){}}),getElementById:el,body:{contains:()=>true}},
+      window:{Clerk:{session:null,client:{signIn:{create:async()=>signInAttempt}},
+        setActive:async({session})=>{calls.setActive.push(session)}}}};
+    vm.createContext(sandbox);vm.runInContext(s.slice(a,b)+';s91ShowClerkCodeSignIn("","")',sandbox);
+    const submit=()=>handlers['clerk-code-form:submit']({preventDefault(){}});
+    return {els,calls,submit,sandbox};
+  }
+  async function signInWith(attemptFirstFactor,{twice=false}={}){
+    const p=page(attemptFirstFactor);
+    p.els['clerk-code-email'].value='person@example.com';
+    await p.submit();                                   // "Email me a code"
+    p.els['clerk-code'].value='123 456';
+    const first=p.submit();
+    if(twice)await p.submit();                          // pressed again while the first check is running
+    await first;
+    return {...p.calls,error:p.els['clerk-code-error'].textContent};
+  }
+"""
+
+
+def _run_node(body):
+    run = subprocess.run(['node', '-e', CODE_FORM_HARNESS + "(async()=>{" + body + "})().catch(e=>{console.error(e);process.exitCode=1});"],
+                         cwd=ROOT, capture_output=True, text=True, timeout=10)
+    assert run.returncode == 0, run.stderr
+
+
+def test_code_entered_once_signs_in_and_a_second_press_sends_nothing_more():
+    _run_node(r"""
+      const ok=await signInWith(async(attempt,args)=>{
+        assert.strictEqual(args.code,'123456');
+        await new Promise(r=>setTimeout(r,20));
+        attempt.status='complete';attempt.createdSessionId='sess_1';return attempt;
+      },{twice:true});
+      assert.strictEqual(ok.attempts,1,'the code is checked once');
+      assert.deepStrictEqual(ok.setActive,['sess_1']);assert.strictEqual(ok.started,1);
+      assert.strictEqual(ok.error,'');
+    """)
+
+
+def test_code_already_accepted_finishes_sign_in_instead_of_showing_an_error():
+    _run_node(r"""
+      const ok=await signInWith(async attempt=>{
+        attempt.status='complete';attempt.createdSessionId='sess_2';   // Clerk accepted it, but the reply was lost
+        throw {errors:[{code:'verification_already_verified',message:'This verification has already been verified.'}]};
+      });
+      assert.deepStrictEqual(ok.setActive,['sess_2']);assert.strictEqual(ok.started,1);assert.strictEqual(ok.error,'');
+      // A wrong code is still reported as wrong.
+      const bad=await signInWith(async()=>{throw {errors:[{code:'form_code_incorrect',longMessage:'Incorrect code'}]}});
+      assert.strictEqual(bad.started,0);assert.ok(bad.error.length>0);
+    """)
+
+
+def test_sign_in_network_failure_reads_plainly():
+    _run_node(r"""
+      const net=await signInWith(async()=>{throw new Error('ClerkJS: Network error at "https://clerk.example/v1/client/sign_ins/sia_1/attempt_first_factor?_method=GET" - TypeError: Failed to fetch. Please try again.')});
+      assert.strictEqual(net.started,0);
+      assert.ok(/internet connection/.test(net.error),net.error);
+      assert.ok(!/https?:|GET/.test(net.error),net.error);
+    """)

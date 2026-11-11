@@ -13,6 +13,7 @@ import uuid
 from contextvars import ContextVar
 
 from sqlalchemy import event
+from sqlalchemy.pool import QueuePool
 
 logger = logging.getLogger("solar91.request")
 
@@ -85,6 +86,42 @@ def install_connection_timing(engine) -> None:
             _add("connect_ms", (time.perf_counter() - started) * 1000.0)
 
 
+class TimedQueuePool(QueuePool):
+    """QueuePool that records, for the running request, how long it waited for a free pooled connection.
+
+    Waiting is the time spent getting a connection minus the time spent opening a new one (which
+    install_connection_timing already reports as connect_ms). It also records the highest number of connections in use
+    seen by the request, so a slow request can be read as "the pool was full" rather than "the query was slow".
+    Behaviour is QueuePool's exactly; only timing is added. Used for PostgreSQL only (see app/core/database.py).
+    """
+
+    def _do_get(self):  # noqa: ANN202 - SQLAlchemy internal signature
+        stats = _stats.get()
+        if stats is None:
+            return super()._do_get()
+        connect_before = stats.get("connect_ms", 0.0)
+        started = time.perf_counter()
+        try:
+            return super()._do_get()
+        finally:
+            waited = (time.perf_counter() - started) * 1000.0 - (stats.get("connect_ms", 0.0) - connect_before)
+            stats["pool_wait_ms"] = stats.get("pool_wait_ms", 0.0) + max(0.0, waited)
+            stats["pool_checkouts"] = stats.get("pool_checkouts", 0) + 1
+            in_use = self.checkedout()
+            if in_use > stats.get("pool_in_use_max", 0):
+                stats["pool_in_use_max"] = in_use
+            stats["pool_capacity"] = self.size() + max(0, self._max_overflow)
+
+
+def pool_status(engine) -> dict | None:
+    """Current pool occupancy (for logs). None for pools that do not report it (SQLite)."""
+    pool = getattr(engine, "pool", None)
+    if not isinstance(pool, QueuePool):
+        return None
+    return {"size": pool.size(), "max_overflow": max(0, pool._max_overflow), "checked_out": pool.checkedout(),
+            "idle": pool.checkedin(), "overflow": max(0, pool.overflow())}
+
+
 def install_connection_health(engine, idle_seconds: float) -> None:
     """Pre-ping, but only for connections that have sat idle for idle_seconds or longer.
 
@@ -153,7 +190,8 @@ def make_timing_middleware(slow_ms: int):
     async def request_timing(request, call_next):
         path = request.url.path
         quiet = path in _QUIET_PATHS or path.startswith(_QUIET_PREFIXES)
-        stats = {"queries": 0, "db_ms": 0.0, "connects": 0, "connect_ms": 0.0, "pings": 0, "ping_ms": 0.0}
+        stats = {"queries": 0, "db_ms": 0.0, "connects": 0, "connect_ms": 0.0, "pings": 0, "ping_ms": 0.0,
+                 "pool_wait_ms": 0.0, "pool_checkouts": 0, "pool_in_use_max": 0, "pool_capacity": 0}
         token = _stats.set(stats)
         rid, render_id = _request_id(request)
         started = time.perf_counter()
@@ -167,12 +205,15 @@ def make_timing_middleware(slow_ms: int):
                 if render_id:
                     response.headers.setdefault("Rndr-Id", render_id)
                 pool_ms = stats["connect_ms"] + stats["ping_ms"]
-                response.headers["Server-Timing"] = (
-                    f'app;dur={max(0.0, total_ms - stats["db_ms"] - pool_ms):.0f}, '
+                timing = (
+                    f'app;dur={max(0.0, total_ms - stats["db_ms"] - pool_ms - stats["pool_wait_ms"]):.0f}, '
                     f'db;dur={stats["db_ms"]:.0f};desc="{stats["queries"]} queries", '
                     f'conn;dur={pool_ms:.0f};desc="{stats["connects"]} new, {stats["pings"]} checked", '
-                    f'total;dur={total_ms:.0f}'
                 )
+                if stats["pool_capacity"]:  # PostgreSQL pool only: time spent waiting for a free connection
+                    timing += (f'pool;dur={stats["pool_wait_ms"]:.0f};'
+                               f'desc="{stats["pool_in_use_max"]}/{stats["pool_capacity"]} in use", ')
+                response.headers["Server-Timing"] = timing + f'total;dur={total_ms:.0f}'
             return response
         except Exception as exc:  # logged, then re-raised unchanged so error handling is not hidden
             route = request.scope.get("route")
@@ -197,10 +238,12 @@ def make_timing_middleware(slow_ms: int):
                 level = logging.WARNING if total_ms >= slow_ms or status >= 500 else logging.INFO
                 logger.log(
                     level,
-                    "slow_or_failed_request id=%s rndr_id=%s method=%s route=%s status=%s total_ms=%.0f app_ms=%.0f db_ms=%.0f db_queries=%d new_connections=%d connect_ms=%.0f health_checks=%d health_check_ms=%.0f render_instance=%s render_commit=%s",
+                    "slow_or_failed_request id=%s rndr_id=%s method=%s route=%s status=%s total_ms=%.0f app_ms=%.0f db_ms=%.0f db_queries=%d new_connections=%d connect_ms=%.0f health_checks=%d health_check_ms=%.0f pool_wait_ms=%.0f pool_in_use_max=%d pool_capacity=%d render_instance=%s render_commit=%s",
                     rid, render_id or "-", request.method, template, status, total_ms,
-                    max(0.0, total_ms - stats["db_ms"] - stats["connect_ms"] - stats["ping_ms"]), stats["db_ms"], stats["queries"],
+                    max(0.0, total_ms - stats["db_ms"] - stats["connect_ms"] - stats["ping_ms"] - stats["pool_wait_ms"]),
+                    stats["db_ms"], stats["queries"],
                     stats["connects"], stats["connect_ms"], stats["pings"], stats["ping_ms"],
+                    stats["pool_wait_ms"], stats["pool_in_use_max"], stats["pool_capacity"],
                     os.getenv("RENDER_INSTANCE_ID", "-"), os.getenv("RENDER_GIT_COMMIT", "-"),
                 )
 

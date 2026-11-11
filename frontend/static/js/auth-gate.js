@@ -91,6 +91,10 @@ function s91CanonEmail(v){
   }
   return e;
 }
+function s91ClerkCode(err){
+  const first=err&&Array.isArray(err.errors)&&err.errors[0];
+  return first&&first.code||"";
+}
 function s91CodeError(err){
   const clerkError=err&&Array.isArray(err.errors)&&err.errors[0];
   const m=String(clerkError&&(clerkError.longMessage||clerkError.message)||err&&err.message||"");
@@ -100,6 +104,8 @@ function s91CodeError(err){
   }
   if(/signups not allowed|sign.?up.*disabled/i.test(m))return "This email has no Clerk account yet. Ask your O&M Head to add you.";
   if(/expired|invalid/i.test(m))return "That code is wrong or has expired. Check the newest email, or ask for a new code.";
+  // Clerk's own network error names the request URL ("Network error at https://... Failed to fetch"); say it plainly.
+  if(/network error|failed to fetch|load failed|networkerror/i.test(m))return "Could not reach the sign-in service. Check your internet connection and press the button again.";
   return m||"Something went wrong. Please try again.";
 }
 function s91ShowClerkCodeSignIn(prefillEmail,errorMessage){
@@ -154,8 +160,11 @@ function s91ShowClerkCodeSignIn(prefillEmail,errorMessage){
     startCooldown();
     $("clerk-code").focus();
   }
+  let busy=false;
   $("clerk-code-form").addEventListener("submit",async function(ev){
     ev.preventDefault();
+    if(busy)return;   // Enter pressed twice or phone autofill: one request at a time
+    busy=true;
     const submit=$("clerk-code-submit");fail("");
     submit.disabled=true;
     try{
@@ -166,18 +175,29 @@ function s91ShowClerkCodeSignIn(prefillEmail,errorMessage){
         const token=$("clerk-code").value.replace(/\D/g,"");
         if(token.length<6){fail("Enter the code from the email.");return}
         submit.textContent="Verifying…";
-        const attempt=flow==="signIn"
-          ?await signInAttempt.attemptFirstFactor({strategy:"email_code",code:token})
-          :await signUpAttempt.attemptEmailAddressVerification({code:token});
+        const pending=flow==="signIn"?signInAttempt:signUpAttempt;
+        let attempt;
+        try{
+          attempt=flow==="signIn"
+            ?await signInAttempt.attemptFirstFactor({strategy:"email_code",code:token})
+            :await signUpAttempt.attemptEmailAddressVerification({code:token});
+        }catch(err){
+          // The code was already accepted (a second submit, or the first reply was lost): finish signing in.
+          if(s91ClerkCode(err)==="verification_already_verified"&&pending&&pending.status==="complete"&&pending.createdSessionId)attempt=pending;
+          else throw err;
+        }
         if(attempt.status!=="complete"||!attempt.createdSessionId)throw new Error("Clerk could not complete sign-in. Request a new code and try again.");
         await window.Clerk.setActive({session:attempt.createdSessionId});
         await startSolar91App();
         return;
       }
     }catch(err){
+      // Already signed in (for example in another tab): open the portal instead of showing an error.
+      if(s91ClerkCode(err)==="session_exists"&&window.Clerk&&window.Clerk.session){await startSolar91App();return}
       fail(s91CodeError(err));
       submit.textContent=sent?"Verify and sign in":"Email me a code";
     }finally{
+      busy=false;
       if(document.body.contains(submit))submit.disabled=false;
     }
   });
@@ -264,6 +284,7 @@ async function clerkToken(fresh){
 }
 async function clerkSignOut(){
   try {
+    if (typeof s91ClearInflight === "function") s91ClearInflight();
     if (window.Clerk && typeof window.Clerk.signOut === "function") await window.Clerk.signOut();
   } finally {
     window.location.assign("/");
@@ -314,62 +335,101 @@ function s91ApiErrorMessage(status,data){
   if(raw&&typeof raw==="object"&&typeof raw.message==="string"&&raw.message)return raw.message;
   return S91_HTTP_MESSAGES[status]||"The request failed (HTTP "+status+"). Please retry.";
 }
+/* Identical GET requests already in flight share one network round trip (two modules asking for the same list at
+   the same moment cost one request). Only the response *text* is shared: every caller parses its own copy, so one
+   module changing its data can never change another's. Nothing is cached after the response arrives, and the map is
+   cleared on sign-out, so no response outlives its request or crosses to another account. */
+const S91_INFLIGHT=new Map();
+function s91ClearInflight(){S91_INFLIGHT.clear();}
 async function apiFetch(url,opts,latency){
+  const now=()=>typeof performance!=="undefined"&&performance.now?performance.now():Date.now();
+  const started=now();
   opts=Object.assign({},opts||{});opts.headers=Object.assign({"Accept":"application/json"},opts.headers||{});
-  const token=await clerkToken();
-  if(token)opts.headers["Authorization"]="Bearer "+token;
-  const isForm=(typeof FormData!=="undefined"&&opts.body instanceof FormData);
-  if(opts.body&&typeof opts.body!=="string"&&!isForm)opts.body=JSON.stringify(opts.body);
-  if(opts.body&&!isForm)opts.headers["Content-Type"]="application/json";
-  const isRead=!opts.method||["GET","HEAD"].includes(String(opts.method).toUpperCase());
+  const method=String(opts.method||"GET").toUpperCase();
+  const isRead=method==="GET"||method==="HEAD";
   const externalSignal=opts.signal;
-  // Bounded requests: a sleeping server must not leave the portal in a permanent spinner.
-  // Never retry writes automatically; a timed-out write could already have committed.
-  async function attempt(){
-    const controller=new AbortController(),abortFromCaller=()=>controller.abort();
-    if(externalSignal){
-      if(externalSignal.aborted)controller.abort();
-      else externalSignal.addEventListener("abort",abortFromCaller,{once:true});
+  const inflight=method==="GET"&&!externalSignal&&!latency&&typeof S91_INFLIGHT!=="undefined"?S91_INFLIGHT:null;
+  async function transport(){
+    const token=await clerkToken();
+    if(token)opts.headers["Authorization"]="Bearer "+token;
+    const isForm=(typeof FormData!=="undefined"&&opts.body instanceof FormData);
+    if(opts.body&&typeof opts.body!=="string"&&!isForm)opts.body=JSON.stringify(opts.body);
+    if(opts.body&&!isForm)opts.headers["Content-Type"]="application/json";
+    // Bounded requests: a sleeping server must not leave the portal in a permanent spinner.
+    // Never retry writes automatically; a timed-out write could already have committed.
+    async function attempt(){
+      const controller=new AbortController(),abortFromCaller=()=>controller.abort();
+      if(externalSignal){
+        if(externalSignal.aborted)controller.abort();
+        else externalSignal.addEventListener("abort",abortFromCaller,{once:true});
+      }
+      const timeout=setTimeout(()=>controller.abort(),isRead?45000:60000);
+      const fetchStarted=latency&&typeof performance!=="undefined"?performance.now():0;
+      try{
+        const response=await fetch(url,{...opts,signal:controller.signal});
+        if(latency){latency.status=response.status;latency.serverTiming=response.headers.get("Server-Timing")||"";latency.contentLength=Number(response.headers.get("Content-Length"))||null}
+        return response;
+      }finally{
+        if(latency&&fetchStarted)latency.fetchMs+=performance.now()-fetchStarted;
+        clearTimeout(timeout);if(externalSignal)externalSignal.removeEventListener("abort",abortFromCaller);
+      }
     }
-    const timeout=setTimeout(()=>controller.abort(),isRead?45000:60000);
-    const fetchStarted=latency&&typeof performance!=="undefined"?performance.now():0;
-    try{
-      const response=await fetch(url,{...opts,signal:controller.signal});
-      if(latency){latency.status=response.status;latency.serverTiming=response.headers.get("Server-Timing")||"";latency.contentLength=Number(response.headers.get("Content-Length"))||null}
-      return response;
-    }finally{
-      if(latency&&fetchStarted)latency.fetchMs+=performance.now()-fetchStarted;
-      clearTimeout(timeout);if(externalSignal)externalSignal.removeEventListener("abort",abortFromCaller);
+    let res;
+    try{res=await attempt();}
+    catch(error){
+      if(externalSignal&&externalSignal.aborted)throw error;
+      if(!isRead)throw new Error(error?.name==="AbortError"?"Request timed out. Check the record before retrying to avoid duplicates.":"No connection. Check connectivity and verify whether the change was saved.");
+      await new Promise(resolve=>setTimeout(resolve,600));
+      try{res=await attempt();}catch(retryError){if(externalSignal&&externalSignal.aborted)throw retryError;throw new Error("The server is unreachable or timed out. Retry the page once connectivity returns.");}
+    }
+    if(isRead&&[502,503,504].includes(res.status)){
+      await new Promise(resolve=>setTimeout(resolve,600));
+      try{res=await attempt();}catch(error){if(externalSignal&&externalSignal.aborted)throw error;throw new Error("The server did not respond. Please retry.");}
+    }
+    // Expired-on-arrival token: retry once with a fresh one before signing out (401 happens before any write runs).
+    if(res.status===401){
+      const fresh=await clerkToken(true);
+      if(fresh){
+        opts.headers["Authorization"]="Bearer "+fresh;
+        try{res=await attempt();}catch(error){if(externalSignal&&externalSignal.aborted)throw error;throw new Error(isRead?"The server did not respond. Please retry.":"No connection. Check connectivity and verify whether the change was saved.");}
+      }
+    }
+    if(res.status===401){
+      try{await window.Clerk?.signOut();}catch(e){}
+      showClerkSignIn();
+      throw new Error("Authentication required");
+    }
+    let text="";
+    if(res.status!==204){
+      text=typeof res.text==="function"?await res.text().catch(()=>""):JSON.stringify(await res.json().catch(()=>({})));
+    }
+    return {status:res.status,ok:res.ok,text,serverTiming:res.headers.get("Server-Timing")||"",
+            transferBytes:Number(res.headers.get("Content-Length"))||null};
+  }
+  let pending=inflight?inflight.get(url):null;
+  const shared=!!pending;
+  if(!pending){
+    pending=transport();
+    if(inflight){
+      inflight.set(url,pending);
+      const done=()=>{if(inflight.get(url)===pending)inflight.delete(url);};
+      pending.then(done,done);
     }
   }
-  let res;
-  try{res=await attempt();}
+  const perf=window.Solar91Perf&&window.Solar91Perf.enabled?window.Solar91Perf:null;
+  let result;
+  try{result=await pending;}
   catch(error){
-    if(externalSignal&&externalSignal.aborted)throw error;
-    if(!isRead)throw new Error(error?.name==="AbortError"?"Request timed out. Check the record before retrying to avoid duplicates.":"No connection. Check connectivity and verify whether the change was saved.");
-    await new Promise(resolve=>setTimeout(resolve,600));
-    try{res=await attempt();}catch(retryError){if(externalSignal&&externalSignal.aborted)throw retryError;throw new Error("The server is unreachable or timed out. Retry the page once connectivity returns.");}
+    if(perf)perf.recordRequest(method,url,{status:0,clientMs:now()-started,shared});
+    throw error;
   }
-  if(isRead&&[502,503,504].includes(res.status)){
-    await new Promise(resolve=>setTimeout(resolve,600));
-    try{res=await attempt();}catch(error){if(externalSignal&&externalSignal.aborted)throw error;throw new Error("The server did not respond. Please retry.");}
-  }
-  // Expired-on-arrival token: retry once with a fresh one before signing out (401 happens before any write runs).
-  if(res.status===401){
-    const fresh=await clerkToken(true);
-    if(fresh){
-      opts.headers["Authorization"]="Bearer "+fresh;
-      try{res=await attempt();}catch(error){if(externalSignal&&externalSignal.aborted)throw error;throw new Error(isRead?"The server did not respond. Please retry.":"No connection. Check connectivity and verify whether the change was saved.");}
-    }
-  }
-  if(res.status===401){
-    try{await window.Clerk?.signOut();}catch(e){}
-    showClerkSignIn();
-    throw new Error("Authentication required");
-  }
-  const data=res.status===204?null:await res.json().catch(()=>({}));
-  if(!res.ok){
-    const err=new Error(s91ApiErrorMessage(res.status,data));err.status=res.status;err.data=data;throw err;
+  const parseStarted=now();
+  let data=null;
+  if(result.status!==204){try{data=JSON.parse(result.text);}catch(e){data={};}}
+  if(perf)perf.recordRequest(method,url,{status:result.status,clientMs:now()-started,networkMs:parseStarted-started,
+    parseMs:now()-parseStarted,bytes:result.text.length,transferBytes:result.transferBytes,serverTiming:result.serverTiming,shared});
+  if(!result.ok){
+    const err=new Error(s91ApiErrorMessage(result.status,data));err.status=result.status;err.data=data;throw err;
   }
   return data;
 }

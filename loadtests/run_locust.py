@@ -88,7 +88,7 @@ def main() -> int:
     try:
         return subprocess.run(command, cwd=ROOT, check=False).returncode
     except FileNotFoundError:
-        print("Locust is not installed. Install requirements-load.txt first.", file=sys.stderr)
+        print("Locust is not installed. Install loadtests/requirements.txt first.", file=sys.stderr)
         return 2
 
 

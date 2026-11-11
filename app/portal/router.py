@@ -104,7 +104,8 @@ def plant_details(site_code: str, db: DB, user: CurrentUser):
     today = service.business_today()
     issues = service._issue_counts(db, [plant.id]).get(plant.id)
     pm = service._pm_counts(db, [plant.id], today).get(plant.id)
-    washing = service._washing_rows(db, user).get(str(plant.id))
+    washing_rows = service._washing_rows(db, user, [plant.id])
+    washing = (washing_rows or {}).get(str(plant.id))
     last_at = service._last_activity(db, [plant.id]).get(plant.id)
     engineers = service.site_engineers_by_plant(db, [plant.id]).get(plant.id, [])
     washer = service.washing_assignees_by_plant(db, [plant.id]).get(plant.id, "")
@@ -114,6 +115,7 @@ def plant_details(site_code: str, db: DB, user: CurrentUser):
         "activity": service.activity(db, user, [plant.id], limit=10),
         "issueTotal": (issues or {}).get("total", 0),
         "pmCancelled": (pm or {}).get("cancelled", 0),
+        "warnings": ["washing_unavailable"] if washing_rows is None else [],
     }
 
 
@@ -125,7 +127,7 @@ def plant_operational(site_code: str, db: DB, user: CurrentUser):
         plant,
         service._issue_counts(db, [plant.id]).get(plant.id),
         service._pm_counts(db, [plant.id], today).get(plant.id),
-        service._washing_rows(db, user).get(str(plant.id)),
+        (service._washing_rows(db, user, [plant.id]) or {}).get(str(plant.id)),
         service._last_activity(db, [plant.id]).get(plant.id),
     )
 
@@ -150,7 +152,8 @@ def calendar(db: DB, user: CurrentUser,
     else:
         ids = [p.id for p in service.visible_plants(db, user)]
     try:
-        entries = service.calendar(db, user, kind, month, ids)
+        page = service.calendar_page(db, user, kind, month, ids)
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
-    return {"kind": kind, "month": month, "entries": entries}
+    # "truncated": the month has more entries than were sent; the UI says so instead of showing a partial month as whole.
+    return {"kind": kind, "month": month, **page}

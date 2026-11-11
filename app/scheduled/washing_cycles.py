@@ -34,6 +34,17 @@ OVERVIEW_SEND_REPORT_DAYS = 35  # reports sent to the browser by default (this m
 _OVERVIEW_CACHE: dict[tuple, tuple[float, dict]] = {}
 _OVERVIEW_VERSION = 0
 
+# The scalar report columns the overview's figures are computed from (cycles, compliance, excused days, daily status,
+# productivity, pending reviews). When the report list itself is not wanted (Overview, plant details, the plant tab),
+# reports are read as plain rows of just these columns: no ORM objects, and the JSON columns (photo evidence, cleaned
+# table codes) are never transferred or decoded. The figures are identical because they read only these attributes.
+_SUMMARY_REPORT_COLUMNS = (
+    WashingDailyReport.id, WashingDailyReport.plant_id, WashingDailyReport.cycle_month, WashingDailyReport.cycle_no,
+    WashingDailyReport.report_date, WashingDailyReport.job_status, WashingDailyReport.tables_cleaned,
+    WashingDailyReport.remarks, WashingDailyReport.exception_reason, WashingDailyReport.reported_by,
+    WashingDailyReport.review_status, WashingDailyReport.cycle_completed, WashingDailyReport.created_at,
+)
+
 
 def invalidate_overview_cache() -> None:
     """Called after every write request, so a user always sees their own change straight away."""
@@ -580,18 +591,25 @@ def _overview_as_of(month: str | None) -> date | None:
 
 
 def get_overview(db: Session, user: User, include_tables: bool = False, report_days: int = OVERVIEW_SEND_REPORT_DAYS,
-                 month: str | None = None) -> dict:
+                 month: str | None = None, include_reports: bool = True, plant_ids: set[UUID] | None = None) -> dict:
+    """Washing overview for the caller's scope.
+
+    ``include_reports=False`` leaves out the ``reports`` list (and reads reports as light rows, see
+    _SUMMARY_REPORT_COLUMNS); every plant figure is unchanged. ``plant_ids`` computes only those plants (still within
+    the caller's scope); portfolio totals then cover just those plants.
+    """
     report_days = max(1, min(int(report_days), OVERVIEW_REPORT_DAYS))
     as_of = _overview_as_of(month)
     ttl = 0 if get_settings().app_env == "test" else OVERVIEW_CACHE_SECONDS
     if ttl <= 0:
-        return _build_overview(db, user, include_tables, report_days, as_of)
-    key = (str(user.id), user.role, include_tables, report_days, business_today().isoformat(), as_of)
+        return _build_overview(db, user, include_tables, report_days, as_of, include_reports, plant_ids)
+    key = (str(user.id), user.role, include_tables, report_days, business_today().isoformat(), as_of,
+           include_reports, tuple(sorted(str(p) for p in plant_ids)) if plant_ids is not None else None)
     hit = _OVERVIEW_CACHE.get(key)
     if hit and datetime.now(timezone.utc).timestamp() - hit[0] < ttl:
         return hit[1]
     version = _OVERVIEW_VERSION
-    result = _build_overview(db, user, include_tables, report_days, as_of)
+    result = _build_overview(db, user, include_tables, report_days, as_of, include_reports, plant_ids)
     if version == _OVERVIEW_VERSION:  # no write happened while this was being built
         if len(_OVERVIEW_CACHE) > 50:
             _OVERVIEW_CACHE.clear()
@@ -600,7 +618,7 @@ def get_overview(db: Session, user: User, include_tables: bool = False, report_d
 
 
 def _build_overview(db: Session, user: User, include_tables: bool = False, report_days: int = OVERVIEW_SEND_REPORT_DAYS,
-                    as_of: date | None = None) -> dict:
+                    as_of: date | None = None, include_reports: bool = True, plant_ids: set[UUID] | None = None) -> dict:
     """Washing overview as of today, or as of `as_of` (the last day of an earlier month chosen on the page): reports
     after that day are left out, so cycles, compliance, deadlines and the day-by-day status read as they stood then."""
     manager = _is_washing_manager(db, user)
@@ -654,6 +672,8 @@ def _build_overview(db: Session, user: User, include_tables: bool = False, repor
         pool.append(plant)
         if config is None or not (manager or (user.role == "Site Engineer" and plant.id in allowed_plant_ids)):
             continue
+        if plant_ids is not None and plant.id not in plant_ids:
+            continue
         visible_configs.append((plant, config))
         table_counts[plant.id] = int(table_count or 0)
         if last_report:
@@ -662,6 +682,7 @@ def _build_overview(db: Session, user: User, include_tables: bool = False, repor
             assignee_names[config.assigned_user_id] = assignee_name
 
     visible_ids = [plant.id for plant, _config in visible_configs]
+    light = not include_reports and not include_tables
     codes_by_plant: dict[UUID, list[str]] = {}
     reports_by_plant: dict[UUID, list[WashingDailyReport]] = {}
     if visible_ids:
@@ -673,16 +694,28 @@ def _build_overview(db: Session, user: User, include_tables: bool = False, repor
             ).all():
                 codes_by_plant.setdefault(plant_id, []).append(code or legacy_id)
         report_cutoff = (as_of or business_today()) - timedelta(days=OVERVIEW_REPORT_DAYS)
-        report_stmt = select(WashingDailyReport).where(
+        report_stmt = (select(*_SUMMARY_REPORT_COLUMNS) if light else select(WashingDailyReport)).where(
             WashingDailyReport.plant_id.in_(visible_ids),
             or_(WashingDailyReport.report_date >= report_cutoff, WashingDailyReport.review_status == "Pending"),
         )
         if as_of is not None:
             report_stmt = report_stmt.where(WashingDailyReport.report_date >= report_cutoff, WashingDailyReport.report_date <= as_of)
-        for report in db.scalars(
-            report_stmt
-            .order_by(WashingDailyReport.plant_id, WashingDailyReport.report_date.desc(), WashingDailyReport.created_at.desc())
-        ):
+        if light:
+            # Every per-plant figure reads only this month's reports (cycles, ledger, daily status, delays,
+            # exceptions), the last 7 days (productivity), the days from each cycle's start (excused days; a saved
+            # start date can fall in the previous month) and reports awaiting review. Read just those instead of
+            # the whole 90-day window; the figures are identical (tests/test_performance_paths.py).
+            as_of_day = as_of or business_today()
+            earliest = min([as_of_day.replace(day=1), as_of_day - timedelta(days=7)] +
+                           [min(_cycle_start_dates(as_of_day, config.cycle_overrides)) for _plant, config in visible_configs])
+            report_stmt = report_stmt.where(or_(
+                WashingDailyReport.report_date >= earliest,
+                WashingDailyReport.cycle_month == _month_key(as_of_day),
+                WashingDailyReport.review_status == "Pending",
+            ))
+        ordered = report_stmt.order_by(WashingDailyReport.plant_id, WashingDailyReport.report_date.desc(),
+                                       WashingDailyReport.created_at.desc())
+        for report in (db.execute(ordered) if light else db.scalars(ordered)):
             reports_by_plant.setdefault(report.plant_id, []).append(report)
     visible: list[tuple[Plant, WashingConfig, int, list[WashingDailyReport]]] = []
     for plant, config in visible_configs:
@@ -705,6 +738,7 @@ def _build_overview(db: Session, user: User, include_tables: bool = False, repor
     send_cutoff = today - timedelta(days=report_days)
     plant_rows = []
     reports_out = []
+    pending_reviews = 0
     monthly_out = []
     cycle_events_all: list[dict] = []
     patterns = _reason_patterns(excused_reasons(db))
@@ -840,7 +874,7 @@ def _build_overview(db: Session, user: User, include_tables: bool = False, repor
                 "carried_in": ledger[cycle_no]["carried_in"],
                 "late_days": max(0, (done_on - due).days) if done_on else (max(0, (today - due).days) if state != "Upcoming" else 0),
             })
-        for report in reports:
+        for report in (reports if not light else ()):   # cycle events need the whole window; summary leaves them out
             if report.cycle_completed and report.review_status == "Confirmed":
                 cycle_events_all.append({
                     "plant_id": str(plant.id), "plant": plant.plant_name, "site_code": plant.site_code,
@@ -894,7 +928,10 @@ def _build_overview(db: Session, user: User, include_tables: bool = False, repor
         # Every report still feeds the figures above; only recent ones (and any awaiting review) are sent to the browser.
         for report in reports:
             if report.report_date >= send_cutoff or report.review_status == "Pending":
-                reports_out.append(_report_out(report, plant, user, config, manager, table_count))
+                if report.review_status == "Pending":
+                    pending_reviews += 1
+                if include_reports:
+                    reports_out.append(_report_out(report, plant, user, config, manager, table_count))
 
     completed_rows = db.execute(
         select(
@@ -909,9 +946,9 @@ def _build_overview(db: Session, user: User, include_tables: bool = False, repor
             WashingDailyReport.review_status == "Confirmed",
         )
         .group_by(WashingDailyReport.plant_id, WashingDailyReport.cycle_month)
-    ).all() if visible else []
+    ).all() if visible and not light else []   # the 12-month chart is not part of the summary: one round trip less
     completed_lookup = {(plant_id, month): count for plant_id, month, count in completed_rows}
-    for plant, _config, _tables, _reports in visible:
+    for plant, _config, _tables, _reports in (visible if not light else ()):
         for key in month_keys:
             monthly_out.append({
                 "plant_id": str(plant.id),
@@ -928,6 +965,7 @@ def _build_overview(db: Session, user: User, include_tables: bool = False, repor
         "monthly_target": MONTHLY_CYCLE_TARGET,
         "plants": plant_rows,
         "reports": reports_out,
+        "reports_included": include_reports,
         "monthly": monthly_out,
         "portfolio": {
             "tables_due_today": sum(row["tables_due_today"] for row in plant_rows),
@@ -959,7 +997,7 @@ def _build_overview(db: Session, user: User, include_tables: bool = False, repor
         "plants_overdue": sum(matrix[key] for key in ("1d", "3d", "7d")),
         "plants_below_threshold": sum(1 for row in plant_rows if row["active"] and row["cycle_compliance_percent"] < row["compliance_threshold_percent"]),
         "not_set_up": len(result["unconfigured"]),
-        "pending_reviews": sum(1 for report in reports_out if report["review_status"] == "Pending"),
+        "pending_reviews": pending_reviews,
     })
     if not manager:
         # Compliance / delay / ranking figures are O&M performance metrics; field users never receive them.

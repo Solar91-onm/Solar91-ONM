@@ -51,7 +51,8 @@ class IssueRepository:
         if q:
             like = f"%{q.lower()}%"
             stmt = stmt.where(or_(func.lower(Issue.ticket_no).like(like), func.lower(Issue.description).like(like), func.lower(func.coalesce(Issue.vertical, " ")).like(like)))
-        return list(self.db.scalars(stmt.order_by(Issue.created_at.desc()).offset(offset).limit(limit)))
+        # id breaks ties so offset paging ("Load more") never repeats or skips issues created in the same instant.
+        return list(self.db.scalars(stmt.order_by(Issue.created_at.desc(), Issue.id.desc()).offset(offset).limit(limit)))
 
     def by_id(self, issue_id, *, include_deleted=False, for_update=False):
         if for_update:

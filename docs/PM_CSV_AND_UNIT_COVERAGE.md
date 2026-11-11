@@ -43,4 +43,4 @@ pytest -q
 
 Check JavaScript parsing with `node --check frontend/static/js/29-pm-live-dashboard.js` and `node --check frontend/static/js/24-pm-plan.js`.
 
-This change does not require a new database migration. Configure Supabase as described in `.env.example` and `RELEASE_VALIDATION.md`. Actual live service connectivity, production data, security policies, and a complete end-to-end acceptance check require the target environment; they were not verified in the offline test environment.
+This change does not require a new database migration. Configure Supabase as described in `.env.example` and `docs/RENDER_DEPLOYMENT_RUNBOOK.md`. Actual live service connectivity, production data, security policies, and a complete end-to-end acceptance check require the target environment; they were not verified in the offline test environment.

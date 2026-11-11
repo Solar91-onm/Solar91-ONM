@@ -125,7 +125,8 @@
           totals: body.totals || aggregatePortfolio(rows),
           asOf: body.asOf || null,
           businessDate: body.businessDate || null,
-          scope: body.scope || "portfolio"
+          scope: body.scope || "portfolio",
+          warnings: body.warnings || []
         };
       }).catch(function (error) {
         portfolioPromise = null;
@@ -219,20 +220,22 @@
   }
 
   /**
-   * Dated PM / Washing records for a month. The whole visible portfolio is read
-   * once per (kind, month) and filtered per plant here, so a calendar that asks
-   * for every plant costs one request, not one per plant.
+   * One month of dated PM / Washing records: every visible plant (siteCode omitted) or one plant.
+   * Resolves to { entries, truncated, limit }. `truncated` = the month holds more entries than the
+   * server sends at once; the calendar says so instead of showing a partial month as complete.
+   * Cached for a minute per (kind, month, plant); a failed read is never cached.
    */
-  function fetchCalendarActivities(plant, _profile, kind, month) {
+  function fetchCalendarMonth(kind, month, siteCode) {
     if (!/^(pm|washing)$/.test(kind) || !/^\d{4}-\d{2}$/.test(String(month))) {
       return Promise.reject(new Error("Calendar activity requires a supported activity type and YYYY-MM month."));
     }
-    const key = kind + ":" + month;
+    const key = kind + ":" + month + ":" + (siteCode || "*");
     if (!calendarCache.has(key)) {
       calendarCache.set(key, api().request(
-        "/api/portal/calendar?kind=" + kind + "&month=" + encodeURIComponent(month)
+        "/api/portal/calendar?kind=" + kind + "&month=" + encodeURIComponent(month) +
+        (siteCode ? "&site_code=" + encodeURIComponent(siteCode) : "")
       ).then(function (body) {
-        return body.entries || [];
+        return { entries: body.entries || [], truncated: !!body.truncated, limit: body.limit || null };
       }).catch(function (error) {
         calendarCache.delete(key);
         throw error;
@@ -240,9 +243,24 @@
       // Calendars should reflect new records within a minute.
       setTimeout(function () { calendarCache.delete(key); }, PORTFOLIO_TTL_MS);
     }
-    return calendarCache.get(key).then(function (entries) {
-      if (!plant) return entries.slice();
-      return entries.filter(function (e) { return e.plantSiteCode === plant.siteCode; });
+    return calendarCache.get(key);
+  }
+
+  /**
+   * Dated PM / Washing records for a month, as an array. With a plant, only that plant's records are
+   * requested (a portfolio month already in the cache is reused when it is complete), so a plant's
+   * calendar never depends on how busy the rest of the portfolio is.
+   */
+  function fetchCalendarActivities(plant, _profile, kind, month) {
+    if (!plant) {
+      return fetchCalendarMonth(kind, month).then(function (page) { return page.entries.slice(); });
+    }
+    const whole = calendarCache.get(kind + ":" + month + ":*");
+    const fromWhole = whole ? whole.then(function (page) {
+      return page.truncated ? null : page.entries.filter(function (e) { return e.plantSiteCode === plant.siteCode; });
+    }, function () { return null; }) : Promise.resolve(null);
+    return fromWhole.then(function (entries) {
+      return entries || fetchCalendarMonth(kind, month, plant.siteCode).then(function (page) { return page.entries.slice(); });
     });
   }
 
@@ -310,6 +328,7 @@
     fetchOperationalProfile,
     fetchActivity,
     fetchCalendarActivities,
+    fetchCalendarMonth,
     fetchPortfolio,
     fetchPortfolioRange,
     fetchPortfolioTrend,

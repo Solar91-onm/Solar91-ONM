@@ -22,6 +22,7 @@ no records rather than a zero, because a zero reads as "nothing is wrong".
 from __future__ import annotations
 
 from datetime import date, datetime, time, timedelta, timezone
+import logging
 from typing import Any
 from uuid import UUID
 
@@ -236,14 +237,27 @@ def _pm_counts(db: Session, plant_ids: list[UUID], today: date) -> dict[UUID, di
     return out
 
 
-def _washing_rows(db: Session, user: User) -> dict[str, dict[str, Any]]:
-    """Live washing figures per plant, straight from the module that owns them."""
+logger = logging.getLogger("solar91.portal")
+
+
+def _washing_rows(db: Session, user: User, plant_ids: list[UUID] | None = None) -> dict[str, dict[str, Any]] | None:
+    """Live washing figures per plant, straight from the module that owns them.
+
+    Reads the overview without its report list (the figures are identical; see washing_cycles._SUMMARY_REPORT_COLUMNS).
+    ``plant_ids`` limits the work to those plants (plant details). Returns None when washing could not be read, so the
+    caller can say "unavailable" instead of showing zeros that look like real data.
+    """
     from app.scheduled.washing_cycles import get_overview
 
     try:
-        overview = get_overview(db, user)
-    except Exception:  # washing not configured yet must not take the Overview down
-        return {}
+        overview = get_overview(db, user, include_reports=False,
+                                plant_ids=set(plant_ids) if plant_ids is not None else None)
+    except Exception as error:  # washing must not take the Overview down, but the failure must be visible
+        # PostgreSQL aborts the whole transaction after a failed statement; roll back (this request is read-only)
+        # so the remaining Overview queries can still run.
+        db.rollback()
+        logger.warning("washing_overview_unavailable error=%s", type(error).__name__)
+        return None
     return {row["plant_id"]: row for row in overview.get("plants", [])}
 
 
@@ -468,7 +482,8 @@ def portfolio(db: Session, user: User) -> dict[str, Any]:
 
     issues = _issue_counts(db, ids)
     pm = _pm_counts(db, ids, today)
-    washing = _washing_rows(db, user)
+    washing_rows = _washing_rows(db, user)
+    washing = washing_rows or {}
     last_at = _last_activity(db, ids)
 
     rows = []
@@ -491,6 +506,8 @@ def portfolio(db: Session, user: User) -> dict[str, Any]:
         "asOf": datetime.now(timezone.utc).isoformat(),
         "businessDate": today.isoformat(),
         "scope": "assigned" if user.role == "Site Engineer" else "portfolio",
+        # A section that could not be read is named here; its figures are absent (shown as "Not available").
+        "warnings": ["washing_unavailable"] if washing_rows is None else [],
     }
 
 
@@ -954,8 +971,7 @@ def activity(db: Session, user: User, plant_ids: list[UUID], limit: int = 25) ->
         return []
     limit = max(1, min(int(limit), 100))
     since = business_today() - timedelta(days=ACTIVITY_WINDOW_DAYS)
-    codes = dict(db.execute(select(Plant.id, Plant.site_code).where(Plant.id.in_(plant_ids))).all())
-    names = dict(db.execute(select(Plant.id, Plant.plant_name).where(Plant.id.in_(plant_ids))).all())
+    codes, names = _plant_labels(db, plant_ids)
 
     events: list[dict[str, Any]] = []
 
@@ -1010,8 +1026,32 @@ def activity(db: Session, user: User, plant_ids: list[UUID], limit: int = 25) ->
 
 # ── Calendar ────────────────────────────────────────────────────────────────
 
-def calendar(db: Session, user: User, kind: str, month: str, plant_ids: list[UUID]) -> list[dict[str, Any]]:
-    """Dated PM or Washing entries for one month — real records only."""
+CALENDAR_LIMIT = 4000
+
+
+def _plant_labels(db: Session, plant_ids: list[UUID]) -> tuple[dict[UUID, str], dict[UUID, str]]:
+    """Site code and name per plant in one round trip (was two separate queries)."""
+    codes: dict[UUID, str] = {}
+    names: dict[UUID, str] = {}
+    for plant_id, site_code, plant_name in db.execute(
+        select(Plant.id, Plant.site_code, Plant.plant_name).where(Plant.id.in_(plant_ids))
+    ).all():
+        codes[plant_id] = site_code
+        names[plant_id] = plant_name
+    return codes, names
+
+
+def calendar_page(db: Session, user: User, kind: str, month: str, plant_ids: list[UUID],
+                  limit: int = CALENDAR_LIMIT) -> dict[str, Any]:
+    """``calendar`` plus whether the month held more than ``limit`` entries, so a capped month is never shown as
+    complete. One extra row is read to tell."""
+    entries = calendar(db, user, kind, month, plant_ids, limit=limit + 1)
+    return {"entries": entries[:limit], "truncated": len(entries) > limit, "limit": limit}
+
+
+def calendar(db: Session, user: User, kind: str, month: str, plant_ids: list[UUID],
+             limit: int = CALENDAR_LIMIT) -> list[dict[str, Any]]:
+    """Dated PM or Washing entries for one month — real records only, at most ``limit`` (earliest first)."""
     if kind not in {"pm", "washing"}:
         raise ValueError("Calendar activity requires kind=pm or kind=washing")
     try:
@@ -1024,8 +1064,7 @@ def calendar(db: Session, user: User, kind: str, month: str, plant_ids: list[UUI
     if not plant_ids:
         return []
 
-    codes = dict(db.execute(select(Plant.id, Plant.site_code).where(Plant.id.in_(plant_ids))).all())
-    names = dict(db.execute(select(Plant.id, Plant.plant_name).where(Plant.id.in_(plant_ids))).all())
+    codes, names = _plant_labels(db, plant_ids)
     today = business_today()
 
     if kind == "pm":
@@ -1035,8 +1074,8 @@ def calendar(db: Session, user: User, kind: str, month: str, plant_ids: list[UUI
                    OMTask.task_type, OMTask.frequency, OMTask.status, due.label("due_on"), OMTask.actual_completed_on,
                    OMTask.assignee_text, OMTask.unit_no, OMTask.total_units)
             .where(OMTask.plant_id.in_(plant_ids), due >= first, due <= last)
-            .order_by(due)
-            .limit(4000)
+            .order_by(due, OMTask.id)
+            .limit(limit)
         ).all()
         out = []
         for row in rows:
@@ -1077,8 +1116,8 @@ def calendar(db: Session, user: User, kind: str, month: str, plant_ids: list[UUI
             WashingDailyReport.report_date >= first,
             WashingDailyReport.report_date <= last,
         )
-        .order_by(WashingDailyReport.report_date)
-        .limit(4000)
+        .order_by(WashingDailyReport.report_date, WashingDailyReport.id)
+        .limit(limit)
     ).all()
     return [
         {

@@ -8,8 +8,10 @@ Locust.
 
 ## Scope and safety
 
-- `/api/bootstrap` returns broad application state. The staging database must contain only synthetic
-  records and must not be a production clone or contain customer/staff personal data.
+- The harness reads the portal's Overview, plant list, calendars and issue lists, which return every
+  record in the token's scope. The staging database must contain only synthetic records and must not be
+  a production clone or contain customer/staff personal data. (It no longer requests `/api/bootstrap`,
+  which no current screen uses.)
 - Use a dedicated staging O&M Head bearer token and a separate active staging Assignee UUID.
   Never use a production token or service-role key. The token is passed in an HTTP header and is
   never printed by the runner.
@@ -56,7 +58,7 @@ Run from the repository root in a dedicated staging test environment:
 
 ```powershell
 py -3.12 -m venv .venv-load
-.\.venv-load\Scripts\python.exe -m pip install --disable-pip-version-check -r requirements-load.txt
+.\.venv-load\Scripts\python.exe -m pip install --disable-pip-version-check -r loadtests/requirements.txt
 
 $env:SOLAR91_LOADTEST_ENV = "staging"
 $env:SOLAR91_LOADTEST_CONFIRM_STAGING = "I_VERIFIED_THIS_IS_STAGING"

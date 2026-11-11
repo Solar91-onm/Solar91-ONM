@@ -33,8 +33,11 @@ else:
 
     # Idle-aware health check (see observability.install_connection_health) instead of pinging before every request.
     idle_aware_ping = settings.db_pool_pre_ping and settings.db_ping_idle_seconds > 0
+    from app.core.observability import TimedQueuePool  # QueuePool + per-request pool-wait timing
+
     engine = create_engine(
         settings.database_url,
+        poolclass=TimedQueuePool,
         pool_pre_ping=settings.db_pool_pre_ping and not idle_aware_ping,
         pool_timeout=settings.db_pool_timeout_seconds,
         pool_size=settings.db_pool_size,

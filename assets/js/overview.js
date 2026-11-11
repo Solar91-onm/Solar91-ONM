@@ -818,7 +818,11 @@
   let rendered = false;
   function render() {
     if (!state) return;
-    renderTiles(state.totals);
+    if (global.Solar91Perf && global.Solar91Perf.enabled) {
+      global.Solar91Perf.time("render overview tiles", () => renderTiles(state.totals));
+    } else {
+      renderTiles(state.totals);
+    }
     rendered = true;
   }
 
@@ -874,20 +878,121 @@
     }
   }
 
+  // ─── Loading, failure and refresh ────────────────────────────────────
+  const REFRESH_AFTER_MS = 60 * 1000;   // same freshness window as the data caches (data-adapter.js)
+  let lastLoadedAt = 0;
+  let loadingPortfolio = false;
+
+  function overviewNotice(html, kind) {
+    const metrics = document.querySelector("[data-overview-metrics]");
+    if (!metrics || !metrics.parentNode) return;
+    let notice = document.querySelector("[data-overview-notice]");
+    if (!html) { if (notice) notice.remove(); return; }
+    if (!notice) {
+      notice = document.createElement("div");
+      notice.setAttribute("data-overview-notice", "");
+      metrics.parentNode.insertBefore(notice, metrics);
+    }
+    notice.className = "ep-overview-notice" + (kind === "error" ? " is-error" : "");
+    notice.setAttribute("role", kind === "error" ? "alert" : "status");
+    notice.innerHTML = html;
+  }
+
+  function stampDataTime(asOf) {
+    const el = document.querySelector("[data-last-updated]");
+    const when = asOf ? new Date(asOf) : new Date();
+    if (!el || isNaN(when.getTime())) return;
+    el.textContent = "Updated " + new Intl.DateTimeFormat("en-IN", {
+      hour: "2-digit", minute: "2-digit", day: "2-digit", month: "short"
+    }).format(when);
+    el.title = "When these figures were read from the database";
+  }
+
+  function showWarnings(warnings) {
+    if ((warnings || []).indexOf("washing_unavailable") !== -1) {
+      overviewNotice("Module cleaning figures could not be read just now, so they show as not available. " +
+        '<button type="button" data-overview-retry>Retry</button>', "warning");
+    } else {
+      overviewNotice("");
+    }
+  }
+
+  /** Read the portfolio. `refresh` = data already on screen is being brought up to date (filters and period kept). */
+  function loadPortfolio(refresh) {
+    if (loadingPortfolio) return;
+    loadingPortfolio = true;
+    if (refresh) data.invalidate();
+    data.fetchPortfolio(!!refresh).then((portfolio) => {
+      loadingPortfolio = false;
+      lastLoadedAt = Date.now();
+      if (!state) {
+        state = {
+          allRows: portfolio.rows,
+          periodRows: portfolio.rows,
+          rows: portfolio.rows,
+          totals: portfolio.totals,
+          businessDate: portfolio.businessDate,
+          sort: { column: "health", dir: "asc" }
+        };
+        populateFilterOptions(portfolio.rows);
+        render();
+      } else {
+        state.allRows = portfolio.rows;
+        state.periodRows = portfolio.rows;
+        state.businessDate = portfolio.businessDate || state.businessDate;
+        populateFilterOptions(portfolio.rows);
+        activityCache = null;
+        if (state.rangeStart && state.rangeEnd) {
+          rangeKey = "";                       // the same period, read again
+          applyRange(state.rangeStart, state.rangeEnd);
+        } else {
+          recomputeAndRender();
+        }
+      }
+      stampDataTime(portfolio.asOf);
+      showWarnings(portfolio.warnings);
+      if (global.Solar91Perf) global.Solar91Perf.mark("overview_usable");
+    }).catch((error) => {
+      loadingPortfolio = false;
+      const message = "The Overview could not be loaded: " + fmt.escape((error && error.message) || "please retry.") +
+        ' <button type="button" data-overview-retry>Retry</button>';
+      if (!state) {
+        const metrics = document.querySelector("[data-overview-metrics]");
+        if (metrics) metrics.innerHTML = "";
+      }
+      overviewNotice(message, "error");
+    });
+  }
+
+  // Something open or being typed into must never be replaced under the user.
+  function userIsBusy() {
+    const focused = document.activeElement;
+    if (focused && focused.matches && focused.matches("input, textarea, select, [contenteditable='true']")) return true;
+    return !!document.querySelector(".ep-pd__overlay, [role='dialog'][aria-modal='true'], .ep-issues__drawer");
+  }
+
+  function overviewIsShowing() {
+    const metrics = document.querySelector("[data-overview-metrics]");
+    return !!(metrics && metrics.offsetParent !== null);
+  }
+
+  // A tab left in the background makes no requests. When it comes back after the data has gone stale, the
+  // Overview (only if it is the page on screen and nothing is being edited) reads its figures again.
+  function wireVisibilityRefresh() {
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState !== "visible" || !state || !lastLoadedAt) return;
+      if (Date.now() - lastLoadedAt < REFRESH_AFTER_MS || !overviewIsShowing() || userIsBusy()) return;
+      loadPortfolio(true);
+    });
+    document.addEventListener("click", (ev) => {
+      if (ev.target.closest("[data-overview-retry]")) loadPortfolio(true);
+    });
+  }
+
   function init() {
     wireInteractions();
-    data.fetchPortfolio().then((portfolio) => {
-      state = {
-        allRows: portfolio.rows,
-        periodRows: portfolio.rows,
-        rows: portfolio.rows,
-        totals: portfolio.totals,
-        businessDate: portfolio.businessDate,
-        sort: { column: "health", dir: "asc" }
-      };
-      populateFilterOptions(portfolio.rows);
-      render();
-    });
+    wireVisibilityRefresh();
+    loadPortfolio(false);
   }
 
   global.Solar91PortalOverview = {

@@ -4,7 +4,7 @@
 
 Run Locust only against a dedicated HTTPS staging service containing synthetic records. The runner in `loadtests/run_locust.py` refuses to start until staging, synthetic data, approved-host and run-ID settings are provided. Never use production credentials, real user data, production Storage, or production URLs. A host allowlist is an operator confirmation, not proof that the database is synthetic.
 
-The current harness exercises dashboard bootstrap, issue list/filter/search, plant search, issue activity/steps, one synthetic issue lifecycle per ten users, simultaneous edits to distinct fields, duplicate-close rejection, and optional private evidence upload/access denial. It does not yet exercise every module or prove 100-user capacity.
+The current harness exercises the portal's real sign-in reads (`/api/auth/session`, `/api/portal/plants`, `/api/portal/overview`, this month's `/api/portal/overview/range` and `/trend`), the PM and washing calendars, the plant tab's washing figures (`/api/scheduled/washing/overview?plant_id=...&include_reports=false`), issue list/filter/search, plant search, issue activity/steps, one synthetic issue lifecycle per ten users, simultaneous edits to distinct fields, duplicate-close rejection, and optional private evidence upload/access denial. It does not yet exercise every module or prove 100-user capacity.
 
 ## Generate 1x/5x/10x local data fixtures
 
@@ -32,13 +32,18 @@ These are 50-repeat, single-process SQLite query microbenchmarks on one workstat
 
 ## Authenticated API latency benchmark
 
-`scripts/benchmark_api_latency.py --scale 1|5|10 --runs 10..200` builds a fresh SQLite database inside a temporary directory, seeds the synthetic scale profile, authenticates as its synthetic Assignee, and measures nine read endpoints through FastAPI TestClient. It does not accept a database URL or a target host. The output includes p50/p95 client wall time, `Server-Timing` app/DB/total, query count, decoded response bytes, and HTTP status/error count. The 10x profile is large; use 10 samples for that profile to avoid repeatedly serializing its full bootstrap payload.
+`scripts/benchmark_api_latency.py --scale 1|5|10 --runs 10..200` builds a fresh SQLite database inside a temporary directory, seeds the synthetic scale profile, authenticates as its synthetic Assignee, and measures read endpoints through FastAPI TestClient. It does not accept a database URL or a target host. The output includes p50/p95 client wall time, `Server-Timing` app/DB/total, query count, decoded response bytes, and HTTP status/error count.
+
+- `--set portal` (default) measures what the current portal requests: session, plant list, Overview, range and trend, activity, plant details, PM and washing calendars, Health issue lists (all plants and one plant), the Washing overview (whole portfolio, and the plant tab's one-plant figures-only form), BOM and Movable Assets. `--set legacy` measures the old `/api/bootstrap` and `/api/state/...` routes that no current screen requests; `--set all` measures both.
+- `--daily-washing` adds one washing report per plant per day for 90 days (with table codes and photo metadata). The base fixture spreads a few reports over a year, which hides the cost of the washing overview's 90-day window; use this flag when measuring washing or the Overview.
 
 ```powershell
-python .\scripts\benchmark_api_latency.py --scale 1 --runs 20
-python .\scripts\benchmark_api_latency.py --scale 5 --runs 20
-python .\scripts\benchmark_api_latency.py --scale 10 --runs 10
+python .\scripts\benchmark_api_latency.py --scale 1 --runs 20 --daily-washing
+python .\scripts\benchmark_api_latency.py --scale 5 --runs 20 --daily-washing
+python .\scripts\benchmark_api_latency.py --scale 10 --runs 20 --daily-washing
 ```
+
+Results of the November 2026 performance pass are in `docs/SOLAR91_PERFORMANCE_ENGINEERING_REPORT.md`.
 
 This is a warmed, single-process local API benchmark. Client wall time includes TestClient and response decompression, not an actual browser/network; it excludes live PostgreSQL, Render cold starts, browser rendering, Storage and concurrent users. API timing results and dataset sizes are recorded in `docs/SCALABILITY_AUDIT.md`.
 
@@ -47,7 +52,7 @@ This is a warmed, single-process local API benchmark. Client wall time includes 
 - A dedicated Render staging service and isolated Supabase staging database/bucket.
 - A staging bearer token for an O&M Head, a synthetic plant UUID/site code, an active staging Assignee UUID, and a unique ticket prefix.
 - A person monitoring Render and Supabase resource metrics with authority to stop the run.
-- Python dependencies from `requirements-load.txt` installed in a separate virtual environment.
+- Python dependencies from `loadtests/requirements.txt` installed in a separate virtual environment.
 
 Set the variables exactly as documented in `loadtests/README.md`: `SOLAR91_LOADTEST_ENV`, `SOLAR91_LOADTEST_CONFIRM_STAGING`, `SOLAR91_LOADTEST_SYNTHETIC_ONLY`, `SOLAR91_LOADTEST_BASE_URL`, `SOLAR91_LOADTEST_APPROVED_HOST`, `SOLAR91_LOADTEST_PRODUCTION_HOSTS`, `SOLAR91_LOADTEST_RUN_ID`, `SOLAR91_LOADTEST_BEARER_TOKEN`, `SOLAR91_LOADTEST_PLANT_ID`, `SOLAR91_LOADTEST_PLANT_SITE_CODE`, and `SOLAR91_LOADTEST_ASSIGNEE_ID`. The bearer token is read from the environment and is not printed. Do not put secret values in a committed file.
 
@@ -57,7 +62,7 @@ Use the guarded runner to execute one stage at a time. Begin with one user, insp
 
 ```powershell
 py -3.12 -m venv .venv-load
-.\.venv-load\Scripts\python.exe -m pip install -r requirements-load.txt
+.\.venv-load\Scripts\python.exe -m pip install -r loadtests/requirements.txt
 .\.venv-load\Scripts\python.exe .\loadtests\run_locust.py --users 1 --spawn-rate 1 --run-time 2m
 .\.venv-load\Scripts\python.exe .\loadtests\run_locust.py --users 25 --spawn-rate 2 --run-time 5m
 .\.venv-load\Scripts\python.exe .\loadtests\run_locust.py --users 50 --spawn-rate 5 --run-time 5m

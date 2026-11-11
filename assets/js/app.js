@@ -91,7 +91,11 @@
         showClerkSignIn("This email is not registered. Ask your O&M Head to add you, then try again.");
         return;
       }
-      authSetupCard("Solar91 could not start", esc(message));
+      // Usually the server waking up or a dropped connection right after sign-in: offer a retry, not a dead end.
+      authSetupCard("Solar91 could not start", esc(message) +
+        '<span style="display:flex;gap:8px;margin-top:14px">' +
+        '<button onclick="startSolar91App()" style="padding:8px 12px">Try again</button>' +
+        '<button onclick="clerkSignOut()" style="padding:8px 12px">Sign out</button></span>');
     }
   };
 

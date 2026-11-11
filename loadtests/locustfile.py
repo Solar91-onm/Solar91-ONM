@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import date
+
 import itertools
 import struct
 import zlib
@@ -48,9 +50,22 @@ class PortalUser(HttpUser):
             self._workflow_once()
 
     def _dashboard(self) -> None:
-        with self.client.get("/api/bootstrap", name="/api/bootstrap [dashboard]", catch_response=True) as response:
-            if response.status_code != 200:
-                response.failure(f"Dashboard bootstrap returned HTTP {response.status_code}")
+        """What the current portal requests at sign-in: session, plant list, Overview, then the period figures and
+        trend for this month (assets/js/app.js, data-adapter.js, overview.js). The old /api/bootstrap is no longer
+        requested by any screen, so it is not measured here."""
+        today = date.today()
+        month_start = today.replace(day=1).isoformat()
+        for path, name in (
+            ("/api/auth/session", "/api/auth/session"),
+            ("/api/portal/plants", "/api/portal/plants"),
+            ("/api/portal/overview", "/api/portal/overview"),
+            (f"/api/portal/overview/range?start_date={month_start}&end_date={today.isoformat()}", "/api/portal/overview/range [month]"),
+            (f"/api/portal/overview/trend?start_date={month_start}&end_date={today.isoformat()}", "/api/portal/overview/trend [month]"),
+        ):
+            with self.client.get(path, name=name, catch_response=True) as response:
+                if response.status_code != 200:
+                    response.failure(f"{name} returned HTTP {response.status_code}")
+                    return
 
     def _issues(self, status: str | None = None) -> list[dict] | None:
         params = {
@@ -325,12 +340,19 @@ class PortalUser(HttpUser):
 
     @task(3)
     def washing_overview(self) -> None:
-        with self.client.get("/api/scheduled/washing/overview", name="/api/scheduled/washing/overview", catch_response=True) as response:
+        # The plant tab's Module Cleaning page: one plant, figures only (operations-calendar.js).
+        with self.client.get(
+            f"/api/scheduled/washing/overview?month={date.today():%Y-%m}&plant_id={self.config.plant_id}&include_reports=false",
+            name="/api/scheduled/washing/overview [plant tab]", catch_response=True,
+        ) as response:
             if response.status_code != 200:
                 response.failure(f"Washing overview returned HTTP {response.status_code}")
 
     @task(2)
-    def bootstrap_lite(self) -> None:
-        with self.client.get("/api/bootstrap?lite=1", name="/api/bootstrap?lite=1", catch_response=True) as response:
-            if response.status_code != 200:
-                response.failure(f"Lite bootstrap returned HTTP {response.status_code}")
+    def calendars(self) -> None:
+        month = f"{date.today():%Y-%m}"
+        for kind in ("pm", "washing"):
+            with self.client.get(f"/api/portal/calendar?kind={kind}&month={month}", name=f"/api/portal/calendar [{kind}]",
+                                 catch_response=True) as response:
+                if response.status_code != 200:
+                    response.failure(f"Calendar {kind} returned HTTP {response.status_code}")

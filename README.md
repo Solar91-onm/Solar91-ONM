@@ -1,30 +1,45 @@
-# Solar91 O&M Portal — Field Desk + stabilized source release
+# Solar91 O&M Portal
 
-FastAPI operations portal for Solar91's solar plants, equipment, Site Issues, scheduled maintenance, washing and administrative access. The **database is authoritative**: the browser sends operational writes to FastAPI, backed by Supabase PostgreSQL. Clerk sends email sign-in codes; Solar91 roles and access scopes remain in the application database.
+Web portal for running operations and maintenance on Solar91's solar plants: plant records, site issues,
+preventive maintenance (PM), module washing, BOM and movable assets.
 
-The portal includes a **site-engineer-first Field Desk** for daily issue and scheduled maintenance work, plus a top-left Ask Solar91 entry. The search assistant is read-only and grounded in role-authorized operational data. See [`docs/FIELD_DESK_RELEASE_2026-10-13.md`](docs/FIELD_DESK_RELEASE_2026-10-13.md) for access rights and verification.
+- Backend: Python, FastAPI, SQLAlchemy
+- Database: PostgreSQL on Supabase (tests use SQLite)
+- Files and photos: Supabase Storage (private bucket)
+- Sign-in: Clerk email codes. Roles and plant access are stored in our own database.
+- Frontend: plain JavaScript and CSS, served by FastAPI
+- Hosting: Render (Docker)
 
-## Operations Calendar
+## Folders
 
-The new **Operations Calendar** combines authorised Site Issues, individual PM work orders, actual washing reports and configured washing-cycle deadlines in compact month/week/day views, with plant-scoped filtering, severity/status colours and anchored detail popups. It keeps all existing record workflows intact. Implementation, security and local verification are documented in [`docs/OPERATIONS_CALENDAR_IMPLEMENTATION.md`](docs/OPERATIONS_CALENDAR_IMPLEMENTATION.md).
+```
+app/            backend, one folder per feature (issues, scheduled, portal, bom, ...)
+assets/         portal frontend (css/, js/, images/), served at /assets
+frontend/       page template, sign-in screen, brand images, PWA files, Excel templates
+database/       SQL migrations (database/migrations/) and Supabase notes
+scripts/        start-up checks, migrations, seed data, backups, benchmarks
+tests/          automated tests (pytest)
+loadtests/      Locust load tests (staging only, never production)
+launchers/      double-click start files for Windows, Mac and Linux
+docs/           deployment runbook, workflow and performance notes
+```
 
-## Daily field operations
+## Pages
 
-**Site Engineers are the principal on-plant workers.** An O&M Head assigns each Site Engineer one plant via Team & Access. On sign-in, the first dashboard displays a live Field Desk: open issues, critical priorities, scheduled PM and overdue PM. Engineers can record a field observation directly against an active issue; the note enters PostgreSQL issue history without changing ownership or closing the ticket. Existing PM and Washing modules remain available for executing scheduled jobs and evidence. The O&M Head and Assignee continue their existing workflows. An approved **Administration** account is the read-only observer role; newly created **Viewer** accounts stay blocked until promoted.
+- **Overview**: portfolio tiles, PM and washing compliance, plant comparison, critical issues, recent activity.
+- **Plants → a plant**: Details (with Design/MDL, Purchase, Liasoning and BOM), Health (issues), PM, Washing.
+- **Views**: the same pages for all plants together, plus Movable Assets and Asset & Warranty.
+- **Settings**: team access and work categories.
 
-The **Ask Solar91** entry under the upper-left sidebar brand searches the currently loaded, role-authorized operational data. It never writes records.
+The server decides what each person can see. O&M Head and Administration see every plant, an Assignee sees their
+assigned plants, a Site Engineer sees one plant, and a new Viewer waits until the O&M Head gives them a role.
+When a figure has no data it shows "Not available", not 0.
 
-## Architecture
+## Run it on your computer
 
-- Python/FastAPI and SQLAlchemy (PostgreSQL production; SQLite **tests only**).
-- Plain JavaScript/CSS frontend served by FastAPI at `/`; asset files at `/static/`.
-- Clerk email-code sign-in; session tokens and verified email identity are checked on the server before loading Solar91 roles and plant permissions.
-- Supabase PostgreSQL for operational records, Supabase Storage for protected evidence.
-- Render web-service deployment configuration: `render.yaml` and `scripts/render_start.sh`.
+Use Python 3.12 and a **test** Supabase project, never production.
 
-## Windows PowerShell: local development
-
-Use Python 3.12 (also tested with Python 3.13 in this environment), Node.js for frontend regression checks, and a **nonproduction** Supabase project.
+Windows (PowerShell):
 
 ```powershell
 py -3.12 -m venv .venv
@@ -34,71 +49,64 @@ Copy-Item .env.example .env
 notepad .env
 ```
 
-Replace placeholders in `.env` with the **staging/test project's** credentials. `DATABASE_URL`, `SUPABASE_URL`, the Clerk publishable/secret keys, and the exact Clerk session issuer are required to operate the application. `SUPABASE_SERVICE_ROLE_KEY` and `SUPABASE_STORAGE_BUCKET` are required for protected evidence file operations. **Never** put the Clerk secret key, service-role key, or DB password in browser code.
-
-Once the staging database schema is in the required state, check it and launch:
-
-```powershell
-python scripts/preflight.py
-python scripts/ensure_storage.py
-python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
-```
-
-Open `http://127.0.0.1:8000/` and sign in using the emailed code for a Clerk account whose Solar91 role/scope is configured. Set Clerk's allowed origin and enable email-code verification in its dashboard. Check `/health` for process liveness, `/health/ready` for live database access and `/docs` for the FastAPI API reference. `/health` **alone does not prove** database connectivity.
-
-**Migrations:** `database/migrations/001_*.sql` through `028_*.sql` are the supplied historical migration set. Review current schema, back up staging, and apply **only missing, approved migrations in order**. Do not indiscriminately re-run all SQL on an existing instance. No new migration was required for this release.
-
-## Linux/macOS: local development
+Linux / Mac:
 
 ```bash
 python3.12 -m venv .venv
 source .venv/bin/activate
 python -m pip install -r requirements.txt
 cp .env.example .env
-# Fill in .env with staging Supabase credentials
+```
+
+Fill in `.env` with the database URL, Supabase URL and keys, and the Clerk keys and issuer. Keep `.env` private and
+never commit it. Then:
+
+```bash
 python scripts/preflight.py
 python scripts/ensure_storage.py
 python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 ```
 
-## Execute tests
+Open http://127.0.0.1:8000 and sign in with the code Clerk emails you. `/health` shows the server is running and
+`/health/ready` shows it can reach the database. On Windows you can also double-click
+`launchers\START_SOLAR91_WINDOWS.bat`.
 
-Install test dependencies and Node.js (used by the extreme-date regression test):
+## Tests
 
-```powershell
+Node.js must be installed (some tests run the frontend JavaScript).
+
+```bash
 python -m pip install -r requirements-dev.txt
 python -m pytest -q
 ```
 
-To perform the optional full browser/HTTP/SQLite smoke test, have Chromium on PATH or install the Playwright Chromium browser, then run:
+Optional browser check on a throwaway local database (no real accounts or data):
 
-```powershell
+```bash
 python -m playwright install chromium
 python scripts/browser_smoke.py
 ```
 
-On Linux/macOS, the same Python commands work once a browser is available. The smoke test launches an **isolated test-only** FastAPI server, SQLite database, and synthetic identity; it does **not** authenticate against Supabase or modify hosted data. The smoke script exits nonzero on a failure. On managed systems that block local HTTP navigation, it has a browser inlining/real-API fallback and prints that limitation.
+## Database changes
 
-Check JS syntax manually with Node:
+SQL migrations are in `database/migrations/`, numbered in order. The app does **not** run them on start-up.
+Before applying one, check what the database already has, take a backup, and apply only the missing migrations in
+order. `database/SUPABASE_CHANGES_FOR_THIS_RELEASE.md` lists the steps for the latest changes.
 
-```powershell
-Get-ChildItem frontend/static/js/*.js | ForEach-Object { node --check $_.FullName }
-```
+## Deploying
 
-Or on Linux/macOS: `for f in frontend/static/js/*.js; do node --check "$f" || exit 1; done`.
+Render builds the `Dockerfile` using `render.yaml` and starts it with `scripts/render_start.sh`. Secret values are set
+in the Render dashboard, not in files. Step-by-step instructions and troubleshooting:
+[docs/RENDER_DEPLOYMENT_RUNBOOK.md](docs/RENDER_DEPLOYMENT_RUNBOOK.md).
 
-## Deployment
+If the site hangs after a deploy, open `/health/ready` first. A 503 there means the database settings on Render
+need fixing, not the frontend.
 
-`render.yaml`, `Dockerfile`, and the [Render runbook](docs/RENDER_DEPLOYMENT_RUNBOOK.md) are provided for the existing Render service. Set private environment variables through the Render dashboard. Configure Clerk's allowed origins and email-code sign-in, then follow [`RELEASE_VALIDATION.md`](RELEASE_VALIDATION.md) to verify readiness and permissions in staging. This source has not been deployed to Render or connected to production services.
+## More notes
 
-Production entry point: `uvicorn app.main:app`; test-only entry point `tests.e2e_server:app` is strictly for local browser smoke tests and is guarded against accidental production execution.
-
-### Portal hangs after a Render deployment? (October 2026 stability release)
-
-Check `/health/ready` first. If it returns 503, solve the Render database/service configuration before changing frontend files. Clerk keys configure authentication; Supabase credentials configure PostgreSQL and private Storage, which still require their own **PostgreSQL Session Pooler `DATABASE_URL`**. Copy `.env.example` locally and fill missing private values in ignored `.env`; for Render, add private values in its Environment panel. Never commit private credentials. See `docs/RENDER_DEPLOYMENT_RUNBOOK.md` for the exact variable names.
-
-If the backend is ready but navigation seems blocked, refresh in a private browsing window to eliminate old JS caches. Press **Escape** to close a stuck modal. If startup cannot complete in 16 seconds, the login splash displays a Reload portal control.
-
-### Interactive Work Radar & Ask Solar91 (13 Oct 2026)
-
-The dashboard includes an interactive Work Radar for Overdue, Due Today, Next 7 Days, and Active Work. Click the cards, the work-type legend (Issues / PM / Washing), or equipment chips to filter the action list; **Open work** enters the matching real register. The older Field Desk can be expanded, so no issue/PM/Washing features were removed. Ask Solar91 uses role-authorized live search and clickable records, with **optional** opt-in AI narration if you configure `OPENAI_API_KEY` and `AI_ASSISTANT_ENABLED=true` privately on Render. Without this opt-in it remains a grounded, read-only search assistant. Full details and scope limitations: [Work Radar and Ask Solar91 guide](docs/WORK_RADAR_AND_ASK_SOLAR91_2026.md).
+- [docs/SCHEDULED_OM_WORKFLOW.md](docs/SCHEDULED_OM_WORKFLOW.md): how PM and washing work
+- [docs/PM_UNIT_SCHEDULING.md](docs/PM_UNIT_SCHEDULING.md) and [docs/PM_CSV_AND_UNIT_COVERAGE.md](docs/PM_CSV_AND_UNIT_COVERAGE.md): PM planning and CSV import
+- [docs/OPERATIONS_CALENDAR_IMPLEMENTATION.md](docs/OPERATIONS_CALENDAR_IMPLEMENTATION.md): the PM and washing calendars
+- [docs/ISSUE_EDIT_DELETE_2026.md](docs/ISSUE_EDIT_DELETE_2026.md): editing, deleting and restoring issues
+- [docs/OPERATIONS_ASSISTANT_AND_CHAT_RETENTION.md](docs/OPERATIONS_ASSISTANT_AND_CHAT_RETENTION.md): Ask Solar91 and chat history
+- [docs/LOAD_TESTING_GUIDE.md](docs/LOAD_TESTING_GUIDE.md) and [docs/SCALABILITY_AUDIT.md](docs/SCALABILITY_AUDIT.md): load testing and scaling

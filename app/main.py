@@ -169,6 +169,15 @@ async def _log_database_latency() -> None:
     from app.core.observability import measure_database_latency
 
     rtt = await asyncio.to_thread(measure_database_latency, engine)
+    from app.core.observability import pool_status
+
+    pool = pool_status(engine)
+    if pool:
+        # Connections one process can open. Total against Supabase's limit = instances x workers x this.
+        workers = int(os.getenv("WEB_CONCURRENCY", "1") or 1)
+        logger.info("database_pool size=%d max_overflow=%d per_process_max=%d workers=%d per_instance_max=%d",
+                    pool["size"], pool["max_overflow"], pool["size"] + pool["max_overflow"], workers,
+                    workers * (pool["size"] + pool["max_overflow"]))
     if rtt is None:
         logger.warning("database_latency unavailable (database not reachable at startup)")
     else:

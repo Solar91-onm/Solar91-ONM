@@ -1509,6 +1509,10 @@
           '<button type="button" data-calendar-action="next" aria-label="Next month">›</button>' +
         '</div><button type="button" class="ep-calendar__today" data-calendar-action="today">Today</button>' +
       '</div>' +
+      (state.truncated
+        ? '<p class="ep-calendar__truncated" role="status">This month has more than ' + state.truncated +
+          ' entries; only the first ' + state.truncated + ' (earliest due) are shown. Open a single plant to see all of its entries.</p>'
+        : "") +
       content +
       (hoverEnabled
         ? '<div class="ep-calendar__wash-hover-card' +
@@ -1551,7 +1555,10 @@
       var cyclesUrl = "/api/scheduled/washing/plants/" + encodeURIComponent(selected.dbId) +
         "/cycles?month=" + queryMonth;
       return Promise.all([
-        api.request("/api/scheduled/washing/overview?month=" + queryMonth),
+        // Only this plant's figures are read here (the plant's reports come from /cycles), so ask for one plant
+        // without the report list instead of the whole portfolio's overview.
+        api.request("/api/scheduled/washing/overview?month=" + queryMonth +
+          "&plant_id=" + encodeURIComponent(selected.dbId) + "&include_reports=false"),
         api.request(cyclesUrl).catch(function (error) {
           if (error.status === 409 && /not been set up/i.test(error.message)) return null;
           throw error;
@@ -1692,6 +1699,7 @@
     state.loaded = false;
     state.error = "";
     state.events = [];
+    state.truncated = 0;
     state.liveWashing = !!(
       context.type === "washing" &&
       context.plantCode &&
@@ -1733,14 +1741,12 @@
       if (context.plantCode && !rows.length) {
         throw new Error("The selected plant is not in the portal catalogue.");
       }
-      return Promise.all(rows.map(function (row) {
-        return data.fetchCalendarActivities(row.plant, row.profile, context.type, state.month);
-      }));
-    }).then(function (eventGroups) {
+      // One request for the month: the plant's own records on a plant tab, every visible plant otherwise.
+      return data.fetchCalendarMonth(context.type, state.month, context.plantCode || "");
+    }).then(function (page) {
       if (requestId !== state.requestId) return;
-      state.events = eventGroups.reduce(function (all, group) {
-        return all.concat(group);
-      }, []).filter(function (event) {
+      state.truncated = page.truncated ? (page.limit || page.entries.length) : 0;
+      state.events = page.entries.filter(function (event) {
         return (!state.rangeStart || event.date >= state.rangeStart) &&
           (!state.rangeEnd || event.date <= state.rangeEnd);
       }).sort(function (a, b) {

@@ -241,6 +241,13 @@
   // ─── Render ──────────────────────────────────────────────────────────
   function render(container) {
     if (!container) return;
+    if (global.Solar91Perf && global.Solar91Perf.enabled) {
+      return global.Solar91Perf.time("render plants table", function () { renderTable(container); });
+    }
+    renderTable(container);
+  }
+
+  function renderTable(container) {
     var rows = visibleRows();
     var single = mode.kind === "single";
     var plant = single && rows[0] ? rows[0].plant : null;

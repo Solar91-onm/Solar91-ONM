@@ -74,7 +74,6 @@ Presentation only (`29-pm-live-dashboard.js`, `46-pm-command.css`); no API, sche
 - **Maintenance by day**: the day strip shows a workload bar; the chosen day is a compact list (plant · equipment × units · progress · assignee · status), searchable, filtered by All / To do / Overdue / Done, 12 rows until *Show all*. An empty day offers a jump to the next planned day.
 - **Register**: 15 rows a page, people filter, sort (due date / most overdue / plant / equipment), overdue rows tinted with "N d late", "due today / in N d" for work due this week, an *Unassigned* chip.
 - **Assign** (O&M Head; register row, day list, unit drawer): assigns a plant's open work orders in one group through the existing `PATCH /api/scheduled/tasks/{id}/assignee`, one request per work order, so role and equipment-scope checks and the task log stay on the server. If one is rejected it stops, says how many were saved and leaves the rest unchanged.
-- Browser check: `python scripts/verify_pm_command_view.py` (mock data and API, no credentials).
 
 ## Views instead of one long page (October 2026)
 Presentation only (`29-pm-live-dashboard.js`, `47-pm-views.css`); no API, schema or stored-record changes. The hero and the five KPI tiles stay on top; below them one tab bar:
@@ -85,7 +84,6 @@ Presentation only (`29-pm-live-dashboard.js`, `47-pm-views.css`); no API, schema
 - **Work register** — unchanged register, filters, assign and edit. KPI tiles, hero pills, chart bars/slices and Command Centre / Work Radar / Plant Pulse links open this view (Plant Pulse "today" opens the Calendar).
 
 Scale: one render reuses its coverage, plant lookups and grouping instead of recomputing them per row, and search boxes redraw 150 ms after typing stops. Measured in local headless Chromium with mock data (100 plants, 2,208 work orders): about 250–380 ms per render before, 35–105 ms per view after. Not measured against live data or on a phone CPU. `/api/scheduled/tasks` and the bootstrap still send every PM record the user may see (see `docs/SCALABILITY_AUDIT.md`).
-Browser checks: `python scripts/verify_pm_command_view.py`, `python scripts/verify_pm_consolidation.py`.
 
 ## ACDB, Miscellaneous and MCCB in the page and the templates (October 2026)
 - **Plants × equipment** always has a column for every Plant side and GSS side equipment of the cycle (in cycle order, ACDB and Miscellaneous included), even before any job exists; an empty cell's **+** opens Add job for that plant and equipment. MCCB is not shown.

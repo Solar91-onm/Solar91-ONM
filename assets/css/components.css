@@ -1254,3 +1254,8 @@
   .ep-sheet-io { flex-wrap: wrap; }
   .ep-sheet-io__dialog { width: 100%; }
 }
+
+/* Overview: a section that could not be read, or the whole Overview failing, is said plainly with a retry. */
+.ep-overview-notice { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 0 0 12px; padding: 10px 14px; border: 1px solid #f5c26b; border-radius: var(--ep-radius-md, 8px); background: #fff8eb; color: #7a4a00; font-size: var(--ep-fs-sm, 13px); }
+.ep-overview-notice.is-error { border-color: #f1a7a1; background: #fdf1f0; color: #8a1c13; }
+.ep-overview-notice button { padding: 4px 10px; border: 1px solid currentColor; border-radius: 999px; background: transparent; color: inherit; font: inherit; font-weight: 600; cursor: pointer; }
