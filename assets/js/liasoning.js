@@ -7,7 +7,7 @@
  *   Views  -> Details -> Liasoning               one row per plant (search, SPV and district filters, CSV)
  *
  * Columns: Site Code | LOA | PPA | Tariff | Registered Land Lease | Commissioning Documents (+ Edit).
- *   LOA and PPA are dates, Tariff is a number (Rs per kWh); the last two are links to a folder or
+ *   LOA and PPA are dates, Tariff is a number (Rs per Unit); the last two are links to a folder or
  *   document held outside the portal.
  *
  * Stored on the plant record, no extra table:
@@ -70,7 +70,7 @@
     var n = Number(raw);
     return isFinite(n) && n >= 0 ? n : null;
   }
-  function showTariff(n) { return n === null ? "" : "₹" + String(Math.round(n * 1000) / 1000) + "/kWh"; }
+  function showTariff(n) { return n === null ? "" : String(Math.round(n * 1000) / 1000) + " Rs/Unit"; }
 
   // Only real web links become clickable; anything else (javascript:, junk) is ignored.
   function linkOf(plant, key) {
@@ -193,7 +193,7 @@
   var FIELDS = [
     { key: "loa_date", label: "LOA date", type: "date" },
     { key: "ppa_date", label: "PPA date", type: "date" },
-    { key: "tariff", label: "Tariff (₹ per kWh)", type: "number", step: "0.001", min: "0", max: String(MAX_TARIFF) },
+    { key: "tariff", label: "Tariff (Rs/Unit)", type: "number", step: "0.001", min: "0", max: String(MAX_TARIFF) },
     { key: "land_lease_url", label: "Registered Land Lease link", type: "url", full: true, placeholder: "https://…" },
     { key: "commissioning_docs_url", label: "Commissioning Documents link", type: "url", full: true, placeholder: "https://…" }
   ];
@@ -274,7 +274,7 @@
   // --- Export -----------------------------------------------------------------
   function exportCSV() {
     var canLinks = canOpenLinks();
-    var header = ["Site Code", "Plant Name", "LOA", "PPA", "Tariff (Rs/kWh)", "Registered Land Lease", "Commissioning Documents"];
+    var header = ["Site Code", "Plant Name", "LOA", "PPA", "Tariff (Rs/Unit)", "Registered Land Lease", "Commissioning Documents"];
     var body = visibleRows().map(function (e) {
       var p = e.plant, r = record(p), t = tariffOf(p);
       return [p.siteCode, p.displayName || p.plantName, showDate(r.loa_date), showDate(r.ppa_date), t === null ? "" : t,
