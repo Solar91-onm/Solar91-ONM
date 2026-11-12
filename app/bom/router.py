@@ -9,12 +9,13 @@ from __future__ import annotations
 
 import re
 import uuid
+from decimal import Decimal
 from typing import Annotated
 from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, nulls_last, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -27,6 +28,8 @@ router = APIRouter(prefix="/api/bom", tags=["BOM"])
 MAX_PAGE = 500
 MAX_QUANTITY = 1_000_000
 MAX_LINES_PER_PLANT = 2000
+MAX_ITEM_NAME = 400          # a BOQ description runs long; migration 040 made the column text
+MAX_SORT_ORDER = 1_000_000   # BOQ line order, not a quantity
 
 
 def _text(value: str | None, limit: int, label: str, required: bool = False) -> str | None:
@@ -38,6 +41,14 @@ def _text(value: str | None, limit: int, label: str, required: bool = False) -> 
     if len(clean) > limit:
         raise HTTPException(422, f"{label} must be {limit} characters or fewer")
     return clean
+
+
+def _number(value: Decimal | int | float | None) -> int | float | None:
+    """A NUMERIC(14,3) quantity as a plain JSON number: 5368.23, 7180.8, 12 -- never "12.000"."""
+    if value is None:
+        return None
+    amount = Decimal(str(value))
+    return int(amount) if amount == amount.to_integral_value() else float(amount)
 
 
 def _url(value: str | None) -> str | None:
@@ -54,7 +65,11 @@ def _url(value: str | None) -> str | None:
 class BomIn(BaseModel):
     item_name: str
     maker_supplier: str | None = None
-    quantity: int | None = Field(default=None, ge=0, le=MAX_QUANTITY)
+    # A BOQ quantity is fractional (5368.23 kWp, 7180.8 Mtrs), stored as NUMERIC(14,3).
+    quantity: Decimal | None = Field(default=None, ge=0, le=MAX_QUANTITY, decimal_places=3, max_digits=14)
+    unit: str | None = None
+    section: str | None = None
+    sort_order: int | None = Field(default=None, ge=0, le=MAX_SORT_ORDER)
     specs: str | None = None
     test_report: str | None = None
     warranty_cert: str | None = None
@@ -76,9 +91,12 @@ def _clean(body: BomIn) -> dict:
     if len(specs) > 2000:
         raise HTTPException(422, "Specs must be 2000 characters or fewer")
     return {
-        "item_name": _text(body.item_name, 200, "Item name", required=True),
+        "item_name": _text(body.item_name, MAX_ITEM_NAME, "Item name", required=True),
         "maker_supplier": _text(body.maker_supplier, 160, "Maker/Supplier"),
-        "quantity": body.quantity,
+        "quantity": None if body.quantity is None else body.quantity.quantize(Decimal("0.001")),
+        "unit": _text(body.unit, 24, "Unit"),
+        "section": _text(body.section, 160, "Section"),
+        "sort_order": body.sort_order,
         "specs": specs or None,
         "test_report": _text(body.test_report, 200, "T.R."),
         "warranty_cert": _text(body.warranty_cert, 200, "W.C."),
@@ -91,10 +109,16 @@ def _clean(body: BomIn) -> dict:
 def _out(row: BomItem, plant: Plant) -> dict:
     return {
         "id": str(row.id), "siteCode": plant.site_code, "itemName": row.item_name,
-        "makerSupplier": row.maker_supplier, "quantity": row.quantity, "specs": row.specs,
+        "makerSupplier": row.maker_supplier, "quantity": _number(row.quantity), "unit": row.unit,
+        "section": row.section, "sortOrder": row.sort_order, "specs": row.specs,
         "testReport": row.test_report, "warrantyCert": row.warranty_cert,
         "serialNo": row.serial_no, "invoice": row.invoice, "invoiceUrl": row.invoice_url, "version": row.row_version,
     }
+
+
+def _log(value):
+    """Audit metadata is stored as JSON: a Decimal quantity goes in as a number, not a Decimal."""
+    return _number(value) if isinstance(value, Decimal) else value
 
 
 def _like(term: str) -> str:
@@ -104,8 +128,12 @@ def _like(term: str) -> str:
 @router.get("")
 def list_items(db: Annotated[Session, Depends(get_db)], user: Annotated[User, Depends(get_current_user)],
                site_code: str | None = None, spv: str | None = None, maker: str | None = None,
-               q: str | None = None, limit: int = 200, offset: int = 0):
-    """Lines in the caller's scope, filtered and paged. ``total`` counts every match, not just this page."""
+               section: str | None = None, q: str | None = None, limit: int = 200, offset: int = 0):
+    """Lines in the caller's scope, filtered and paged. ``total`` counts every match, not just this page.
+
+    Lines come back in BOQ order -- section, then the sheet's line order, then item name -- so the
+    page can render them exactly as received. Lines with no section or no line order sort last.
+    """
     limit = max(1, min(limit, MAX_PAGE))
     offset = max(0, offset)
     plants = [_plant_for_code(db, user, site_code)] if site_code else _visible_plants(db, user)
@@ -113,15 +141,21 @@ def list_items(db: Annotated[Session, Depends(get_db)], user: Annotated[User, De
         plants = [p for p in plants if (p.project_company or "") == spv]
     by_id = {p.id: p for p in plants}
     if not by_id:
-        return {"items": [], "total": 0, "makers": [], "limit": limit, "offset": offset}
+        return {"items": [], "total": 0, "makers": [], "sections": [], "limit": limit, "offset": offset}
     ids = list(by_id)
     where = [BomItem.plant_id.in_(ids)]
-    # Makers offered in the filter come from the plants in scope, before the maker/search filters apply.
+    # Makers and sections offered in the filters come from the plants in scope, before the
+    # maker/section/search filters apply, so choosing one never empties the other list.
     makers = sorted({m for (m,) in db.execute(
         select(BomItem.maker_supplier).where(*where, BomItem.maker_supplier.is_not(None)).distinct())},
         key=str.lower)[:300]
+    sections = sorted({x for (x,) in db.execute(
+        select(BomItem.section).where(*where, BomItem.section.is_not(None)).distinct())},
+        key=str.lower)[:300]
     if maker:
         where.append(func.lower(BomItem.maker_supplier) == maker.strip().lower())
+    if section:
+        where.append(func.lower(BomItem.section) == section.strip().lower())
     term = (q or "").strip()[:100]
     if term:
         pattern = _like(term.lower())
@@ -130,9 +164,11 @@ def list_items(db: Annotated[Session, Depends(get_db)], user: Annotated[User, De
             BomItem.invoice, BomItem.test_report, BomItem.warranty_cert)]))
     total = db.scalar(select(func.count()).select_from(BomItem).where(*where)) or 0
     rows = list(db.scalars(select(BomItem).where(*where).order_by(
+        # The raw section column, not lower(section), so ix_bom_items_plant_section_order can serve this.
+        nulls_last(BomItem.section), nulls_last(BomItem.sort_order),
         func.lower(BomItem.item_name), BomItem.created_at, BomItem.id).limit(limit).offset(offset)))
     return {"items": [_out(r, by_id[r.plant_id]) for r in rows], "total": total, "makers": makers,
-            "limit": limit, "offset": offset}
+            "sections": sections, "limit": limit, "offset": offset}
 
 
 @router.post("", status_code=201, dependencies=[Depends(require_csrf)])
@@ -172,7 +208,7 @@ def update_item(item_id: str, body: BomUpdate, db: Annotated[Session, Depends(ge
     if body.version != row.row_version:
         raise HTTPException(409, "This line was changed by someone else. Reload the page and try again.")
     values = _clean(body)
-    changes = {k: {"from": getattr(row, k), "to": v} for k, v in values.items() if getattr(row, k) != v}
+    changes = {k: {"from": _log(getattr(row, k)), "to": _log(v)} for k, v in values.items() if getattr(row, k) != v}
     if changes:
         for key, value in values.items():
             setattr(row, key, value)

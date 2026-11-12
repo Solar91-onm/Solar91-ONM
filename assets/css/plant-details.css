@@ -145,11 +145,13 @@
 .ep-bom__actions { white-space: normal; }
 .ep-bom__invoice { font-weight: 600; text-decoration: none; }
 .ep-bom__invoice:hover { text-decoration: underline; }
-@media (max-width: 900px) {   /* phones: a readable width beats squeezing; only here may the table scroll sideways */
+@media (max-width: 1100px) {  /* phones and small laptops: a readable width beats squeezing twelve columns */
   .ep-bom__scroll { overflow-x: auto; }
-  .ep-pt__table.ep-bom__table { min-width: 900px; }
+  .ep-pt__table.ep-bom__table { min-width: 1100px; }
 }
 .ep-bom__item { font-weight: 600; color: var(--ep-text-strong); }
+.ep-pt__table.ep-bom__table td.ep-bom__section { color: var(--ep-text-muted); font-weight: 600; }
+.ep-pt__table.ep-bom__table td.num.mono { overflow-wrap: normal; word-break: keep-all; }   /* a quantity never breaks mid-number */
 .ep-bom__del { margin-left: 6px; width: 24px; height: 24px; border: 1px solid var(--ep-border-soft, var(--ep-border)); border-radius: 999px; background: var(--ep-bg-muted); color: var(--ep-text-muted); cursor: pointer; font-size: 15px; line-height: 1; }
 .ep-bom__del:hover { color: #b42318; border-color: #b42318; }
 .ep-bom__more { display: flex; justify-content: center; padding: 10px; border-top: 1px solid var(--ep-border-soft, var(--ep-border)); }

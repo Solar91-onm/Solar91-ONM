@@ -1,9 +1,15 @@
 /**
  * bom.js
  * ---------------------------------------------------------------------
- * Bill of Materials: the parts inventory of the solar plants. One row per part line:
+ * Bill of Materials: the BOQ / parts inventory of the solar plants. One row per BOQ line:
  *
- *   Item Name | Maker/Supplier | Quantity | Specs | T.R. | W.C. | Item Serial No. | Invoice
+ *   Section | Item Name | Maker/Supplier | Quantity | Unit | Specs | T.R. | W.C. | Item Serial No. | Invoice
+ *
+ * Section is the BOQ group heading ("PV Section", "PROTECTION") and Unit the unit of measure
+ * (Nos., Mtrs, kWp). Quantity is fractional (5368.23 kWp). A BOQ line may legitimately carry no
+ * maker, no unit and no section, and sub-variant lines repeat an item name: nothing here groups,
+ * dedupes or re-sorts rows -- they render in the order the API returns them (section, BOQ line
+ * order, item name).
  *
  *   Views -> Details -> BOM    every plant's lines (search, plant, SPV and maker filters), a Plant column
  *   Plant -> Details -> BOM    that plant's lines only
@@ -21,20 +27,26 @@
 
   var PAGE = 200;
   var EXPORT_CAP = 5000;
+  var MAX_QUANTITY = 1000000;
+  var MAX_SORT_ORDER = 1000000;
+  // `w` is the column's share of the table width (see colgroupHTML): the columns that hold
+  // long BOQ text get more of the frame than Quantity or Unit, so nothing has to scroll sideways.
   var COLS = [
-    { key: "itemName", label: "Item Name" },
-    { key: "makerSupplier", label: "Maker/Supplier" },
-    { key: "quantity", label: "Quantity", num: true },
-    { key: "specs", label: "Specs" },
-    { key: "testReport", label: "T.R." },
-    { key: "warrantyCert", label: "W.C." },
-    { key: "serialNo", label: "Item Serial No." },
-    { key: "invoice", label: "Invoice" }
+    { key: "section", label: "Section", w: 1.25 },
+    { key: "itemName", label: "Item Name", w: 2 },
+    { key: "makerSupplier", label: "Maker/Supplier", w: 1.15 },
+    { key: "quantity", label: "Quantity", num: true, w: 1 },
+    { key: "unit", label: "Unit", w: 0.6 },
+    { key: "specs", label: "Specs", w: 2.1 },
+    { key: "testReport", label: "T.R.", w: 0.7 },
+    { key: "warrantyCert", label: "W.C.", w: 0.7 },
+    { key: "serialNo", label: "Item Serial No.", w: 0.95 },
+    { key: "invoice", label: "Invoice", w: 0.95 }
   ];
 
   var mode = { kind: "all", siteCode: null };
-  var ui = { search: "", plant: "__all", spv: "__all", maker: "__all" };
-  var st = { items: [], total: 0, makers: [], plants: [], loading: false, error: "", more: false };
+  var ui = { search: "", plant: "__all", spv: "__all", maker: "__all", section: "__all" };
+  var st = { items: [], total: 0, makers: [], sections: [], plants: [], loading: false, error: "", more: false };
   var token = 0, searchTimer = null, busy = false;
 
   function api() { return global.Solar91PortalAPI; }
@@ -50,6 +62,7 @@
       if (ui.spv !== "__all") q.push("spv=" + encodeURIComponent(ui.spv));
     }
     if (ui.maker !== "__all") q.push("maker=" + encodeURIComponent(ui.maker));
+    if (ui.section !== "__all") q.push("section=" + encodeURIComponent(ui.section));
     if (ui.search.trim()) q.push("q=" + encodeURIComponent(ui.search.trim()));
     return "/api/bom?" + q.join("&");
   }
@@ -69,6 +82,7 @@
       st.items = append ? st.items.concat(res.items || []) : (res.items || []);
       st.total = res.total || 0;
       st.makers = res.makers || [];
+      st.sections = res.sections || [];
       st.loading = false;
       st.more = st.items.length < st.total;
     }).catch(function (err) {
@@ -86,7 +100,7 @@
   }
 
   function filtersActive() {
-    return !!(ui.search.trim() || ui.plant !== "__all" || ui.spv !== "__all" || ui.maker !== "__all");
+    return !!(ui.search.trim() || ui.plant !== "__all" || ui.spv !== "__all" || ui.maker !== "__all" || ui.section !== "__all");
   }
 
   function toolbarHTML() {
@@ -104,8 +118,10 @@
       '<input type="text" placeholder="Search item, maker, specs, serial, invoice..." data-bom-search value="' + fmt.escape(ui.search) + '" autocomplete="off" /></div>';
     var maker = '<select class="ep-pt__select" data-bom-filter="maker" aria-label="Filter by maker or supplier"><option value="__all">All makers</option>' +
       opts(st.makers, ui.maker) + "</select>";
+    var section = '<select class="ep-pt__select" data-bom-filter="section" aria-label="Filter by BOQ section"><option value="__all">All sections</option>' +
+      opts(st.sections, ui.section) + "</select>";
     var clear = filtersActive() ? '<button type="button" class="ep-pt__export" data-bom-clear>Clear filters</button>' : "";
-    if (single()) return '<div class="ep-pt__toolbar">' + search + maker + clear + "</div>";
+    if (single()) return '<div class="ep-pt__toolbar">' + search + section + maker + clear + "</div>";
     return '<div class="ep-pt__toolbar">' + search +
       '<select class="ep-pt__select" data-bom-filter="spv" aria-label="Filter by SPV or project"><option value="__all">All SPV</option>' +
         opts(spvs, ui.spv, function (v) {
@@ -114,7 +130,7 @@
         }) + "</select>" +
       '<select class="ep-pt__select" data-bom-filter="plant" aria-label="Filter by plant"><option value="__all">All plants</option>' +
         opts(plants.map(function (r) { return r.plant.siteCode; }), ui.plant, function (c) { return c + " · " + plantName(c); }) + "</select>" +
-      maker + clear + "</div>";
+      section + maker + clear + "</div>";
   }
 
   var EDIT_ICON = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"></path><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"></path></svg>';
@@ -136,10 +152,16 @@
     return cell(item.invoice);
   }
 
-  // Every column gets the same share of the frame, so the table is evenly spaced, symmetrical and never scrolls sideways.
+  // Every column gets a share of the frame proportional to how much text it holds, so the whole
+  // table fits without scrolling sideways and a 500-character spec still wraps readably.
   function colgroupHTML(editor) {
-    var n = COLS.length + (single() ? 0 : 1) + (editor ? 1 : 0);
-    return "<colgroup>" + new Array(n + 1).join('<col style="width:' + (100 / n).toFixed(3) + '%">') + "</colgroup>";
+    var shares = COLS.map(function (c) { return c.w || 1; });
+    if (!single()) shares.push(1.1);                       // Plant
+    if (editor) shares.push(0.9);                          // Edit
+    var total = shares.reduce(function (a, b) { return a + b; }, 0);
+    return "<colgroup>" + shares.map(function (w) {
+      return '<col style="width:' + (100 * w / total).toFixed(3) + '%">';
+    }).join("") + "</colgroup>";
   }
 
   function cell(value, cls) {
@@ -147,11 +169,21 @@
     return "<td" + (cls ? ' class="' + cls + '"' : "") + ">" + (has ? fmt.escape(String(value)) : '<span class="ep-pt__dash">—</span>') + "</td>";
   }
 
+  // A BOQ quantity is fractional and stored to three decimals; it is shown as stored, with the
+  // trailing zeros trimmed (5368.23, 7180.8, 12 -- never "12.000", never rounded to 5368).
+  function qtyCell(value) {
+    if (value === null || value === undefined || value === "") return '<td class="num mono"><span class="ep-pt__dash">—</span></td>';
+    var n = Number(value);
+    return '<td class="num mono">' + (isFinite(n) ? fmt.formatNumber(n) : fmt.escape(String(value))) + "</td>";
+  }
+
   function rowHTML(item, editor) {
     return "<tr>" +
+      cell(item.section, "ep-bom__section") +
       '<td class="ep-bom__item">' + fmt.escape(item.itemName) + "</td>" +
       cell(item.makerSupplier) +
-      '<td class="num mono">' + (item.quantity === null ? '<span class="ep-pt__dash">—</span>' : fmt.formatNumber(item.quantity)) + "</td>" +
+      qtyCell(item.quantity) +
+      cell(item.unit) +
       cell(item.specs, "ep-bom__specs") + cell(item.testReport) + cell(item.warrantyCert) +
       cell(item.serialNo, "mono") + invoiceCell(item) +
       (single() ? "" : '<td><span class="ep-pt__code">' + fmt.escape(item.siteCode) + '</span><span class="ep-pt__name">' + fmt.escape(plantName(item.siteCode)) + "</span></td>") +
@@ -240,9 +272,13 @@
         '<p class="ep-pd__mono">' + fmt.escape(siteCode ? siteCode + " · " + plantName(siteCode) : "Choose the plant this part belongs to") + "</p></div>" +
         '<button class="ep-pd__x" type="button" data-bom-close aria-label="Close">×</button></header>' +
       '<div class="ep-bom__modal-body">' + plantField +
-        f("item_name", "Item Name *", 200, v.itemName, " ep-bom__wide") + f("maker_supplier", "Maker/Supplier", 160, v.makerSupplier) +
-        '<label class="ep-pd__field"><span>Quantity</span><input type="number" min="0" max="1000000" step="1" inputmode="numeric" data-bom-field="quantity" value="' +
+        f("item_name", "Item Name *", 400, v.itemName, " ep-bom__wide") + f("section", "Section (BOQ heading)", 160, v.section) +
+        f("maker_supplier", "Maker/Supplier", 160, v.makerSupplier) +
+        '<label class="ep-pd__field"><span>Quantity</span><input type="number" min="0" max="1000000" step="0.001" inputmode="decimal" data-bom-field="quantity" value="' +
           (v.quantity == null ? "" : v.quantity) + '" /></label>' +
+        f("unit", "Unit (Nos., Mtrs, kWp…)", 24, v.unit) +
+        '<label class="ep-pd__field"><span>Sort order (BOQ line order)</span><input type="number" min="0" max="1000000" step="1" inputmode="numeric" data-bom-field="sort_order" value="' +
+          (v.sortOrder == null ? "" : v.sortOrder) + '" /></label>' +
         '<label class="ep-pd__field ep-bom__wide"><span>Specs</span><textarea rows="3" maxlength="2000" data-bom-field="specs">' + fmt.escape(v.specs || "") + "</textarea></label>" +
         f("test_report", "T.R.", 200, v.testReport) + f("warranty_cert", "W.C.", 200, v.warrantyCert) +
         f("serial_no", "Item Serial No.", 120, v.serialNo) + f("invoice", "Invoice", 200, v.invoice) +
@@ -274,10 +310,17 @@
       if (!code) { errorEl.textContent = "Choose a plant."; return; }
       if (!val("item_name")) { errorEl.textContent = "Item Name is required."; return; }
       var qty = val("quantity");
-      if (qty !== "" && (!/^\d+$/.test(qty) || Number(qty) > 1000000)) { errorEl.textContent = "Quantity must be a whole number from 0 to 1,000,000."; return; }
+      if (qty !== "" && (!/^\d+(\.\d{1,3})?$/.test(qty) || Number(qty) > MAX_QUANTITY)) {
+        errorEl.textContent = "Quantity must be a number from 0 to 1,000,000 with at most three decimals."; return;
+      }
+      var order = val("sort_order");
+      if (order !== "" && (!/^\d+$/.test(order) || Number(order) > MAX_SORT_ORDER)) {
+        errorEl.textContent = "Sort order must be a whole number from 0 to 1,000,000."; return;
+      }
       var link = val("invoice_url");
       if (link && !safeUrl(link)) { errorEl.textContent = "Invoice link must start with http:// or https://"; return; }
       var body = { invoice_url: link, item_name: val("item_name"), maker_supplier: val("maker_supplier"), quantity: qty === "" ? null : Number(qty),
+        unit: val("unit"), section: val("section"), sort_order: order === "" ? null : Number(order),
         specs: val("specs"), test_report: val("test_report"), warranty_cert: val("warranty_cert"), serial_no: val("serial_no"), invoice: val("invoice") };
       if (item) body.version = item.version; else body.site_code = code;
       saving = true;
@@ -370,7 +413,7 @@
       });
     });
     var clear = container.querySelector("[data-bom-clear]");
-    if (clear) clear.addEventListener("click", function () { ui = { search: "", plant: "__all", spv: "__all", maker: "__all" }; load(container, false); });
+    if (clear) clear.addEventListener("click", function () { ui = { search: "", plant: "__all", spv: "__all", maker: "__all", section: "__all" }; load(container, false); });
     var more = container.querySelector("[data-bom-more]");
     if (more) more.addEventListener("click", function () { if (!st.loading) load(container, true); });
     var add = container.querySelector("[data-bom-add]");
@@ -390,8 +433,8 @@
   function show(container, opts) {
     if (!container) return;
     mode = { kind: (opts && opts.siteCode) ? "single" : "all", siteCode: opts ? opts.siteCode : null };
-    ui = { search: "", plant: "__all", spv: "__all", maker: "__all" };
-    st = { items: [], total: 0, makers: [], plants: st.plants, loading: true, error: "", more: false };
+    ui = { search: "", plant: "__all", spv: "__all", maker: "__all", section: "__all" };
+    st = { items: [], total: 0, makers: [], sections: [], plants: st.plants, loading: true, error: "", more: false };
     container.innerHTML = '<div class="ep-pt__loading">Loading BOM…</div>';
     data.fetchPortfolio().then(function (portfolio) {
       st.plants = portfolio.rows || [];

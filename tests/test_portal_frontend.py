@@ -991,3 +991,128 @@ def test_calendar_day_detail_lists_the_cleaned_tables():
     calendar = (PORTAL_ASSETS / "js" / "operations-calendar.js").read_text(encoding="utf-8")
     assert '["Which tables", event.tablesList]' in calendar
     assert "tablesList: formatTableList(tableNumbersOf(report))" in calendar
+
+
+def test_bom_table_adds_section_and_unit_columns_and_keeps_the_server_row_order():
+    """BOQ fields (migration 040) are two more ordinary columns in the same BOM table.
+
+    Section sits first, Unit directly after Quantity, rows render in the order the API sent
+    them, decimals keep their stored precision, and both columns reach the CSV.
+    """
+    module = (PORTAL_ASSETS / "js" / "bom.js").read_text(encoding="utf-8")
+    assert '{ key: "section", label: "Section", w: ' in module
+    assert '{ key: "unit", label: "Unit", w: ' in module
+    assert module.index('{ key: "section"') < module.index('{ key: "itemName"')
+    assert module.index('{ key: "quantity"') < module.index('{ key: "unit"') < module.index('{ key: "specs"')
+    # Still one table: no grouped section header rows, cards or accordions.
+    assert "ep-pt__table ep-bom__table" in module
+    assert "rowspan" not in module and "ep-bom__group" not in module
+    assert 'data-bom-filter="section"' in module and "All sections" in module
+    assert 'step="0.001"' in module and 'data-bom-field="sort_order"' in module
+
+    script = r"""
+      global.window = global;
+      global.document = { activeElement: null, body: { appendChild() {}, removeChild() {} },
+        createElement: () => ({ click() {}, style: {} }) };
+      let csv = '';
+      global.Blob = function (parts) { csv = parts.join(''); };
+      global.URL.createObjectURL = () => 'blob:bom';
+      global.URL.revokeObjectURL = () => {};
+      require('./assets/js/format.js');
+
+      const plant = { siteCode: 'ABH01', plantName: 'Abhaneri 01', displayName: 'Abhaneri', district: 'Dausa', projectCompany: 'P1' };
+      global.Solar91PortalData = { fetchPortfolio: () => Promise.resolve({ rows: [{ plant: plant, profile: {} }] }) };
+
+      const base = { siteCode: 'ABH01', makerSupplier: null, quantity: null, unit: null, section: null,
+        sortOrder: null, specs: null, testReport: null, warrantyCert: null, serialNo: null,
+        invoice: null, invoiceUrl: null, version: 1 };
+      // Exactly as the API sends them: section, then BOQ line order. Not alphabetical.
+      const ITEMS = [
+        Object.assign({}, base, { id: '1', itemName: 'Solar PV Modules', makerSupplier: 'Adani',
+          quantity: 5368.23, unit: 'kWp', section: 'PV Section', sortOrder: 1, specs: 'Mono PERC 550 Wp' }),
+        Object.assign({}, base, { id: '2', itemName: 'DC Cable', makerSupplier: 'Polycab',
+          quantity: 7180.8, unit: 'Mtrs', section: 'PV Section', sortOrder: 2 }),
+        Object.assign({}, base, { id: '3', itemName: 'JOINTING KIT', section: 'HT Section', sortOrder: 3, specs: '95 sqmm' }),
+        Object.assign({}, base, { id: '4', itemName: 'JOINTING KIT', section: 'HT Section', sortOrder: 4,
+          specs: '185 sqmm', quantity: 12, unit: 'Set' }),
+        Object.assign({}, base, { id: '5', itemName: 'Aux transformer' })
+      ];
+      let urls = [];
+      global.Solar91PortalAPI = {
+        can: () => false,
+        currentUser: () => ({ role: 'O&M Head' }),
+        request: (url) => { urls.push(url); return Promise.resolve({ items: ITEMS, total: ITEMS.length,
+          makers: ['Adani', 'Polycab'], sections: ['HT Section', 'PV Section'], limit: 200, offset: 0 }); }
+      };
+      require('./assets/js/bom.js');
+
+      function container() {
+        const el = { isConnected: true, html: '', nodes: {} };
+        Object.defineProperty(el, 'innerHTML', { get() { return el.html; }, set(v) { el.html = v; } });
+        const make = (key) => el.nodes[key] || (el.nodes[key] = { on: {}, value: '', textContent: '',
+          classList: { toggle() {} }, getAttribute: () => key.split('=')[1] || key,
+          addEventListener(t, f) { this.on[t] = f; }, click() { if (this.on.click) this.on.click(); } });
+        el.querySelector = (sel) => {
+          const name = sel.charAt(0) === '.' ? sel.slice(1) : sel.slice(1, -1);
+          return el.html.indexOf(name) === -1 ? null : make(name);
+        };
+        el.querySelectorAll = (sel) => {
+          const name = sel.slice(1, -1), found = [];
+          let i = -1;
+          while ((i = el.html.indexOf(name + '="', i + 1)) !== -1) {
+            const from = i + name.length + 2;
+            found.push(make(name + '=' + el.html.slice(from, el.html.indexOf('"', from))));
+          }
+          return found;
+        };
+        return el;
+      }
+      const tick = () => new Promise(r => setTimeout(r, 0));
+      const fail = (m) => { throw new Error(m); };
+      const at = (html, text) => { const i = html.indexOf(text); if (i === -1) fail('missing: ' + text); return i; };
+
+      (async () => {
+        const el = container();
+        Solar91PortalBom.show(el, { siteCode: 'ABH01' });
+        for (let i = 0; i < 8; i++) await tick();
+        const html = el.html;
+
+        // Two more ordinary columns in the same table: Section first, Unit after Quantity.
+        if (at(html, '<th>Section</th>') > at(html, '<th>Item Name</th>')) fail('Section must come first');
+        if (html.indexOf('<th>Quantity</th><th>Unit</th>') === -1) fail('Unit must follow Quantity');
+        if (at(html, '<th>Unit</th>') > at(html, '<th>Specs</th>')) fail('Unit must come before Specs');
+        if (html.indexOf('<table') !== html.lastIndexOf('<table')) fail('the page must stay one table');
+
+        // The server's order is the page's order: not alphabetical, not regrouped.
+        const order = ['Solar PV Modules', 'DC Cable', '95 sqmm', '185 sqmm', 'Aux transformer'].map(t => at(html, t));
+        for (let i = 1; i < order.length; i++) if (order[i] < order[i - 1]) fail('row order changed');
+        // Sub-variant lines sharing an item name are both rendered.
+        if ((html.match(/JOINTING KIT<\/td>/g) || []).length !== 2) fail('a repeated item name was collapsed');
+
+        // Decimals as stored, trailing zeros trimmed, never rounded to an integer.
+        if (html.indexOf('5,368.23') === -1 || html.indexOf('7,180.8') === -1) fail('decimal quantity lost');
+        if (html.indexOf('12.000') !== -1 || html.indexOf('>5,368<') !== -1) fail('quantity rounded or padded');
+
+        // A line with no maker, no unit and no section renders placeholders, never "undefined".
+        if (html.indexOf('undefined') !== -1) fail('undefined leaked into the table');
+        if ((html.match(/ep-pt__dash/g) || []).length < 10) fail('missing placeholders');
+
+        // The section filter sits with the other filters and is fed by the API list.
+        if (html.indexOf('data-bom-filter="section"') === -1) fail('section filter missing');
+        if (html.indexOf('>HT Section</option>') === -1 || html.indexOf('>All sections</option>') === -1) fail('section options missing');
+        el.nodes['data-bom-filter=section'].value = 'PV Section';
+        el.nodes['data-bom-filter=section'].on.change();
+        for (let i = 0; i < 6; i++) await tick();
+        if (urls[urls.length - 1].indexOf('section=PV%20Section') === -1) fail('section not sent: ' + urls[urls.length - 1]);
+
+        // CSV carries both new columns, in the table's positions, with the raw stored numbers.
+        el.nodes['data-bom-export=csv'].on.click();
+        for (let i = 0; i < 8; i++) await tick();
+        const lines = csv.replace(/^﻿/, '').split('\r\n');
+        if (lines[0].indexOf('Section,Item Name,Maker/Supplier,Quantity,Unit,Specs,T.R.,W.C.,Item Serial No.,Invoice') !== 0) fail('CSV header: ' + lines[0]);
+        if (lines[1].indexOf('PV Section,Solar PV Modules,Adani,5368.23,kWp,') !== 0) fail('CSV row: ' + lines[1]);
+        if (lines[5].indexOf(',Aux transformer,,,,') !== 0) fail('CSV empty row: ' + lines[5]);
+      })().catch(e => { console.error(e.message); process.exit(1); });
+    """
+    run = subprocess.run(["node", "-e", script], cwd=ROOT, capture_output=True, text=True, timeout=20)
+    assert run.returncode == 0, run.stderr

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import date, datetime, timezone
+from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Index, Integer, JSON, Numeric, String, Text, UniqueConstraint, func, text
@@ -776,19 +777,28 @@ class MovableAsset(Base, TimestampMixin):
 
 
 class BomItem(Base, TimestampMixin):
-    """One inventory line of a plant's Bill of Materials (BOM page). Migration 038.
+    """One line of a plant's Bill of Materials / BOQ (BOM page). Migrations 038 and 040.
 
-    What part is installed or held at the plant, who made or supplied it, how many, a short
-    description (specs), and its paperwork references. ``test_report`` (T.R.), ``warranty_cert``
-    (W.C.) and ``invoice`` are free-text references, not files. ``row_version`` is bumped on every
-    save so two people editing the same line cannot silently overwrite each other.
+    What part is installed or held at the plant, who made or supplied it, how many and in which
+    unit, a short description (specs), and its paperwork references. ``test_report`` (T.R.),
+    ``warranty_cert`` (W.C.) and ``invoice`` are free-text references, not files. ``row_version``
+    is bumped on every save so two people editing the same line cannot silently overwrite each
+    other.
+
+    A real BOQ arrives grouped: ``section`` is the group heading ("PV Section", "PROTECTION") and
+    ``sort_order`` the line order inside the sheet. The sheet's own S.No. repeats across
+    sub-variant lines, so it cannot order them; ``sort_order`` can. ``quantity`` is NUMERIC(14,3)
+    because BOQ lines carry fractions (5368.23 kWp, 7180.8 Mtrs).
     """
     __tablename__ = "bom_items"
     id: Mapped[uuid.UUID] = uuid_pk()
     plant_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("plants.id", ondelete="CASCADE"), nullable=False, index=True)
-    item_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    item_name: Mapped[str] = mapped_column(Text, nullable=False)
     maker_supplier: Mapped[str | None] = mapped_column(String(160))
-    quantity: Mapped[int | None] = mapped_column(Integer)
+    quantity: Mapped[Decimal | None] = mapped_column(Numeric(14, 3))
+    unit: Mapped[str | None] = mapped_column(String(24))        # Nos. / Mtrs / kWp / KG / Set
+    section: Mapped[str | None] = mapped_column(String(160))    # BOQ group heading
+    sort_order: Mapped[int | None] = mapped_column(Integer)     # BOQ line order within the sheet
     specs: Mapped[str | None] = mapped_column(Text)
     test_report: Mapped[str | None] = mapped_column(String(200))
     warranty_cert: Mapped[str | None] = mapped_column(String(200))
@@ -797,3 +807,4 @@ class BomItem(Base, TimestampMixin):
     invoice_url: Mapped[str | None] = mapped_column(Text)      # http(s) link to the invoice; the Invoice cell opens it
     row_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     updated_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    __table_args__ = (Index("ix_bom_items_plant_section_order", "plant_id", "section", "sort_order"),)
