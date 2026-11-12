@@ -39,7 +39,7 @@ from app.core.models import (
     WashingDailyReport,
     WashingTable,
 )
-from app.core.security import user_scoped_plant_ids
+from app.core.security import user_scoped_plant_ids, visible_custom_fields
 from app.core.timeutil import BUSINESS_TZ, business_today
 
 # ── Business rules (mirrored from the owning modules) ────────────────────────
@@ -409,8 +409,11 @@ def build_profile(
     return profile
 
 
-def plant_out(plant: Plant, engineers: list[str], washing_assignee: str) -> dict[str, Any]:
-    """A plant record as the portal reads it: stored columns, nothing invented."""
+def plant_out(plant: Plant, engineers: list[str], washing_assignee: str, user: User) -> dict[str, Any]:
+    """A plant record as the portal reads it: stored columns, nothing invented.
+
+    ``user`` is required so the Design/MDL folder link is only sent to roles allowed to open it.
+    """
     return {
         "id": str(plant.id),
         "site_code": plant.site_code,
@@ -429,7 +432,7 @@ def plant_out(plant: Plant, engineers: list[str], washing_assignee: str) -> dict
         "assigned_engineer": plant.assigned_engineer,
         "site_engineers": engineers,
         "washing_assignee": washing_assignee,
-        "custom_fields": plant.custom_fields or {},
+        "custom_fields": visible_custom_fields(plant.custom_fields, user),
         "created_at": plant.created_at.isoformat() if getattr(plant, "created_at", None) else None,
         "updated_at": plant.updated_at.isoformat() if getattr(plant, "updated_at", None) else None,
     }
@@ -496,7 +499,7 @@ def portfolio(db: Session, user: User) -> dict[str, Any]:
             last_at.get(plant.id),
         )
         rows.append({
-            "plant": plant_out(plant, engineers, washer),
+            "plant": plant_out(plant, engineers, washer, user),
             "profile": profile,
         })
 
@@ -657,7 +660,7 @@ def portfolio_for_range(db: Session, user: User, start: date, end: date) -> dict
             None,
         )
         rows.append({
-            "plant": plant_out(plant, engineers.get(plant.id, []), washers.get(plant.id, "")),
+            "plant": plant_out(plant, engineers.get(plant.id, []), washers.get(plant.id, ""), user),
             "profile": profile,
         })
     return {

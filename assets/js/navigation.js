@@ -34,18 +34,40 @@
 
   var DETAIL_SECTIONS = [
     { id: "design-mdl", label: "Design/MDL" },
-    { id: "purchase", label: "Purchase" },
     { id: "liasoning", label: "Liasoning" },
     { id: "bom", label: "BOM" }
   ];
 
+  // "*" = every page. A list = only those plant pages, and no portfolio-wide Views
+  // or Login access. Data scope (one plant for a Site Engineer) is enforced by the server.
   var ROLE_TAB_VISIBILITY = {
     "O&M Head":        "*",
     "Assignee":        "*",
     "Administration":  "*",
-    "Site Engineer":   "*",
+    "Site Engineer":   ["health", "pm", "washing", "movable-assets"],
     "Viewer":          "*"
   };
+
+  var currentRole = null;
+
+  function restrictedPages() {
+    var rule = ROLE_TAB_VISIBILITY[currentRole];
+    return Array.isArray(rule) ? rule : null;
+  }
+
+  function plantPages() {
+    var allowed = restrictedPages();
+    return allowed ? PLANT_SUB_PAGES.filter(function (p) { return allowed.indexOf(p.id) !== -1; }) : PLANT_SUB_PAGES;
+  }
+
+  function isPlantPageAllowed(pageId) {
+    var allowed = restrictedPages();
+    return !allowed || allowed.indexOf(pageId) !== -1;
+  }
+
+  function defaultPlantPage() {
+    return plantPages()[0].id;
+  }
 
   // Current navigation state
   var navState = {
@@ -142,7 +164,7 @@
 
   function renderPlantSubNav(siteCode) {
     return '<div class="ep-nav-plant__sub">' +
-      PLANT_SUB_PAGES.map(function (page) {
+      plantPages().map(function (page) {
         var navId = "plant:" + siteCode + ":" + page.id;
         var isActive = navState.activeView === "plant-sub" &&
                        navState.selectedPlant === siteCode &&
@@ -177,7 +199,7 @@
     navState.selectedRange = null;
     navState.selectedPlant = siteCode;
     navState.expandedPlants[siteCode] = true;
-    navState.selectedSubPage = "details";
+    navState.selectedSubPage = defaultPlantPage();
     navState.selectedDetailSection = "details";
     navState.activeView = "plant-sub";
     navState.selectedViewPage = null;
@@ -190,6 +212,15 @@
 
   // ─── View selection ─────────────────────────────────────────────────
   function selectView(pageId, dateRange, detailSection) {
+    if (restrictedPages()) {
+      // No portfolio-wide Views for this role: open the same page for their own plant instead.
+      if (allPlants.length === 1 && isPlantPageAllowed(pageId)) {
+        selectPlantPage(allPlants[0].siteCode, pageId, dateRange);
+      } else {
+        activateOverview();
+      }
+      return;
+    }
     navState.activeView = "view-sub";
     navState.selectedViewPage = pageId;
     navState.selectedDetailSection = pageId === "details" && detailSection
@@ -211,10 +242,10 @@
     if (!allPlants.some(function (item) { return item.siteCode === siteCode; })) {
       allPlants.push(plant);
     }
-    var page = PLANT_SUB_PAGES.find(function (s) { return s.id === pageId; });
+    var page = plantPages().find(function (s) { return s.id === pageId; });
     navState.selectedPlant = siteCode;
     navState.expandedPlants[siteCode] = true;
-    navState.selectedSubPage = page ? page.id : "details";
+    navState.selectedSubPage = page ? page.id : defaultPlantPage();
     navState.selectedDetailSection = "details";
     navState.activeView = "plant-sub";
     navState.selectedViewPage = null;
@@ -258,7 +289,21 @@
     return perf.time("navigate " + page, renderContentArea);
   }
 
+  // Last guard for restricted roles, whatever path changed navState.
+  function enforceRolePages() {
+    if (!restrictedPages()) return;
+    if (navState.activeView === "view-sub" || navState.activeView === "settings") {
+      navState.activeView = "overview";
+      navState.selectedViewPage = null;
+    }
+    if (navState.activeView === "plant-sub" && !isPlantPageAllowed(navState.selectedSubPage)) {
+      navState.selectedSubPage = defaultPlantPage();
+      navState.selectedDetailSection = "details";
+    }
+  }
+
   function renderContentArea() {
+    enforceRolePages();
     var shell = document.querySelector(".ep-shell");
     if (shell) shell.classList.toggle("is-login-access", navState.activeView === "settings");
     var overviewEl = document.querySelector('[data-tab-view="overview"]');
@@ -433,7 +478,15 @@
 
   // ─── Role visibility (Phase 1 compat) ──────────────────────────────
   function applyRoleVisibility(role) {
-    // Phase 1 compat — all roles see everything for now
+    currentRole = role || null;
+    var restricted = !!restrictedPages();
+    var views = document.querySelector('[data-nav-group="views"]');
+    if (views) views.hidden = restricted;
+    var settings = document.querySelector(".ep-sidebar__settings");
+    if (settings) settings.hidden = restricted;
+    renderPlantList(document.querySelector("[data-plant-search]")?.value || "");
+    updateContentArea();
+    updateHighlights();
   }
 
   // ─── Wire all interactions ──────────────────────────────────────────

@@ -41,7 +41,7 @@ def _plant_or_404(db: Session, user: User, site_code: str) -> Plant:
 def list_plants(db: DB, user: CurrentUser):
     """Every plant the user may see, with its full stored record (one query for plants and people)."""
     return {"plants": [
-        service.plant_out(plant, engineers, washer)
+        service.plant_out(plant, engineers, washer, user)
         for plant, engineers, washer in service.visible_plants_with_people(db, user)
     ]}
 
@@ -110,7 +110,7 @@ def plant_details(site_code: str, db: DB, user: CurrentUser):
     engineers = service.site_engineers_by_plant(db, [plant.id]).get(plant.id, [])
     washer = service.washing_assignees_by_plant(db, [plant.id]).get(plant.id, "")
     return {
-        "plant": service.plant_out(plant, engineers, washer),
+        "plant": service.plant_out(plant, engineers, washer, user),
         "profile": service.build_profile(plant, issues, pm, washing, last_at),
         "activity": service.activity(db, user, [plant.id], limit=10),
         "issueTotal": (issues or {}).get("total", 0),

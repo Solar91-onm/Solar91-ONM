@@ -131,7 +131,8 @@
     var parts = shownParts();
     var plant = single && rows[0] ? rows[0].plant : null;
     var editor = canEdit();
-    var colCount = rows.length + 2;   // part name + one column per plant + total
+    var showTotal = !single;          // the per-plant view has no Total column
+    var colCount = rows.length + 1 + (showTotal ? 1 : 0);   // part name + one column per plant (+ total)
 
     var editIcon = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"></path><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"></path></svg>';
 
@@ -144,11 +145,11 @@
         (editor ? '<button class="ep-pt__edit" type="button" data-ma-edit="' + fmt.escape(p.siteCode) +
           '" aria-label="Edit movable assets of ' + fmt.escape(p.siteCode) + '">' + editIcon + "Edit</button>" : "") +
         "</th>";
-    }).join("") + '<th class="num">Total</th>';
+    }).join("") + (showTotal ? '<th class="num">Total</th>' : "");
 
     var colgroup = '<colgroup><col class="ep-ma__col-code">' +
       (rows.length ? '<col class="ep-ma__col-part" span="' + rows.length + '">' : "") +
-      '<col class="ep-ma__col-total"></colgroup>';
+      (showTotal ? '<col class="ep-ma__col-total">' : "") + "</colgroup>";
 
     var body = parts.map(function (part) {
       var sum = 0;
@@ -160,14 +161,14 @@
         '<td class="ep-pt__codecell"><span class="ep-ma__part" title="' + fmt.escape(part) + '">' + fmt.escape(part) + "</span>" +
           (editor ? '<button type="button" class="ep-ma__remove" data-ma-remove="' + state.parts.indexOf(part) +
             '" aria-label="Remove part ' + fmt.escape(part) + '" title="Remove this part">&times;</button>' : "") + "</td>" +
-        cells + '<td class="num mono">' + fmt.formatNumber(sum) + "</td></tr>";
+        cells + (showTotal ? '<td class="num mono">' + fmt.formatNumber(sum) + "</td>" : "") + "</tr>";
     }).join("");
 
     var grand = 0;
     var foot = rows.length && parts.length ? "<tfoot><tr><th>Total</th>" + rows.map(function (entry) {
       var t = total(entry.plant.siteCode, parts); grand += t;
       return '<td class="num mono">' + fmt.formatNumber(t) + "</td>";
-    }).join("") + '<td class="num mono">' + fmt.formatNumber(grand) + "</td></tr></tfoot>" : "";
+    }).join("") + (showTotal ? '<td class="num mono">' + fmt.formatNumber(grand) + "</td>" : "") + "</tr></tfoot>" : "";
 
     var empty = !parts.length
       ? (editor ? 'No parts yet. Use "Add part" to create the first row.' : "No movable assets have been added yet.")

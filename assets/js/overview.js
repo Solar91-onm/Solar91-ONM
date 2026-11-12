@@ -30,12 +30,18 @@
   let searchTerm = "";
   const filters = { plant: "__all", health: "__all", company: "__all", district: "__all" };
 
+  // The district dropdown merges values that differ only by case or spacing, so compare them the same way.
+  function districtKey(value) { return String(value || "").trim().toLocaleLowerCase(); }
+  function districtMatches(plant) {
+    return filters.district === "__all" || districtKey(plant.district) === districtKey(filters.district);
+  }
+
   function applyFilters(rows) {
     return rows.filter(({ plant, profile }) => {
       if (filters.plant !== "__all" && plant.siteCode !== filters.plant) return false;
       if (filters.health !== "__all" && profile.derivedCondition !== filters.health) return false;
       if (filters.company !== "__all" && (plant.projectCompany || "") !== filters.company) return false;
-      if (filters.district !== "__all" && (plant.district || "") !== filters.district) return false;
+      if (!districtMatches(plant)) return false;
       return true;
     });
   }
@@ -148,6 +154,35 @@
     const companySel = document.querySelector("[data-filter=\"company\"]");
     const districtSel = document.querySelector("[data-filter=\"district\"]");
 
+    // Picking a plant narrows SPV and district to that plant; "All plants" (or clearing the
+    // plant box) puts both back to their defaults.
+    function syncLocationFilters(plant) {
+      let company = "__all";
+      let district = "__all";
+      if (plant) {
+        if (companySel && plant.projectCompany &&
+            Array.from(companySel.options).some((o) => o.value === plant.projectCompany)) {
+          company = plant.projectCompany;
+        }
+        const option = districtSel && plant.district
+          ? Array.from(districtSel.options).find((o) => o.value !== "__all" && districtKey(o.value) === districtKey(plant.district))
+          : null;
+        if (option) district = option.value;
+      }
+      filters.company = company;
+      filters.district = district;
+      if (companySel) companySel.value = company;
+      if (districtSel) districtSel.value = district;
+    }
+
+    function selectPlantFilter(code) {
+      const row = code === "__all" ? null : allRows.find(({ plant }) => plant.siteCode === code);
+      filters.plant = row ? code : "__all";
+      syncLocationFilters(row ? row.plant : null);
+      recomputeAndRender();
+      reloadTrendForFilters();
+    }
+
     if (plantInput && plantPanel) {
       function renderPlantOptions(term) {
         const t = (term || "").trim().toLowerCase();
@@ -176,12 +211,16 @@
           plantInput.focus();
         }
       });
-      plantInput.addEventListener("input", () => { plantCombo.classList.add("is-open"); renderPlantOptions(plantInput.value); });
+      plantInput.addEventListener("input", () => {
+        plantCombo.classList.add("is-open");
+        renderPlantOptions(plantInput.value);
+        // Backspacing the plant name away means "All plants" again.
+        if (!plantInput.value.trim() && filters.plant !== "__all") selectPlantFilter("__all");
+      });
       plantPanel.addEventListener("click", (ev) => {
         const opt = ev.target.closest("[data-plant-opt]");
         if (!opt) return;
         const code = opt.getAttribute("data-plant-opt");
-        filters.plant = code;
         if (code === "__all") {
           plantInput.value = "";
           plantInput.placeholder = "All plants";
@@ -191,8 +230,7 @@
           plantInput.placeholder = "All plants";
         }
         plantCombo.classList.remove("is-open");
-        recomputeAndRender();
-        reloadTrendForFilters();
+        selectPlantFilter(code);
       });
       document.addEventListener("click", (ev) => {
         if (!plantCombo.contains(ev.target)) plantCombo.classList.remove("is-open");
@@ -459,7 +497,7 @@
     const trendRows = state.allRows.filter(({ plant }) => {
       if (filters.plant !== "__all" && plant.siteCode !== filters.plant) return false;
       if (filters.company !== "__all" && (plant.projectCompany || "") !== filters.company) return false;
-      if (filters.district !== "__all" && (plant.district || "") !== filters.district) return false;
+      if (!districtMatches(plant)) return false;
       return true;
     });
     if (!trendRows.length) {

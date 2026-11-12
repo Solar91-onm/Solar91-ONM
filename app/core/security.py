@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Any
 from uuid import UUID
 import re
 
@@ -63,6 +63,26 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
     # New Clerk-authenticated users wait here until an O&M Head assigns one of the four operational roles.
     "Viewer": set(),
 }
+
+
+# Design/MDL site-execution folder link (plant custom_fields.design_link): only these roles receive it.
+DESIGN_LINK_ROLES = {"O&M Head", "Assignee", "Administration"}
+DESIGN_LINK_KEY = "design_link"
+
+
+def can_view_design_link(user: User | None) -> bool:
+    return bool(user is not None and user.is_active and user.role in DESIGN_LINK_ROLES)
+
+
+def visible_custom_fields(fields: dict[str, Any] | None, user: User | None) -> dict[str, Any]:
+    """A copy of a plant's custom_fields with the design folder link removed for roles that may not open it.
+
+    Always returns a new dict, so the ORM object's stored value is never changed by redaction.
+    """
+    out = dict(fields or {})
+    if not can_view_design_link(user):
+        out.pop(DESIGN_LINK_KEY, None)
+    return out
 
 
 def require_permission(permission: str):

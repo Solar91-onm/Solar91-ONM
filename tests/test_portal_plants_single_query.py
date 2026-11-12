@@ -68,12 +68,12 @@ def _seed(db):
     return alpha, bravo, charlie, helper
 
 
-def _legacy_rows(db, plants):
+def _legacy_rows(db, plants, user):
     """What the route returned before: plants, then engineers, then washing assignees."""
     ids = [p.id for p in plants]
     engineers = service.site_engineers_by_plant(db, ids)
     washers = service.washing_assignees_by_plant(db, ids)
-    return [service.plant_out(p, engineers.get(p.id, []), washers.get(p.id, "")) for p in plants]
+    return [service.plant_out(p, engineers.get(p.id, []), washers.get(p.id, ""), user) for p in plants]
 
 
 def test_plants_match_the_three_query_result_in_one_statement(client, db):
@@ -85,7 +85,8 @@ def test_plants_match_the_three_query_result_in_one_statement(client, db):
     assert response.status_code == 200
     body = response.json()["plants"]
     assert [p["site_code"] for p in body] == ["ALPHA", "BRAVO", "CHARLIE"]
-    expected = _legacy_rows(db, service.visible_plants(db, db.get(User, _head_id(db))))
+    head = db.get(User, _head_id(db))
+    expected = _legacy_rows(db, service.visible_plants(db, head), head)
     assert body == _jsonish(expected)
     assert statements == 1  # was 3 (the signed-in user lookup is overridden in tests)
 
@@ -94,11 +95,12 @@ def test_people_folding_rules(client, db):
     alpha, bravo, charlie, _helper = _seed(db)
     login_user(client, db, role="O&M Head")
     by_code = {p["site_code"]: p for p in client.get("/api/portal/plants").json()["plants"]}
+    head = db.get(User, _head_id(db))
 
-    alpha_out = service.plant_out(alpha, ["Amy Engineer", "Zed Engineer"], "Wash Lead")
+    alpha_out = service.plant_out(alpha, ["Amy Engineer", "Zed Engineer"], "Wash Lead", head)
     assert by_code["ALPHA"] == _jsonish([alpha_out])[0]
-    assert by_code["BRAVO"] == _jsonish([service.plant_out(bravo, ["Same Name", "Same Name"], "")])[0]
-    assert by_code["CHARLIE"] == _jsonish([service.plant_out(charlie, [], "")])[0]
+    assert by_code["BRAVO"] == _jsonish([service.plant_out(bravo, ["Same Name", "Same Name"], "", head)])[0]
+    assert by_code["CHARLIE"] == _jsonish([service.plant_out(charlie, [], "", head)])[0]
 
 
 def test_scoped_assignee_still_sees_only_assigned_plants(client, db):

@@ -127,7 +127,12 @@ def test_overview_area_filter_and_operational_trend_controls_are_wired(client):
     assert "data-trend-apply" not in overview_markup
     assert 'data-filter="date"' in overview_markup
     assert "districtsByKey" in overview and "(plant.district || \"\").trim()" in overview
-    assert 'filters.district !== "__all"' in overview
+    assert 'filters.district === "__all" || districtKey(plant.district) === districtKey(filters.district)' in overview
+    assert overview.count("if (!districtMatches(plant)) return false;") == 2   # table rows and trend rows
+    # Picking a plant narrows SPV + district to it; All plants / an emptied plant box resets both.
+    assert "syncLocationFilters(row ? row.plant : null);" in overview
+    assert 'if (!plantInput.value.trim() && filters.plant !== "__all") selectPlantFilter("__all");' in overview
+    assert "selectPlantFilter(code);" in overview
     assert "renderTrendChart(trend)" in overview
     assert "ep-overview-trend__line--" in overview
     assert 'item.axis === "percent"' in overview
@@ -483,7 +488,7 @@ def test_plant_and_portfolio_details_sections_are_in_left_navigation():
     table = (PORTAL_ASSETS / "js" / "plants-table.js").read_text(encoding="utf-8")
     navigation = (PORTAL_ASSETS / "js" / "navigation.js").read_text(encoding="utf-8")
     page = TEMPLATE.read_text(encoding="utf-8")
-    for section in ("design-mdl", "purchase", "liasoning", "bom"):
+    for section in ("design-mdl", "liasoning", "bom"):
         assert section in navigation
         assert f'data-nav="view:details:{section}"' in page
     assert 'var navId = "plant:" + siteCode + ":" + page.id;' in navigation
@@ -491,7 +496,7 @@ def test_plant_and_portfolio_details_sections_are_in_left_navigation():
     assert 'section: navState.selectedDetailSection' in navigation
     assert "data-pt-detail-tab" not in table
     assert "ep-pt__detail-tabs" not in table
-    assert 'var DETAIL_SECTIONS = ["details", "design-mdl", "purchase", "liasoning", "bom"];' in table
+    assert 'var DETAIL_SECTIONS = ["details", "design-mdl", "liasoning", "bom"];' in table
     assert 'detailSection === "details"' in table
     assert 'data-detail-section="' in table
     assert 'if (loaded) {' in table
@@ -522,6 +527,7 @@ def test_design_mdl_renders_empty_index_and_saves_a_merged_custom_fields_patch()
       };
       global.Solar91PortalAPI = {
         can: (perm) => perm === 'plants.manage',
+        currentUser: () => ({ role: 'O&M Head' }),
         // The freshly read record carries a key this page has not seen; the save must keep it.
         plants: () => Promise.resolve([Object.assign({}, plant, { customFields: { cctv_url: 'https://cctv.example.invalid/a',
           design_link: 'https://folder.example.invalid/ABH01', design_index: { legacy_extra: true } } })]),

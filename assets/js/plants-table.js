@@ -25,11 +25,10 @@
   var mode = { kind: "all", siteCode: null };
   var detailSection = "details";
   var ui = { search: "", spv: "__all", district: "__all", sort: "name" };
-  var DETAIL_SECTIONS = ["details", "design-mdl", "purchase", "liasoning", "bom"];
+  var DETAIL_SECTIONS = ["details", "design-mdl", "liasoning", "bom"];
   var DETAIL_SECTION_LABELS = {
     details: "Details",
     "design-mdl": "Design/MDL",
-    purchase: "Purchase",
     liasoning: "Liasoning",
     bom: "BOM"
   };

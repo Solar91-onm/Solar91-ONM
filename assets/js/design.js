@@ -66,6 +66,14 @@
 
   function api() { return global.Solar91PortalAPI; }
   function canEdit() { return !!(api() && api().can("plants.manage")); }
+  // Only these roles may open the site-execution folder. The server also leaves the link
+  // out of plant records for everyone else (app/core/security.py DESIGN_LINK_ROLES).
+  var FOLDER_ROLES = ["O&M Head", "Assignee", "Administration"];
+  function canOpenFolder() {
+    var user = api() && api().currentUser();
+    return !!(user && FOLDER_ROLES.indexOf(user.role) !== -1);
+  }
+  var RESTRICTED_NOTE = "Only O&M Head, Assignee and Administration can open this folder";
   function single() { return mode.kind === "single"; }
 
   // --- Stored values (read tolerantly) --------------------------------------
@@ -76,6 +84,7 @@
 
   // Only real web links become clickable; anything else (javascript:, junk) stays plain text.
   function designLink(plant) {
+    if (!canOpenFolder()) return "";
     var value = custom(plant).design_link;
     if (typeof value !== "string" || !value.trim()) return "";
     try {
@@ -153,7 +162,7 @@
       headHTML(fmt.escape(p.displayName || p.plantName) + " · Design/MDL", fmt.escape(p.siteCode) + " · " + fmt.escape(p.district || "")) +
       '<div class="ep-pt__card ep-dsn__folder">' +
         '<div class="ep-dsn__folder-main"><span class="ep-dsn__eyebrow">Design / site-execution folder</span>' + codeLink(p, true) +
-          (designLink(p) ? "" : '<span class="ep-dsn__nolink">Link not added yet</span>') + "</div>" +
+          (designLink(p) ? "" : '<span class="ep-dsn__nolink">' + (canOpenFolder() ? "Link not added yet" : fmt.escape(RESTRICTED_NOTE)) + "</span>") + "</div>" +
         '<div class="ep-dsn__counter"><strong>' + count + "</strong>/" + REGISTER.length + " present</div></div>" +
       '<div class="ep-pt__card">' +
         '<div class="ep-pt__meta"><span class="ep-pt__count">Drawing index</span><span class="ep-pt__spacer"></span>' +
@@ -207,7 +216,7 @@
     return "<tr>" +
       '<td class="ep-pt__codecell ep-dsn__sticky">' + codeLink(p, false) + '<span class="ep-pt__name">' + fmt.escape(p.displayName || p.plantName) + "</span></td>" +
       "<td>" + (href ? '<a class="ep-pt__loc" href="' + fmt.escape(href) + '" target="_blank" rel="noopener noreferrer" title="Open the design folder in a new tab">Open ↗</a>'
-        : '<span class="ep-pt__cctv-placeholder">Not set</span>') + "</td>" +
+        : '<span class="ep-pt__cctv-placeholder"' + (canOpenFolder() ? ">Not set" : ' title="' + fmt.escape(RESTRICTED_NOTE) + '">Restricted') + "</span>") + "</td>" +
       '<td class="num mono">' + countIn(REGISTER, has) + "/" + REGISTER.length + "</td>" +
       KEY.map(function (d) { return '<td class="num">' + tick(has[d.id], true) + "</td>"; }).join("") +
       '<td class="num mono">' + countIn(MISC, has) + "/" + MISC.length + "</td></tr>";

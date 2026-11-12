@@ -133,9 +133,6 @@
               <button class="ep-nav-item ep-nav-item--sub ep-nav-item--detail" type="button" data-nav="view:details:design-mdl">
                 <span class="ep-nav-item__label">Design/MDL</span>
               </button>
-              <button class="ep-nav-item ep-nav-item--sub ep-nav-item--detail" type="button" data-nav="view:details:purchase">
-                <span class="ep-nav-item__label">Purchase</span>
-              </button>
               <button class="ep-nav-item ep-nav-item--sub ep-nav-item--detail" type="button" data-nav="view:details:liasoning">
                 <span class="ep-nav-item__label">Liasoning</span>
               </button>
@@ -172,11 +169,25 @@
         </button>
       </div>
 
-      <div class="ep-sidebar__footer">
-        <div class="ep-avatar" aria-hidden="true">S</div>
-        <div class="ep-user">
-          <div class="ep-user__name" data-user-name>Solar91 Team</div>
-          <div class="ep-user__role" data-user-role>Role</div>
+      <div class="ep-sidebar__footer" data-user-menu>
+        <button class="ep-user-toggle" type="button" data-user-menu-toggle aria-haspopup="menu" aria-expanded="false" aria-controls="ep-user-menu">
+          <span class="ep-avatar" aria-hidden="true">S</span>
+          <span class="ep-user">
+            <span class="ep-user__name" data-user-name>Solar91 Team</span>
+            <span class="ep-user__role" data-user-role>Role</span>
+          </span>
+          <svg class="ep-user-toggle__chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m18 15-6-6-6 6"></path></svg>
+        </button>
+        <div class="ep-user-menu" id="ep-user-menu" role="menu" data-user-menu-list hidden>
+          <button class="ep-user-menu__item" type="button" role="menuitem" data-user-action="close">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg>
+            Close portal
+          </button>
+          <button class="ep-user-menu__item ep-user-menu__item--danger" type="button" role="menuitem" data-user-action="logout">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><path d="m16 17 5-5-5-5"></path><path d="M21 12H9"></path></svg>
+            Log out
+          </button>
+          <p class="ep-user-menu__note" data-user-menu-note hidden>Your browser kept this tab open. Close it from the browser tab bar.</p>
         </div>
       </div>
     </aside>

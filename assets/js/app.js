@@ -26,6 +26,48 @@
     }).format(new Date()));
   }
 
+  /** Lower-left user card: a menu with Close portal and Log out, shown only after a click. */
+  function wireUserMenu() {
+    var root = document.querySelector("[data-user-menu]");
+    var toggle = root && root.querySelector("[data-user-menu-toggle]");
+    var menu = root && root.querySelector("[data-user-menu-list]");
+    if (!toggle || !menu) return;
+    var note = menu.querySelector("[data-user-menu-note]");
+
+    function setOpen(open) {
+      menu.hidden = !open;
+      toggle.setAttribute("aria-expanded", String(open));
+      if (!open && note) note.hidden = true;
+      if (open) { var first = menu.querySelector("[data-user-action]"); if (first) first.focus(); }
+    }
+
+    toggle.addEventListener("click", function (ev) {
+      ev.stopPropagation();
+      setOpen(menu.hidden);
+    });
+    document.addEventListener("click", function (ev) {
+      if (!menu.hidden && !root.contains(ev.target)) setOpen(false);
+    });
+    document.addEventListener("keydown", function (ev) {
+      if (ev.key === "Escape" && !menu.hidden) { setOpen(false); toggle.focus(); }
+    });
+
+    menu.addEventListener("click", function (ev) {
+      var item = ev.target.closest("[data-user-action]");
+      if (!item) return;
+      var action = item.getAttribute("data-user-action");
+      if (action === "logout") {
+        item.disabled = true;   // one sign-out request, even on a double click
+        if (typeof global.clerkSignOut === "function") global.clerkSignOut();
+        else global.location.assign("/");
+      } else if (action === "close") {
+        global.close();
+        // Browsers only let a page close a tab that a script opened; otherwise say so instead of doing nothing.
+        setTimeout(function () { if (note && !global.closed) note.hidden = false; }, 200);
+      }
+    });
+  }
+
   /** Render the portal for a signed-in user whose role has been granted access. */
   function renderPortal(user) {
     if (booted) return;
@@ -37,6 +79,7 @@
     if (avatar) avatar.textContent = (user.name || user.email || "S").trim().charAt(0).toUpperCase();
 
     stampUpdated();
+    wireUserMenu();
 
     global.Solar91PortalNav.wire();
     global.Solar91PortalNav.applyRoleVisibility(user.role || "Viewer");

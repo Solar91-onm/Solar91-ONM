@@ -27,7 +27,7 @@ docs/           deployment runbook, workflow and performance notes
 ## Pages
 
 - **Overview**: portfolio tiles, PM and washing compliance, plant comparison, critical issues, recent activity.
-- **Plants → a plant**: Details (with Design/MDL, Purchase, Liasoning and BOM), Health (issues), PM, Washing.
+- **Plants → a plant**: Details (with Design/MDL, Liasoning and BOM), Health (issues), PM, Washing.
 - **Views**: the same pages for all plants together, plus Movable Assets and Asset & Warranty.
 - **Settings**: team access and work categories.
 
