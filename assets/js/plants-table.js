@@ -119,7 +119,9 @@
     { key: "district",  label: "District" },
     { key: "discom",    label: "Discom" },
     { key: "engineer",  label: "Site Engineer" },
-    { key: "assignee",  label: "Assignee" },
+    { key: "assignee",  label: "Cleaning Assignee" },
+    { key: "pmAssignee",     label: "PM Assignee" },
+    { key: "healthAssignee", label: "Health Assignee" },
     { key: "cod",       label: "COD",           align: "num" },
     { key: "location",  label: "Location" },
     { key: "cctv",      label: "CCTV" },
@@ -169,6 +171,8 @@
             ? fmt.escape(p.siteEngineers.join(", "))
             : (p.assignedEngineer ? fmt.escape(p.assignedEngineer) : dash("No Site Engineer assigned"))) + "</td>" +
         "<td>" + (p.washingAssignee ? fmt.escape(p.washingAssignee) : dash("Module Cleaning not set up")) + "</td>" +
+        "<td>" + (p.pmAssignee ? fmt.escape(p.pmAssignee) : dash("No Preventive Maintenance Assignee")) + "</td>" +
+        "<td>" + (p.healthAssignee ? fmt.escape(p.healthAssignee) : dash("No Health Assignee")) + "</td>" +
         '<td class="num mono">' + fmt.escape(formatCOD(p.commissionedOn)) + "</td>" +
         locationCell +
         cctvCell +
@@ -348,6 +352,8 @@
         p.discom || "",
         (p.siteEngineers || []).join("; ") || p.assignedEngineer || "",
         p.washingAssignee || "",
+        p.pmAssignee || "",
+        p.healthAssignee || "",
         formatCOD(p.commissionedOn),
         p.location || p.mapsUrl || "",
         cctvUrl(p),
@@ -464,6 +470,11 @@
     // Design/MDL: the design folder link and drawing index, read from the plant's custom_fields.
     if (detailSection === "design-mdl" && global.Solar91PortalDesign) {
       global.Solar91PortalDesign.show(container, { siteCode: mode.siteCode });
+      return;
+    }
+    // Liasoning: LOA, PPA, tariff and the land-lease / commissioning document links.
+    if (detailSection === "liasoning" && global.Solar91PortalLiasoning) {
+      global.Solar91PortalLiasoning.show(container, { siteCode: mode.siteCode });
       return;
     }
     if (loaded) {

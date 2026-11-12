@@ -176,13 +176,13 @@
 }
 
 .ep-settings__table {
-  min-width: 1040px;
+  min-width: 0;
 }
 
 .ep-settings__table-head,
 .ep-settings__person {
   display: grid;
-  grid-template-columns: minmax(190px, 1.2fr) minmax(190px, 1.2fr) minmax(140px, 0.8fr) minmax(90px, 0.5fr) minmax(250px, 1.4fr);
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1.2fr) minmax(0, 0.8fr) minmax(0, 0.5fr) minmax(0, 1.4fr);
   align-items: center;
   column-gap: 12px;
 }
@@ -611,3 +611,7 @@
 
 @media (max-width: 900px) { .ep-cat__grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 560px) { .ep-cat__grid { grid-template-columns: 1fr; } }
+
+/* Login access: columns share the frame, long names and e-mail addresses wrap instead of scrolling. */
+.ep-settings__person > *,
+.ep-settings__table-head > * { min-width: 0; overflow-wrap: anywhere; }

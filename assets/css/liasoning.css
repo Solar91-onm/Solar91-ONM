@@ -1,0 +1,15 @@
+/* liasoning.css: Plant/Views -> Details -> Liasoning (assets/js/liasoning.js). Built on tokens.css; the table reuses ep-pt__.
+   All columns share the frame: fixed layout, no minimum width, cells wrap. */
+.ep-pt__table.ep-lia__table { table-layout: fixed; min-width: 0; width: 100%; }
+.ep-pt__table.ep-lia__table th:nth-child(n), .ep-pt__table.ep-lia__table td:nth-child(n) { width: auto; }
+.ep-pt__table.ep-lia__table th:nth-child(1), .ep-pt__table.ep-lia__table td:nth-child(1) { width: 20%; }
+.ep-pt__table.ep-lia__table th:nth-child(2), .ep-pt__table.ep-lia__table td:nth-child(2),
+.ep-pt__table.ep-lia__table th:nth-child(3), .ep-pt__table.ep-lia__table td:nth-child(3) { width: 12%; }
+.ep-pt__table.ep-lia__table th:nth-child(4), .ep-pt__table.ep-lia__table td:nth-child(4) { width: 12%; }
+.ep-pt__table.ep-lia__table th:nth-child(5), .ep-pt__table.ep-lia__table td:nth-child(5),
+.ep-pt__table.ep-lia__table th:nth-child(6), .ep-pt__table.ep-lia__table td:nth-child(6) { width: 18%; }
+.ep-pt__table.ep-lia__table.has-edit th:nth-child(7), .ep-pt__table.ep-lia__table.has-edit td:nth-child(7) { width: 8%; }
+.ep-lia__full { grid-column: 1 / -1; }
+
+/* Phones: too narrow to fit six columns legibly, so the table scrolls there only. */
+@media (max-width: 700px) { .ep-pt__table.ep-lia__table { min-width: 640px; } }

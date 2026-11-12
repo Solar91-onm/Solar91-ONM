@@ -76,6 +76,8 @@
       assignedEngineer: plant.assigned_engineer || "",
       siteEngineers: plant.site_engineers || [],
       washingAssignee: plant.washing_assignee || "",
+      pmAssignee: plant.pm_assignee || "",
+      healthAssignee: plant.health_assignee || "",
       customFields: plant.custom_fields || {},
       mapsUrl: mapsUrl(plant)
     };

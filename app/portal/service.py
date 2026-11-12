@@ -33,6 +33,7 @@ from app.core.models import (
     Issue,
     OMTask,
     Plant,
+    PlantResponsibility,
     User,
     UserPlantAssignment,
     WashingConfig,
@@ -100,20 +101,22 @@ def overview_plants(db: Session, user: User) -> list[Plant]:
     return list(db.scalars(select(Plant).order_by(Plant.plant_name)))
 
 
-def _plants_with_people(db: Session, stmt) -> list[tuple[Plant, list[str], str]]:
-    """Plants from ``stmt`` with their Site Engineers and washing assignee, in **one** query.
+def _plants_with_people(db: Session, stmt) -> list[tuple[Plant, list[str], str, dict[str, str]]]:
+    """Plants from ``stmt`` with their Site Engineers, washing assignee and PM / Health assignees, in **one** query.
 
     This used to be three statements (plants, then engineers, then washing assignees). Every
     statement costs a full round trip to Supabase, which is the dominant cost of these routes,
     so the two people lookups are outer-joined onto the plant select and folded here instead.
 
     A plant repeats once per ``user_plant_assignments`` row, which is a handful at most;
-    ``washing_config.plant_id`` is that table's primary key, so washing never multiplies the
-    result. Name handling is identical to the per-metric helpers this replaces: only active
+    ``washing_config.plant_id`` is that table's primary key, and ``plant_responsibilities`` is
+    keyed by (plant, area) and joined once per area, so neither multiplies the result. Name handling is identical to the per-metric helpers this replaces: only active
     Site Engineers count, and the names are sorted.
     """
     engineer = aliased(User)
     washer = aliased(User)
+    pm_row, health_row = aliased(PlantResponsibility), aliased(PlantResponsibility)
+    pm_user, health_user = aliased(User), aliased(User)
     rows = db.execute(
         stmt.outerjoin(UserPlantAssignment, UserPlantAssignment.plant_id == Plant.id)
         .outerjoin(
@@ -126,14 +129,19 @@ def _plants_with_people(db: Session, stmt) -> list[tuple[Plant, list[str], str]]
         )
         .outerjoin(WashingConfig, WashingConfig.plant_id == Plant.id)
         .outerjoin(washer, washer.id == WashingConfig.assigned_user_id)
-        .add_columns(engineer.display_name, washer.display_name)
+        .outerjoin(pm_row, and_(pm_row.plant_id == Plant.id, pm_row.area == "pm"))
+        .outerjoin(pm_user, pm_user.id == pm_row.assigned_user_id)
+        .outerjoin(health_row, and_(health_row.plant_id == Plant.id, health_row.area == "health"))
+        .outerjoin(health_user, health_user.id == health_row.assigned_user_id)
+        .add_columns(engineer.display_name, washer.display_name, pm_user.display_name, health_user.display_name)
     ).all()
 
     order: list[Plant] = []
     seen: set[UUID] = set()
     engineers: dict[UUID, list[str]] = {}
     washers: dict[UUID, str] = {}
-    for plant, engineer_name, washer_name in rows:
+    responsible: dict[UUID, dict[str, str]] = {}
+    for plant, engineer_name, washer_name, pm_name, health_name in rows:
         if plant.id not in seen:
             seen.add(plant.id)
             order.append(plant)
@@ -141,18 +149,23 @@ def _plants_with_people(db: Session, stmt) -> list[tuple[Plant, list[str], str]]
             engineers.setdefault(plant.id, []).append(engineer_name)
         if washer_name:
             washers[plant.id] = washer_name
+        if pm_name:
+            responsible.setdefault(plant.id, {})["pm"] = pm_name
+        if health_name:
+            responsible.setdefault(plant.id, {})["health"] = health_name
     for names in engineers.values():
         names.sort()
-    return [(plant, engineers.get(plant.id, []), washers.get(plant.id, "")) for plant in order]
+    return [(plant, engineers.get(plant.id, []), washers.get(plant.id, ""), responsible.get(plant.id, {}))
+            for plant in order]
 
 
-def visible_plants_with_people(db: Session, user: User) -> list[tuple[Plant, list[str], str]]:
+def visible_plants_with_people(db: Session, user: User) -> list[tuple[Plant, list[str], str, dict[str, str]]]:
     """``visible_plants`` plus each plant's Site Engineers and washing assignee, in one query."""
     stmt = _visible_plants_stmt(db, user)
     return [] if stmt is None else _plants_with_people(db, stmt)
 
 
-def overview_plants_with_people(db: Session, user: User) -> list[tuple[Plant, list[str], str]]:
+def overview_plants_with_people(db: Session, user: User) -> list[tuple[Plant, list[str], str, dict[str, str]]]:
     """``overview_plants`` plus each plant's Site Engineers and washing assignee, in one query."""
     if user.role not in {"O&M Head", "Assignee", "Administration"}:
         return visible_plants_with_people(db, user)
@@ -409,7 +422,10 @@ def build_profile(
     return profile
 
 
-def plant_out(plant: Plant, engineers: list[str], washing_assignee: str, user: User) -> dict[str, Any]:
+def plant_out(
+    plant: Plant, engineers: list[str], washing_assignee: str, user: User,
+    responsible: dict[str, str] | None = None,
+) -> dict[str, Any]:
     """A plant record as the portal reads it: stored columns, nothing invented.
 
     ``user`` is required so the Design/MDL folder link is only sent to roles allowed to open it.
@@ -432,6 +448,8 @@ def plant_out(plant: Plant, engineers: list[str], washing_assignee: str, user: U
         "assigned_engineer": plant.assigned_engineer,
         "site_engineers": engineers,
         "washing_assignee": washing_assignee,
+        "pm_assignee": (responsible or {}).get("pm", ""),
+        "health_assignee": (responsible or {}).get("health", ""),
         "custom_fields": visible_custom_fields(plant.custom_fields, user),
         "created_at": plant.created_at.isoformat() if getattr(plant, "created_at", None) else None,
         "updated_at": plant.updated_at.isoformat() if getattr(plant, "updated_at", None) else None,
@@ -460,6 +478,22 @@ def site_engineers_by_plant(db: Session, plant_ids: list[UUID]) -> dict[UUID, li
     return out
 
 
+def responsibilities_by_plant(db: Session, plant_ids: list[UUID]) -> dict[UUID, dict[str, str]]:
+    """Responsible Preventive Maintenance / Health Assignee names per plant: {plant_id: {"pm": name, "health": name}}."""
+    if not plant_ids:
+        return {}
+    rows = db.execute(
+        select(PlantResponsibility.plant_id, PlantResponsibility.area, User.display_name)
+        .join(User, User.id == PlantResponsibility.assigned_user_id)
+        .where(PlantResponsibility.plant_id.in_(plant_ids))
+    ).all()
+    out: dict[UUID, dict[str, str]] = {}
+    for plant_id, area, name in rows:
+        if name:
+            out.setdefault(plant_id, {})[area] = name
+    return out
+
+
 def washing_assignees_by_plant(db: Session, plant_ids: list[UUID]) -> dict[UUID, str]:
     if not plant_ids:
         return {}
@@ -480,7 +514,7 @@ def portfolio(db: Session, user: User) -> dict[str, Any]:
     how many plants the user can see.
     """
     people = overview_plants_with_people(db, user)
-    ids = _plant_ids([plant for plant, _engineers, _washer in people])
+    ids = _plant_ids([plant for plant, *_rest in people])
     today = business_today()
 
     issues = _issue_counts(db, ids)
@@ -490,7 +524,7 @@ def portfolio(db: Session, user: User) -> dict[str, Any]:
     last_at = _last_activity(db, ids)
 
     rows = []
-    for plant, engineers, washer in people:
+    for plant, engineers, washer, responsible in people:
         profile = build_profile(
             plant,
             issues.get(plant.id),
@@ -499,7 +533,7 @@ def portfolio(db: Session, user: User) -> dict[str, Any]:
             last_at.get(plant.id),
         )
         rows.append({
-            "plant": plant_out(plant, engineers, washer, user),
+            "plant": plant_out(plant, engineers, washer, user, responsible),
             "profile": profile,
         })
 
@@ -649,6 +683,7 @@ def portfolio_for_range(db: Session, user: User, start: date, end: date) -> dict
 
     engineers = site_engineers_by_plant(db, plant_ids)
     washers = washing_assignees_by_plant(db, plant_ids)
+    responsible = responsibilities_by_plant(db, plant_ids)
     rows = []
     for plant in plants:
         profile = build_profile(
@@ -660,7 +695,7 @@ def portfolio_for_range(db: Session, user: User, start: date, end: date) -> dict
             None,
         )
         rows.append({
-            "plant": plant_out(plant, engineers.get(plant.id, []), washers.get(plant.id, ""), user),
+            "plant": plant_out(plant, engineers.get(plant.id, []), washers.get(plant.id, ""), user, responsible.get(plant.id)),
             "profile": profile,
         })
     return {

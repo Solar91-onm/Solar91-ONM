@@ -970,47 +970,53 @@
 .ep-pt__scroll {
   width: 100%; max-height: 70vh; overflow-y: auto; overflow-x: auto;
 }
+/* Every column shares the frame: no sideways scrolling on a desktop or laptop screen.
+   Cells wrap instead of being cut off. (Phones keep a scroll fallback, see the media query below.) */
 .ep-pt__table {
-  width: 100%; min-width: 1200px; table-layout: fixed; border-collapse: collapse;
+  width: 100%; min-width: 0; table-layout: fixed; border-collapse: collapse;
 }
-.ep-pt__table th:nth-child(1), .ep-pt__table td:nth-child(1) { width: 12%; }
-.ep-pt__table th:nth-child(2), .ep-pt__table td:nth-child(2) { width: 6%; }
-.ep-pt__table th:nth-child(3), .ep-pt__table td:nth-child(3) { width: 7%; }
-.ep-pt__table th:nth-child(4), .ep-pt__table td:nth-child(4) { width: 8%; }
+/* Details table, 15 columns: code, SPV, AC, DC, district, discom, site engineer, cleaning / PM / health
+   assignee, COD, location, CCTV, last activity, edit. */
+.ep-pt__table th:nth-child(1), .ep-pt__table td:nth-child(1) { width: 11%; }
+.ep-pt__table th:nth-child(2), .ep-pt__table td:nth-child(2) { width: 5%; }
+.ep-pt__table th:nth-child(3), .ep-pt__table td:nth-child(3) { width: 5%; }
+.ep-pt__table th:nth-child(4), .ep-pt__table td:nth-child(4) { width: 5%; }
 .ep-pt__table th:nth-child(5), .ep-pt__table td:nth-child(5) { width: 7%; }
-.ep-pt__table th:nth-child(6), .ep-pt__table td:nth-child(6) { width: 7%; }
-.ep-pt__table th:nth-child(7), .ep-pt__table td:nth-child(7) { width: 12%; }
-.ep-pt__table th:nth-child(8), .ep-pt__table td:nth-child(8) { width: 10%; }
-.ep-pt__table th:nth-child(9), .ep-pt__table td:nth-child(9) { width: 6%; }
-.ep-pt__table th:nth-child(10), .ep-pt__table td:nth-child(10) { width: 7%; }
+.ep-pt__table th:nth-child(6), .ep-pt__table td:nth-child(6) { width: 6%; }
+.ep-pt__table th:nth-child(7), .ep-pt__table td:nth-child(7) { width: 8%; }
+.ep-pt__table th:nth-child(8), .ep-pt__table td:nth-child(8) { width: 8%; }
+.ep-pt__table th:nth-child(9), .ep-pt__table td:nth-child(9) { width: 8%; }
+.ep-pt__table th:nth-child(10), .ep-pt__table td:nth-child(10) { width: 8%; }
 .ep-pt__table th:nth-child(11), .ep-pt__table td:nth-child(11) { width: 6%; }
 .ep-pt__table th:nth-child(12), .ep-pt__table td:nth-child(12) { width: 7%; }
 .ep-pt__table th:nth-child(13), .ep-pt__table td:nth-child(13) { width: 5%; }
+.ep-pt__table th:nth-child(14), .ep-pt__table td:nth-child(14) { width: 6%; }
+.ep-pt__table th:nth-child(15), .ep-pt__table td:nth-child(15) { width: 5%; }
 .ep-pt__scroll:focus { outline: 2px solid var(--ep-accent); outline-offset: -2px; }
 .ep-pt__table thead th {
   position: sticky; top: 0; z-index: 1;
-  padding: 8px 10px;
+  padding: 8px 6px;
   background: var(--ep-bg-muted);
   border-bottom: 1px solid var(--ep-border);
   text-align: left;
   font-size: 10px;
   font-weight: 700;
-  letter-spacing: 0.035em;
+  letter-spacing: 0.02em;
   text-transform: uppercase;
   color: var(--ep-text-muted);
   white-space: normal;
-  overflow-wrap: normal;
+  overflow-wrap: anywhere;
 }
 .ep-pt__table thead th.num { text-align: center; }
 .ep-pt__table tbody td {
-  padding: 7px 10px;
+  padding: 7px 6px;
   border-bottom: 1px solid var(--ep-border-soft);
   font-size: 12px;
   color: var(--ep-text);
   vertical-align: middle;
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: anywhere;
   overflow: hidden;
-  text-overflow: ellipsis;
 }
 .ep-pt__table tbody td.num { text-align: center; }
 .ep-pt__table tbody td.mono { font-family: var(--ep-font-mono); font-size: var(--ep-fs-sm); }
@@ -1020,7 +1026,7 @@
 
 .ep-pt__codecell { min-width: 0; }
 .ep-pt__code, .ep-pt__name {
-  display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  display: block; overflow: hidden; white-space: normal; overflow-wrap: anywhere;
 }
 .ep-pt__code {
   font-family: var(--ep-font-mono);
@@ -1042,9 +1048,10 @@
 .ep-pt__loc {
   display: inline-flex; align-items: center;
   max-width: 100%; padding: 2px 0; text-decoration: none;
-  font-size: 11px; color: var(--ep-accent-strong); white-space: nowrap;
+  font-size: 11px; color: var(--ep-accent-strong); white-space: normal; overflow-wrap: anywhere;
 }
 .ep-pt__loc:hover { text-decoration: underline; }
+/* Only on a phone is there too little width to fit every column legibly; there the table scrolls. */
 @media (max-width: 700px) {
   .ep-pt__table { min-width: 1080px; }
 }

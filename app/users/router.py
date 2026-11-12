@@ -5,11 +5,11 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.core.models import AuditLog, Plant, User, UserPlantAssignment, WashingConfig
+from app.core.models import AuditLog, Plant, PlantResponsibility, User, UserPlantAssignment, WashingConfig
 from app.core.security import require_csrf, require_permission
 
 router = APIRouter(prefix="/api/users", tags=["Users"])
@@ -25,6 +25,8 @@ class AccessUpdate(BaseModel):
     role: str
     plant_ids: list[UUID] = Field(default_factory=list, max_length=500)
     washing_plant_ids: list[UUID] = Field(default_factory=list, max_length=500)
+    pm_plant_ids: list[UUID] = Field(default_factory=list, max_length=500)
+    health_plant_ids: list[UUID] = Field(default_factory=list, max_length=500)
     is_active: bool | None = None
 
 
@@ -50,6 +52,34 @@ def out(u: User):
 
 
 PORTFOLIO_ROLES = {"O&M Head", "Administration"}
+RESPONSIBILITY_AREAS = ("pm", "health")
+
+
+def _set_responsibility(db: Session, area: str, user_id: UUID, plant_ids: list[UUID]) -> None:
+    """Make ``user_id`` the one responsible Assignee for ``area`` on exactly ``plant_ids``.
+
+    One Assignee per plant per area: choosing a plant takes it over from whoever held it, and
+    plants the person no longer has are released. The touched rows are locked for the update.
+    """
+    rows = list(db.scalars(
+        select(PlantResponsibility)
+        .where(
+            PlantResponsibility.area == area,
+            or_(PlantResponsibility.assigned_user_id == user_id, PlantResponsibility.plant_id.in_(plant_ids)),
+        )
+        .with_for_update()
+    ))
+    by_plant = {row.plant_id: row for row in rows}
+    wanted = set(plant_ids)
+    for row in rows:
+        if row.assigned_user_id == user_id and row.plant_id not in wanted:
+            db.delete(row)
+    for plant_id in plant_ids:
+        row = by_plant.get(plant_id)
+        if row is not None:
+            row.assigned_user_id = user_id
+        else:
+            db.add(PlantResponsibility(plant_id=plant_id, area=area, assigned_user_id=user_id))
 
 
 def _active_head_count(db: Session, exclude_id: UUID | None = None) -> int:
@@ -92,11 +122,21 @@ def list_users(
     for uid, plant_id in washing_rows:
         if uid is not None:
             washing_by_user.setdefault(uid, []).append(str(plant_id))
+    responsibility_by_user: dict[UUID, dict[str, list[str]]] = {}
+    for uid, plant_id, area in db.execute(
+        select(PlantResponsibility.assigned_user_id, PlantResponsibility.plant_id, PlantResponsibility.area)
+        .join(Plant, Plant.id == PlantResponsibility.plant_id)
+        .where(PlantResponsibility.assigned_user_id.is_not(None))
+        .order_by(Plant.site_code)
+    ).all():
+        responsibility_by_user.setdefault(uid, {}).setdefault(area, []).append(str(plant_id))
     result = []
     for u in db.scalars(select(User).order_by(User.display_name)):
         item = out(u)
         item["plants"] = by_user.get(u.id, [])
         item["washing_plant_ids"] = washing_by_user.get(u.id, [])
+        item["pm_plant_ids"] = responsibility_by_user.get(u.id, {}).get("pm", [])
+        item["health_plant_ids"] = responsibility_by_user.get(u.id, {}).get("health", [])
         item["created_at"] = u.created_at.isoformat() if getattr(u, "created_at", None) else None
         item["is_self"] = u.id == user.id
         result.append(item)
@@ -116,15 +156,19 @@ def update_access(
         raise HTTPException(404, "User not found")
     unique_ids = list(dict.fromkeys(data.plant_ids))
     washing_ids = list(dict.fromkeys(data.washing_plant_ids))
+    pm_ids = list(dict.fromkeys(data.pm_plant_ids))
+    health_ids = list(dict.fromkeys(data.health_plant_ids))
     if washing_ids and data.role != "Assignee":
         raise HTTPException(422, "Washing scope can only be assigned to an Assignee")
+    if (pm_ids or health_ids) and data.role != "Assignee":
+        raise HTTPException(422, "Preventive Maintenance and Health scope can only be assigned to an Assignee")
     if data.role == "Assignee":
-        unique_ids = list(dict.fromkeys(unique_ids + washing_ids))
+        unique_ids = list(dict.fromkeys(unique_ids + washing_ids + pm_ids + health_ids))
     _validate_access(data.role, unique_ids)
     # Portfolio roles see every plant; keeping per-plant rows for them would only confuse.
     if data.role in PORTFOLIO_ROLES:
         unique_ids = []
-    all_requested_ids = list(dict.fromkeys(unique_ids + washing_ids))
+    all_requested_ids = list(dict.fromkeys(unique_ids + washing_ids + pm_ids + health_ids))
     if all_requested_ids:
         valid = set(db.scalars(select(Plant.id).where(Plant.id.in_(all_requested_ids))))
         missing = [str(x) for x in all_requested_ids if x not in valid]
@@ -132,8 +176,8 @@ def update_access(
             raise HTTPException(422, detail={"message": "Unknown plant assignment", "plant_ids": missing})
 
     new_active = target.is_active if data.is_active is None else data.is_active
-    if washing_ids and not new_active:
-        raise HTTPException(422, "Washing scope can only be assigned to an active Assignee")
+    if (washing_ids or pm_ids or health_ids) and not new_active:
+        raise HTTPException(422, "Module Cleaning, Preventive Maintenance and Health scope can only be assigned to an active Assignee")
     # Lock-out protection: the portal must always keep at least one active O&M Head.
     losing_head = target.role == "O&M Head" and (data.role != "O&M Head" or not new_active)
     if losing_head and _active_head_count(db, exclude_id=target.id) == 0:
@@ -165,11 +209,19 @@ def update_access(
         str(config.plant_id) for config in washing_configs
         if config.assigned_user_id == target.id
     ]
+    before_responsibilities = {
+        area: [str(x) for x in db.scalars(
+            select(PlantResponsibility.plant_id).where(
+                PlantResponsibility.area == area, PlantResponsibility.assigned_user_id == target.id))]
+        for area in RESPONSIBILITY_AREAS
+    }
     before = {
         "role": target.role,
         "active": target.is_active,
         "plant_ids": before_ids,
         "washing_plant_ids": before_washing_ids,
+        "pm_plant_ids": before_responsibilities["pm"],
+        "health_plant_ids": before_responsibilities["health"],
     }
     target.role = data.role
     target.is_active = new_active
@@ -182,11 +234,15 @@ def update_access(
             config.assigned_user_id = None
     for plant_id in washing_ids:
         config_by_plant[plant_id].assigned_user_id = target.id
+    _set_responsibility(db, "pm", target.id, pm_ids)
+    _set_responsibility(db, "health", target.id, health_ids)
     after = {
         "role": target.role,
         "active": target.is_active,
         "plant_ids": [str(x) for x in unique_ids],
         "washing_plant_ids": [str(x) for x in washing_ids],
+        "pm_plant_ids": [str(x) for x in pm_ids],
+        "health_plant_ids": [str(x) for x in health_ids],
     }
     db.add(AuditLog(
         user_id=user.id, actor_name=user.display_name, action="Changed user access",
@@ -260,6 +316,9 @@ def update_role(
         raise HTTPException(409, "You cannot remove your own O&M Head access")
     before = row.role
     row.role = data.role
+    if data.role != "Assignee":
+        # Only an Assignee can hold Preventive Maintenance or Health responsibility for a plant.
+        db.execute(delete(PlantResponsibility).where(PlantResponsibility.assigned_user_id == row.id))
     # Portfolio roles see every plant, so their per-plant rows are dropped.
     if data.role in PORTFOLIO_ROLES:
         db.execute(delete(UserPlantAssignment).where(UserPlantAssignment.user_id == row.id))

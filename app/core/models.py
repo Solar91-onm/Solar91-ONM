@@ -359,6 +359,20 @@ class NotificationPreference(Base, TimestampMixin):
     )
 
 
+class PlantResponsibility(Base):
+    """The Assignee responsible for a plant's Preventive Maintenance ('pm') or Health ('health').
+
+    One Assignee per plant per area, like ``WashingConfig.assigned_user_id`` for Module Cleaning.
+    database/migrations/039.
+    """
+    __tablename__ = "plant_responsibilities"
+    plant_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("plants.id", ondelete="CASCADE"), primary_key=True)
+    area: Mapped[str] = mapped_column(String(20), primary_key=True)
+    assigned_user_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    __table_args__ = (Index("ix_plant_responsibilities_user", "assigned_user_id", "area"),)
+
+
 class WashingConfig(Base):
     __tablename__ = "washing_config"
     plant_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("plants.id", ondelete="CASCADE"), primary_key=True)

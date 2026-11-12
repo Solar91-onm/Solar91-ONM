@@ -64,7 +64,9 @@ def test_login_access_uses_real_users_and_hides_categories_from_settings(client)
     assert "Arun Demo" not in settings and "Demo invite" not in settings
     assert "Solar91PortalCategories" not in settings
     assert "data-categories-host" not in settings
-    assert "Equipment scope · Module Cleaning" in settings
+    assert "Scope · Module Cleaning" in settings
+    assert "Scope · Preventive Maintenance" in settings and "Scope · Health" in settings
+    assert "pm_plant_ids" in settings and "health_plant_ids" in settings
     assert "washing_plant_ids" in settings
     assert "Role &amp; plant assignments" not in settings
 
@@ -609,13 +611,20 @@ def test_plant_table_uses_balanced_shared_columns_and_numeric_spv_label():
             styles,
         )
     ]
-    assert len(widths) == 13
+    assert len(widths) == 15      # + PM Assignee and Health Assignee
     assert sum(widths) == 100
-    assert widths[9] >= 7, "the Location column should not wrap its heading"
-    assert "min-width: 1200px" in styles and "overflow-x: auto" in styles
+    assert widths[11] >= 7, "the Location column should not wrap its heading"
+    # Every column shares the frame on a desktop: no table minimum width, so nothing scrolls sideways.
+    # A phone is too narrow to fit 15 columns legibly, so the scroll fallback lives in that media query only.
+    assert "width: 100%; min-width: 0; table-layout: fixed" in styles
+    assert "min-width: 1200px" not in styles
+    assert "@media (max-width: 700px) {\n  .ep-pt__table { min-width: 1080px; }" in styles
+    assert "overflow-x: auto" in styles
     table = (PORTAL_ASSETS / "js" / "plants-table.js").read_text(encoding="utf-8")
     assert "function spvNumber(plant)" in table
-    assert '{ key: "assignee",  label: "Assignee" }' in table
+    assert '{ key: "assignee",  label: "Cleaning Assignee" }' in table
+    assert '{ key: "pmAssignee",     label: "PM Assignee" }' in table
+    assert '{ key: "healthAssignee", label: "Health Assignee" }' in table
     assert table.index('{ key: "location",  label: "Location" }') < table.index('{ key: "cctv",      label: "CCTV" }')
     assert table.index('{ key: "cctv",      label: "CCTV" }') < table.index('{ key: "activity",  label: "Last Activity" }')
     assert 'plant.customFields && plant.customFields.cctv_url' in table
