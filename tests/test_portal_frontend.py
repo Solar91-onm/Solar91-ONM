@@ -950,56 +950,84 @@ def test_calendar_day_detail_lists_the_cleaned_tables():
     assert "tablesList: formatTableList(tableNumbersOf(report))" in calendar
 
 
-def test_bom_table_adds_section_and_unit_columns_and_keeps_the_server_row_order():
-    """BOQ fields (migration 040) are two more ordinary columns in the same BOM table.
+def test_bom_table_merges_sections_splits_maker_and_supplier_and_keeps_boq_order():
+    """The BOM table's columns, its merged Section cell and its unformatted quantities.
 
-    Section sits first, Unit directly after Quantity, rows render in the order the API sent
-    them, decimals keep their stored precision, and both columns reach the CSV.
+    Column order, left to right: (Plant) | Section | Item Description | Specs | Maker | Supplier |
+    Quantity | Unit | T.R. | W.C. | Item Serial No. | Invoice | (Edit). The Section cell is drawn
+    once per block with a rowspan, recomputed on every render, and quantities print as raw digits.
     """
     module = (PORTAL_ASSETS / "js" / "bom.js").read_text(encoding="utf-8")
     assert '{ key: "section", label: "Section", w: ' in module
-    assert '{ key: "unit", label: "Unit", w: ' in module
-    assert module.index('{ key: "section"') < module.index('{ key: "itemName"')
-    assert module.index('{ key: "quantity"') < module.index('{ key: "unit"') < module.index('{ key: "specs"')
-    # Still one table: no grouped section header rows, cards or accordions.
+    assert '{ key: "itemName", label: "Item Description", w: ' in module
+    assert '{ key: "maker", label: "Maker", w: ' in module
+    assert '{ key: "supplier", label: "Supplier", w: ' in module
+    assert module.index('{ key: "itemName"') < module.index('{ key: "specs"') < module.index('{ key: "maker"')
+    assert module.index('{ key: "maker"') < module.index('{ key: "supplier"') < module.index('{ key: "quantity"')
+    assert module.index('{ key: "quantity"') < module.index('{ key: "unit"') < module.index('{ key: "testReport"')
+    assert "Maker/Supplier" not in module and "makerSupplier" not in module
+    # Still one table: a merged cell, not grouped header rows, cards or accordions.
     assert "ep-pt__table ep-bom__table" in module
-    assert "rowspan" not in module and "ep-bom__group" not in module
-    assert 'data-bom-filter="section"' in module and "All sections" in module
+    assert "ep-bom__group" not in module
+    assert 'rowspan="' in module and "function sectionBlocks(items)" in module
+    # The quantity cell is the only one that drops fmt.formatNumber.
+    assert "function qtyText(value)" in module and "fmt.formatNumber(" not in module
+    assert 'data-bom-filter="section"' in module and 'data-bom-filter="supplier"' in module
     assert 'step="0.001"' in module and 'data-bom-field="sort_order"' in module
+    assert '"/api/bom/sections/order"' in module and 'method: "PATCH"' in module
 
     script = r"""
       global.window = global;
       global.document = { activeElement: null, body: { appendChild() {}, removeChild() {} },
-        createElement: () => ({ click() {}, style: {} }) };
+        createElement: () => ({ click() {}, style: {} }), addEventListener() {}, removeEventListener() {} };
       let csv = '';
       global.Blob = function (parts) { csv = parts.join(''); };
       global.URL.createObjectURL = () => 'blob:bom';
       global.URL.revokeObjectURL = () => {};
       require('./assets/js/format.js');
 
-      const plant = { siteCode: 'ABH01', plantName: 'Abhaneri 01', displayName: 'Abhaneri', district: 'Dausa', projectCompany: 'P1' };
-      global.Solar91PortalData = { fetchPortfolio: () => Promise.resolve({ rows: [{ plant: plant, profile: {} }] }) };
+      const abh = { id: 'p1', siteCode: 'ABH01', plantName: 'Abhaneri 01', displayName: 'Abhaneri', district: 'Dausa', projectCompany: 'P1' };
+      const bgr = { id: 'p2', siteCode: 'BGR02', plantName: 'Bagru 02', displayName: 'Bagru', district: 'Jaipur', projectCompany: 'P1' };
+      global.Solar91PortalData = { fetchPortfolio: () => Promise.resolve({ rows: [{ plant: abh, profile: {} }, { plant: bgr, profile: {} }] }) };
 
-      const base = { siteCode: 'ABH01', makerSupplier: null, quantity: null, unit: null, section: null,
-        sortOrder: null, specs: null, testReport: null, warrantyCert: null, serialNo: null,
-        invoice: null, invoiceUrl: null, version: 1 };
-      // Exactly as the API sends them: section, then BOQ line order. Not alphabetical.
-      const ITEMS = [
-        Object.assign({}, base, { id: '1', itemName: 'Solar PV Modules', makerSupplier: 'Adani',
-          quantity: 5368.23, unit: 'kWp', section: 'PV Section', sortOrder: 1, specs: 'Mono PERC 550 Wp' }),
-        Object.assign({}, base, { id: '2', itemName: 'DC Cable', makerSupplier: 'Polycab',
-          quantity: 7180.8, unit: 'Mtrs', section: 'PV Section', sortOrder: 2 }),
-        Object.assign({}, base, { id: '3', itemName: 'JOINTING KIT', section: 'HT Section', sortOrder: 3, specs: '95 sqmm' }),
-        Object.assign({}, base, { id: '4', itemName: 'JOINTING KIT', section: 'HT Section', sortOrder: 4,
-          specs: '185 sqmm', quantity: 12, unit: 'Set' }),
-        Object.assign({}, base, { id: '5', itemName: 'Aux transformer' })
+      const base = { siteCode: 'ABH01', maker: null, supplier: null, quantity: null, unit: null, section: null,
+        sectionOrder: null, sortOrder: null, specs: null, testReport: null, warrantyCert: null,
+        serialNo: null, invoice: null, invoiceUrl: null, version: 1 };
+      const row = (over) => Object.assign({}, base, over);
+      // Exactly as the API sends them: section ORDER, then BOQ line order. "PV Section" (order 1)
+      // leads "14x2 MMS Hardware Quantity" (order 2) -- alphabetically it would be the other way.
+      const PLANT_ITEMS = [
+        row({ id: '1', itemName: 'Solar PV Modules', maker: 'Adani', supplier: 'Shakti Traders',
+              quantity: 5334, unit: 'kWp', section: 'PV Section', sectionOrder: 1, sortOrder: 1, specs: 'Mono PERC 550 Wp' }),
+        row({ id: '2', itemName: 'DC Cable', maker: 'Polycab', supplier: 'Shakti Traders',
+              quantity: 7180.8, unit: 'Mtrs', section: 'PV Section', sectionOrder: 1, sortOrder: 2 }),
+        row({ id: '3', itemName: 'JOINTING KIT', section: '14x2 MMS Hardware Quantity', sectionOrder: 2, sortOrder: 3, specs: '95 sqmm' }),
+        row({ id: '4', itemName: 'JOINTING KIT', section: '14x2 MMS Hardware Quantity', sectionOrder: 2, sortOrder: 4,
+              specs: '185 sqmm', quantity: 12, unit: 'Set' }),
+        row({ id: '5', itemName: 'Aux transformer' })
       ];
-      let urls = [];
+      const SECTIONS = ['PV Section', '14x2 MMS Hardware Quantity'];
+      // Two plants, both with a "PV Section": one plant's block must not merge into the next.
+      const ALL_ITEMS = [
+        row({ id: '1', itemName: 'Solar PV Modules', section: 'PV Section', sectionOrder: 1, sortOrder: 1 }),
+        row({ id: '2', itemName: 'DC Cable', section: 'PV Section', sectionOrder: 1, sortOrder: 2 }),
+        row({ id: '6', siteCode: 'BGR02', itemName: 'Solar PV Modules', section: 'PV Section', sectionOrder: 1, sortOrder: 1 }),
+        row({ id: '7', siteCode: 'BGR02', itemName: 'DC Cable', section: 'PV Section', sectionOrder: 1, sortOrder: 2 })
+      ];
+
+      let items = PLANT_ITEMS, sections = SECTIONS, editor = false, urls = [], patched = null;
       global.Solar91PortalAPI = {
-        can: () => false,
+        can: () => editor,
         currentUser: () => ({ role: 'O&M Head' }),
-        request: (url) => { urls.push(url); return Promise.resolve({ items: ITEMS, total: ITEMS.length,
-          makers: ['Adani', 'Polycab'], sections: ['HT Section', 'PV Section'], limit: 200, offset: 0 }); }
+        request: (url, opts) => {
+          urls.push(url);
+          if (opts && opts.method === 'PATCH') { patched = JSON.parse(opts.body); return Promise.resolve({ sections: patched.sections }); }
+          // The server filters; this stands in for it, so the table re-renders over fewer rows.
+          const want = (url.match(/[?&]section=([^&]*)/) || [])[1];
+          const shown = want ? items.filter(i => i.section === decodeURIComponent(want)) : items;
+          return Promise.resolve({ items: shown, total: shown.length, makers: ['Adani', 'Polycab'],
+            suppliers: ['Shakti Traders'], sections: sections, limit: 200, offset: 0 });
+        }
       };
       require('./assets/js/bom.js');
 
@@ -1027,49 +1055,105 @@ def test_bom_table_adds_section_and_unit_columns_and_keeps_the_server_row_order(
       const tick = () => new Promise(r => setTimeout(r, 0));
       const fail = (m) => { throw new Error(m); };
       const at = (html, text) => { const i = html.indexOf(text); if (i === -1) fail('missing: ' + text); return i; };
+      const count = (html, re) => (html.match(re) || []).length;
+      const settle = async (n) => { for (let i = 0; i < (n || 8); i++) await tick(); };
 
       (async () => {
-        const el = container();
+        // ── Plant -> Details -> BOM ───────────────────────────────────────────
+        let el = container();
         Solar91PortalBom.show(el, { siteCode: 'ABH01' });
-        for (let i = 0; i < 8; i++) await tick();
-        const html = el.html;
+        await settle();
+        let html = el.html;
 
-        // Two more ordinary columns in the same table: Section first, Unit after Quantity.
-        if (at(html, '<th>Section</th>') > at(html, '<th>Item Name</th>')) fail('Section must come first');
-        if (html.indexOf('<th>Quantity</th><th>Unit</th>') === -1) fail('Unit must follow Quantity');
-        if (at(html, '<th>Unit</th>') > at(html, '<th>Specs</th>')) fail('Unit must come before Specs');
+        // The whole header row, left to right, in one piece.
+        if (html.indexOf('<th>Section</th><th>Item Description</th><th>Specs</th><th>Maker</th>' +
+          '<th>Supplier</th><th>Quantity</th><th>Unit</th><th>T.R.</th><th>W.C.</th>' +
+          '<th>Item Serial No.</th><th>Invoice</th>') === -1) fail('column order: ' + html.slice(at(html, '<thead>'), at(html, '</thead>')));
+        if (html.indexOf('<th>Item Name</th>') !== -1 || html.indexOf('Maker/Supplier') !== -1) fail('old column names remain');
         if (html.indexOf('<table') !== html.lastIndexOf('<table')) fail('the page must stay one table');
 
-        // The server's order is the page's order: not alphabetical, not regrouped.
+        // Section: ONE merged cell per block of consecutive rows, not one per row.
+        if (count(html, /class="ep-bom__section/g) !== 3) fail('expected three section blocks, got ' + count(html, /class="ep-bom__section/g));
+        if (count(html, /rowspan="2"/g) !== 2) fail('two two-row blocks must carry rowspan="2"');
+        if (count(html, />PV Section<\/td>/g) !== 1) fail('the section name must be printed once per block');
+        if (count(html, />14x2 MMS Hardware Quantity<\/td>/g) !== 1) fail('second block repeated its name');
+        if (html.indexOf('rowspan="1"') !== -1) fail('a one-row block needs no rowspan');
+        // The no-section rows form their own block, shown as a dash, after the named ones.
+        if (at(html, 'Aux transformer') < at(html, '>14x2 MMS Hardware Quantity</td>')) fail('unsectioned rows must come last');
+
+        // The server's order is the page's order: BOQ order, never alphabetical.
+        if (at(html, '>PV Section</td>') > at(html, '>14x2 MMS Hardware Quantity</td>')) fail('sections were re-sorted alphabetically');
         const order = ['Solar PV Modules', 'DC Cable', '95 sqmm', '185 sqmm', 'Aux transformer'].map(t => at(html, t));
         for (let i = 1; i < order.length; i++) if (order[i] < order[i - 1]) fail('row order changed');
-        // Sub-variant lines sharing an item name are both rendered.
-        if ((html.match(/JOINTING KIT<\/td>/g) || []).length !== 2) fail('a repeated item name was collapsed');
+        if (count(html, /JOINTING KIT<\/td>/g) !== 2) fail('a repeated item name was collapsed');
 
-        // Decimals as stored, trailing zeros trimmed, never rounded to an integer.
-        if (html.indexOf('5,368.23') === -1 || html.indexOf('7,180.8') === -1) fail('decimal quantity lost');
-        if (html.indexOf('12.000') !== -1 || html.indexOf('>5,368<') !== -1) fail('quantity rounded or padded');
+        // Maker and Supplier are two cells; Specs sits right after the description.
+        if (html.indexOf('<td class="ep-bom__item">Solar PV Modules</td><td class="ep-bom__specs">Mono PERC 550 Wp</td>' +
+          '<td>Adani</td><td>Shakti Traders</td>') === -1) fail('cell order: ' + html.slice(at(html, 'Solar PV Modules'), at(html, 'Solar PV Modules') + 260));
 
-        // A line with no maker, no unit and no section renders placeholders, never "undefined".
+        // Quantities: the raw digits, no thousands separator, no padded zeros.
+        if (html.indexOf('>5334<') === -1) fail('quantity must print as 5334');
+        if (html.indexOf('5,334') !== -1 || html.indexOf('7,180.8') !== -1) fail('a thousands separator leaked in');
+        if (html.indexOf('>7180.8<') === -1 || html.indexOf('>12<') === -1) fail('decimal or whole quantity lost');
+        if (html.indexOf('12.000') !== -1 || html.indexOf('>5368<') !== -1) fail('quantity padded or rounded');
+
+        // Nothing invented for the empty line.
         if (html.indexOf('undefined') !== -1) fail('undefined leaked into the table');
-        if ((html.match(/ep-pt__dash/g) || []).length < 10) fail('missing placeholders');
+        if (count(html, /ep-pt__dash/g) < 10) fail('missing placeholders');
 
-        // The section filter sits with the other filters and is fed by the API list.
-        if (html.indexOf('data-bom-filter="section"') === -1) fail('section filter missing');
-        if (html.indexOf('>HT Section</option>') === -1 || html.indexOf('>All sections</option>') === -1) fail('section options missing');
+        // Both filter lists are fed by the API, in the API's order.
+        if (at(html, '>PV Section</option>') > at(html, '>14x2 MMS Hardware Quantity</option>')) fail('the filter dropdown re-sorted the sections');
+        if (html.indexOf('>Shakti Traders</option>') === -1 || html.indexOf('>All suppliers</option>') === -1) fail('supplier filter missing');
+
+        // ── The spans are recomputed, never reused ────────────────────────────
         el.nodes['data-bom-filter=section'].value = 'PV Section';
         el.nodes['data-bom-filter=section'].on.change();
-        for (let i = 0; i < 6; i++) await tick();
+        await settle();
+        html = el.html;
         if (urls[urls.length - 1].indexOf('section=PV%20Section') === -1) fail('section not sent: ' + urls[urls.length - 1]);
+        if (count(html, /class="ep-bom__section/g) !== 1) fail('the filtered table must hold one block');
+        if (count(html, /rowspan="2"/g) !== 1) fail('the span must be recomputed for the two rows left');
+        if (html.indexOf('rowspan="4"') !== -1 || html.indexOf('rowspan="5"') !== -1) fail('a stale span survived the filter');
+        if (html.indexOf('14x2 MMS Hardware Quantity</td>') !== -1) fail('a filtered-out block still rendered');
 
-        // CSV carries both new columns, in the table's positions, with the raw stored numbers.
+        // ── CSV: the table's columns, the section on every row, raw quantities ─
+        el.nodes['data-bom-filter=section'].value = '__all';
+        el.nodes['data-bom-filter=section'].on.change();
+        await settle();
         el.nodes['data-bom-export=csv'].on.click();
-        for (let i = 0; i < 8; i++) await tick();
+        await settle();
         const lines = csv.replace(/^﻿/, '').split('\r\n');
-        if (lines[0].indexOf('Section,Item Name,Maker/Supplier,Quantity,Unit,Specs,T.R.,W.C.,Item Serial No.,Invoice') !== 0) fail('CSV header: ' + lines[0]);
-        if (lines[1].indexOf('PV Section,Solar PV Modules,Adani,5368.23,kWp,') !== 0) fail('CSV row: ' + lines[1]);
-        if (lines[5].indexOf(',Aux transformer,,,,') !== 0) fail('CSV empty row: ' + lines[5]);
+        if (lines[0] !== 'Section,Item Description,Specs,Maker,Supplier,Quantity,Unit,T.R.,W.C.,Item Serial No.,Invoice,Invoice Link,Plant Code') fail('CSV header: ' + lines[0]);
+        if (lines[1] !== 'PV Section,Solar PV Modules,Mono PERC 550 Wp,Adani,Shakti Traders,5334,kWp,,,,,,ABH01') fail('CSV row: ' + lines[1]);
+        // A merged cell on screen, a repeated one in the file.
+        if (lines[2].indexOf('PV Section,DC Cable,,Polycab,Shakti Traders,7180.8,Mtrs,') !== 0) fail('CSV must repeat the section: ' + lines[2]);
+        if (lines[4].indexOf('14x2 MMS Hardware Quantity,JOINTING KIT,185 sqmm,,,12,Set,') !== 0) fail('CSV row 4: ' + lines[4]);
+        if (lines[5].indexOf(',Aux transformer,,,,,') !== 0) fail('CSV empty row: ' + lines[5]);
+        if (csv.indexOf('5,334') !== -1) fail('a formatted quantity reached the CSV');
+
+        // ── Reorder sections: editors, single-plant mode only ─────────────────
+        if (el.html.indexOf('data-bom-reorder') !== -1) fail('a viewer must not be offered the reorder button');
+        editor = true;
+        el = container();
+        Solar91PortalBom.show(el, { siteCode: 'ABH01' });
+        await settle();
+        if (el.html.indexOf('data-bom-reorder') === -1) fail('an editor needs the reorder button');
+        if (el.html.indexOf('>Reorder sections<') === -1) fail('reorder button label');
+
+        // ── Views -> Details -> BOM (all plants) ──────────────────────────────
+        items = ALL_ITEMS;
+        el = container();
+        Solar91PortalBom.show(el, {});
+        await settle();
+        html = el.html;
+        if (html.indexOf('<th>Plant</th><th>Section</th><th>Item Description</th>') === -1) fail('Plant must lead across plants: ' + html.slice(at(html, '<thead>'), at(html, '</thead>')));
+        if (html.indexOf('data-bom-reorder') !== -1) fail('reordering must not be offered across plants');
+        // Same section name, two plants: two blocks of two, never one block of four.
+        if (count(html, /class="ep-bom__section/g) !== 2) fail('plants were merged into one block');
+        if (count(html, /rowspan="2"/g) !== 2) fail('expected a rowspan="2" per plant');
+        if (html.indexOf('rowspan="4"') !== -1) fail('one plant\'s block ran into the next plant\'s');
+        if (count(html, />PV Section<\/td>/g) !== 2) fail('each plant names its section once');
       })().catch(e => { console.error(e.message); process.exit(1); });
     """
-    run = subprocess.run(["node", "-e", script], cwd=ROOT, capture_output=True, text=True, timeout=20)
+    run = subprocess.run(["node", "-e", script], cwd=ROOT, capture_output=True, text=True, timeout=30)
     assert run.returncode == 0, run.stderr

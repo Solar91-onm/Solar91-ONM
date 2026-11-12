@@ -755,20 +755,25 @@ class BomItem(Base, TimestampMixin):
     is bumped on every save so two people editing the same line cannot silently overwrite each
     other.
 
-    A real BOQ arrives grouped: ``section`` is the group heading ("PV Section", "PROTECTION") and
-    ``sort_order`` the line order inside the sheet. The sheet's own S.No. repeats across
-    sub-variant lines, so it cannot order them; ``sort_order`` can. ``quantity`` is NUMERIC(14,3)
-    because BOQ lines carry fractions (5368.23 kWp, 7180.8 Mtrs).
+    A real BOQ arrives grouped: ``section`` is the group heading ("PV Section", "PROTECTION"),
+    ``section_order`` that section's place in the sheet (the same value on every row of the
+    section, so the page never falls back to alphabetical order) and ``sort_order`` the line
+    order inside the section. The sheet's own S.No. repeats across sub-variant lines, so it
+    cannot order them; ``sort_order`` can. ``quantity`` is NUMERIC(14,3) because BOQ lines carry
+    fractions (5368.23 kWp, 7180.8 Mtrs). ``maker`` and ``supplier`` are separate parties
+    (migration 041 renamed the old single ``maker_supplier`` column to ``maker``).
     """
     __tablename__ = "bom_items"
     id: Mapped[uuid.UUID] = uuid_pk()
     plant_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("plants.id", ondelete="CASCADE"), nullable=False, index=True)
     item_name: Mapped[str] = mapped_column(Text, nullable=False)
-    maker_supplier: Mapped[str | None] = mapped_column(String(160))
+    maker: Mapped[str | None] = mapped_column(String(160))
+    supplier: Mapped[str | None] = mapped_column(String(160))
     quantity: Mapped[Decimal | None] = mapped_column(Numeric(14, 3))
-    unit: Mapped[str | None] = mapped_column(String(24))        # Nos. / Mtrs / kWp / KG / Set
-    section: Mapped[str | None] = mapped_column(String(160))    # BOQ group heading
-    sort_order: Mapped[int | None] = mapped_column(Integer)     # BOQ line order within the sheet
+    unit: Mapped[str | None] = mapped_column(String(24))          # Nos. / Mtrs / kWp / KG / Set
+    section: Mapped[str | None] = mapped_column(String(160))      # BOQ group heading
+    section_order: Mapped[int | None] = mapped_column(Integer)    # order of the section within the plant
+    sort_order: Mapped[int | None] = mapped_column(Integer)       # BOQ line order within the section
     specs: Mapped[str | None] = mapped_column(Text)
     test_report: Mapped[str | None] = mapped_column(String(200))
     warranty_cert: Mapped[str | None] = mapped_column(String(200))
@@ -777,4 +782,4 @@ class BomItem(Base, TimestampMixin):
     invoice_url: Mapped[str | None] = mapped_column(Text)      # http(s) link to the invoice; the Invoice cell opens it
     row_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     updated_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
-    __table_args__ = (Index("ix_bom_items_plant_section_order", "plant_id", "section", "sort_order"),)
+    __table_args__ = (Index("ix_bom_items_plant_section_order", "plant_id", "section_order", "sort_order"),)

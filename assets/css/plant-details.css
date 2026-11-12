@@ -150,7 +150,16 @@
   .ep-pt__table.ep-bom__table { min-width: 1100px; }
 }
 .ep-bom__item { font-weight: 600; color: var(--ep-text-strong); }
-.ep-pt__table.ep-bom__table td.ep-bom__section { color: var(--ep-text-muted); font-weight: 600; }
+/* Section: ONE merged cell per block (rowspan), read against the whole block like a sheet.
+   Top-aligned so the heading sits beside the block's first line, with a left accent bar and a
+   faint alternating tint so where one block ends and the next begins stays obvious. */
+.ep-pt__table.ep-bom__table td.ep-bom__section {
+  color: var(--ep-text-strong); font-weight: 600; vertical-align: top;
+  border-left: 3px solid var(--ep-accent, #2f6fed);
+  background: color-mix(in srgb, var(--ep-accent, #2f6fed) 4%, transparent);
+}
+.ep-pt__table.ep-bom__table td.ep-bom__section.is-alt { background: color-mix(in srgb, var(--ep-accent, #2f6fed) 9%, transparent); }
+.ep-bom__table tbody tr.ep-bom__block-start > td { border-top: 1px solid var(--ep-border-strong, var(--ep-border)); }
 .ep-pt__table.ep-bom__table td.num.mono { overflow-wrap: normal; word-break: keep-all; }   /* a quantity never breaks mid-number */
 .ep-bom__del { margin-left: 6px; width: 24px; height: 24px; border: 1px solid var(--ep-border-soft, var(--ep-border)); border-radius: 999px; background: var(--ep-bg-muted); color: var(--ep-text-muted); cursor: pointer; font-size: 15px; line-height: 1; }
 .ep-bom__del:hover { color: #b42318; border-color: #b42318; }
@@ -161,3 +170,13 @@
 .ep-bom__modal-body .ep-bom__wide { grid-column: 1 / -1; }
 .ep-bom__modal-body textarea, .ep-bom__modal-body select { width: 100%; padding: 8px 12px; border: 1px solid var(--ep-border-strong); border-radius: var(--ep-radius-md); background: var(--ep-bg); color: var(--ep-text); font: inherit; resize: vertical; }
 @media (max-width: 760px) { .ep-bom__modal-body { grid-template-columns: 1fr; } }
+/* Reorder sections dialog: the plant's BOQ sections, moved with up/down buttons. */
+.ep-pd__modal.ep-bom__order-modal { width: min(460px, 100%); display: flex; flex-direction: column; overflow: hidden; }
+.ep-bom__order { list-style: none; margin: 0; padding: 0 var(--ep-s-5) var(--ep-s-3); overflow-y: auto; min-height: 0; }
+.ep-bom__order-row { display: flex; align-items: center; gap: var(--ep-s-3); padding: 8px 0; border-bottom: 1px solid var(--ep-border-soft, var(--ep-border)); }
+.ep-bom__order-pos { min-width: 22px; color: var(--ep-text-muted); font-variant-numeric: tabular-nums; }
+.ep-bom__order-name { flex: 1 1 auto; font-weight: 600; overflow-wrap: anywhere; }
+.ep-bom__order-move { display: flex; gap: 4px; }
+.ep-bom__order-btn { width: 28px; height: 28px; border: 1px solid var(--ep-border-strong); border-radius: var(--ep-radius-md); background: var(--ep-bg); color: var(--ep-text); cursor: pointer; line-height: 1; }
+.ep-bom__order-btn:hover:not([disabled]) { border-color: var(--ep-accent, #2f6fed); color: var(--ep-accent, #2f6fed); }
+.ep-bom__order-btn[disabled] { opacity: .4; cursor: default; }
