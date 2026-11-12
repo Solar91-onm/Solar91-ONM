@@ -21,6 +21,8 @@
 .ep-pd__btn--primary { background: var(--ep-accent); border-color: var(--ep-accent); color: var(--ep-text-inverse); }
 .ep-pd__btn--primary:hover { background: var(--ep-accent-strong); }
 .ep-pd__btn[disabled] { opacity: .6; cursor: progress; }
+.ep-pd__btn--danger { background: #b42318; border-color: #b42318; color: #fff; }   /* removal is never the default answer */
+.ep-pd__btn--danger:hover { background: #8f1d13; }
 
 
 /* Editor */
@@ -151,10 +153,11 @@
 }
 .ep-bom__item { font-weight: 600; color: var(--ep-text-strong); }
 /* Section: ONE merged cell per block (rowspan), read against the whole block like a sheet.
-   Top-aligned so the heading sits beside the block's first line, with a left accent bar and a
-   faint alternating tint so where one block ends and the next begins stays obvious. */
+   Centred down the block so the heading sits against the middle of the rows it covers, with a
+   left accent bar and a faint alternating tint so where one block ends and the next begins
+   stays obvious. */
 .ep-pt__table.ep-bom__table td.ep-bom__section {
-  color: var(--ep-text-strong); font-weight: 600; vertical-align: top;
+  color: var(--ep-text-strong); font-weight: 600; vertical-align: middle;
   border-left: 3px solid var(--ep-accent, #2f6fed);
   background: color-mix(in srgb, var(--ep-accent, #2f6fed) 4%, transparent);
 }
@@ -180,3 +183,8 @@
 .ep-bom__order-btn { width: 28px; height: 28px; border: 1px solid var(--ep-border-strong); border-radius: var(--ep-radius-md); background: var(--ep-bg); color: var(--ep-text); cursor: pointer; line-height: 1; }
 .ep-bom__order-btn:hover:not([disabled]) { border-color: var(--ep-accent, #2f6fed); color: var(--ep-accent, #2f6fed); }
 .ep-bom__order-btn[disabled] { opacity: .4; cursor: default; }
+/* Two-step removal dialog: what is being removed, then a final decision. */
+.ep-pd__modal.ep-bom__confirm { width: min(440px, 100%); }
+.ep-bom__confirm-body { padding: 0 var(--ep-s-5) var(--ep-s-3); color: var(--ep-text-muted); }
+.ep-bom__confirm-item { font-weight: 600; color: var(--ep-text-strong); overflow-wrap: anywhere; margin: 0 0 4px; }
+.ep-bom__confirm-where { margin: 0 0 var(--ep-s-3); font-size: .92em; }

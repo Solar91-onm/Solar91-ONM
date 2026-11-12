@@ -409,16 +409,88 @@
     if (first) first.focus();
   }
 
-  function removeItem(container, id) {
-    var item = findItem(id);
+  /**
+   * Remove a BOM line, behind two deliberate confirmations.
+   *
+   * The x in the Edit column sits one click away from every row, so a stray click used to be a
+   * removal. It now opens this dialog instead: step one states what is being removed and from
+   * which plant, step two asks for a final decision. Nothing is sent until both are answered,
+   * "No" and Escape leave the line untouched, and a failed delete is reported in the dialog
+   * rather than being swallowed.
+   *
+   * The API is the authority on who may do this: DELETE /api/bom/{id} requires `plants.manage`,
+   * which only the O&M Head role holds. An Assignee, Administration or Site Engineer user is
+   * refused by the server and is never shown the button.
+   */
+  function openRemove(container, item, trigger) {
     if (busy || !item) return;
-    if (!global.confirm('Remove "' + item.itemName + '" (' + item.siteCode + ") from the BOM?")) return;
-    busy = true;
-    api().request("/api/bom/" + encodeURIComponent(id) + "?version=" + item.version, { method: "DELETE" })
-      .then(function () { return load(container, false); })
-      .then(function () { setStatus(container, "Line removed."); })
-      .catch(function (err) { setStatus(container, "Could not remove: " + (err && err.message ? err.message : "try again"), true); })
-      .then(function () { busy = false; });
+    var step = 1, removing = false;
+    var where = item.siteCode + (plantName(item.siteCode) ? " · " + plantName(item.siteCode) : "");
+    var overlay = document.createElement("div");
+    overlay.className = "ep-pd__overlay";
+    document.body.appendChild(overlay);
+
+    function close() {
+      if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+      document.removeEventListener("keydown", onKey);
+      if (trigger && trigger.isConnected) trigger.focus();
+    }
+    function onKey(ev) { if (ev.key === "Escape" && !removing) close(); }
+    document.addEventListener("keydown", onKey);
+
+    function paint(message) {
+      var first = step === 1;
+      overlay.innerHTML = '<div class="ep-pd__modal ep-bom__confirm" role="alertdialog" aria-modal="true" aria-labelledby="bom-del-title" aria-describedby="bom-del-body">' +
+        '<header class="ep-pd__modal-head"><div><h2 id="bom-del-title">' +
+          (first ? "Remove this BOM line?" : "Is this your final decision?") + "</h2>" +
+          '<p class="ep-pd__mono">' + fmt.escape(where) + "</p></div>" +
+          '<button class="ep-pd__x" type="button" data-bom-del-no aria-label="Close">&times;</button></header>' +
+        '<div class="ep-bom__confirm-body" id="bom-del-body">' +
+          '<p class="ep-bom__confirm-item">' + fmt.escape(item.itemName) + "</p>" +
+          (item.section ? '<p class="ep-bom__confirm-where">Section: ' + fmt.escape(item.section) + "</p>" : "") +
+          "<p>" + (first
+            ? "This removes the line from this plant's BOQ for everyone. It cannot be undone."
+            : "Confirm once more and the line is removed permanently.") + "</p>" +
+          (message ? '<p class="ep-pd__form-error" role="alert">' + fmt.escape(message) + "</p>" : "") +
+        "</div>" +
+        '<footer class="ep-pd__modal-foot"><button class="ep-pd__btn" type="button" data-bom-del-no>' +
+          (first ? "No, keep it" : "Go back") + "</button>" +
+          '<button class="ep-pd__btn ep-pd__btn--danger" type="button" data-bom-del-yes' + (removing ? " disabled" : "") + ">" +
+          (removing ? "Removing…" : (first ? "Yes, remove it" : "Yes, remove permanently")) + "</button></footer></div>";
+
+      overlay.querySelectorAll("[data-bom-del-no]").forEach(function (btn) {
+        btn.addEventListener("click", function () {
+          if (removing) return;
+          if (step === 2) { step = 1; paint(); return; }   // "Go back" returns to the first question
+          close();
+        });
+      });
+      var yes = overlay.querySelector("[data-bom-del-yes]");
+      if (yes) yes.addEventListener("click", function () {
+        if (removing) return;
+        if (step === 1) { step = 2; paint(); return; }
+        removing = true; busy = true;
+        paint();
+        api().request("/api/bom/" + encodeURIComponent(item.id) + "?version=" + item.version, { method: "DELETE" })
+          .then(function () {
+            removing = false; busy = false; close();
+            return load(container, false).then(function () { setStatus(container, "Line removed."); });
+          })
+          .catch(function (err) {
+            removing = false; busy = false;
+            step = 1;                                      // a failed removal starts over, never half-done
+            paint("Not removed. " + (err && err.message ? err.message : "Please retry."));
+          });
+      });
+      // The safe answer holds the focus, so Enter never removes a line on its own.
+      var safe = overlay.querySelector("[data-bom-del-no]");
+      if (safe && !removing) safe.focus();
+    }
+    paint();
+
+    overlay.addEventListener("click", function (ev) {
+      if (!removing && ev.target === overlay) close();
+    });
   }
 
   /**
@@ -599,7 +671,7 @@
       btn.addEventListener("click", function () { var it = findItem(btn.getAttribute("data-bom-edit")); if (it) openEditor(container, it, btn); });
     });
     container.querySelectorAll("[data-bom-del]").forEach(function (btn) {
-      btn.addEventListener("click", function () { removeItem(container, btn.getAttribute("data-bom-del")); });
+      btn.addEventListener("click", function () { var it = findItem(btn.getAttribute("data-bom-del")); if (it) openRemove(container, it, btn); });
     });
     container.querySelectorAll("[data-bom-export]").forEach(function (btn) {
       btn.addEventListener("click", function () { exportFile(container, btn.getAttribute("data-bom-export")); });

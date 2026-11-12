@@ -1157,3 +1157,183 @@ def test_bom_table_merges_sections_splits_maker_and_supplier_and_keeps_boq_order
     """
     run = subprocess.run(["node", "-e", script], cwd=ROOT, capture_output=True, text=True, timeout=30)
     assert run.returncode == 0, run.stderr
+
+
+def test_bom_removal_asks_twice_and_never_uses_a_bare_browser_confirm():
+    """The x in the Edit column must not be one click away from deleting a BOQ line.
+
+    It opens a dialog that states what is being removed, asks again for a final decision, and
+    only then sends DELETE. The safe answer holds the focus, so Enter cannot remove a line.
+    """
+    module = (PORTAL_ASSETS / "js" / "bom.js").read_text(encoding="utf-8")
+    assert "global.confirm(" not in module, "a browser confirm() is too easy to dismiss by reflex"
+    assert "function openRemove(container, item, trigger)" in module
+    assert "Is this your final decision?" in module and "Remove this BOM line?" in module
+    assert 'role="alertdialog"' in module and "ep-pd__btn--danger" in module
+    # The first question's safe answer is focused, and the step only advances on an explicit click.
+    assert 'overlay.querySelector("[data-bom-del-no]")' in module
+    assert "if (step === 1) { step = 2; paint(); return; }" in module
+
+    script = r"""
+      global.window = global;
+      const listeners = {};
+      let overlayEl = null;
+      // A DOM small enough to drive the dialog: innerHTML is parsed only for the attributes
+      // the module looks up, which is all the dialog needs to be clicked through.
+      function node(tag) {
+        const el = { tag, children: [], on: {}, html: '', disabled: false, focused: 0, parentNode: null,
+          className: '', isConnected: true };
+        Object.defineProperty(el, 'innerHTML', { get: () => el.html, set(v) { el.html = v; } });
+        el.addEventListener = (t, f) => { el.on[t] = f; };
+        el.focus = () => { el.focused += 1; };
+        el.querySelector = (sel) => el.querySelectorAll(sel)[0] || null;
+        el.querySelectorAll = (sel) => {
+          const name = sel.slice(1, -1), found = [];
+          let i = -1;
+          while ((i = el.html.indexOf(name, i + 1)) !== -1) {
+            const before = el.html.lastIndexOf('<', i);
+            const key = name + '@' + before;
+            found.push(el.nodes[key] || (el.nodes[key] = Object.assign(node('button'), {
+              disabled: el.html.slice(before, i).indexOf('disabled') !== -1 ||
+                        el.html.slice(i, el.html.indexOf('>', i)).indexOf('disabled') !== -1 })));
+          }
+          return found;
+        };
+        el.nodes = {};
+        return el;
+      }
+      global.document = {
+        activeElement: null,
+        body: { appendChild(el) { overlayEl = el; el.parentNode = { removeChild() { overlayEl = null; } }; },
+                removeChild() {} },
+        createElement: (tag) => node(tag),
+        addEventListener(t, f) { listeners[t] = f; },
+        removeEventListener() {}
+      };
+      global.Blob = function () {};
+      global.URL.createObjectURL = () => 'blob:bom';
+      global.URL.revokeObjectURL = () => {};
+      require('./assets/js/format.js');
+
+      const plant = { id: 'p1', siteCode: 'ABH01', plantName: 'Abhaneri 01', displayName: 'Abhaneri', district: 'Dausa', projectCompany: 'P1' };
+      global.Solar91PortalData = { fetchPortfolio: () => Promise.resolve({ rows: [{ plant: plant, profile: {} }] }) };
+      const ITEM = { id: 'line-1', siteCode: 'ABH01', itemName: 'Solar PV module (Wp)', maker: 'Renew',
+        supplier: null, quantity: 9856, unit: 'Nos.', section: 'PV Section', sectionOrder: 1, sortOrder: 1,
+        specs: '540/545/550', testReport: null, warrantyCert: null, serialNo: null, invoice: null,
+        invoiceUrl: null, version: 3 };
+      let calls = [], fails = false;
+      global.Solar91PortalAPI = {
+        can: () => true,
+        currentUser: () => ({ role: 'O&M Head' }),
+        request: (url, opts) => {
+          if (opts && opts.method === 'DELETE') {
+            calls.push(url);
+            return fails ? Promise.reject(new Error('That line was changed by someone else.')) : Promise.resolve({ removed: true });
+          }
+          return Promise.resolve({ items: [ITEM], total: 1, makers: ['Renew'], suppliers: [],
+            sections: ['PV Section'], limit: 200, offset: 0 });
+        }
+      };
+      require('./assets/js/bom.js');
+
+      function container() {
+        const el = { isConnected: true, html: '', nodes: {} };
+        Object.defineProperty(el, 'innerHTML', { get() { return el.html; }, set(v) { el.html = v; } });
+        const make = (key) => el.nodes[key] || (el.nodes[key] = { on: {}, value: '', textContent: '',
+          classList: { toggle() {} }, getAttribute: () => key.split('=')[1] || key,
+          addEventListener(t, f) { this.on[t] = f; }, click() { if (this.on.click) this.on.click(); } });
+        el.querySelector = (sel) => {
+          const name = sel.charAt(0) === '.' ? sel.slice(1) : sel.slice(1, -1);
+          return el.html.indexOf(name) === -1 ? null : make(name);
+        };
+        el.querySelectorAll = (sel) => {
+          const name = sel.slice(1, -1), found = [];
+          let i = -1;
+          while ((i = el.html.indexOf(name + '="', i + 1)) !== -1) {
+            const from = i + name.length + 2;
+            found.push(make(name + '=' + el.html.slice(from, el.html.indexOf('"', from))));
+          }
+          return found;
+        };
+        return el;
+      }
+      const tick = () => new Promise(r => setTimeout(r, 0));
+      const settle = async (n) => { for (let i = 0; i < (n || 8); i++) await tick(); };
+      const fail = (m) => { throw new Error(m); };
+      const no = () => overlayEl.querySelectorAll('[data-bom-del-no]')[0];
+      const yes = () => overlayEl.querySelectorAll('[data-bom-del-yes]')[0];
+
+      (async () => {
+        const el = container();
+        Solar91PortalBom.show(el, { siteCode: 'ABH01' });
+        await settle();
+        if (el.html.indexOf('data-bom-del="line-1"') === -1) fail('the remove button is missing');
+
+        // One click opens the dialog and sends nothing.
+        el.nodes['data-bom-del=line-1'].click();
+        if (!overlayEl) fail('no dialog opened');
+        if (overlayEl.html.indexOf('Remove this BOM line?') === -1) fail('step one missing');
+        if (overlayEl.html.indexOf('Solar PV module (Wp)') === -1) fail('the dialog must name the line');
+        if (overlayEl.html.indexOf('ABH01') === -1) fail('the dialog must name the plant');
+        if (calls.length) fail('a click must not delete anything: ' + calls);
+        if (no().focused < 1) fail('the safe answer must hold the focus');
+
+        // "No, keep it" closes it, still without a delete.
+        no().on.click();
+        if (overlayEl) fail('the dialog stayed open');
+        if (calls.length) fail('answering No deleted the line');
+
+        // One "Yes" only advances to the final question.
+        el.nodes['data-bom-del=line-1'].click();
+        yes().on.click();
+        if (overlayEl.html.indexOf('Is this your final decision?') === -1) fail('step two missing');
+        if (calls.length) fail('the first Yes must not delete: ' + calls);
+        // "Go back" returns to step one instead of closing.
+        no().on.click();
+        if (!overlayEl) fail('Go back must not close the dialog');
+        if (overlayEl.html.indexOf('Remove this BOM line?') === -1) fail('Go back must return to step one');
+        if (calls.length) fail('Go back deleted the line');
+
+        // Escape at either step leaves the line alone.
+        listeners.keydown({ key: 'Escape' });
+        if (overlayEl) fail('Escape must close the dialog');
+        if (calls.length) fail('Escape deleted the line');
+
+        // Two Yes answers delete once, with the row's current version.
+        el.nodes['data-bom-del=line-1'].click();
+        yes().on.click();
+        yes().on.click();
+        await settle();
+        if (calls.length !== 1) fail('expected exactly one DELETE, got ' + calls.length);
+        if (calls[0] !== '/api/bom/line-1?version=3') fail('DELETE url: ' + calls[0]);
+        if (overlayEl) fail('the dialog must close once the line is removed');
+
+        // A refused delete is reported in the dialog and starts over; it is never silent.
+        fails = true; calls = [];
+        el.nodes['data-bom-del=line-1'].click();
+        yes().on.click();
+        yes().on.click();
+        await settle();
+        if (!overlayEl) fail('a failed removal must keep the dialog open');
+        if (overlayEl.html.indexOf('Not removed.') === -1) fail('the failure must be shown: ' + overlayEl.html);
+        if (overlayEl.html.indexOf('changed by someone else') === -1) fail('the server message must be shown');
+        if (overlayEl.html.indexOf('Remove this BOM line?') === -1) fail('a failure must return to step one');
+        if (calls.length !== 1) fail('a failed delete must not retry on its own');
+      })().catch(e => { console.error(e.message); process.exit(1); });
+    """
+    run = subprocess.run(["node", "-e", script], cwd=ROOT, capture_output=True, text=True, timeout=30)
+    assert run.returncode == 0, run.stderr
+
+
+def test_only_the_om_head_role_can_remove_a_bom_line():
+    """Removal is gated by `plants.manage`, and that permission belongs to O&M Head alone.
+
+    Assignee, Administration and Site Engineer cannot delete a BOQ line, so the approval of
+    someone else's deletion never arises: there is no role that can start one.
+    """
+    from app.core.security import ROLE_PERMISSIONS
+
+    holders = {role for role, perms in ROLE_PERMISSIONS.items() if "plants.manage" in perms}
+    assert holders == {"O&M Head"}, holders
+    for role in ("Assignee", "Administration", "Site Engineer", "Viewer"):
+        assert "plants.manage" not in ROLE_PERMISSIONS[role], role
