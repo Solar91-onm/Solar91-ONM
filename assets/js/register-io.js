@@ -43,24 +43,6 @@
       },
       canApply: function (result) { return (result.new || 0) > 0; }
     },
-    warranty: {
-      label: "asset & warranty",
-      templateUrl: "/api/asset-warranty/import/template",
-      templateName: "Asset_Warranty_Template.xlsx",
-      exportUrl: "/api/asset-warranty/export",
-      exportName: "Asset_Warranty_Register.xlsx",
-      importUrl: "/api/asset-warranty/import",
-      summary: function (result) {
-        var parts = [];
-        if (result.new) parts.push(result.new + " equipment row" + (result.new === 1 ? "" : "s") + " to add");
-        if (result.updated) parts.push(result.updated + " existing row" + (result.updated === 1 ? "" : "s") + " to update");
-        return parts;
-      },
-      saved: function (result) {
-        return result.saved + " equipment row" + (result.saved === 1 ? "" : "s") + " saved.";
-      },
-      canApply: function (result) { return (result.rows || 0) > 0; }
-    },
     pm: {
       label: "PM plan",
       templateUrl: "/api/pm-plan/import/template",

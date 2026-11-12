@@ -19,7 +19,6 @@
     { id: "health",          label: "Health" },
     { id: "pm",              label: "Preventive Maintenance" },
     { id: "washing",         label: "Module Cleaning" },
-    { id: "asset-warranty",  label: "Asset & Warranty" },
     { id: "movable-assets",  label: "Movable Assets" }
   ];
 
@@ -28,7 +27,6 @@
     { id: "health",          label: "Health" },
     { id: "pm",              label: "Preventive Maintenance" },
     { id: "washing",         label: "Module Cleaning" },
-    { id: "asset-warranty",  label: "Asset & Warranty" },
     { id: "movable-assets",  label: "Movable Assets" }
   ];
 
@@ -310,7 +308,6 @@
     var tableEl = document.querySelector('[data-tab-view="plants-table"]');
     var calendarEl = document.querySelector('[data-tab-view="calendar"]');
     var healthEl = document.querySelector('[data-tab-view="health"]');
-    var assetWarrantyEl = document.querySelector('[data-tab-view="asset-warranty"]');
     var movableAssetsEl = document.querySelector('[data-tab-view="movable-assets"]');
     var detailsEl = document.querySelector('[data-tab-view="plant-details"]');
     var settingsEl = document.querySelector('[data-tab-view="settings"]');
@@ -321,7 +318,7 @@
     var phContext = document.querySelector("[data-placeholder-context]");
 
     function showOnly(el) {
-      [overviewEl, tableEl, calendarEl, healthEl, assetWarrantyEl, movableAssetsEl, detailsEl, settingsEl, placeholderEl].forEach(function (section) {
+      [overviewEl, tableEl, calendarEl, healthEl, movableAssetsEl, detailsEl, settingsEl, placeholderEl].forEach(function (section) {
         if (section) section.classList.toggle("is-visible", section === el);
       });
     }
@@ -416,13 +413,7 @@
           endDate: navState.selectedRange && navState.selectedRange.endDate
         }
       );
-    } else if (pageId === "asset-warranty" && global.Solar91PortalAssetWarranty) {
-      showOnly(assetWarrantyEl);
-      global.Solar91PortalAssetWarranty.render(
-        document.querySelector("[data-asset-warranty-host]"),
-        { plantCode: plantCode }
-      );
-          } else if (pageId === "movable-assets" && global.Solar91PortalMovableAssets) {
+    } else if (pageId === "movable-assets" && global.Solar91PortalMovableAssets) {
       showOnly(movableAssetsEl);
       global.Solar91PortalMovableAssets.show(
         document.querySelector("[data-movable-assets-host]"),

@@ -12,7 +12,7 @@ access panel are unchanged by this release.
 |---|---|---|
 | 1 | `database/migrations/032_remove_equipment_register.sql` | Removes the equipment register and moves Assignee scope to plants |
 | 2 | `database/migrations/033_work_categories.sql` | Creates the (empty) `work_categories` table your new list goes into |
-| 3 | `database/migrations/034_asset_warranty.sql` | Creates `asset_warranty`, the table the Asset & Warranty page fills |
+| 3 | `database/migrations/034_asset_warranty.sql` | Created `asset_warranty`. **The Asset & Warranty page has since been removed from the portal**, so nothing reads or writes this table any more. It is left in place with its rows; skip this migration on a database that does not already have it. |
 | 4 | `database/migrations/035_issue_equipment_details.sql` | Adds `serial_no`, `supplier_maker` and `unit_count` to `issues` |
 | 5 | `database/migrations/036_user_plant_assignments_plant_index.sql` | Adds an index on `user_plant_assignments(plant_id)` for the portal plant list and Overview (additive, no data change) |
 

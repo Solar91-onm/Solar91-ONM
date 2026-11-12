@@ -731,39 +731,9 @@ class PMUnitConfig(Base, TimestampMixin):
     updated_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
     __table_args__ = (UniqueConstraint("plant_id", "equipment_type"),)
 
-class AssetWarranty(Base, TimestampMixin):
-    """One equipment (or one part of it) at a plant, with its warranty and certification dates.
-
-    Filled from the Asset & Warranty page by spreadsheet upload. This is NOT the equipment register
-    that migration 032 removed: it adds no assignment tables and no columns to issues or om_tasks,
-    and it does not affect who can see what — scope is still by plant.
-
-    ``equipment`` is free text: a label for the physical item ("Inverter INV-03"), not a work
-    category. Work categories (``WorkCategory``, ``OMTask.task_type``, ``Issue.vertical``) are what
-    PM cycles and issue verticals are built on and are untouched by this table.
-
-    Migration 034.
-    """
-    __tablename__ = "asset_warranty"
-    id: Mapped[uuid.UUID] = uuid_pk()
-    plant_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("plants.id", ondelete="CASCADE"), nullable=False, index=True)
-    equipment: Mapped[str] = mapped_column(String(160), nullable=False)
-    part: Mapped[str | None] = mapped_column(String(160))          # blank = the equipment as a whole
-    part_number: Mapped[str | None] = mapped_column(String(120))
-    make: Mapped[str | None] = mapped_column(String(160))
-    serial_no: Mapped[str | None] = mapped_column(String(120))
-    quantity: Mapped[int | None] = mapped_column(Integer)
-    warranty_start: Mapped[date | None] = mapped_column(Date)
-    warranty_end: Mapped[date | None] = mapped_column(Date)
-    certification_date: Mapped[date | None] = mapped_column(Date)
-    certification_expiry: Mapped[date | None] = mapped_column(Date)
-    # RESERVED. The certificate itself comes from an API that is not built yet, so nothing writes
-    # this today; the column exists so the spreadsheet keeps its place and no later migration is
-    # needed. Holds a reference (document id or path), never file bytes.
-    certification_file: Mapped[str | None] = mapped_column(Text)
-    remarks: Mapped[str | None] = mapped_column(Text)
-    created_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
-    __table_args__ = (UniqueConstraint("plant_id", "equipment", "part", "part_number"),)
+# The Asset & Warranty page was removed from the portal. Its table, `asset_warranty`
+# (migration 034), is deliberately left in the database with its rows intact; no model
+# maps it any more, so nothing in the application reads or writes it.
 
 class MovableAsset(Base, TimestampMixin):
     """Units of one named part held at one plant (Movable Assets page). Migration 037."""

@@ -40,7 +40,6 @@ from app.issues.router import invalidate_pulse_cache
 from app.services.router import router as services_router
 from app.users.invites import router as users_invites_router
 from app.users.router import router as users_router
-from app.warranty.router import router as warranty_router
 from app.movable_assets.router import router as movable_assets_router
 from app.bom.router import router as bom_router
 
@@ -326,7 +325,6 @@ app.include_router(portal_router)
 app.include_router(categories_router)
 app.include_router(users_router)
 app.include_router(users_invites_router)
-app.include_router(warranty_router)
 app.include_router(movable_assets_router)
 app.include_router(bom_router)
 

@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.models import AuditLog, MovableAsset, User
 from app.core.security import get_current_user, require_csrf, require_permission
-from app.warranty.sheets import _plant_for_code, _visible_plants
+from app.plants.scope import plant_for_code, visible_plants
 
 router = APIRouter(prefix="/api/movable-assets", tags=["Movable Assets"])
 
@@ -66,7 +66,7 @@ class PlantUnitsIn(BaseModel):
 def list_units(db: Annotated[Session, Depends(get_db)], user: Annotated[User, Depends(get_current_user)],
                site_code: str | None = None):
     """Every (plant, part, units) in the caller's scope, plus the part names for the columns."""
-    plants = {p.id: p for p in ([_plant_for_code(db, user, site_code)] if site_code else _visible_plants(db, user))}
+    plants = {p.id: p for p in ([plant_for_code(db, user, site_code)] if site_code else visible_plants(db, user))}
     if not plants:
         return {"parts": [], "records": []}
     rows = list(db.scalars(select(MovableAsset).where(MovableAsset.plant_id.in_(list(plants)))))
@@ -81,7 +81,7 @@ def list_units(db: Annotated[Session, Depends(get_db)], user: Annotated[User, De
 @router.put("", dependencies=[Depends(require_csrf)])
 def set_units(body: UnitsIn, db: Annotated[Session, Depends(get_db)],
               user: Annotated[User, Depends(require_permission("plants.manage"))]):
-    plant = _plant_for_code(db, user, body.site_code)
+    plant = plant_for_code(db, user, body.site_code)
     part = _canonical(db, _clean_part(body.part))
     row = db.scalar(select(MovableAsset).where(MovableAsset.plant_id == plant.id, MovableAsset.part == part))
     if row is None:
@@ -105,7 +105,7 @@ def set_plant_units(body: PlantUnitsIn, db: Annotated[Session, Depends(get_db)],
     Only parts that already exist as columns are accepted, so a stale dialog cannot bring back a
     part someone else just removed.
     """
-    plant = _plant_for_code(db, user, body.site_code)
+    plant = plant_for_code(db, user, body.site_code)
     known = {p.lower(): p for (p,) in db.execute(select(MovableAsset.part).distinct())}
     wanted: dict[str, int] = {}
     for item in body.items:
@@ -145,7 +145,7 @@ def add_part(body: PartIn, db: Annotated[Session, Depends(get_db)],
     if part not in existing and len(existing) >= MAX_PARTS:
         raise HTTPException(422, f"At most {MAX_PARTS} different parts are supported")
     created = 0
-    for plant in _visible_plants(db, user):
+    for plant in visible_plants(db, user):
         has = db.scalar(select(MovableAsset.id).where(MovableAsset.plant_id == plant.id, MovableAsset.part == part))
         if has is None:
             db.add(MovableAsset(plant_id=plant.id, part=part, units=0, updated_by=user.id))
@@ -161,7 +161,7 @@ def delete_part(part: str, db: Annotated[Session, Depends(get_db)],
                 user: Annotated[User, Depends(require_permission("plants.manage"))]):
     """Remove a part column for the plants in the caller's scope."""
     part = _canonical(db, _clean_part(part))
-    ids = [p.id for p in _visible_plants(db, user)]
+    ids = [p.id for p in visible_plants(db, user)]
     rows = list(db.scalars(select(MovableAsset).where(MovableAsset.plant_id.in_(ids), MovableAsset.part == part))) if ids else []
     for row in rows:
         db.delete(row)

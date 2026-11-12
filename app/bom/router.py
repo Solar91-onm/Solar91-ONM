@@ -21,7 +21,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.models import AuditLog, BomItem, Plant, User
 from app.core.security import get_current_user, require_csrf, require_permission
-from app.warranty.sheets import _plant_for_code, _visible_plants
+from app.plants.scope import plant_for_code, visible_plants
 
 router = APIRouter(prefix="/api/bom", tags=["BOM"])
 
@@ -136,7 +136,7 @@ def list_items(db: Annotated[Session, Depends(get_db)], user: Annotated[User, De
     """
     limit = max(1, min(limit, MAX_PAGE))
     offset = max(0, offset)
-    plants = [_plant_for_code(db, user, site_code)] if site_code else _visible_plants(db, user)
+    plants = [plant_for_code(db, user, site_code)] if site_code else visible_plants(db, user)
     if spv:
         plants = [p for p in plants if (p.project_company or "") == spv]
     by_id = {p.id: p for p in plants}
@@ -174,7 +174,7 @@ def list_items(db: Annotated[Session, Depends(get_db)], user: Annotated[User, De
 @router.post("", status_code=201, dependencies=[Depends(require_csrf)])
 def add_item(body: BomCreate, db: Annotated[Session, Depends(get_db)],
              user: Annotated[User, Depends(require_permission("plants.manage"))]):
-    plant = _plant_for_code(db, user, body.site_code)
+    plant = plant_for_code(db, user, body.site_code)
     count = db.scalar(select(func.count()).select_from(BomItem).where(BomItem.plant_id == plant.id)) or 0
     if count >= MAX_LINES_PER_PLANT:
         raise HTTPException(422, f"A plant can hold at most {MAX_LINES_PER_PLANT} BOM lines")
@@ -197,7 +197,7 @@ def _owned(db: Session, user: User, item_id: str) -> tuple[BomItem, Plant]:
         raise HTTPException(404, "BOM line not found")
     plant = db.get(Plant, row.plant_id)
     # Re-checks plant scope: a line outside the caller's plants answers 404 like a missing one.
-    _plant_for_code(db, user, plant.site_code)
+    plant_for_code(db, user, plant.site_code)
     return row, plant
 
 

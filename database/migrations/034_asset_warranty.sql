@@ -1,3 +1,9 @@
+-- ----------------------------------------------------------------------------
+-- SUPERSEDED. The Asset & Warranty page was removed from the portal; no code
+-- reads or writes `asset_warranty` any more. This file is kept as the record of
+-- what was applied to production, and the table is left in place with its rows.
+-- Do not run it on a database that does not already have the table.
+-- ----------------------------------------------------------------------------
 -- ============================================================================
 -- 034  Asset & Warranty records
 -- ============================================================================

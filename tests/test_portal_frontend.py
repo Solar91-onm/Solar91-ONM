@@ -6,7 +6,7 @@ what that swap must keep true:
   * the page is served at / behind the unchanged sign-in gate
   * every stylesheet and script it references exists and parses
   * the sign-in panel loads before the application that boots after it
-  * the retired equipment register stays removed; Asset & Warranty does not invent data
+  * the retired equipment register and Asset & Warranty pages stay removed
   * no production token is embedded in the page
 """
 from __future__ import annotations
@@ -377,47 +377,6 @@ def test_record_washing_keeps_the_last_cycle_open_for_extra_washing():
     assert run.returncode == 0, run.stderr or run.stdout
 
 
-def test_asset_warranty_setup_is_offered_on_the_plant_page_only():
-    """The sheet records the equipment AT a plant, so Set up belongs on the plant page.
-
-    The Views tab is portfolio-wide: there is no single plant to set up there, and offering the
-    control would upload against whichever plant happened to be selected last.
-    """
-    module = (PORTAL_ASSETS / "js" / "asset-warranty.js").read_text(encoding="utf-8")
-    register = (PORTAL_ASSETS / "js" / "register-io.js").read_text(encoding="utf-8")
-    assert 'options.plantCode && global.Solar91RegisterIO' in module
-    assert 'Solar91RegisterIO.controls("warranty"' in module
-    # The upload and both downloads are scoped to that plant.
-    assert "siteCode: options.plantCode" in module
-    for url in ("/api/asset-warranty/import", "/api/asset-warranty/import/template",
-                "/api/asset-warranty/export"):
-        assert url in register, url
-
-
-def test_asset_warranty_sheet_reserves_a_certification_file_column():
-    """The certificate comes from an API that is not built yet; the column exists so the sheet
-    people fill in today still works once it is, with nothing to re-import."""
-    from app.warranty import sheets as warranty_sheets
-    assert "Certification file" in warranty_sheets.HEADERS
-    for column in ("Equipment", "Part", "Part number", "Warranty start", "Warranty end",
-                   "Certification date", "Certification expiry"):
-        assert column in warranty_sheets.HEADERS, column
-
-
-# ── Asset & Warranty does not imply an inventory register ───────────────────
-
-def test_asset_warranty_view_is_present_without_invented_register_data(client):
-    page = _page(client)
-    assert 'data-nav="view:asset-warranty"' in page
-    assert 'data-tab-view="asset-warranty"' in page
-    assert "/assets/js/asset-warranty.js" in page
-    assert "/assets/css/asset-warranty.css" in page
-    module = (PORTAL_ASSETS / "js" / "asset-warranty.js").read_text(encoding="utf-8")
-    assert "No inventory records" in module
-    assert "Not configured" in module
-    assert "Unit counts and warranty status cannot be shown" in module
-
-
 def test_portal_scripts_do_not_reference_removed_endpoints():
     offenders = []
     for path in sorted(PORTAL_ASSETS.rglob("*.js")):
@@ -439,13 +398,22 @@ def test_no_mock_data_module_remains():
 
 # ── Navigation ───────────────────────────────────────────────────────────────
 
-def test_plant_and_view_sub_pages_include_asset_warranty():
+def test_plant_and_view_sub_pages_are_the_live_pages_only():
+    """Asset & Warranty was removed from the portal; no sub-page, host or route may survive it."""
     nav = (PORTAL_ASSETS / "js" / "navigation.js").read_text(encoding="utf-8")
     for block in ("PLANT_SUB_PAGES", "VIEW_SUB_PAGES"):
         start = nav.index(block)
         section = nav[start:nav.index("];", start)]
         ids = re.findall(r'id:\s*"([a-z-]+)"', section)
-        assert ids == ["details", "health", "pm", "washing", "asset-warranty", "movable-assets"], (block, ids)
+        assert ids == ["details", "health", "pm", "washing", "movable-assets"], (block, ids)
+    page = TEMPLATE.read_text(encoding="utf-8")
+    for dead in ("asset-warranty", "data-asset-warranty-host", "Solar91PortalAssetWarranty"):
+        assert dead not in nav, dead
+        assert dead not in page, dead
+    assert not (PORTAL_ASSETS / "js" / "asset-warranty.js").exists()
+    assert not (PORTAL_ASSETS / "css" / "asset-warranty.css").exists()
+    register = (PORTAL_ASSETS / "js" / "register-io.js").read_text(encoding="utf-8")
+    assert "/api/asset-warranty" not in register
 
 
 def test_plant_details_page_is_wired_up():
@@ -460,17 +428,6 @@ def test_plant_details_page_is_wired_up():
     assert "siteCode: plantCode" in nav
     assert "section: navState.selectedDetailSection" in nav
     assert "data-plant-details-host" in nav
-
-
-def test_asset_warranty_routes_for_plant_and_portfolio_without_inventory_api():
-    nav = (PORTAL_ASSETS / "js" / "navigation.js").read_text(encoding="utf-8")
-    module = (PORTAL_ASSETS / "js" / "asset-warranty.js").read_text(encoding="utf-8")
-    assert 'pageId === "asset-warranty"' in nav
-    assert 'data-asset-warranty-host' in nav
-    assert "{ plantCode: plantCode }" in nav
-    assert "data.listPlants()" in module
-    assert "/api/equipment" not in module
-    assert "data-aw-view" in module and 'role="dialog"' in module
 
 
 def test_single_plant_details_shows_only_that_plant_row():
