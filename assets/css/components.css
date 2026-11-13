@@ -66,14 +66,11 @@
 }
 .ep-chip-stat__v { font-weight: 600; font-variant-numeric: tabular-nums; }
 
-/* Metric strip — THREE big metrics inside ONE frame, divided by soft lines.
-   Neutral palette: dark numbers, grey pill, 6px status dot only. */
+/* Four metric cards in a two-by-two grid, divided by soft lines. */
 .ep-metrics {
   display: grid;
-  /* Four tiles: PM, Module Cleaning, Inverters, Open Site Issues. */
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
-@media (max-width: 1500px) { .ep-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 760px) { .ep-metrics { grid-template-columns: 1fr; } }
 
 .ep-metric {
@@ -93,10 +90,8 @@
 .ep-metric:last-child { border-right: 0; }
 /* Two tiles to a row: the right-hand one of each pair ends the row, and the last
    row carries no rule under it. */
-@media (max-width: 1500px) {
-  .ep-metric:nth-child(2n) { border-right: 0; }
-  .ep-metric:nth-child(-n+2) { border-bottom: 1px solid var(--ep-border-soft); }
-}
+.ep-metric:nth-child(2n) { border-right: 0; }
+.ep-metric:nth-child(-n+2) { border-bottom: 1px solid var(--ep-border-soft); }
 @media (max-width: 760px) {
   .ep-metric { border-right: 0; border-bottom: 1px solid var(--ep-border-soft); }
   .ep-metric:last-child { border-bottom: 0; }

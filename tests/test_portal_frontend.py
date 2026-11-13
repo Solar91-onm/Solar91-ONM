@@ -40,6 +40,14 @@ def test_root_serves_the_portal_shell(client):
     assert 'class="ep-sidebar"' in page and 'class="ep-main"' in page
 
 
+def test_sidebar_order_and_overview_metric_grid(client):
+    page = _page(client)
+    styles = (PORTAL_ASSETS / "css" / "components.css").read_text(encoding="utf-8")
+    assert page.index('data-nav-group="views"') < page.index('data-nav-group="plants"')
+    assert ".ep-metrics {\n  display: grid;\n  grid-template-columns: repeat(2, minmax(0, 1fr));\n}" in styles
+    assert "@media (max-width: 760px) { .ep-metrics { grid-template-columns: 1fr; } }" in styles
+
+
 def test_portal_route_redirects_to_the_app(client):
     moved = client.get("/portal", follow_redirects=False)
     assert moved.status_code == 308
