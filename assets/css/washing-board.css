@@ -51,6 +51,37 @@
   box-shadow: 0 0 0 3px var(--ep-accent-ring);
 }
 
+.ep-wb__filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 0 0 12px;
+}
+.ep-wb__filters label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 150px;
+  color: var(--ep-text-muted);
+  font-size: var(--ep-fs-xs);
+  font-weight: 600;
+}
+.ep-wb__filters select {
+  min-height: 36px;
+  max-width: 260px;
+  padding: 6px 30px 6px 10px;
+  border: 1px solid var(--ep-border);
+  border-radius: 8px;
+  background: var(--ep-surface);
+  color: var(--ep-text);
+  font: inherit;
+}
+.ep-wb__filters select:focus-visible {
+  outline: 0;
+  border-color: var(--ep-accent);
+  box-shadow: 0 0 0 3px var(--ep-accent-ring);
+}
+
 .ep-wb__grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(290px, 1fr));

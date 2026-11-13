@@ -141,6 +141,23 @@
     return { start: start, end: end };
   }
 
+  function elapsedDays(date, today) {
+    function dayNumber(value) {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(String(value || ""))) return null;
+      var parts = value.split("-").map(Number);
+      var timestamp = Date.UTC(parts[0], parts[1] - 1, parts[2]);
+      var parsed = new Date(timestamp);
+      return parsed.getUTCFullYear() === parts[0] &&
+        parsed.getUTCMonth() === parts[1] - 1 &&
+        parsed.getUTCDate() === parts[2]
+        ? timestamp / 86400000
+        : null;
+    }
+    var issueDay = dayNumber(date);
+    var todayDay = dayNumber(today);
+    return issueDay === null || todayDay === null ? null : todayDay - issueDay;
+  }
+
   function mapApiIssue(issue, plantsById) {
     var plant = plantsById[String(issue.plant_id)];
     return {
@@ -183,14 +200,7 @@
       if (state.canEdit && Object.keys(state.columnFilters).some(function (key) {
         var term = String(state.columnFilters[key] || "").trim().toLowerCase();
         if (!term) return false;
-        var values = {
-          plant: issue.plantCode + " " + issue.plantName,
-          equipment: issue.equipment,
-          problem: issue.problem,
-          assignee: issue.assignee,
-          status: issue.status
-        };
-        return String(values[key] || "").toLowerCase().indexOf(term) === -1;
+        return issueColumnValue(issue, key).toLowerCase().indexOf(term) === -1;
       })) return false;
       if (!ignoreStatus && state.statusFilter !== "All" && statusGroup(issue.status) !== state.statusFilter) return false;
       var term = state.search.trim().toLowerCase();
@@ -334,6 +344,37 @@
     { key: "action", label: "Action" }
   ];
 
+  function issueColumnValue(issue, key) {
+    var values = {
+      plant: issue.plantCode + " " + issue.plantName,
+      equipment: issue.equipment,
+      problem: issue.problem,
+      assignee: issue.assignee,
+      status: issue.status
+    };
+    return String(values[key] || "").trim();
+  }
+
+  function issueColumnOptions(key) {
+    var values = {};
+    state.rows.forEach(function (issue) {
+      var value = issueColumnValue(issue, key);
+      if (value) values[value] = true;
+    });
+    return Object.keys(values).sort(function (a, b) { return a.localeCompare(b); });
+  }
+
+  function occurrenceDateCell(value) {
+    if (!value) return '<span class="ep-issues__unassigned">Not recorded</span>';
+    var days = elapsedDays(value, localDate(new Date()));
+    var age = days === null
+      ? ""
+      : '<small class="ep-issues__date-age">(' +
+        (days < 0 ? "in " + Math.abs(days) : days) + " " +
+        (Math.abs(days) === 1 ? "day" : "days") + ')</small>';
+    return escape(formatIssueDate(value)) + age;
+  }
+
   /** The ETC is stored as a timestamp; the register shows the date, with the time as its title. */
   function etcCell(value) {
     if (!value) return '<span class="ep-issues__unassigned">Not set</span>';
@@ -350,11 +391,15 @@
     var filterRow = state.canEdit
       ? '<tr class="ep-issues__column-filter-row">' + COLUMNS.map(function (column) {
         var filterable = ["plant", "equipment", "problem", "assignee", "status"].indexOf(column.key) !== -1;
-        return '<th>' + (filterable
-          ? '<input type="search" data-issue-column-filter="' + column.key + '" value="' +
-            escape(state.columnFilters[column.key] || "") + '" placeholder="Filter" aria-label="Filter by ' +
-            escape(column.label) + '" />'
-          : "") + '</th>';
+        if (!filterable) return "<th></th>";
+        var listId = "ep-issue-filter-options-" + column.key;
+        var options = issueColumnOptions(column.key).map(function (value) {
+          return '<option value="' + escape(value) + '"></option>';
+        }).join("");
+        return '<th><input type="search" list="' + listId + '" data-issue-column-filter="' +
+          column.key + '" value="' + escape(state.columnFilters[column.key] || "") +
+          '" placeholder="Select or type" aria-label="Select or type to filter by ' +
+          escape(column.label) + '" /><datalist id="' + listId + '">' + options + '</datalist></th>';
       }).join("") + '</tr>'
       : "";
     return '<div class="ep-issues__table-wrap"><table class="ep-issues__table"><thead><tr>' +
@@ -378,9 +423,8 @@
               (issue.serialNo ? "<small>S/N " + escape(issue.serialNo) + "</small>" : "")
             : '<span class="ep-issues__unassigned">Not recorded</span>') + '</td>' +
           '<td data-label="' + labels[5] + '" class="ep-issues__problem">' + escape(issue.problem) + '</td>' +
-          '<td data-label="' + labels[6] + '" class="ep-issues__date">' + (issue.occurredAt
-            ? escape(formatIssueDate(issue.occurredAt))
-            : '<span class="ep-issues__unassigned">Not recorded</span>') + '</td>' +
+          '<td data-label="' + labels[6] + '" class="ep-issues__date">' +
+            occurrenceDateCell(issue.occurredAt) + '</td>' +
           '<td data-label="' + labels[7] + '" class="ep-issues__date">' + etcCell(issue.dueAt) + '</td>' +
           '<td data-label="' + labels[8] + '">' + (issue.assignee
             ? '<span class="ep-issues__assignee"><i>' + escape(issue.assignee.split(/\s+/).map(function (part) { return part[0]; }).join("").slice(0, 2)) +

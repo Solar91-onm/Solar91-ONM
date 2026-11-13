@@ -557,6 +557,40 @@ def test_details_and_health_header_filters_are_limited_to_head_and_assignee():
     assert '["plant", "equipment", "problem", "assignee", "status"]' in issues
     assert 'data-issue-column-filter="' in issues
     assert "if (state.canEdit && Object.keys(state.columnFilters).some(function (key)" in issues
+    assert 'list="' + "' + listId +" in issues
+    assert '<datalist id="' + "' + listId +" in issues
+    assert "function issueColumnOptions(key)" in issues
+    assert "state.rows.forEach(function (issue)" in issues
+    assert 'placeholder="Select or type"' in issues
+
+
+def test_health_occurrence_date_age_uses_calendar_days():
+    issues = (PORTAL_ASSETS / "js" / "site-issues.js").read_text(encoding="utf-8")
+    styles = (PORTAL_ASSETS / "css" / "site-issues.css").read_text(encoding="utf-8")
+    assert "function elapsedDays(date, today)" in issues
+    assert "occurrenceDateCell(issue.occurredAt)" in issues
+    assert 'class="ep-issues__date-age"' in issues
+    assert ".ep-issues__date-age" in styles
+    script = r"""
+      const fs=require('fs'),vm=require('vm'),assert=require('assert');
+      const source=fs.readFileSync('assets/js/site-issues.js','utf8');
+      const start=source.indexOf('function elapsedDays(');
+      assert(start>=0,'elapsedDays missing');
+      const open=source.indexOf('{',start);let depth=0,end=-1;
+      for(let i=open;i<source.length;i++){
+        if(source[i]==='{')depth++;
+        else if(source[i]==='}'&&--depth===0){end=i+1;break}
+      }
+      const box={};vm.createContext(box);
+      vm.runInContext(source.slice(start,end)+';this.elapsedDays=elapsedDays',box);
+      assert.strictEqual(box.elapsedDays('2026-11-03','2026-11-13'),10);
+      assert.strictEqual(box.elapsedDays('2024-02-28','2024-03-01'),2);
+      assert.strictEqual(box.elapsedDays('2026-11-13','2026-11-13'),0);
+      assert.strictEqual(box.elapsedDays('2026-11-15','2026-11-13'),-2);
+      assert.strictEqual(box.elapsedDays('2026-02-30','2026-03-01'),null);
+    """
+    run = subprocess.run(["node", "-e", script], cwd=ROOT, capture_output=True, text=True, timeout=20)
+    assert run.returncode == 0, run.stderr or run.stdout
 
 
 def test_module_cleaning_board_shows_every_plant_and_opens_one_plants_calendar():
@@ -1155,6 +1189,11 @@ def test_module_cleaning_board_can_load_a_past_month():
     assert 'month.addEventListener("change"' in board
     assert 'show(container, st.selectedMonth)' in board
     assert '"/api/scheduled/washing/overview?month=" + encodeURIComponent(month)' in board
+    assert 'data-wb-filter="plant"' in board
+    assert 'data-wb-filter="cycle"' in board
+    assert 'data-wb-filter="date"' in board
+    assert '(row.cleaned_cycles || []).indexOf(Number(ui.cycle))' in board
+    assert '(row.cleaning_dates || []).indexOf(ui.date)' in board
 
 
 def test_health_month_filter_uses_complete_month_bounds():

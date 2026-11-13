@@ -756,6 +756,12 @@ def _build_overview(db: Session, user: User, include_tables: bool = False, repor
                 completed_by_month.setdefault(report.cycle_month, set()).add(report.cycle_no)
         cycles_this_month = len(completed_by_month.get(month, set()))
         month_reports = [r for r in reports if r.cycle_month == month]
+        cleaned_reports = [
+            report for report in month_reports
+            if report.tables_cleaned > 0 and report.review_status in ("Pending", "Confirmed")
+        ]
+        cleaning_dates = sorted({report.report_date.isoformat() for report in cleaned_reports})
+        cleaned_cycles = sorted({report.cycle_no for report in cleaned_reports})
         closed_cycles = _closed_incomplete(month_reports, table_count)   # left incomplete by an O&M re-clean
         current_cycle = min(MONTHLY_CYCLE_TARGET, max(cycles_this_month, max(completed_by_month.get(month, set()), default=0),
                                                       max(closed_cycles, default=0)) + 1)
@@ -908,6 +914,8 @@ def _build_overview(db: Session, user: User, include_tables: bool = False, repor
             "assignee_user_id": str(config.assigned_user_id) if config.assigned_user_id else None,
             "assignee_name": assignee_names.get(config.assigned_user_id),
             "cycles_this_month": cycles_this_month,
+            "cleaning_dates": cleaning_dates,
+            "cleaned_cycles": cleaned_cycles,
             "monthly_target": MONTHLY_CYCLE_TARGET,
             "current_cycle": current_cycle,
             "confirmed_tables_cleaned": cleaned_confirmed,

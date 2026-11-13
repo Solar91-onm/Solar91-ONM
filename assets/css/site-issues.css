@@ -675,6 +675,13 @@
 .ep-issues__plant-row:focus-visible { outline: 2px solid #4a9b70; outline-offset: -2px; }
 .ep-issues__table td strong { color: #2e3c33; font-size: 10px; font-weight: 650; }
 .ep-issues__table td small { display: block; margin-top: 3px; color: #8a968e; font-size: 9px; }
+.ep-issues__table td .ep-issues__date-age {
+  display: inline;
+  margin: 0 0 0 4px;
+  color: #76827a;
+  font-weight: 500;
+  white-space: nowrap;
+}
 /* Column order: Issue ID, Plant, Equipment, Sub-problem, Maker, Problem, Occurred, ETC, ... */
 .ep-issues__table td:first-child { min-width: 90px; }
 .ep-issues__table td:nth-child(2) { min-width: 95px; }

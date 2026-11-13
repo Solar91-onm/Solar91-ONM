@@ -181,6 +181,10 @@ def test_washing_summary_keeps_every_figure_and_drops_only_the_lists(db, client)
         assert summary_row == {k: v for k, v in full_row.items() if k not in OMITTED_BY_SUMMARY}
     assert summary["portfolio"] == full["portfolio"]
     assert summary["overdue_matrix"] == full["overdue_matrix"]
+    today = business_today()
+    current_row = next(row for row in summary["plants"] if row["site_code"] == "SUM01")
+    assert today.isoformat() in current_row["cleaning_dates"]
+    assert min(3, (today.day - 1) // 10 + 1) in current_row["cleaned_cycles"]
 
     # And it is substantially smaller, which is the whole point.
     assert len(json.dumps(summary)) * 2 < len(json.dumps(full))

@@ -21,7 +21,7 @@
   var fmt = global.Solar91PortalFormat;
   var token = 0;
   var st = { rows: [], month: "", selectedMonth: "", today: "", loading: false, error: "" };
-  var ui = { search: "", status: "__all" };
+  var ui = { search: "", status: "__all", plant: "__all", cycle: "__all", date: "__all" };
 
   function api() { return global.Solar91PortalAPI; }
   function escape(value) { return fmt.escape(value === null || value === undefined ? "" : String(value)); }
@@ -76,6 +76,39 @@
       return cycle.confirmed + " confirmed · " + cycle.pending + " awaiting confirmation";
     }
     return cycle.confirmed + " of " + cycle.total + " tables cleaned";
+  }
+
+  function plantOptions() {
+    return st.rows.slice().sort(function (a, b) {
+      return String(a.plant || a.site_code).localeCompare(String(b.plant || b.site_code));
+    }).map(function (row) {
+      return '<option value="' + escape(row.site_code) + '"' +
+        (ui.plant === row.site_code ? " selected" : "") + '>' +
+        escape(row.plant || row.site_code) + " · " + escape(row.site_code) + "</option>";
+    }).join("");
+  }
+
+  function cycleOptions() {
+    var target = st.rows.reduce(function (max, row) {
+      return Math.max(max, Number(row.monthly_target) || 3);
+    }, 0);
+    var options = [];
+    for (var cycle = 1; cycle <= target; cycle += 1) {
+      options.push('<option value="' + cycle + '"' +
+        (ui.cycle === String(cycle) ? " selected" : "") + ">Cycle " + cycle + "</option>");
+    }
+    return options.join("");
+  }
+
+  function dateOptions() {
+    var dates = {};
+    st.rows.forEach(function (row) {
+      (row.cleaning_dates || []).forEach(function (date) { dates[date] = true; });
+    });
+    return Object.keys(dates).sort().map(function (date) {
+      return '<option value="' + escape(date) + '"' +
+        (ui.date === date ? " selected" : "") + ">" + escape(shortDate(date)) + "</option>";
+    }).join("");
   }
 
   // ─── Card ────────────────────────────────────────────────────────────
@@ -138,6 +171,10 @@
     var term = ui.search.trim().toLowerCase();
     return st.rows.filter(function (row) {
       if (ui.status !== "__all" && statusOf(row).key !== ui.status) return false;
+      if (ui.plant !== "__all" && row.site_code !== ui.plant) return false;
+      if (ui.cycle !== "__all" &&
+          (row.cleaned_cycles || []).indexOf(Number(ui.cycle)) === -1) return false;
+      if (ui.date !== "__all" && (row.cleaning_dates || []).indexOf(ui.date) === -1) return false;
       if (!term) return true;
       return [row.plant, row.site_code, row.district, row.assignee_name]
         .join(" ").toLowerCase().indexOf(term) !== -1;
@@ -174,6 +211,14 @@
         '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.5-3.5"></path></svg>' +
         '<input type="text" placeholder="Search plant, code, district, assignee..." data-wb-search value="' +
         escape(ui.search) + '" autocomplete="off" /></div></div>' +
+      '<div class="ep-wb__filters" aria-label="Filter Module Cleaning plants">' +
+        '<label><span>Plant</span><select data-wb-filter="plant" aria-label="Filter by plant">' +
+          '<option value="__all">All plants</option>' + plantOptions() + '</select></label>' +
+        '<label><span>Cycle</span><select data-wb-filter="cycle" aria-label="Filter by cleaning cycle">' +
+          '<option value="__all">All cycles</option>' + cycleOptions() + '</select></label>' +
+        '<label><span>Cleaning date</span><select data-wb-filter="date" aria-label="Filter by cleaning date">' +
+          '<option value="__all">All dates with tables cleaned</option>' + dateOptions() + '</select></label>' +
+      '</div>' +
       (st.loading
         ? '<div class="ep-pt__loading" role="status">Loading Module Cleaning…</div>'
         : st.error
@@ -192,6 +237,7 @@
       month.addEventListener("change", function () {
         if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month.value)) return;
         st.selectedMonth = month.value;
+        ui.date = "__all";
         show(container, st.selectedMonth);
       });
     }
@@ -207,6 +253,12 @@
         if (again) { again.focus(); try { again.setSelectionRange(pos, pos); } catch (_) {} }
       });
     }
+    container.querySelectorAll("[data-wb-filter]").forEach(function (select) {
+      select.addEventListener("change", function () {
+        ui[select.getAttribute("data-wb-filter")] = select.value;
+        render(container);
+      });
+    });
     container.querySelectorAll("[data-wb-status]").forEach(function (button) {
       button.addEventListener("click", function () {
         ui.status = button.getAttribute("data-wb-status");

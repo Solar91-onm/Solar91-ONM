@@ -7,8 +7,9 @@
 - Washing compliance is the percentage of configured cycles due in each bucket that were confirmed complete on or before their configured due date. Plants without a washing setup are omitted from its denominator.
 - PM compliance is the percentage of non-cancelled tasks due in each bucket that were completed on or before their effective planned due date.
 - Active site issues are the currently open issue records grouped by their `occurred_at` date; this series is not a historical snapshot of issue status.
-- The Module Cleaning portfolio board in Views defaults to the current month and has a month picker for any past month. A plant's Module Cleaning calendar also has previous/next navigation and Week/Month views.
+- The Module Cleaning portfolio board in Views defaults to the current month and has a month picker for any past month. Plant, cycle, and cleaning-date filters use that month's plants and dates with reported cleaned tables. A plant's Module Cleaning calendar also has previous/next navigation and Week/Month views.
 - Health pages in both Plants and Views provide an occurrence-date filter styled like Overview: it defaults to the current month, offers quick periods, a month picker for past months, and a toggle for a custom From–To range. Date bounds are sent to the role-scoped issue API, so paging and older months use matching records rather than only filtering the newest page. Clear filters removes the date filter.
 - Clicking an issue row opens that plant's Health page; Module Cleaning cards open that plant's cleaning calendar. A saved PM or cleaning record links from its detail dialog to the plant's matching module page.
-- In the portfolio Health register and Views → Details table, O&M Head and Assignee can type text into selected column-header filters. Other roles do not see these controls.
+- In the portfolio Health register, O&M Head and Assignee can select from distinct loaded values in supported column filters or type to narrow them. Occurrence dates show the elapsed day count; other roles do not see these controls.
+- In Views → Details, O&M Head and Assignee can type text into selected column-header filters.
 - Compliance percentages use the left axis (0–100%); issue counts use the right axis. Buckets are daily through 31 days, weekly through 366 days, then monthly. Requests are bounded to 10 years.
