@@ -533,7 +533,8 @@ def test_design_mdl_renders_empty_index_and_saves_a_merged_custom_fields_patch()
         if (!html.includes('Link not added yet') || html.includes('<a class="ep-dsn__code"')) fail('missing link should render plain');
         if (!html.includes('<strong>0</strong>/32 present')) fail('counter missing');
         if (html.indexOf('Key drawings') < 0 || html.indexOf('Key drawings') > html.indexOf('Miscellaneous')) fail('sections missing');
-        if ((html.match(/Not added<\/span>/g) || []).length !== 32) fail('every drawing should show Not added');
+        if ((html.match(/class="ep-dsn__tile is-off"/g) || []).length !== 32) fail('every drawing should show as not added');
+        if (html.includes('class="ep-dsn__tile is-on"')) fail('no drawing should show as added');
         if (!html.includes('data-dsn-edit')) fail('edit toggle missing for plants.manage');
 
         // Edit -> tick GA Layout -> Save sends the merged custom_fields.

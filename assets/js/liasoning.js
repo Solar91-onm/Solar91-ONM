@@ -7,8 +7,8 @@
  *   Views  -> Details -> Liasoning               one row per plant (search, SPV and district filters, CSV)
  *
  * Columns: Site Code | LOA | PPA | Tariff | Registered Land Lease | Commissioning Documents (+ Edit).
- *   LOA and PPA are dates, Tariff is a number (Rs per Unit); the last two are links to a folder or
- *   document held outside the portal.
+ *   LOA and PPA are dates, Tariff is a number (the Rs/Unit unit is in the column heading, not the cell);
+ *   the last two are links to a folder or document held outside the portal.
  *
  * Stored on the plant record, no extra table:
  *   custom_fields.liasoning = { loa_date, ppa_date, tariff, land_lease_url, commissioning_docs_url }
@@ -27,7 +27,7 @@
     { key: "code", label: "Site Code" },
     { key: "loa", label: "LOA", align: "num" },
     { key: "ppa", label: "PPA", align: "num" },
-    { key: "tariff", label: "Tariff", align: "num" },
+    { key: "tariff", label: "Tariff (Rs/Unit)", align: "num" },
     { key: "land", label: "Registered Land Lease", align: "num" },
     { key: "commissioning", label: "Commissioning Documents", align: "num" }
   ];
@@ -70,7 +70,7 @@
     var n = Number(raw);
     return isFinite(n) && n >= 0 ? n : null;
   }
-  function showTariff(n) { return n === null ? "" : String(Math.round(n * 1000) / 1000) + " Rs/Unit"; }
+  function showTariff(n) { return n === null ? "" : String(Math.round(n * 1000) / 1000); }
 
   // Only real web links become clickable; anything else (javascript:, junk) is ignored.
   function linkOf(plant, key) {

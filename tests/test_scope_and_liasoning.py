@@ -105,7 +105,7 @@ def test_plant_out_carries_pm_and_health_assignee_names():
 
 def test_liasoning_page_has_the_requested_columns_and_is_wired():
     module = (ROOT / "assets" / "js" / "liasoning.js").read_text(encoding="utf-8")
-    labels = ["Site Code", "LOA", "PPA", "Tariff", "Registered Land Lease", "Commissioning Documents"]
+    labels = ["Site Code", "LOA", "PPA", "Tariff (Rs/Unit)", "Registered Land Lease", "Commissioning Documents"]
     positions = [module.index(f'label: "{label}"') for label in labels]
     assert positions == sorted(positions)                           # in the requested order
     table = (ROOT / "assets" / "js" / "plants-table.js").read_text(encoding="utf-8")

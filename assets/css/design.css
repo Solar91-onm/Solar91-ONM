@@ -12,31 +12,56 @@ a.ep-dsn__code:focus-visible, .ep-dsn__codelink:focus-visible { outline: 2px sol
 .ep-dsn__counter { padding: var(--ep-s-2) var(--ep-s-4); border-radius: 999px; background: var(--ep-bg-muted); font-size: var(--ep-fs-md); color: var(--ep-text-muted); white-space: nowrap; }
 .ep-dsn__counter strong { font-size: var(--ep-fs-lg); color: var(--ep-text-strong); }
 
-/* Index table (single plant): two columns, so drop the 13-column widths of the Details table. */
-.ep-pt__table.ep-dsn__table.is-single { min-width: 0; }
-.ep-pt__table.ep-dsn__table.is-single th:nth-child(n), .ep-pt__table.ep-dsn__table.is-single td:nth-child(n) { width: auto; }
-.ep-pt__table.ep-dsn__table.is-single th:nth-child(2), .ep-pt__table.ep-dsn__table.is-single td:nth-child(2) { width: 160px; }
-.ep-dsn__table .ep-dsn__drawing { font-size: var(--ep-fs-sm); color: var(--ep-text); white-space: normal; }
+/* Drawing index (single plant): one at-a-glance board, Key drawings left, Miscellaneous right.
+   A filled tile = added, an outlined tile = not added. No scrolling: 10 + 22 tiles fit one frame. */
+.ep-dsn__legend { display: inline-flex; align-items: center; gap: var(--ep-s-4); font-size: var(--ep-fs-xs); color: var(--ep-text-muted); }
+.ep-dsn__legend-item { display: inline-flex; align-items: center; gap: 6px; }
+.ep-dsn__legend i { width: 14px; height: 14px; border-radius: 4px; border: 1.5px solid var(--ep-accent); background: var(--ep-bg); }
+.ep-dsn__legend i.is-on { background: var(--ep-accent); }
+.ep-dsn__legend i.is-off { border-style: dashed; border-color: var(--ep-border-strong); }
 
-/* Section sub-headers inside tbody: "Key drawings" is highlighted, "Miscellaneous" is quiet. */
-.ep-dsn__section th { padding: 8px 10px; text-align: left; font-size: 10px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; border-bottom: 1px solid var(--ep-border); }
-.ep-dsn__section-count { margin-left: var(--ep-s-2); font-family: var(--ep-font-mono); font-weight: 600; letter-spacing: 0; }
-.ep-dsn__section--key th { background: var(--ep-accent-soft); color: var(--ep-accent-strong); border-top: 1px solid var(--ep-accent-ring); }
-.ep-dsn__section--misc th { background: var(--ep-bg-muted); color: var(--ep-text-muted); border-top: 1px solid var(--ep-border); }
-.ep-pt__table tbody tr.ep-dsn__section:hover { background: transparent; }
-.ep-dsn__row--key td:first-child { box-shadow: inset 3px 0 0 var(--ep-accent); }
-.ep-dsn__row--key .ep-dsn__drawing { font-weight: 600; color: var(--ep-text-strong); }
+.ep-dsn__board { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); gap: var(--ep-s-5); padding: var(--ep-s-5); }
+.ep-dsn__panel { min-width: 0; padding: var(--ep-s-4); border: 1px solid var(--ep-border); border-radius: var(--ep-radius-md); background: var(--ep-bg-subtle); }
+.ep-dsn__panel--key { background: var(--ep-accent-soft); border-color: var(--ep-accent-ring); }
+.ep-dsn__panel-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--ep-s-2); }
+.ep-dsn__panel-title { margin: 0; font-size: var(--ep-fs-xs); font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ep-text-muted); }
+.ep-dsn__panel--key .ep-dsn__panel-title { color: var(--ep-accent-strong); }
+.ep-dsn__panel-count { font-family: var(--ep-font-mono); font-size: var(--ep-fs-md); color: var(--ep-text-muted); }
+.ep-dsn__panel-count strong { font-size: var(--ep-fs-lg); color: var(--ep-text-strong); }
+.ep-dsn__bar { height: 4px; margin: var(--ep-s-2) 0 var(--ep-s-3); border-radius: 999px; background: var(--ep-border); overflow: hidden; }
+.ep-dsn__bar span { display: block; height: 100%; background: var(--ep-accent); border-radius: 999px; }
+
+.ep-dsn__grid { display: grid; gap: 6px; }
+.ep-dsn__grid--key { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.ep-dsn__grid--misc { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+
+.ep-dsn__tile { position: relative; display: block; min-width: 0; }
+.ep-dsn__tile-in { display: flex; align-items: center; gap: 7px; min-height: 40px; padding: 6px 9px; border-radius: var(--ep-radius-sm); border: 1.5px solid var(--ep-border-strong); background: var(--ep-bg); color: var(--ep-text-faint); transition: background .12s, border-color .12s, color .12s; }
+.ep-dsn__tile-dot { flex: 0 0 auto; width: 8px; height: 8px; border-radius: 50%; border: 1.5px solid currentColor; }
+.ep-dsn__tile-label { font-size: var(--ep-fs-xs); font-weight: 600; line-height: 1.25; overflow-wrap: anywhere; }
+.ep-dsn__tile.is-off .ep-dsn__tile-in { border-style: dashed; }
+.ep-dsn__tile.is-on .ep-dsn__tile-in,
+.ep-dsn__tile.is-edit input:checked + .ep-dsn__tile-in { background: var(--ep-accent); border-color: var(--ep-accent); color: var(--ep-text-inverse); }
+.ep-dsn__tile.is-on .ep-dsn__tile-dot,
+.ep-dsn__tile.is-edit input:checked + .ep-dsn__tile-in .ep-dsn__tile-dot { background: currentColor; }
+
+/* Edit mode: the whole tile is the checkbox (the native input stays focusable but invisible). */
+.ep-dsn__tile.is-edit { cursor: pointer; }
+.ep-dsn__tile.is-edit input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
+.ep-dsn__tile.is-edit:hover .ep-dsn__tile-in { border-color: var(--ep-accent); }
+.ep-dsn__tile.is-edit input:focus-visible + .ep-dsn__tile-in { outline: 2px solid var(--ep-accent); outline-offset: 2px; }
+.ep-dsn__sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+@media (max-width: 900px) {
+  .ep-dsn__board { grid-template-columns: minmax(0, 1fr); padding: var(--ep-s-3); gap: var(--ep-s-3); }
+  .ep-dsn__grid--misc { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
 
 /* Present / Not added. */
 .ep-dsn__tick { display: inline-flex; align-items: center; gap: 4px; font-size: var(--ep-fs-xs); font-weight: 600; white-space: nowrap; }
 .ep-dsn__tick.is-present { color: var(--ep-accent-strong); }
 .ep-dsn__tick.is-absent { color: var(--ep-text-faint); font-weight: 400; }
 .ep-dsn__table.is-portfolio .ep-dsn__tick.is-present { font-size: var(--ep-fs-md); }
-
-/* Edit mode: one checkbox per drawing. */
-.ep-dsn__check { display: inline-flex; align-items: center; gap: 6px; font-size: var(--ep-fs-xs); color: var(--ep-text-muted); cursor: pointer; }
-.ep-dsn__check input { width: 16px; height: 16px; margin: 0; accent-color: var(--ep-accent); cursor: pointer; }
-.ep-dsn__table.is-editing .ep-dsn__check input:checked + span { color: var(--ep-accent-strong); font-weight: 600; }
 
 /* Portfolio table: sticky plant column, columns sized to content, horizontal scroll is fine. */
 .ep-pt__table.ep-dsn__table.is-portfolio { table-layout: fixed; min-width: 0; width: 100%; }

@@ -17,6 +17,9 @@
 const AUTH_PROVIDER = (window.S91_CONFIG && window.S91_CONFIG.authProvider) || "clerk";
 const AUTH_IDENTITY={name:null,role:null};
 const S91_CODE_RESEND_SECONDS=60;
+// Once Clerk accepts the code the session exists, so a page reload signs in. If activating it or opening the portal
+// stalls longer than this, reload rather than leave "Signing you in…" on screen.
+const S91_SIGNIN_STALL_MS=15000;
 
 function authSetupCard(title, detail){
   document.getElementById("app").innerHTML = '<div style="min-height:100vh;display:grid;place-items:center;padding:24px;background:#F4F6F5;font-family:Inter,system-ui,sans-serif"><div style="width:min(520px,100%);background:#fff;border:1px solid #E4E9E6;border-radius:16px;padding:24px;box-shadow:0 12px 38px rgba(16,24,20,.10)"><div style="display:flex;align-items:center;gap:10px"><img src="/static/brand/solar91-emblem.png" height="34" alt=""><img src="/static/brand/solar91-wordmark.png" height="22" alt="SOLAR 91"></div><h2 style="margin:8px 0 8px;font-size:22px">'+title+'</h2><p style="margin:0;color:#4F5B55;line-height:1.55">'+detail+'</p></div></div>';
@@ -78,6 +81,11 @@ function showClerkSignIn(errorMessage){
   s91ShowClerkCodeSignIn("",errorMessage);
   s91Alive(document.querySelector(".s91-mesh"));
 }
+
+/* Render's free plan puts the server to sleep after about 15 idle minutes, and the code sign-in talks only to Clerk,
+   so the first request to this server comes after the code is accepted. Waking it while the person reads the email
+   (and again while Clerk checks the code) keeps that request from waiting on a cold start. Sends no data or token. */
+function s91WakeServer(){try{fetch("/health/ready",{cache:"no-store",credentials:"omit"}).catch(()=>{})}catch(_){}}
 
 /* ---- Clerk email-code sign-in ---- */
 /* Same rule as app/auth/emails.py: Gmail ignores dots and +tags, so one mailbox = one account. Typos are never corrected. */
@@ -150,6 +158,7 @@ function s91ShowClerkCodeSignIn(prefillEmail,errorMessage){
   }
   async function sendCode(){
     const email=$("clerk-code-email").value.trim();
+    s91WakeServer();
     await requestCode();
     sent=true;
     $("clerk-code-email").readOnly=true;
@@ -175,6 +184,7 @@ function s91ShowClerkCodeSignIn(prefillEmail,errorMessage){
         const token=$("clerk-code").value.replace(/\D/g,"");
         if(token.length<6){fail("Enter the code from the email.");return}
         submit.textContent="Verifying…";
+        s91WakeServer();
         const pending=flow==="signIn"?signInAttempt:signUpAttempt;
         let attempt;
         try{
@@ -187,8 +197,17 @@ function s91ShowClerkCodeSignIn(prefillEmail,errorMessage){
           else throw err;
         }
         if(attempt.status!=="complete"||!attempt.createdSessionId)throw new Error("Clerk could not complete sign-in. Request a new code and try again.");
-        await window.Clerk.setActive({session:attempt.createdSessionId});
-        await startSolar91App();
+        // Code accepted: say so, free the CPU from the background animation, and never hang here.
+        submit.textContent="Signing you in…";msg("Code accepted. Opening your portal…");
+        const mesh=document.querySelector(".s91-mesh");if(mesh)mesh.remove();
+        const form=$("clerk-code-form"),began=Date.now();
+        const stall=setTimeout(()=>{if(document.body.contains(form))window.location.reload()},S91_SIGNIN_STALL_MS);
+        try{
+          await window.Clerk.setActive({session:attempt.createdSessionId});
+          console.info("Solar91 sign-in: session active after "+(Date.now()-began)+" ms");
+          await startSolar91App();
+          console.info("Solar91 sign-in: portal opened after "+(Date.now()-began)+" ms");
+        }finally{clearTimeout(stall)}
         return;
       }
     }catch(err){

@@ -131,16 +131,38 @@
     return '<div class="ep-pt__head"><h1 class="ep-pt__title">' + title + '</h1><p class="ep-pt__sub">' + sub + "</p></div>";
   }
 
-  function sectionRows(label, list, has, editing, cls) {
-    return '<tr class="ep-dsn__section ep-dsn__section--' + cls + '"><th colspan="2" scope="colgroup">' + label +
-        '<span class="ep-dsn__section-count">' + countIn(list, has) + "/" + list.length + "</span></th></tr>" +
-      list.map(function (d) {
-        var status = editing
-          ? '<label class="ep-dsn__check"><input type="checkbox" data-dsn-check="' + d.id + '"' + (has[d.id] ? " checked" : "") +
-              ' aria-label="' + fmt.escape(d.label) + ' added" /><span>Added</span></label>'
-          : tick(has[d.id]);
-        return '<tr class="ep-dsn__row ep-dsn__row--' + cls + '"><td class="ep-dsn__drawing">' + fmt.escape(d.label) + '</td><td class="num">' + status + "</td></tr>";
-      }).join("");
+  // Single plant: the whole index as one at-a-glance board — Key drawings on one side,
+  // Miscellaneous on the other, one tile per drawing. A filled tile is added, an outline is not.
+  function tileHTML(d, on, editing) {
+    var inner = '<span class="ep-dsn__tile-in">' +
+      '<span class="ep-dsn__tile-dot" aria-hidden="true"></span>' +
+      '<span class="ep-dsn__tile-label">' + fmt.escape(d.label) + "</span></span>";
+    if (editing) {
+      return '<label class="ep-dsn__tile is-edit" title="' + fmt.escape(d.label) + '">' +
+        '<input type="checkbox" data-dsn-check="' + d.id + '"' + (on ? " checked" : "") +
+        ' aria-label="' + fmt.escape(d.label) + ' added" />' + inner + "</label>";
+    }
+    return '<span class="ep-dsn__tile ' + (on ? "is-on" : "is-off") + '" title="' +
+      fmt.escape(d.label) + " — " + (on ? "Added" : "Not added") + '">' + inner +
+      '<span class="ep-dsn__sr">' + (on ? "Added" : "Not added") + "</span></span>";
+  }
+
+  function panelHTML(label, list, has, editing, cls) {
+    var n = countIn(list, has);
+    var pct = list.length ? Math.round((n / list.length) * 100) : 0;
+    return '<section class="ep-dsn__panel ep-dsn__panel--' + cls + '" aria-label="' + fmt.escape(label) + '">' +
+      '<header class="ep-dsn__panel-head"><h2 class="ep-dsn__panel-title">' + fmt.escape(label) + "</h2>" +
+        '<span class="ep-dsn__panel-count"><strong>' + n + "</strong>/" + list.length + "</span></header>" +
+      '<div class="ep-dsn__bar"><span style="width:' + pct + '%"></span></div>' +
+      '<div class="ep-dsn__grid ep-dsn__grid--' + cls + '">' +
+        list.map(function (d) { return tileHTML(d, has[d.id], editing); }).join("") +
+      "</div></section>";
+  }
+
+  function legendHTML() {
+    return '<span class="ep-dsn__legend">' +
+      '<span class="ep-dsn__legend-item"><i class="is-on"></i>Added</span>' +
+      '<span class="ep-dsn__legend-item"><i class="is-off"></i>Not added</span></span>';
   }
 
   function renderSingle(container) {
@@ -165,12 +187,12 @@
           (designLink(p) ? "" : '<span class="ep-dsn__nolink">' + (canOpenFolder() ? "Link not added yet" : fmt.escape(RESTRICTED_NOTE)) + "</span>") + "</div>" +
         '<div class="ep-dsn__counter"><strong>' + count + "</strong>/" + REGISTER.length + " present</div></div>" +
       '<div class="ep-pt__card">' +
-        '<div class="ep-pt__meta"><span class="ep-pt__count">Drawing index</span><span class="ep-pt__spacer"></span>' +
+        '<div class="ep-pt__meta"><span class="ep-pt__count">Drawing index</span>' + legendHTML() + '<span class="ep-pt__spacer"></span>' +
           '<span class="ep-ma__status" data-dsn-status role="status" aria-live="polite"></span>' + controls + "</div>" +
-        '<div class="ep-pt__table-wrap"><div class="ep-pt__scroll" tabindex="0" role="region" aria-label="Design drawing index">' +
-          '<table class="ep-pt__table ep-dsn__table is-single' + (editing ? " is-editing" : "") + '"><thead><tr><th>Drawing</th><th class="num">Status</th></tr></thead><tbody>' +
-            sectionRows("Key drawings", KEY, has, editing, "key") + sectionRows("Miscellaneous", MISC, has, editing, "misc") +
-          "</tbody></table></div></div></div></div>";
+        '<div class="ep-dsn__board' + (editing ? " is-editing" : "") + '">' +
+          panelHTML("Key drawings", KEY, has, editing, "key") +
+          panelHTML("Miscellaneous", MISC, has, editing, "misc") +
+        "</div></div></div>";
   }
 
   function visibleRows() {
