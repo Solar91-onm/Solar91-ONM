@@ -20,7 +20,7 @@
 
   var fmt = global.Solar91PortalFormat;
   var token = 0;
-  var st = { rows: [], month: "", today: "", loading: false, error: "" };
+  var st = { rows: [], month: "", selectedMonth: "", today: "", loading: false, error: "" };
   var ui = { search: "", status: "__all" };
 
   function api() { return global.Solar91PortalAPI; }
@@ -161,26 +161,25 @@
   }
 
   function render(container) {
-    if (st.loading) {
-      container.innerHTML = '<div class="ep-pt__loading">Loading Module Cleaning…</div>';
-      return;
-    }
-    if (st.error) {
-      container.innerHTML = '<div class="ep-pt__error">Module Cleaning could not be loaded. ' +
-        escape(st.error) + "</div>";
-      return;
-    }
     var rows = visibleRows();
     container.innerHTML = '<div class="ep-pt ep-wb">' +
       '<div class="ep-pt__head"><h1 class="ep-pt__title">Module Cleaning</h1>' +
         '<p class="ep-pt__sub">' + st.rows.length + " plants · " + escape(st.month) +
         " · open a plant for its cleaning calendar</p></div>" +
       '<div class="ep-wb__tallies">' + countsHTML() + "</div>" +
-      '<div class="ep-pt__toolbar"><div class="ep-pt__search">' +
+      '<div class="ep-pt__toolbar"><label class="ep-wb__month"><span>Month</span>' +
+        '<input type="month" data-wb-month value="' + escape(st.selectedMonth) +
+        '" max="' + escape(monthKey(new Date())) + '" aria-label="Select Module Cleaning month" /></label>' +
+        '<div class="ep-pt__search">' +
         '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.5-3.5"></path></svg>' +
         '<input type="text" placeholder="Search plant, code, district, assignee..." data-wb-search value="' +
         escape(ui.search) + '" autocomplete="off" /></div></div>' +
-      (rows.length
+      (st.loading
+        ? '<div class="ep-pt__loading" role="status">Loading Module Cleaning…</div>'
+        : st.error
+          ? '<div class="ep-pt__error" role="alert">Module Cleaning could not be loaded. ' +
+            escape(st.error) + ' <button type="button" data-wb-retry>Try again</button></div>'
+          : rows.length
         ? '<div class="ep-wb__grid">' + rows.map(cardHTML).join("") + "</div>"
         : '<div class="ep-pt__empty-card">No plants match this search.</div>') +
       "</div>";
@@ -188,6 +187,16 @@
   }
 
   function wire(container) {
+    var month = container.querySelector("[data-wb-month]");
+    if (month) {
+      month.addEventListener("change", function () {
+        if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month.value)) return;
+        st.selectedMonth = month.value;
+        show(container, st.selectedMonth);
+      });
+    }
+    var retry = container.querySelector("[data-wb-retry]");
+    if (retry) retry.addEventListener("click", function () { show(container, st.selectedMonth); });
     var search = container.querySelector("[data-wb-search]");
     if (search) {
       search.addEventListener("input", function () {
@@ -212,13 +221,15 @@
     });
   }
 
-  function show(container) {
+  function show(container, selectedMonth) {
     if (!container) return;
     var mine = ++token;
+    var month = selectedMonth || st.selectedMonth || monthKey(new Date());
+    st.selectedMonth = month;
+    st.month = month;
     st.loading = true;
     st.error = "";
     render(container);
-    var month = monthKey(new Date());
     // summary=true: the cards read scalars only, so the per-plant day, cycle and productivity
     // lists — about three quarters of the response — are not asked for.
     return api().request("/api/scheduled/washing/overview?month=" + encodeURIComponent(month) +

@@ -28,6 +28,29 @@
 .ep-wb__tally--behind strong { color: var(--ep-amber, #d97706); }
 .ep-wb__tally--late strong { color: var(--ep-red, #dc2626); }
 
+.ep-wb__month {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ep-text-muted);
+  font-size: var(--ep-fs-sm);
+  font-weight: 600;
+}
+.ep-wb__month input {
+  min-height: 38px;
+  padding: 7px 10px;
+  border: 1px solid var(--ep-border);
+  border-radius: 999px;
+  background: var(--ep-bg);
+  color: var(--ep-text);
+  font: inherit;
+}
+.ep-wb__month input:focus-visible {
+  outline: 0;
+  border-color: var(--ep-accent);
+  box-shadow: 0 0 0 3px var(--ep-accent-ring);
+}
+
 .ep-wb__grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(290px, 1fr));

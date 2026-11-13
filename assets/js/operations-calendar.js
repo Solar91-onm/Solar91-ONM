@@ -732,7 +732,14 @@
               '</span><span>' + escape(event.status) + '</span></div>' +
             '<dl class="ep-calendar__detail-fields">' +
               fields.map(function (field) {
-                return "<div><dt>" + escape(field[0]) + "</dt><dd>" + escape(field[1]) + "</dd></div>";
+                var value = field[0] === "Plant" && event.plantSiteCode
+                  ? '<button type="button" class="ep-plantlink" data-open-plant="' +
+                    escape(event.plantSiteCode) + '" data-open-plant-page="' + context.type +
+                    '" title="Open this plant\'s ' +
+                    escape(context.type === "pm" ? "Preventive Maintenance" : "Module Cleaning") +
+                    ' page">' + escape(field[1]) + '</button>'
+                  : escape(field[1]);
+                return "<div><dt>" + escape(field[0]) + "</dt><dd>" + value + "</dd></div>";
               }).join("") +
             '</dl><p class="ep-calendar__detail-note">Saved record, shown read-only.</p>' +
           '</div>' +

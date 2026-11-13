@@ -67,10 +67,12 @@
     issueDateStart: "",
     issueDateEnd: "",
     issueDatePeriod: "month",
+    issueMonth: "",
     issueDateRangeMode: false,
     issueDateDraftStart: "",
     issueDateDraftEnd: "",
     issueDateError: "",
+    columnFilters: {},
     categoryLoading: false,
     categoryError: "",
     modalId: "",
@@ -129,6 +131,16 @@
     return { start: today.slice(0, 8) + "01", end: today };
   }
 
+  function monthPeriodRange(month, today) {
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(String(month || ""))) return { start: "", end: "" };
+    var parts = month.split("-").map(Number);
+    var lastDay = new Date(parts[0], parts[1], 0).getDate();
+    var start = month + "-01";
+    var end = month + "-" + String(lastDay).padStart(2, "0");
+    if (month === today.slice(0, 7) && today < end) end = today;
+    return { start: start, end: end };
+  }
+
   function mapApiIssue(issue, plantsById) {
     var plant = plantsById[String(issue.plant_id)];
     return {
@@ -168,6 +180,18 @@
       if (state.plantFilter && issue.plantCode !== state.plantFilter) return false;
       if (state.equipmentFilter &&
           String(issue.equipment || "").toLowerCase() !== state.equipmentFilter.toLowerCase()) return false;
+      if (state.canEdit && Object.keys(state.columnFilters).some(function (key) {
+        var term = String(state.columnFilters[key] || "").trim().toLowerCase();
+        if (!term) return false;
+        var values = {
+          plant: issue.plantCode + " " + issue.plantName,
+          equipment: issue.equipment,
+          problem: issue.problem,
+          assignee: issue.assignee,
+          status: issue.status
+        };
+        return String(values[key] || "").toLowerCase().indexOf(term) === -1;
+      })) return false;
       if (!ignoreStatus && state.statusFilter !== "All" && statusGroup(issue.status) !== state.statusFilter) return false;
       var term = state.search.trim().toLowerCase();
       if (!term) return true;
@@ -246,9 +270,12 @@
             '<option value="today"' + (state.issueDatePeriod === "today" ? " selected" : "") + '>Today</option>' +
             '<option value="yesterday"' + (state.issueDatePeriod === "yesterday" ? " selected" : "") + '>Yesterday</option>' +
             '<option value="week"' + (state.issueDatePeriod === "week" ? " selected" : "") + '>This week</option>' +
-            '<option value="month"' + (state.issueDatePeriod === "month" ? " selected" : "") + '>This month</option>' +
+            '<option value="month"' + (state.issueDatePeriod === "month" ? " selected" : "") + '>Selected month</option>' +
           '</select>' +
         '</div>' +
+        '<label class="ep-issues__date-month"><span>Month</span><input type="month" data-issue-month value="' +
+          escape(state.issueMonth) + '" max="' + escape(localDate(new Date()).slice(0, 7)) +
+          '" aria-label="Filter issues by month of occurrence" /></label>' +
         '<div class="ep-issues__date-custom"' + (!state.issueDateRangeMode ? ' hidden' : "") + '>' +
           '<label><span>From</span><input type="date" data-issue-date-start value="' +
             escape(state.issueDateDraftStart) + '" aria-label="Issue date from" /></label>' +
@@ -320,16 +347,27 @@
         '<button type="button" class="ep-issues__button" data-issue-action="clear">Clear filters</button></div>';
     }
     var headers = COLUMNS.map(function (c) { return c.label; });
+    var filterRow = state.canEdit
+      ? '<tr class="ep-issues__column-filter-row">' + COLUMNS.map(function (column) {
+        var filterable = ["plant", "equipment", "problem", "assignee", "status"].indexOf(column.key) !== -1;
+        return '<th>' + (filterable
+          ? '<input type="search" data-issue-column-filter="' + column.key + '" value="' +
+            escape(state.columnFilters[column.key] || "") + '" placeholder="Filter" aria-label="Filter by ' +
+            escape(column.label) + '" />'
+          : "") + '</th>';
+      }).join("") + '</tr>'
+      : "";
     return '<div class="ep-issues__table-wrap"><table class="ep-issues__table"><thead><tr>' +
       global.Solar91PortalSort.headerHTML(COLUMNS, state.columnSort, "data-issue-sort") +
-      '</tr></thead><tbody>' + rows.map(function (issue) {
+      '</tr>' + filterRow + '</thead><tbody>' + rows.map(function (issue) {
         var labels = headers;
-        return '<tr>' +
+        return '<tr class="ep-issues__plant-row" data-issue-plant="' + escape(issue.plantCode) +
+          '" tabindex="0" aria-label="Open Health for ' + escape(issue.plantName || issue.plantCode) + '">' +
           '<td data-label="' + labels[0] + '"><button type="button" class="ep-issues__ticket-link" data-issue-open="' +
             escape(issue.id) + '">' + escape(issue.id) + '</button></td>' +
           '<td data-label="' + labels[1] + '"><button type="button" class="ep-plantlink" data-open-plant="' +
-            escape(issue.plantCode) + '" title="Open ' + escape(issue.plantName || issue.plantCode) +
-            ' in the Plants tab"><strong>' + escape(issue.plantCode) + '</strong><small>' +
+            escape(issue.plantCode) + '" data-open-plant-page="health" title="Open Health for ' +
+            escape(issue.plantName || issue.plantCode) + '"><strong>' + escape(issue.plantCode) + '</strong><small>' +
             escape(issue.plantName) + '</small></button></td>' +
           '<td data-label="' + labels[2] + '"><strong>' + escape(issue.equipment) + '</strong></td>' +
           '<td data-label="' + labels[3] + '">' + (issue.subpart
@@ -739,11 +777,13 @@
     var nextRange = (context.startDate || "") + ":" + (context.endDate || "");
     if (!active || previousScope !== nextScope || previousRange !== nextRange) {
       if (context.startDate || context.endDate) {
+        state.issueMonth = context.startDate ? context.startDate.slice(0, 7) : "";
         state.issueDateStart = context.startDate || "";
         state.issueDateEnd = context.endDate || "";
         state.issueDateRangeMode = true;
       } else {
-        var defaultRange = datePeriodRange("month", localDate(new Date()));
+        state.issueMonth = localDate(new Date()).slice(0, 7);
+        var defaultRange = monthPeriodRange(state.issueMonth, localDate(new Date()));
         state.issueDateStart = defaultRange.start;
         state.issueDateEnd = defaultRange.end;
         state.issueDatePeriod = "month";
@@ -760,6 +800,7 @@
       state.wizardStep = 1;
       state.plantFilter = "";
       state.search = "";
+      state.columnFilters = {};
       state.statusFilter = "All";
     }
     // Opened from the Overview's Inverters tile: that preset survives this render and
@@ -815,8 +856,8 @@
             (state.liveMode && state.hasMore ? " · newest " + state.rows.length + " loaded" : "") + '</span></div>' +
           renderTable(rows) +
           (state.liveMode && state.hasMore
-            ? '<div class="ep-issues__more"><span>Showing the ' + state.rows.length + ' most recently raised issues' +
-              (context.plantCode ? " for this plant" : "") + '. Filters apply to the issues loaded so far.</span>' +
+            ? '<div class="ep-issues__more"><span>Showing the ' + state.rows.length + ' newest issues' +
+              (context.plantCode ? " for this plant" : "") + ' matching the date range. Other filters apply to loaded issues.</span>' +
               (state.moreError ? '<span class="ep-issues__more-error" role="alert">' + escape(state.moreError) + '</span>' : "") +
               '<button type="button" class="ep-issues__button" data-issue-action="more"' + (state.loadingMore ? " disabled" : "") + '>' +
               (state.loadingMore ? "Loading…" : "Load older issues") + '</button></div>'
@@ -866,8 +907,15 @@
   }
 
   function issuesUrl(offset) {
-    return "/api/issues?limit=" + state.pageSize + "&offset=" + offset +
+    var url = "/api/issues?limit=" + state.pageSize + "&offset=" + offset +
       (state.scope ? "&site_code=" + encodeURIComponent(state.scope) : "");
+    if (state.issueDateStart) {
+      url += "&occurred_from=" + encodeURIComponent(state.issueDateStart + "T00:00:00Z");
+    }
+    if (state.issueDateEnd) {
+      url += "&occurred_to=" + encodeURIComponent(state.issueDateEnd + "T23:59:59.999999Z");
+    }
+    return url;
   }
 
   // Next page of the same scope. Rows already shown are kept; an issue that moved between pages (a new one was raised
@@ -946,6 +994,23 @@
         state.issueDateError = "";
         return;
       }
+      if (event.target.matches("[data-issue-column-filter]") && state.canEdit) {
+        var key = event.target.getAttribute("data-issue-column-filter");
+        var pos = event.target.selectionStart;
+        state.columnFilters[key] = event.target.value;
+        if (searchTimer) clearTimeout(searchTimer);
+        searchTimer = setTimeout(function () {
+          searchTimer = null;
+          if (!active || active.host !== host) return;
+          renderView();
+          var input = host.querySelector('[data-issue-column-filter="' + key + '"]');
+          if (input) {
+            input.focus();
+            if (typeof input.setSelectionRange === "function") input.setSelectionRange(pos, pos);
+          }
+        }, 120);
+        return;
+      }
       if (event.target.matches("[data-issue-date-end]")) {
         state.issueDateDraftEnd = event.target.value;
         state.issueDateError = "";
@@ -977,13 +1042,39 @@
       }
       if (event.target.matches("[data-issue-date-period]")) {
         state.issueDatePeriod = event.target.value;
-        var range = datePeriodRange(state.issueDatePeriod, localDate(new Date()));
+        var today = localDate(new Date());
+        if (state.issueDatePeriod === "month" && !state.issueMonth) {
+          state.issueMonth = today.slice(0, 7);
+        }
+        var range = state.issueDatePeriod === "month"
+          ? monthPeriodRange(state.issueMonth, today)
+          : datePeriodRange(state.issueDatePeriod, today);
         state.issueDateStart = range.start;
         state.issueDateEnd = range.end;
         state.issueDateDraftStart = range.start;
         state.issueDateDraftEnd = range.end;
         state.issueDateError = "";
-        renderView();
+        load();
+        return;
+      }
+      if (event.target.matches("[data-issue-month]")) {
+        var month = event.target.value;
+        var today = localDate(new Date());
+        if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month) || month > today.slice(0, 7)) {
+          state.issueDateError = "Choose a month no later than the current month.";
+          renderView();
+          return;
+        }
+        state.issueMonth = month;
+        state.issueDatePeriod = "month";
+        state.issueDateRangeMode = false;
+        var monthRange = monthPeriodRange(month, today);
+        state.issueDateStart = monthRange.start;
+        state.issueDateEnd = monthRange.end;
+        state.issueDateDraftStart = monthRange.start;
+        state.issueDateDraftEnd = monthRange.end;
+        state.issueDateError = "";
+        load();
         return;
       }
       if (event.target.matches("[data-issue-date-start]") ||
@@ -1002,8 +1093,10 @@
         }
         state.issueDateStart = dateStart;
         state.issueDateEnd = dateEnd;
+        state.issueMonth = dateStart && dateEnd && dateStart.slice(0, 7) === dateEnd.slice(0, 7)
+          ? dateStart.slice(0, 7) : "";
         state.issueDateError = "";
-        renderView();
+        load();
         return;
       }
       // Edit form: the resolution fields only apply when the ticket is being
@@ -1056,15 +1149,23 @@
     });
     host.addEventListener("click", function (event) {
       if (!active || active.host !== host) return;
+      var plantRow = event.target.closest("[data-issue-plant]");
+      if (plantRow && !event.target.closest("button, a, input, select, textarea")) {
+        if (plantRow.dataset.issuePlant) {
+          global.Solar91PortalNav.selectPlantPage(plantRow.dataset.issuePlant, "health");
+        }
+        return;
+      }
       if (event.target.closest("[data-issue-date-clear]")) {
         state.issueDateStart = "";
         state.issueDateEnd = "";
         state.issueDateDraftStart = "";
         state.issueDateDraftEnd = "";
         state.issueDatePeriod = "all";
+        state.issueMonth = "";
         state.issueDateRangeMode = false;
         state.issueDateError = "";
-        renderView();
+        load();
         return;
       }
       var templateButton = event.target.closest("[data-issue-template]");
@@ -1179,8 +1280,10 @@
         state.search = "";
         state.plantFilter = "";
         state.equipmentFilter = "";
+        state.columnFilters = {};
         state.statusFilter = "All";
         state.issueDatePeriod = "all";
+        state.issueMonth = "";
         state.issueDateRangeMode = false;
         var allDates = datePeriodRange("all", localDate(new Date()));
         state.issueDateStart = allDates.start;
@@ -1188,6 +1291,8 @@
         state.issueDateDraftStart = allDates.start;
         state.issueDateDraftEnd = allDates.end;
         state.issueDateError = "";
+        load();
+        return;
       } else if (action === "close") {
         if (state.submitting) return;
         state.modalId = "";
@@ -1208,6 +1313,15 @@
         if (current) current.status = action === "progress" ? "In Progress" : "Solved";
       }
       renderView();
+    });
+    host.addEventListener("keydown", function (event) {
+      if (!active || active.host !== host ||
+          !event.target.matches("[data-issue-plant]") ||
+          (event.key !== "Enter" && event.key !== " ")) return;
+      event.preventDefault();
+      if (event.target.dataset.issuePlant) {
+        global.Solar91PortalNav.selectPlantPage(event.target.dataset.issuePlant, "health");
+      }
     });
     host.addEventListener("submit", function (event) {
       if (!event.target.matches("[data-issue-form]") || !active) return;

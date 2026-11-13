@@ -522,11 +522,11 @@ def test_sorting_orders_rows_and_keeps_blanks_last():
     assert run.returncode == 0, run.stderr or run.stdout
 
 
-def test_a_plant_named_in_a_portfolio_table_opens_in_the_plants_tab():
-    """Plant code / name cells in the Views tables are buttons carrying data-open-plant, which the
-    portal's existing handler turns into Solar91PortalNav.selectPlant."""
+def test_plant_links_open_the_matching_module_or_default_plant_page():
     app = (PORTAL_ASSETS / "js" / "app.js").read_text(encoding="utf-8")
     assert 'ev.target.closest("[data-open-plant]")' in app
+    assert 'openBtn.getAttribute("data-open-plant-page")' in app
+    assert "Solar91PortalNav.selectPlantPage(openBtn.getAttribute(\"data-open-plant\"), pageId)" in app
     assert "Solar91PortalNav.selectPlant(openBtn.getAttribute(\"data-open-plant\"))" in app
 
     for module in ("plants-table.js", "liasoning.js", "site-issues.js", "bom.js", "design.js"):
@@ -534,11 +534,29 @@ def test_a_plant_named_in_a_portfolio_table_opens_in_the_plants_tab():
         assert 'class="ep-plantlink"' in source or 'ep-plantlink ep-plantlink--name' in source, module
         assert "data-open-plant=" in source, module
 
+    issues = (PORTAL_ASSETS / "js" / "site-issues.js").read_text(encoding="utf-8")
+    calendar = (PORTAL_ASSETS / "js" / "operations-calendar.js").read_text(encoding="utf-8")
+    assert 'data-open-plant-page="health"' in issues
+    assert 'data-open-plant-page="' + "' + context.type +" in calendar
+    assert 'global.Solar91PortalNav.selectPlantPage(plantRow.dataset.issuePlant, "health")' in issues
+
     # A single plant's own page has nothing to link to, so it keeps a plain cell.
     table = (PORTAL_ASSETS / "js" / "plants-table.js").read_text(encoding="utf-8")
     assert 'var codeCell = mode.kind === "single"' in table
     styles = (PORTAL_ASSETS / "css" / "components.css").read_text(encoding="utf-8")
     assert ".ep-plantlink" in styles
+
+
+def test_details_and_health_header_filters_are_limited_to_head_and_assignee():
+    plants = (PORTAL_ASSETS / "js" / "plants-table.js").read_text(encoding="utf-8")
+    issues = (PORTAL_ASSETS / "js" / "site-issues.js").read_text(encoding="utf-8")
+    assert '["O&M Head", "Assignee"].indexOf(user.role) !== -1' in plants
+    assert "function columnFilterRowHTML()" in plants
+    assert 'data-pt-column-filter="' in plants
+    assert 'FILTERABLE_COLUMNS.some(function (key)' in plants
+    assert '["plant", "equipment", "problem", "assignee", "status"]' in issues
+    assert 'data-issue-column-filter="' in issues
+    assert "if (state.canEdit && Object.keys(state.columnFilters).some(function (key)" in issues
 
 
 def test_module_cleaning_board_shows_every_plant_and_opens_one_plants_calendar():
@@ -1100,17 +1118,23 @@ def test_health_issue_date_filter_is_local_and_supports_a_date_range():
     assert 'aria-label="Filter issues by occurrence date"' in header
     assert ">Range</span>" in header
     assert 'data-issue-date-mode' in header and 'data-issue-date-period' in header
-    assert 'value="month"' in header and "This month</option>" in header
+    assert 'value="month"' in header and "Selected month</option>" in header
+    assert 'type="month" data-issue-month' in header
     assert 'data-issue-date-start' in header and 'data-issue-date-end' in header
     assert 'data-issue-date-start' in issues and 'data-issue-date-end' in issues
     assert 'data-issue-date-apply' not in issues
     assert 'data-issue-date-clear' in issues
     assert 'state.issueDateRangeMode = event.target.checked;' in issues
-    assert 'datePeriodRange(state.issueDatePeriod, localDate(new Date()))' in issues
+    assert 'datePeriodRange(state.issueDatePeriod, today)' in issues
+    assert 'state.issueMonth = today.slice(0, 7);' in issues
+    assert 'monthPeriodRange(state.issueMonth, today)' in issues
     assert 'return { start: today.slice(0, 8) + "01", end: today };' in issues
     assert 'event.target.matches("[data-issue-date-start]") ||' in issues
     assert 'state.issueDateStart = dateStart;' in issues
     assert 'state.issueDateEnd = dateEnd;' in issues
+    assert 'if (event.target.matches("[data-issue-month]"))' in issues
+    assert 'url += "&occurred_from=" + encodeURIComponent(state.issueDateStart + "T00:00:00Z");' in issues
+    assert 'url += "&occurred_to=" + encodeURIComponent(state.issueDateEnd + "T23:59:59.999999Z");' in issues
     assert "issue.occurredAt < state.issueDateStart" in issues
     assert "issue.occurredAt > state.issueDateEnd" in issues
     assert "state.issueDateStart = context.startDate || \"\";" in issues
@@ -1123,6 +1147,36 @@ def test_health_issue_date_filter_is_local_and_supports_a_date_range():
     assert "min-height: 62px;" in styles and "border-radius: 15px;" in styles
     assert ".ep-issues__date-period" in styles
     assert "renderHeader(context)" in issues
+
+
+def test_module_cleaning_board_can_load_a_past_month():
+    board = (PORTAL_ASSETS / "js" / "washing-board.js").read_text(encoding="utf-8")
+    assert 'type="month" data-wb-month' in board
+    assert 'month.addEventListener("change"' in board
+    assert 'show(container, st.selectedMonth)' in board
+    assert '"/api/scheduled/washing/overview?month=" + encodeURIComponent(month)' in board
+
+
+def test_health_month_filter_uses_complete_month_bounds():
+    script = r"""
+      const fs=require('fs'),vm=require('vm'),assert=require('assert');
+      const source=fs.readFileSync('assets/js/site-issues.js','utf8');
+      const start=source.indexOf('function monthPeriodRange(');
+      assert(start>=0,'monthPeriodRange missing');
+      const open=source.indexOf('{',start);let depth=0,end=-1;
+      for(let i=open;i<source.length;i++){
+        if(source[i]==='{')depth++;
+        else if(source[i]==='}'&&--depth===0){end=i+1;break}
+      }
+      const box={};vm.createContext(box);
+      vm.runInContext(source.slice(start,end)+';this.range=monthPeriodRange',box);
+      const range=(month,today)=>JSON.parse(JSON.stringify(box.range(month,today)));
+      assert.deepStrictEqual(range('2024-02','2024-03-10'),{start:'2024-02-01',end:'2024-02-29'});
+      assert.deepStrictEqual(range('2026-10','2026-11-13'),{start:'2026-10-01',end:'2026-10-31'});
+      assert.deepStrictEqual(range('2026-11','2026-11-13'),{start:'2026-11-01',end:'2026-11-13'});
+    """
+    run = subprocess.run(["node", "-e", script], cwd=ROOT, capture_output=True, text=True, timeout=20)
+    assert run.returncode == 0, run.stderr or run.stdout
 
 
 def test_health_loading_does_not_wait_for_categories_and_table_search_is_debounced():

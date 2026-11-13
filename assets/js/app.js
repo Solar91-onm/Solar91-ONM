@@ -90,7 +90,12 @@
     document.addEventListener("click", function (ev) {
       var openBtn = ev.target.closest("[data-open-plant]");
       if (openBtn) {
-        global.Solar91PortalNav.selectPlant(openBtn.getAttribute("data-open-plant"));
+        var pageId = openBtn.getAttribute("data-open-plant-page");
+        if (["health", "pm", "washing"].indexOf(pageId) !== -1) {
+          global.Solar91PortalNav.selectPlantPage(openBtn.getAttribute("data-open-plant"), pageId);
+        } else {
+          global.Solar91PortalNav.selectPlant(openBtn.getAttribute("data-open-plant"));
+        }
       }
     });
   }

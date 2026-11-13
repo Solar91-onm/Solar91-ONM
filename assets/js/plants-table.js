@@ -24,8 +24,9 @@
   var searchTimer = null;
   var mode = { kind: "all", siteCode: null };
   var detailSection = "details";
-  var ui = { search: "", spv: "__all", district: "__all", sort: { key: "code", dir: "asc" } };
+  var ui = { search: "", spv: "__all", district: "__all", sort: { key: "code", dir: "asc" }, columnFilters: {} };
   var DETAIL_SECTIONS = ["details", "design-mdl", "liasoning", "bom"];
+  var FILTERABLE_COLUMNS = ["code", "district", "discom", "engineer", "assignee", "pmAssignee", "healthAssignee", "location"];
   var DETAIL_SECTION_LABELS = {
     details: "Details",
     "design-mdl": "Design/MDL",
@@ -94,6 +95,13 @@
       }
       if (ui.spv !== "__all" && (p.projectCompany || "") !== ui.spv) return false;
       if (ui.district !== "__all" && (p.district || "") !== ui.district) return false;
+      if (canUseColumnFilters() && FILTERABLE_COLUMNS.some(function (key) {
+        var term = String(ui.columnFilters[key] || "").trim().toLowerCase();
+        if (!term) return false;
+        var column = COLUMNS.find(function (item) { return item.key === key; });
+        var value = column && column.sort ? column.sort(r) : "";
+        return String(value || "").toLowerCase().indexOf(term) === -1;
+      })) return false;
       return true;
     });
 
@@ -137,6 +145,22 @@
 
   function canEdit() {
     return !!(global.Solar91PortalAPI && global.Solar91PortalAPI.can("plants.manage"));
+  }
+
+  function canUseColumnFilters() {
+    var user = global.Solar91PortalAPI && global.Solar91PortalAPI.currentUser();
+    return !!(user && ["O&M Head", "Assignee"].indexOf(user.role) !== -1);
+  }
+
+  function columnFilterRowHTML() {
+    if (!canUseColumnFilters()) return "";
+    return '<tr class="ep-pt__column-filter-row">' + COLUMNS.map(function (column) {
+      return '<th>' + (FILTERABLE_COLUMNS.indexOf(column.key) !== -1
+        ? '<input type="search" data-pt-column-filter="' + column.key + '" value="' +
+          fmt.escape(ui.columnFilters[column.key] || "") + '" placeholder="Filter" aria-label="Filter by ' +
+          fmt.escape(column.label) + '" />'
+        : "") + '</th>';
+    }).join("") + '</tr>';
   }
 
   function cctvUrl(plant) {
@@ -308,7 +332,7 @@
                       return "<th" + (c.align === "num" ? ' class="num"' : "") + ">" + c.label + "</th>";
                     }).join("")
                   : global.Solar91PortalSort.headerHTML(COLUMNS, ui.sort, "data-pt-sort")) +
-              "</tr></thead>" +
+              "</tr>" + (single ? "" : columnFilterRowHTML()) + "</thead>" +
               "<tbody>" +
                 (rows.length
                   ? rows.map(rowHTML).join("")
@@ -405,6 +429,25 @@
 
   // ─── Wiring ──────────────────────────────────────────────────────────
   function wire(container) {
+    container.querySelectorAll("[data-pt-column-filter]").forEach(function (input) {
+      input.addEventListener("input", function () {
+        var key = input.getAttribute("data-pt-column-filter");
+        var pos = input.selectionStart;
+        ui.columnFilters[key] = input.value;
+        if (searchTimer) clearTimeout(searchTimer);
+        searchTimer = setTimeout(function () {
+          searchTimer = null;
+          if (!container.isConnected) return;
+          render(container);
+          var again = container.querySelector('[data-pt-column-filter="' + key + '"]');
+          if (again) {
+            again.focus();
+            try { again.setSelectionRange(pos, pos); } catch (_) {}
+          }
+        }, 120);
+      });
+    });
+
     var search = container.querySelector("[data-pt-search]");
     if (search) {
       search.addEventListener("input", function () {
