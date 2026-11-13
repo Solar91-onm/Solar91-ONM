@@ -53,6 +53,7 @@
 <link rel="stylesheet" href="/assets/css/plant-details.css"/>
 <link rel="stylesheet" href="/assets/css/design.css"/>
 <link rel="stylesheet" href="/assets/css/liasoning.css"/>
+<link rel="stylesheet" href="/assets/css/washing-board.css"/>
 
 <link rel="manifest" href="/manifest.webmanifest"/>
 <meta name="theme-color" content="#005e09"/>
@@ -278,15 +279,9 @@
               </div>
             </div>
 
-            <!-- Metric cards and the date trend share one panel frame. -->
+            <!-- Metric cards: PM compliance, Module Cleaning compliance, Open site issues. -->
             <div class="ep-panel">
               <div class="ep-metrics" data-overview-metrics></div>
-              <section class="ep-overview-trend" aria-label="Operational trends">
-              <p class="ep-overview-trend__status" data-overview-trend-status role="status" aria-live="polite"></p>
-              <div class="ep-overview-trend__chart" data-overview-trend-chart>
-                <p class="ep-overview-trend__empty">Choose a date range to view a trend.</p>
-              </div>
-              </section>
             </div>
 
           </section>
@@ -297,6 +292,11 @@
           </section>
 
           <!-- ═════════════ PREVENTIVE MAINTENANCE / WASHING CALENDAR ═════════════ -->
+          <!-- ═════════════ MODULE CLEANING BOARD (all plants) ═════════════ -->
+          <section class="ep-tab-view" data-tab-view="washing-board">
+            <div data-washing-board-host></div>
+          </section>
+
           <section class="ep-tab-view" data-tab-view="calendar">
             <div data-calendar-host></div>
           </section>
@@ -360,24 +360,37 @@ window.S91_CONFIG = JSON.parse(document.getElementById("s91-config").textContent
 <script defer src="/static/js/perf.js"></script>
 <script defer src="/static/js/auth-gate.js"></script>
 
-<!-- ───────────────────────── Portal application ───────────────────────── -->
+<!-- ───────────────────────── Portal shell ─────────────────────────
+     Only what every signed-in user needs before they have chosen a page:
+     formatting, the API client, the data adapter, the module loader,
+     navigation, the Overview and the boot sequence. Every other page's
+     script is listed below and fetched when that page is first opened. -->
 <script defer src="/assets/js/format.js"></script>
 <script defer src="/assets/js/portal-api.js"></script>
 <script defer src="/assets/js/data-adapter.js"></script>
-<script defer src="/assets/js/register-io.js"></script>
-<script defer src="/assets/js/plant-details.js"></script>
-<script defer src="/assets/js/plants-table.js"></script>
-<script defer src="/assets/js/site-issues.js"></script>
-<script defer src="/assets/js/movable-assets.js"></script>
-<script defer src="/assets/js/bom.js"></script>
-<script defer src="/assets/js/design.js"></script>
-<script defer src="/assets/js/liasoning.js"></script>
-<script defer src="/assets/js/operations-calendar.js"></script>
-<script defer src="/assets/js/categories.js"></script>
-<script defer src="/assets/js/settings.js"></script>
+<script defer src="/assets/js/modules.js"></script>
 <script defer src="/assets/js/navigation.js"></script>
 <script defer src="/assets/js/overview.js"></script>
 <script defer src="/assets/js/app.js"></script>
 <script defer src="/static/js/pwa.js"></script>
+
+<!-- Page modules, fetched on first use by assets/js/modules.js. These URLs are
+     content-hashed when the page is served, exactly like the tags above, so each
+     one is cached immutably until its file changes. -->
+<script id="s91-modules" type="application/json">{
+  "table-sort": "/assets/js/table-sort.js",
+  "register-io": "/assets/js/register-io.js",
+  "plant-details": "/assets/js/plant-details.js",
+  "plants-table": "/assets/js/plants-table.js",
+  "site-issues": "/assets/js/site-issues.js",
+  "movable-assets": "/assets/js/movable-assets.js",
+  "bom": "/assets/js/bom.js",
+  "design": "/assets/js/design.js",
+  "liasoning": "/assets/js/liasoning.js",
+  "operations-calendar": "/assets/js/operations-calendar.js",
+  "washing-board": "/assets/js/washing-board.js",
+  "categories": "/assets/js/categories.js",
+  "settings": "/assets/js/settings.js"
+}</script>
 </body>
 </html>

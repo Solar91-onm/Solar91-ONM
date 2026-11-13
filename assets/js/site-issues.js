@@ -51,6 +51,7 @@
     });
     return out.slice(0, 8);
   }
+  var pendingEquipment = null;
   var state = {
     rows: [],
     plants: [],
@@ -60,7 +61,9 @@
     search: "",
     plantFilter: "",
     statusFilter: "All",
+    equipmentFilter: "",
     sort: "recent",
+    columnSort: { key: "", dir: "asc" },
     issueDateStart: "",
     issueDateEnd: "",
     issueDatePeriod: "month",
@@ -163,6 +166,8 @@
             (state.issueDateStart && issue.occurredAt < state.issueDateStart) ||
             (state.issueDateEnd && issue.occurredAt > state.issueDateEnd))) return false;
       if (state.plantFilter && issue.plantCode !== state.plantFilter) return false;
+      if (state.equipmentFilter &&
+          String(issue.equipment || "").toLowerCase() !== state.equipmentFilter.toLowerCase()) return false;
       if (!ignoreStatus && state.statusFilter !== "All" && statusGroup(issue.status) !== state.statusFilter) return false;
       var term = state.search.trim().toLowerCase();
       if (!term) return true;
@@ -171,12 +176,16 @@
         issue.supplierMaker, issue.serialNo, issue.problem, issue.status, issue.assignee
       ].join(" ").toLowerCase().indexOf(term) !== -1;
     });
-    return rows.sort(function (a, b) {
+    rows = rows.sort(function (a, b) {
       var dateOrder = state.sort === "oldest"
         ? a.reportedAt.localeCompare(b.reportedAt)
         : b.reportedAt.localeCompare(a.reportedAt);
       return dateOrder || STATUSES.indexOf(a.status) - STATUSES.indexOf(b.status) || a.id.localeCompare(b.id);
     });
+    // A column heading, once clicked, orders the register instead of the date.
+    return state.columnSort.key
+      ? global.Solar91PortalSort.apply(rows, state.columnSort, COLUMNS)
+      : rows;
   }
 
   function countByStatus(rows, status) {
@@ -218,7 +227,12 @@
     var raise = state.canRaise
       ? '<button class="ep-issues__button ep-issues__button--primary" type="button" data-issue-action="raise">+ Raise issue</button>'
       : "";
-    return '<div class="ep-issues__portfolio-actions">' +
+    var equipmentChip = state.equipmentFilter
+      ? '<button type="button" class="ep-issues__equip-chip" data-issue-action="clear-equipment" ' +
+        'title="Show every equipment category again">' + escape(state.equipmentFilter) +
+        ' only <span aria-hidden="true">x</span></button>'
+      : "";
+    return '<div class="ep-issues__portfolio-actions">' + equipmentChip +
       '<div class="ep-issues__date-filter" role="group" aria-label="Filter issues by occurrence date">' +
         '<span class="ep-issues__date-label">Range</span>' +
         '<label class="ep-toggle" title="Toggle custom date range">' +
@@ -274,39 +288,69 @@
       '</div></section>';
   }
 
+  // The plant sits beside the ticket number, the two dates a ticket is judged by
+  // (when it happened, when it is expected to close) sit together, and Sub-problem
+  // stays beside Equipment - the same pair the Raise issue form captures.
+  // Status orders by how urgent the group is, not alphabetically.
+  var COLUMNS = [
+    { key: "id", label: "Issue ID", sort: function (i) { return i.id; } },
+    { key: "plant", label: "Plant", sort: function (i) { return i.plantCode; } },
+    { key: "equipment", label: "Equipment", sort: function (i) { return i.equipment; } },
+    { key: "subpart", label: "Sub-problem", sort: function (i) { return i.subpart; } },
+    { key: "maker", label: "Maker / Supplier", sort: function (i) { return i.supplierMaker; } },
+    { key: "problem", label: "Problem", sort: function (i) { return i.problem; } },
+    { key: "occurred", label: "Occurred on", sort: function (i) { return i.occurredAt; } },
+    { key: "etc", label: "Est. completion", sort: function (i) { return i.dueAt; } },
+    { key: "assignee", label: "Assigned to", sort: function (i) { return i.assignee; } },
+    { key: "status", label: "Status",
+      sort: function (i) { return ["Unhealthy", "In Progress", "Solved"].indexOf(statusGroup(i.status)); } },
+    { key: "action", label: "Action" }
+  ];
+
+  /** The ETC is stored as a timestamp; the register shows the date, with the time as its title. */
+  function etcCell(value) {
+    if (!value) return '<span class="ep-issues__unassigned">Not set</span>';
+    var text = String(value).replace("T", " ").replace("Z", "");
+    return '<span title="' + escape(text) + '">' + escape(formatIssueDate(text.slice(0, 10))) + "</span>";
+  }
+
   function renderTable(rows) {
     if (!rows.length) {
       return '<div class="ep-issues__empty"><strong>No issues found</strong>' +
         '<button type="button" class="ep-issues__button" data-issue-action="clear">Clear filters</button></div>';
     }
-    // Sub-problem sits in its own column beside Equipment, the same pair the
-    // Raise issue form captures, so the register reads the way tickets are filed.
-    var headers = ["Issue ID", "Equipment", "Sub-problem", "Maker / Supplier", "Problem",
-                   "Plant", "Assigned to", "Status", "Action"];
+    var headers = COLUMNS.map(function (c) { return c.label; });
     return '<div class="ep-issues__table-wrap"><table class="ep-issues__table"><thead><tr>' +
-      headers.map(function (header) { return "<th>" + header + "</th>"; }).join("") +
+      global.Solar91PortalSort.headerHTML(COLUMNS, state.columnSort, "data-issue-sort") +
       '</tr></thead><tbody>' + rows.map(function (issue) {
         var labels = headers;
         return '<tr>' +
           '<td data-label="' + labels[0] + '"><button type="button" class="ep-issues__ticket-link" data-issue-open="' +
             escape(issue.id) + '">' + escape(issue.id) + '</button></td>' +
-          '<td data-label="' + labels[1] + '"><strong>' + escape(issue.equipment) + '</strong></td>' +
-          '<td data-label="' + labels[2] + '">' + (issue.subpart
+          '<td data-label="' + labels[1] + '"><button type="button" class="ep-plantlink" data-open-plant="' +
+            escape(issue.plantCode) + '" title="Open ' + escape(issue.plantName || issue.plantCode) +
+            ' in the Plants tab"><strong>' + escape(issue.plantCode) + '</strong><small>' +
+            escape(issue.plantName) + '</small></button></td>' +
+          '<td data-label="' + labels[2] + '"><strong>' + escape(issue.equipment) + '</strong></td>' +
+          '<td data-label="' + labels[3] + '">' + (issue.subpart
             ? escape(issue.subpart)
             : '<span class="ep-issues__unassigned">Not recorded</span>') + '</td>' +
-          '<td data-label="' + labels[3] + '">' + (issue.supplierMaker
+          '<td data-label="' + labels[4] + '">' + (issue.supplierMaker
             ? '<strong>' + escape(issue.supplierMaker) + '</strong>' +
               (issue.serialNo ? "<small>S/N " + escape(issue.serialNo) + "</small>" : "")
             : '<span class="ep-issues__unassigned">Not recorded</span>') + '</td>' +
-          '<td data-label="' + labels[4] + '" class="ep-issues__problem">' + escape(issue.problem) + '</td>' +
-          '<td data-label="' + labels[5] + '"><strong>' + escape(issue.plantCode) + '</strong><small>' + escape(issue.plantName) + '</small></td>' +
-          '<td data-label="' + labels[6] + '">' + (issue.assignee
+          '<td data-label="' + labels[5] + '" class="ep-issues__problem">' + escape(issue.problem) + '</td>' +
+          '<td data-label="' + labels[6] + '" class="ep-issues__date">' + (issue.occurredAt
+            ? escape(formatIssueDate(issue.occurredAt))
+            : '<span class="ep-issues__unassigned">Not recorded</span>') + '</td>' +
+          '<td data-label="' + labels[7] + '" class="ep-issues__date">' + etcCell(issue.dueAt) + '</td>' +
+          '<td data-label="' + labels[8] + '">' + (issue.assignee
             ? '<span class="ep-issues__assignee"><i>' + escape(issue.assignee.split(/\s+/).map(function (part) { return part[0]; }).join("").slice(0, 2)) +
               '</i>' + escape(issue.assignee) + '</span>'
             : '<span class="ep-issues__unassigned">Unassigned</span>') + '</td>' +
-          '<td data-label="' + labels[7] + '"><span class="ep-issues__status ep-issues__status--' +
+          '<td data-label="' + labels[9] + '"><span class="ep-issues__status ep-issues__status--' +
             statusTone(issue.status) + '"><i></i>' + escape(issue.status) + '</span></td>' +
-          '<td data-label="' + labels[8] + '">' + (state.liveMode && !state.canEdit
+          '<td data-label="' + labels[10] + '">' + (state.liveMode && !state.canEdit
             ? '<span aria-label="Manage this saved ticket in Solar91 O&M">Saved</span>'
             : '<button type="button" class="ep-issues__button ep-issues__button--small" data-issue-edit="' +
               escape(issue.id) + '">Edit</button>') + '</td>' +
@@ -718,6 +762,12 @@
       state.search = "";
       state.statusFilter = "All";
     }
+    // Opened from the Overview's Inverters tile: that preset survives this render and
+    // is shown as a removable chip, then cleared.
+    if (pendingEquipment !== null) {
+      state.equipmentFilter = pendingEquipment;
+      pendingEquipment = null;
+    }
     active = { host: host, context: context };
     wire(host);
     if ((state.loaded || state.loading) && state.scope !== nextScope) {
@@ -1092,6 +1142,12 @@
         siteCode: (active.context && active.context.plantCode) || "",
         onImported: function () { state.loaded = false; renderView(); }
       })) return;
+      var sortButton = event.target.closest("[data-issue-sort]");
+      if (sortButton) {
+        global.Solar91PortalSort.next(state.columnSort, sortButton.getAttribute("data-issue-sort"));
+        renderView();
+        return;
+      }
       var actionButton = event.target.closest("[data-issue-action]");
       if (!actionButton) return;
       var action = actionButton.dataset.issueAction;
@@ -1115,9 +1171,14 @@
         if (state.modalMode !== "create" || state.categoryLoading) return;
         loadCategoriesForWizard(host);
         return;
+      } else if (action === "clear-equipment") {
+        state.equipmentFilter = "";
+        renderView();
+        return;
       } else if (action === "clear") {
         state.search = "";
         state.plantFilter = "";
+        state.equipmentFilter = "";
         state.statusFilter = "All";
         state.issueDatePeriod = "all";
         state.issueDateRangeMode = false;
@@ -1424,5 +1485,12 @@
     });
   }
 
-  global.Solar91PortalIssues = { render: render };
+  /**
+   * Open the register showing one equipment category only. Set just before the page is
+   * rendered (the Overview's Inverters tile does this), because `render` resets the
+   * filters when the scope changes.
+   */
+  function presetEquipment(equipment) { pendingEquipment = equipment || ""; }
+
+  global.Solar91PortalIssues = { render: render, presetEquipment: presetEquipment };
 }(window));

@@ -256,14 +256,15 @@ logger = logging.getLogger("solar91.portal")
 def _washing_rows(db: Session, user: User, plant_ids: list[UUID] | None = None) -> dict[str, dict[str, Any]] | None:
     """Live washing figures per plant, straight from the module that owns them.
 
-    Reads the overview without its report list (the figures are identical; see washing_cycles._SUMMARY_REPORT_COLUMNS).
+    Reads the overview in summary form: no report list and none of the per-plant day/cycle/productivity lists, which
+    build_profile below never looks at (the figures are identical; see washing_cycles._SUMMARY_REPORT_COLUMNS).
     ``plant_ids`` limits the work to those plants (plant details). Returns None when washing could not be read, so the
     caller can say "unavailable" instead of showing zeros that look like real data.
     """
     from app.scheduled.washing_cycles import get_overview
 
     try:
-        overview = get_overview(db, user, include_reports=False,
+        overview = get_overview(db, user, include_reports=False, summary=True,
                                 plant_ids=set(plant_ids) if plant_ids is not None else None)
     except Exception as error:  # washing must not take the Overview down, but the failure must be visible
         # PostgreSQL aborts the whole transaction after a failed statement; roll back (this request is read-only)
@@ -548,12 +549,36 @@ def portfolio(db: Session, user: User) -> dict[str, Any]:
     }
 
 
+# The periods the Overview's Range selector offers, resolved against the business date so the
+# browser never has to guess it. "all" reaches back ten years, the limit the route already allows.
+RANGE_PERIODS = ("today", "yesterday", "week", "month", "all")
+
+
+def resolve_range_period(period: str, today: date | None = None) -> tuple[date, date]:
+    """Start and end dates for a named period, as the Overview's quick selector means them."""
+    end = today or business_today()
+    if period == "yesterday":
+        day = end - timedelta(days=1)
+        return day, day
+    if period == "today":
+        return end, end
+    if period == "week":
+        return end - timedelta(days=end.weekday()), end
+    if period == "month":
+        return end.replace(day=1), end
+    if period == "all":
+        return end - timedelta(days=3650), end
+    raise ValueError("Unknown period")
+
+
 def portfolio_for_range(db: Session, user: User, start: date, end: date) -> dict[str, Any]:
     """Portfolio metrics for records due/reported in an inclusive business-date range."""
     plants = overview_plants(db, user)
     plant_ids = _plant_ids(plants)
     if not plant_ids:
-        return {"rows": [], "totals": aggregate([]), "startDate": start.isoformat(), "endDate": end.isoformat()}
+        return {"rows": [], "totals": aggregate([]), "startDate": start.isoformat(), "endDate": end.isoformat(),
+                "businessDate": business_today().isoformat(),
+                "scope": "assigned" if user.role == "Site Engineer" else "portfolio"}
 
     start_at = datetime.combine(start, time.min, tzinfo=BUSINESS_TZ)
     end_at = datetime.combine(end + timedelta(days=1), time.min, tzinfo=BUSINESS_TZ)
@@ -703,6 +728,11 @@ def portfolio_for_range(db: Session, user: User, start: date, end: date) -> dict
         "totals": aggregate(rows),
         "startDate": start.isoformat(),
         "endDate": end.isoformat(),
+        # The browser needs the business date to drive its own date controls. Sending it here lets
+        # the Overview open on one request instead of reading the whole portfolio first just to
+        # learn today's date.
+        "businessDate": business_today().isoformat(),
+        "scope": "assigned" if user.role == "Site Engineer" else "portfolio",
     }
 
 

@@ -232,8 +232,10 @@
   }
 
   function plantCell(item) {
-    return '<td><span class="ep-pt__code">' + fmt.escape(item.siteCode) + '</span><span class="ep-pt__name">' +
-      fmt.escape(plantName(item.siteCode)) + "</span></td>";
+    return '<td><button type="button" class="ep-plantlink" data-open-plant="' + fmt.escape(item.siteCode) +
+      '" title="Open ' + fmt.escape(plantName(item.siteCode) || item.siteCode) + ' in the Plants tab">' +
+      '<span class="ep-pt__code">' + fmt.escape(item.siteCode) + '</span><span class="ep-pt__name">' +
+      fmt.escape(plantName(item.siteCode)) + "</span></button></td>";
   }
 
   function rowHTML(item, editor, index, byRow) {

@@ -109,6 +109,36 @@ def issues_pulse(db:Annotated[Session,Depends(get_db)],user:Annotated[User,Depen
     _pulse_cache[key]=(now,out)
     return out
 
+@router.get("/equipment-summary")
+def equipment_summary(db:Annotated[Session,Depends(get_db)],user:Annotated[User,Depends(get_current_user)],vertical:str|None=None):
+    """Open tickets per plant for one equipment category, as counts only (one grouped query).
+
+    The Overview's Inverters tile needs how many units are affected, not the tickets themselves; reading the ticket
+    list for that was ~126 KB on every sign-in. ``units`` sums each ticket's own unit count (a ticket that records
+    none counts as one unit), which is the same rule the tile applied to the full list.
+
+    Scope is the caller's: a role without portfolio scope sees only its assigned plants, and a plant with no open
+    ticket in this category is simply absent.
+    """
+    open_states=("Open","Assigned","Acknowledged","In Progress","Pending Vendor","Pending Parts/Vendor")
+    units=func.sum(func.coalesce(Issue.unit_count,1))
+    stmt=(select(Plant.site_code,func.count(Issue.id),units)
+          .join(Plant,Plant.id==Issue.plant_id)
+          .where(Issue.deleted_at.is_(None),Issue.status.in_(open_states))
+          .group_by(Plant.site_code))
+    if vertical:
+        stmt=stmt.where(func.lower(Issue.vertical)==vertical.casefold())
+    if not has_portfolio_scope(user):
+        plant_scope=user_scoped_plant_ids(db,user)
+        if not plant_scope:
+            return {"vertical":vertical,"plants":[],"open":0,"units":0,"plants_affected":0}
+        stmt=stmt.where(Issue.plant_id.in_(plant_scope))
+    rows=[{"site_code":code,"open":int(count or 0),"units":int(unit_total or 0)}
+          for code,count,unit_total in db.execute(stmt).all()]
+    return {"vertical":vertical,"plants":sorted(rows,key=lambda row:row["site_code"]),
+            "open":sum(row["open"] for row in rows),"units":sum(row["units"] for row in rows),
+            "plants_affected":len(rows)}
+
 @router.get("",response_model=list[IssueOut])
 def list_issues(db:Annotated[Session,Depends(get_db)],user:Annotated[User,Depends(get_current_user)],plant_id:UUID|None=None,status:str|None=None,severity:str|None=None,assignee:str|None=None,vertical:str|None=None,site_code:str|None=None,project_number:str|None=None,occurred_from:datetime|None=None,occurred_to:datetime|None=None,q:str|None=None,offset:int=0,limit:int=Query(50,le=200)):
     plant_scope=user_scoped_plant_ids(db,user)

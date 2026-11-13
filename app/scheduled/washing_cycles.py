@@ -591,25 +591,31 @@ def _overview_as_of(month: str | None) -> date | None:
 
 
 def get_overview(db: Session, user: User, include_tables: bool = False, report_days: int = OVERVIEW_SEND_REPORT_DAYS,
-                 month: str | None = None, include_reports: bool = True, plant_ids: set[UUID] | None = None) -> dict:
+                 month: str | None = None, include_reports: bool = True, plant_ids: set[UUID] | None = None,
+                 summary: bool = False) -> dict:
     """Washing overview for the caller's scope.
 
     ``include_reports=False`` leaves out the ``reports`` list (and reads reports as light rows, see
     _SUMMARY_REPORT_COLUMNS); every plant figure is unchanged. ``plant_ids`` computes only those plants (still within
     the caller's scope); portfolio totals then cover just those plants.
+
+    ``summary=True`` leaves out the per-plant lists — the day-by-day status, the cycle rows and the productivity
+    breakdown — which together are about three quarters of the response and are read only by the plant calendar.
+    Every figure a caller still receives is computed exactly as before, from the same ledger. The Overview tiles and
+    the Module Cleaning board use it because they read scalars only.
     """
     report_days = max(1, min(int(report_days), OVERVIEW_REPORT_DAYS))
     as_of = _overview_as_of(month)
     ttl = 0 if get_settings().app_env == "test" else OVERVIEW_CACHE_SECONDS
     if ttl <= 0:
-        return _build_overview(db, user, include_tables, report_days, as_of, include_reports, plant_ids)
+        return _build_overview(db, user, include_tables, report_days, as_of, include_reports, plant_ids, summary)
     key = (str(user.id), user.role, include_tables, report_days, business_today().isoformat(), as_of,
-           include_reports, tuple(sorted(str(p) for p in plant_ids)) if plant_ids is not None else None)
+           include_reports, tuple(sorted(str(p) for p in plant_ids)) if plant_ids is not None else None, summary)
     hit = _OVERVIEW_CACHE.get(key)
     if hit and datetime.now(timezone.utc).timestamp() - hit[0] < ttl:
         return hit[1]
     version = _OVERVIEW_VERSION
-    result = _build_overview(db, user, include_tables, report_days, as_of, include_reports, plant_ids)
+    result = _build_overview(db, user, include_tables, report_days, as_of, include_reports, plant_ids, summary)
     if version == _OVERVIEW_VERSION:  # no write happened while this was being built
         if len(_OVERVIEW_CACHE) > 50:
             _OVERVIEW_CACHE.clear()
@@ -618,7 +624,8 @@ def get_overview(db: Session, user: User, include_tables: bool = False, report_d
 
 
 def _build_overview(db: Session, user: User, include_tables: bool = False, report_days: int = OVERVIEW_SEND_REPORT_DAYS,
-                    as_of: date | None = None, include_reports: bool = True, plant_ids: set[UUID] | None = None) -> dict:
+                    as_of: date | None = None, include_reports: bool = True, plant_ids: set[UUID] | None = None,
+                    summary: bool = False) -> dict:
     """Washing overview as of today, or as of `as_of` (the last day of an earlier month chosen on the page): reports
     after that day are left out, so cycles, compliance, deadlines and the day-by-day status read as they stood then."""
     manager = _is_washing_manager(db, user)
@@ -784,7 +791,7 @@ def _build_overview(db: Session, user: User, include_tables: bool = False, repor
         productivity: dict[str, int] = {}
         daily_productivity: list[dict] = []
         week_start = today - timedelta(days=6)
-        for report in reports:
+        for report in (() if summary else reports):
             if report.review_status == "Confirmed" and report.tables_cleaned and report.report_date >= week_start:
                 productivity[report.reported_by] = productivity.get(report.reported_by, 0) + report.tables_cleaned
                 daily_productivity.append({
@@ -825,7 +832,7 @@ def _build_overview(db: Session, user: User, include_tables: bool = False, repor
             if report.report_date.year == today.year and report.report_date.month == today.month:
                 day_reports.setdefault(report.report_date, []).append(report)
         daily_status = []
-        for offset in range(today.day):
+        for offset in (() if summary else range(today.day)):
             day = today.replace(day=1) + timedelta(days=offset)
             day_rows = day_reports.get(day, [])
             confirmed_n = sum(r.tables_cleaned for r in day_rows if r.review_status == "Confirmed")
@@ -854,7 +861,7 @@ def _build_overview(db: Session, user: User, include_tables: bool = False, repor
                 "report_ids": [str(r.id) for r in day_rows],
             })
         cycle_rows = []
-        for cycle_no in range(1, MONTHLY_CYCLE_TARGET + 1):
+        for cycle_no in (() if summary else range(1, MONTHLY_CYCLE_TARGET + 1)):
             cycle_reports = [r for r in reports if r.cycle_month == month and r.cycle_no == cycle_no and r.review_status in ("Pending", "Confirmed")]
             done_on = completed_dates.get(cycle_no)
             started_on = min((r.report_date for r in cycle_reports if r.tables_cleaned), default=None) or min((r.report_date for r in cycle_reports), default=None)
@@ -888,8 +895,7 @@ def _build_overview(db: Session, user: User, include_tables: bool = False, repor
                 })
         plant_rows.append({
             **overdue,
-            "cycles": cycle_rows,
-            "daily_status": daily_status,
+            **({} if summary else {"cycles": cycle_rows, "daily_status": daily_status}),
             "last_report_date": last_report_by_plant[plant.id].isoformat() if last_report_by_plant.get(plant.id) else None,
             "plant_id": str(plant.id),
             "plant": plant.plant_name,
@@ -920,8 +926,10 @@ def _build_overview(db: Session, user: User, include_tables: bool = False, repor
             "cycle_compliance_percent": compliance["percent"],
             "average_delay_days": round(sum(delays) / len(delays), 1) if delays else 0,
             "exceptions_this_month": sum(1 for report in reports if report.cycle_month == month and report.exception_reason),
-            "productivity": [{"person": person, "tables": count} for person, count in sorted(productivity.items())],
-            "daily_productivity": sorted(daily_productivity, key=lambda row: (row["date"], row["person"])),
+            **({} if summary else {
+                "productivity": [{"person": person, "tables": count} for person, count in sorted(productivity.items())],
+                "daily_productivity": sorted(daily_productivity, key=lambda row: (row["date"], row["person"])),
+            }),
             "compliance_threshold_percent": config.compliance_threshold_percent,
             "excused_days_late_cycle": excused_in_late_cycle,
             "delay_excused": bool(late_cycle) and excused_in_late_cycle >= overdue["overdue_days"],

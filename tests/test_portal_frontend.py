@@ -130,16 +130,20 @@ def test_overview_area_filter_and_operational_trend_controls_are_wired(client):
     assert 'data-filter="date"' in overview_markup
     assert "districtsByKey" in overview and "(plant.district || \"\").trim()" in overview
     assert 'filters.district === "__all" || districtKey(plant.district) === districtKey(filters.district)' in overview
-    assert overview.count("if (!districtMatches(plant)) return false;") == 2   # table rows and trend rows
+    assert overview.count("if (!districtMatches(plant)) return false;") == 1   # the tile rows
     # Picking a plant narrows SPV + district to it; All plants / an emptied plant box resets both.
     assert "syncLocationFilters(row ? row.plant : null);" in overview
     assert 'if (!plantInput.value.trim() && filters.plant !== "__all") selectPlantFilter("__all");' in overview
     assert "selectPlantFilter(code);" in overview
-    assert "renderTrendChart(trend)" in overview
-    assert "ep-overview-trend__line--" in overview
-    assert 'item.axis === "percent"' in overview
+    # The Overview is the three tiles and nothing else: the trend chart was removed from the tab,
+    # markup and script alike, so the tiles fit one screen without scrolling.
+    assert "data-overview-trend-chart" not in overview_markup
+    assert "ep-overview-trend" not in overview_markup
+    assert "renderTrendChart" not in overview
+    assert "fetchPortfolioTrend" not in overview
+    assert 'data-overview-metrics' in overview_markup
+    # The adapter keeps the endpoint it already exposed; only the Overview stopped calling it.
     assert "/api/portal/overview/trend?" in adapter
-    assert ".ep-overview-trend__svg" in styles
 
 
 def test_overview_filters_keep_full_options_and_metric_tiles_open_scoped_pages():
@@ -227,11 +231,12 @@ def test_overview_range_and_trend_requests_are_cached_deduped_and_bounded():
     assert run.returncode == 0, run.stderr or run.stdout
 
 
-def test_overview_coalesces_filter_driven_trend_reloads():
+def test_overview_no_longer_requests_a_trend_for_filter_changes():
     overview = (PORTAL_ASSETS / "js" / "overview.js").read_text(encoding="utf-8")
-    # Changing plant, then district, then company must issue one request, not three.
-    assert "trendTimer" in overview
-    assert "clearTimeout(trendTimer)" in overview
+    # The chart is gone, so changing plant, district or company redraws the tiles and asks for nothing else.
+    assert "trendTimer" not in overview
+    assert "reloadTrendForFilters" not in overview
+    assert "recomputeAndRender();" in overview
 
 
 def test_register_import_export_is_offered_beside_raise_issue_and_set_up_pm():
@@ -241,9 +246,12 @@ def test_register_import_export_is_offered_beside_raise_issue_and_set_up_pm():
     calendar = (PORTAL_ASSETS / "js" / "operations-calendar.js").read_text(encoding="utf-8")
     styles = (PORTAL_ASSETS / "css" / "components.css").read_text(encoding="utf-8")
 
-    # The shared control loads, and after the data adapter it depends on.
-    assert "/assets/js/register-io.js" in page
-    assert page.index("/assets/js/data-adapter.js") < page.index("/assets/js/register-io.js")
+    # The shared control is fetched with the pages that use it (modules.js), not on every page load.
+    assert '"register-io": "/assets/js/register-io.js"' in page
+    assert '<script defer src="/assets/js/register-io.js"' not in page
+    modules = (PORTAL_ASSETS / "js" / "modules.js").read_text(encoding="utf-8")
+    assert '"site-issues": ["table-sort", "register-io"]' in modules
+    assert '"operations-calendar": ["register-io"]' in modules
 
     # It points at the importers that already existed, plus the new downloads.
     for url in ("/api/issues/import", "/api/issues/import/template", "/api/issues/export",
@@ -436,6 +444,195 @@ def test_record_sheet_lets_om_re_clean_tables_into_the_next_cycle():
     """
     run = subprocess.run(["node", "-e", script], cwd=ROOT, capture_output=True, text=True, timeout=30)
     assert run.returncode == 0, run.stderr or run.stdout
+
+
+def test_every_portfolio_table_sorts_from_its_column_headings():
+    """Clicking a heading orders the rows by that column and flips on a second click, with the
+    arrow pair in the heading showing which way they run — the shared control in table-sort.js."""
+    sort = (PORTAL_ASSETS / "js" / "table-sort.js").read_text(encoding="utf-8")
+    page = TEMPLATE.read_text(encoding="utf-8")
+    styles = (PORTAL_ASSETS / "css" / "components.css").read_text(encoding="utf-8")
+
+    # It is fetched with every table that uses it, and never on its own page load.
+    assert '"table-sort": "/assets/js/table-sort.js"' in page
+    assert '<script defer src="/assets/js/table-sort.js"' not in page
+    modules = (PORTAL_ASSETS / "js" / "modules.js").read_text(encoding="utf-8")
+    for module in ("plants-table", "liasoning", "bom", "site-issues"):
+        needs = re.search(r'"?' + re.escape(module) + r'"?: \[([^\]]*)\]', modules)
+        assert needs and "table-sort" in needs.group(1), module
+
+    # Second click on the same column flips it; a different column starts ascending.
+    assert 'if (sortState.key === key) sortState.dir = sortState.dir === "asc" ? "desc" : "asc";' in sort
+    assert 'else { sortState.key = key; sortState.dir = "asc"; }' in sort
+    # Blanks sink in both directions, and equal values keep the order they arrived in.
+    assert "if (aBlank) return 1;" in sort and "if (bBlank) return -1;" in sort
+    assert "return result !== 0 ? result * dir : a.index - b.index;" in sort
+    # A column with no reader (Edit, Action) stays a plain heading.
+    assert 'if (!column.sort) return "<th" + cls + ">" + escape(column.label) + "</th>";' in sort
+    assert "ep-sort__arrows" in sort and 'aria-sort="' in sort
+    assert ".ep-sort[data-dir=\"asc\"] .ep-sort__up," in styles
+
+    # The tables that use it, and the old plants "Sort:" dropdown it replaced.
+    table = (PORTAL_ASSETS / "js" / "plants-table.js").read_text(encoding="utf-8")
+    assert "Solar91PortalSort.headerHTML(COLUMNS, ui.sort, \"data-pt-sort\")" in table
+    assert "Solar91PortalSort.apply(rows, ui.sort, COLUMNS)" in table
+    assert "Sort: plant code" not in table
+    liasoning = (PORTAL_ASSETS / "js" / "liasoning.js").read_text(encoding="utf-8")
+    assert "Solar91PortalSort.headerHTML(COLUMNS, ui.sort, \"data-lia-sort\")" in liasoning
+    issues = (PORTAL_ASSETS / "js" / "site-issues.js").read_text(encoding="utf-8")
+    assert "Solar91PortalSort.headerHTML(COLUMNS, state.columnSort, \"data-issue-sort\")" in issues
+
+
+def test_sorting_orders_rows_and_keeps_blanks_last():
+    """The comparator itself: numbers numerically, text naturally, blanks last either way."""
+    script = """
+      global.window = global;
+      const fs = require('fs');
+      eval(fs.readFileSync('./assets/js/table-sort.js', 'utf8'));
+      const S = global.Solar91PortalSort;
+      const cols = [{ key: 'n', label: 'N', sort: (r) => r.n }, { key: 't', label: 'T', sort: (r) => r.t }];
+      const rows = [{ n: 10, t: 'b' }, { n: 2, t: null }, { n: null, t: 'a' }, { n: 7, t: 'c' }];
+      const fail = (m) => { throw new Error(m); };
+      const asc = S.apply(rows, { key: 'n', dir: 'asc' }, cols).map((r) => r.n);
+      if (String(asc) !== '2,7,10,') fail('ascending: ' + asc);
+      const desc = S.apply(rows, { key: 'n', dir: 'desc' }, cols).map((r) => r.n);
+      if (String(desc) !== '10,7,2,') fail('descending keeps the blank last: ' + desc);
+      const text = S.apply(rows, { key: 't', dir: 'asc' }, cols).map((r) => r.t);
+      if (String(text) !== 'a,b,c,') fail('text: ' + text);
+      // A heading shows the direction it is sorted; an unsorted one shows neither.
+      const head = S.headerHTML(cols, { key: 'n', dir: 'desc' }, 'data-x');
+      if (!/data-x="n" data-dir="desc"/.test(head)) fail('active heading: ' + head);
+      if (!/data-x="t" data-dir=""/.test(head)) fail('idle heading: ' + head);
+      if (!/aria-sort="descending"/.test(head)) fail('aria-sort: ' + head);
+      // Clicking cycles asc then desc.
+      const state = { key: '', dir: 'asc' };
+      S.next(state, 'n'); if (state.dir !== 'asc') fail('first click is ascending');
+      S.next(state, 'n'); if (state.dir !== 'desc') fail('second click flips');
+      S.next(state, 't'); if (state.key !== 't' || state.dir !== 'asc') fail('another column restarts');
+    """
+    run = subprocess.run(["node", "-e", script], cwd=ROOT, capture_output=True, text=True, timeout=30)
+    assert run.returncode == 0, run.stderr or run.stdout
+
+
+def test_a_plant_named_in_a_portfolio_table_opens_in_the_plants_tab():
+    """Plant code / name cells in the Views tables are buttons carrying data-open-plant, which the
+    portal's existing handler turns into Solar91PortalNav.selectPlant."""
+    app = (PORTAL_ASSETS / "js" / "app.js").read_text(encoding="utf-8")
+    assert 'ev.target.closest("[data-open-plant]")' in app
+    assert "Solar91PortalNav.selectPlant(openBtn.getAttribute(\"data-open-plant\"))" in app
+
+    for module in ("plants-table.js", "liasoning.js", "site-issues.js", "bom.js", "design.js"):
+        source = (PORTAL_ASSETS / "js" / module).read_text(encoding="utf-8")
+        assert 'class="ep-plantlink"' in source or 'ep-plantlink ep-plantlink--name' in source, module
+        assert "data-open-plant=" in source, module
+
+    # A single plant's own page has nothing to link to, so it keeps a plain cell.
+    table = (PORTAL_ASSETS / "js" / "plants-table.js").read_text(encoding="utf-8")
+    assert 'var codeCell = mode.kind === "single"' in table
+    styles = (PORTAL_ASSETS / "css" / "components.css").read_text(encoding="utf-8")
+    assert ".ep-plantlink" in styles
+
+
+def test_module_cleaning_board_shows_every_plant_and_opens_one_plants_calendar():
+    """Views → Module Cleaning (and the Overview tile) is a board of plant cards; a card opens that
+    plant's own cleaning calendar. One request feeds it, and the colour is the server's own
+    lateness bucket, so the board and the calendar cannot disagree."""
+    board = (PORTAL_ASSETS / "js" / "washing-board.js").read_text(encoding="utf-8")
+    nav = (PORTAL_ASSETS / "js" / "navigation.js").read_text(encoding="utf-8")
+    page = TEMPLATE.read_text(encoding="utf-8")
+    styles = (PORTAL_ASSETS / "css" / "washing-board.css").read_text(encoding="utf-8")
+
+    assert "/assets/js/washing-board.js" in page
+    assert "/assets/css/washing-board.css" in page
+    assert 'data-tab-view="washing-board"' in page and "data-washing-board-host" in page
+
+    # One read, the same figures the plant calendar uses.
+    assert '"/api/scheduled/washing/overview?month="' in board
+    assert "include_reports=false" in board
+
+    # on_track / 1d / 3d / 7d are the server's buckets; they become the three words and colours.
+    assert 'on_track: { key: "ontrack", label: "On track" }' in board
+    assert '"3d": { key: "behind", label: "Behind" }' in board
+    assert '"7d": { key: "late", label: "Really behind" }' in board
+    for cls in ("ep-wb__card--ontrack", "ep-wb__card--behind", "ep-wb__card--late"):
+        assert cls in styles
+
+    # What a card carries: cycle ring, the three cycle pips, tables cleaned, assignee.
+    for piece in ("ep-wb__ring", "ep-wb__pips", "ep-wb__tables", "ep-wb__assignee", "No tables cleaned"):
+        assert piece in board
+
+    # A card opens that plant's Module Cleaning page.
+    assert 'Solar91PortalNav.selectPlantPage(card.getAttribute("data-wb-plant"), "washing")' in board
+
+    # Portfolio-wide Module Cleaning is the board; one plant is still the calendar.
+    assert 'if (calendarType === "washing" && !plantCode && global.Solar91PortalWashingBoard)' in nav
+    assert "Solar91PortalWashingBoard.show(document.querySelector(\"[data-washing-board-host]\"))" in nav
+
+
+def test_a_plants_module_cleaning_calendar_opens_on_the_week():
+    """A plant's cleaning calendar opens on the current week (seven cells), with Month still one
+    click away. PM and the portfolio calendar are untouched and still open on the month."""
+    calendar = (PORTAL_ASSETS / "js" / "operations-calendar.js").read_text(encoding="utf-8")
+
+    assert 'span: context.type === "washing" && context.plantCode ? "week" : "month",' in calendar
+    assert "weekStart: weekStartOf(" in calendar
+    assert 'var week = state.span === "week";' in calendar
+    assert "var cells = week ? 7 :" in calendar
+    # ‹ › move a week at a time, and the month follows so that week's records are read.
+    assert "state.weekStart = shiftDays(state.weekStart, shift * 7);" in calendar
+    assert "state.month = state.weekStart.slice(0, 7);" in calendar
+    # The Week / Month switch.
+    assert 'data-calendar-action="span-week"' in calendar
+    assert 'data-calendar-action="span-month"' in calendar
+    assert "displayWeek(state.weekStart)" in calendar
+
+
+def test_overview_inverter_tile_counts_units_and_opens_inverter_issues():
+    """The fourth tile: how many inverters are running against how many are installed, narrowed by
+    the Overview filters, opening the site-issues register filtered to inverter tickets."""
+    overview = (PORTAL_ASSETS / "js" / "overview.js").read_text(encoding="utf-8")
+    issues = (PORTAL_ASSETS / "js" / "site-issues.js").read_text(encoding="utf-8")
+
+    assert 'title: "Inverters"' in overview
+    assert 'destination: "inverters"' in overview
+    # Nothing is invented: units come from the saved PM unit configuration, and "not running"
+    # from the server's count of open Inverter tickets and the units they name.
+    assert '"/api/pm-plan/unit-config"' in overview
+    assert '"/api/issues/equipment-summary?vertical=Inverter"' in overview
+    assert "tickets += Number(row.open) || 0;" in overview
+    assert "down += Number(row.units) || 0;" in overview
+    # The filters narrow it: only the plants the tiles are showing are counted.
+    assert "const codes = new Set(state ? state.rows.map(({ plant }) => plant.siteCode) : []);" in overview
+    # The unit configuration is not open to every role; the tile still shows the tickets.
+    assert "inverters.unitsRestricted = true;" in overview
+    assert "Unit counts are not available to your role" in overview
+    # Opening it: this plant when one is filtered, the portfolio otherwise.
+    assert 'if (destination === "inverters") {' in overview
+    assert 'Solar91PortalIssues.presetEquipment("Inverter")' in overview
+    assert 'global.Solar91PortalNav.selectView("health", dateRange);' in overview
+
+    # The register honours the preset and offers a way back to every category.
+    assert "equipmentFilter:" in issues
+    assert "presetEquipment: presetEquipment" in issues
+    assert 'data-issue-action="clear-equipment"' in issues
+    assert 'state.equipmentFilter &&' in issues
+
+
+def test_site_issue_register_columns_read_id_plant_then_problem_dates():
+    """Plant sits beside the ticket number, and the two dates a ticket is judged by follow the
+    problem: Issue ID | Plant | Equipment | Sub-problem | Maker | Problem | Occurred | ETC | ..."""
+    issues = (PORTAL_ASSETS / "js" / "site-issues.js").read_text(encoding="utf-8")
+    columns = issues[issues.index("var COLUMNS = ["):issues.index("  function renderTable(rows)")]
+    order = re.findall(r'\{ key: "([a-zA-Z]+)"', columns)
+    assert order[:8] == ["id", "plant", "equipment", "subpart", "maker", "problem", "occurred", "etc"], order
+    assert order[-1] == "action"
+    assert '{ key: "occurred", label: "Occurred on"' in columns
+    assert '{ key: "etc", label: "Est. completion"' in columns
+    # Both read stored fields: occurred_at and etc_at, already mapped onto the row.
+    assert "occurredAt: String(issue.occurred_at" in issues
+    assert "dueAt: issue.etc_at" in issues
+    # A ticket with no ETC says so rather than showing an empty cell.
+    assert 'if (!value) return \'<span class="ep-issues__unassigned">Not set</span>\';' in issues
 
 
 def test_portal_scripts_do_not_reference_removed_endpoints():
@@ -641,11 +838,11 @@ def test_plant_table_uses_balanced_shared_columns_and_numeric_spv_label():
     assert "overflow-x: auto" in styles
     table = (PORTAL_ASSETS / "js" / "plants-table.js").read_text(encoding="utf-8")
     assert "function spvNumber(plant)" in table
-    assert '{ key: "assignee",  label: "Cleaning Assignee" }' in table
-    assert '{ key: "pmAssignee",     label: "PM Assignee" }' in table
-    assert '{ key: "healthAssignee", label: "Health Assignee" }' in table
-    assert table.index('{ key: "location",  label: "Location" }') < table.index('{ key: "cctv",      label: "CCTV" }')
-    assert table.index('{ key: "cctv",      label: "CCTV" }') < table.index('{ key: "activity",  label: "Last Activity" }')
+    assert '{ key: "assignee",  label: "Cleaning Assignee",' in table
+    assert '{ key: "pmAssignee",     label: "PM Assignee",' in table
+    assert '{ key: "healthAssignee", label: "Health Assignee",' in table
+    assert table.index('{ key: "location",  label: "Location",') < table.index('{ key: "cctv",      label: "CCTV",')
+    assert table.index('{ key: "cctv",      label: "CCTV",') < table.index('{ key: "activity",  label: "Last Activity",')
     assert 'plant.customFields && plant.customFields.cctv_url' in table
     assert 'url.protocol === "http:" || url.protocol === "https:"' in table
     assert '<span class="ep-pt__cctv-placeholder">Add link</span>' in table

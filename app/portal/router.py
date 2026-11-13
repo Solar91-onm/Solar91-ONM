@@ -56,10 +56,22 @@ def overview(db: DB, user: OverviewUser):
 def overview_range(
     db: DB,
     user: OverviewUser,
-    start_date: date = Query(...),
-    end_date: date = Query(...),
+    start_date: date | None = Query(default=None),
+    end_date: date | None = Query(default=None),
+    period: str | None = Query(default=None),
 ):
-    """Date-bounded Overview metrics, with Site Engineers restricted to assigned plants."""
+    """Date-bounded Overview metrics, with Site Engineers restricted to assigned plants.
+
+    ``period`` is one of today / yesterday / week / month / all and is resolved against the
+    business date here, so the Overview can open on this one request instead of reading the whole
+    portfolio first just to learn what today is. Explicit dates behave exactly as before.
+    """
+    if period is not None:
+        if period not in service.RANGE_PERIODS:
+            raise HTTPException(422, "Unknown period. Use one of: " + ", ".join(service.RANGE_PERIODS))
+        start_date, end_date = service.resolve_range_period(period)
+    if start_date is None or end_date is None:
+        raise HTTPException(422, "Provide start_date and end_date, or a period.")
     if start_date > end_date:
         raise HTTPException(422, "Start date must be on or before end date.")
     if end_date > service.business_today():

@@ -34,6 +34,35 @@
     return pad2(parts[2]) + "-" + pad2(parts[1]) + "-" + parts[0].slice(-2);
   }
 
+  /** The Sunday of the week holding `date` (the grid's first column), as YYYY-MM-DD. */
+  function weekStartOf(date) {
+    var start = new Date(date.getFullYear(), date.getMonth(), date.getDate() - date.getDay());
+    return start.getFullYear() + "-" + pad2(start.getMonth() + 1) + "-" + pad2(start.getDate());
+  }
+
+  function dateFromKey(key) {
+    var parts = String(key).split("-").map(Number);
+    return new Date(parts[0], parts[1] - 1, parts[2]);
+  }
+
+  function shiftDays(key, days) {
+    var moved = dateFromKey(key);
+    moved.setDate(moved.getDate() + days);
+    return weekStartOf(moved);
+  }
+
+  /** "9 – 15 Nov 2026", the heading a one-week grid carries instead of a month name. */
+  function displayWeek(startKey) {
+    var start = dateFromKey(startKey);
+    var end = new Date(start.getFullYear(), start.getMonth(), start.getDate() + 6);
+    var sameMonth = start.getMonth() === end.getMonth();
+    var month = function (date) {
+      return new Intl.DateTimeFormat("en-IN", { month: "short" }).format(date);
+    };
+    return start.getDate() + (sameMonth ? "" : " " + month(start)) + " – " +
+      end.getDate() + " " + month(end) + " " + end.getFullYear();
+  }
+
   function displayMonth(key) {
     var parts = monthParts(key);
     return new Intl.DateTimeFormat("en-IN", {
@@ -57,6 +86,10 @@
         month: context.startDate
           ? context.startDate.slice(0, 7)
           : monthKey(new Date()),
+        // Module Cleaning for one plant is read a week at a time — that is the span a
+        // cleaning crew works to. The Month button shows the whole month.
+        span: context.type === "washing" && context.plantCode ? "week" : "month",
+        weekStart: weekStartOf(context.startDate ? dateFromKey(context.startDate) : new Date()),
         rangeStart: context.startDate || "",
         rangeEnd: context.endDate || "",
         plants: [],
@@ -504,7 +537,14 @@
     var parts = monthParts(state.month);
     var firstDay = new Date(parts.year, parts.month - 1, 1).getDay();
     var daysInMonth = new Date(parts.year, parts.month, 0).getDate();
-    var cells = Math.ceil((firstDay + daysInMonth) / 7) * 7;
+    var week = state.span === "week";
+    // In week view the seven cells start at the shown week's Sunday, which may fall in the
+    // month before; `dayNumber` stays an offset from the 1st, so a day outside the month is
+    // drawn the same way the month grid draws its leading and trailing cells.
+    var cells = week ? 7 : Math.ceil((firstDay + daysInMonth) / 7) * 7;
+    var offset = week
+      ? firstDay + Math.round((dateFromKey(state.weekStart) - new Date(parts.year, parts.month - 1, 1)) / 86400000)
+      : 0;
     var eventsByDate = {};
     events.forEach(function (event) {
       if (!eventsByDate[event.date]) eventsByDate[event.date] = [];
@@ -516,7 +556,7 @@
     }).join("");
     var days = "";
     for (var index = 0; index < cells; index += 1) {
-      var dayNumber = index - firstDay + 1;
+      var dayNumber = index + offset - firstDay + 1;
       var inMonth = dayNumber > 0 && dayNumber <= daysInMonth;
       var date = inMonth
         ? state.month + "-" + pad2(dayNumber)
@@ -553,7 +593,8 @@
       "</button>";
     }
     return '<div class="ep-calendar__grid ep-calendar__grid--weeks-' + (cells / 7) +
-      '" role="grid" aria-label="' + escape(displayMonth(state.month)) + '">' +
+      (week ? " ep-calendar__grid--week" : "") +
+      '" role="grid" aria-label="' + escape(week ? displayWeek(state.weekStart) : displayMonth(state.month)) + '">' +
       weekdays + days + "</div>";
   }
 
@@ -1559,10 +1600,20 @@
         '</div></header>' +
         renderToolbar(state, context) +
         '<div class="ep-calendar__monthbar">' +
-        '<div class="ep-calendar__month-nav"><button type="button" data-calendar-action="previous" aria-label="Previous month">‹</button>' +
-          '<h2>' + escape(displayMonth(state.month)) + '</h2>' +
-          '<button type="button" data-calendar-action="next" aria-label="Next month">›</button>' +
-        '</div><button type="button" class="ep-calendar__today" data-calendar-action="today">Today</button>' +
+        '<div class="ep-calendar__month-nav"><button type="button" data-calendar-action="previous" aria-label="' +
+          (state.span === "week" ? "Previous week" : "Previous month") + '">‹</button>' +
+          '<h2>' + escape(state.span === "week" ? displayWeek(state.weekStart) : displayMonth(state.month)) + '</h2>' +
+          '<button type="button" data-calendar-action="next" aria-label="' +
+          (state.span === "week" ? "Next week" : "Next month") + '">›</button>' +
+        '</div>' +
+        // Module Cleaning opens on the week in hand; the whole month stays one click away.
+        '<div class="ep-calendar__span" role="group" aria-label="Dates shown">' +
+          '<button type="button" data-calendar-action="span-week"' +
+            (state.span === "week" ? ' class="is-on" aria-pressed="true"' : ' aria-pressed="false"') + ">Week</button>" +
+          '<button type="button" data-calendar-action="span-month"' +
+            (state.span === "week" ? ' aria-pressed="false"' : ' class="is-on" aria-pressed="true"') + ">Month</button>" +
+        "</div>" +
+        '<button type="button" class="ep-calendar__today" data-calendar-action="today">Today</button>' +
       '</div>' +
       (state.truncated
         ? '<p class="ep-calendar__truncated" role="status">This month has more than ' + state.truncated +
@@ -2030,17 +2081,35 @@
       var context = active.context;
 
       if (action.dataset.calendarAction === "previous" || action.dataset.calendarAction === "next") {
-        var parts = monthParts(state.month);
         var shift = action.dataset.calendarAction === "previous" ? -1 : 1;
-        state.month = monthKey(new Date(parts.year, parts.month - 1 + shift, 1));
+        if (state.span === "week") {
+          state.weekStart = shiftDays(state.weekStart, shift * 7);
+          // A week that starts in the previous month is read from that month's records.
+          state.month = state.weekStart.slice(0, 7);
+        } else {
+          var parts = monthParts(state.month);
+          state.month = monthKey(new Date(parts.year, parts.month - 1 + shift, 1));
+          state.weekStart = weekStartOf(new Date(monthParts(state.month).year, monthParts(state.month).month - 1, 1));
+        }
         state.modalDate = "";
         state.detailEventIndex = null;
         loadEvents(host, state, context);
       } else if (action.dataset.calendarAction === "today") {
         state.month = monthKey(new Date());
+        state.weekStart = weekStartOf(new Date());
         state.modalDate = "";
         state.detailEventIndex = null;
         loadEvents(host, state, context);
+      } else if (action.dataset.calendarAction === "span-week" ||
+                 action.dataset.calendarAction === "span-month") {
+        state.span = action.dataset.calendarAction === "span-week" ? "week" : "month";
+        if (state.span === "week" && state.weekStart.slice(0, 7) !== state.month) {
+          // Switching to Week lands on the first week of the month being read.
+          state.weekStart = weekStartOf(new Date(monthParts(state.month).year, monthParts(state.month).month - 1, 1));
+        }
+        state.modalDate = "";
+        state.detailEventIndex = null;
+        renderView(host, state, context);
       } else if (action.dataset.calendarAction === "open-date") {
         state.modalDate = action.dataset.date;
         state.modalPlant = "";

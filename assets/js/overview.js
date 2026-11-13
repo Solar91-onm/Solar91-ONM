@@ -3,17 +3,14 @@
  * ─────────────────────────────────────────────────────────────────────
  * The portfolio-wide Overview tab.
  *
- * Three summary tiles — PM compliance, Washing compliance, Open site issues —
- * and directly below them a multi-line trend chart of the same three measures
- * over time, one line per measure.
+ * Three summary tiles — PM compliance, Washing compliance, Open site issues.
  *
- * ONE date control drives all four. The Range selector in the filter bar is
- * the single source of truth: `applyRange` records the dates on `state` and
- * then refreshes both the tiles and the chart from them. The chart has no
- * dates of its own, so the two can never disagree.
+ * The Range selector in the filter bar is the single source of truth:
+ * `applyRange` records the dates on `state` and then refreshes the tiles
+ * from them.
  *
- * The plant / project / district filters narrow the tiles and chart to the
- * selected plants, while each filter keeps its full set of available options.
+ * The plant / project / district filters narrow the tiles to the selected
+ * plants, while each filter keeps its full set of available options.
  */
 (function (global) {
   "use strict";
@@ -23,8 +20,9 @@
   let activityCache = null;
   let rangeRequest = 0;
   let rangeKey = "";
-  let trendRequest = 0;
-  let trendTimer = null;
+  // Inverters: how many are installed (the saved per-plant unit configuration) and how many
+  // have an open site issue against them. Both are read once; the filters narrow them here.
+  let inverters = { units: [], issues: [], loaded: false, unitsRestricted: false };
 
   let state = null;      // { allRows, rows, totals, sort }
   let searchTerm = "";
@@ -73,8 +71,7 @@
 
   /**
    * The one date control. Records the range on `state`, then refreshes the
-   * tiles and the chart from it. Everything that changes the dates goes
-   * through here, so the two halves of the tab always agree.
+   * tiles from it.
    */
   function applyRange(startDate, endDate) {
     if (!state) return;
@@ -90,7 +87,6 @@
     }
     state.rangeStart = startDate;
     state.rangeEnd = endDate;
-    loadTrend(startDate, endDate);
     loadRange(startDate, endDate);
   }
 
@@ -146,7 +142,14 @@
     render();
   }
 
-  function populateFilterOptions(allRows) {
+  const DEFAULT_PERIOD = "month";
+
+  /**
+   * Fill the filter dropdowns and wire the controls. Only the first load does this: a later
+   * refresh used to append the same options again and add a second listener to every control.
+   */
+  function populateFilterOptions(allRows, wireControls) {
+    if (!wireControls) return;
     // Searchable plant filter combobox
     const plantCombo = document.querySelector("[data-plant-filter-combo]");
     const plantInput = document.querySelector("[data-plant-filter-input]");
@@ -180,7 +183,6 @@
       filters.plant = row ? code : "__all";
       syncLocationFilters(row ? row.plant : null);
       recomputeAndRender();
-      reloadTrendForFilters();
     }
 
     if (plantInput && plantPanel) {
@@ -278,9 +280,6 @@
         }
         filters[filterName] = ev.target.value;
         recomputeAndRender();
-        if (filterName === "plant" || filterName === "district" || filterName === "company") {
-          reloadTrendForFilters();
-        }
       });
     });
 
@@ -301,16 +300,6 @@
       });
     }
 
-    // The chart used to carry its own title, description and From / To / Apply, which could
-    // disagree with the Range selector above. The Range selector drives the chart now, so that
-    // header has been deleted from the page rather than hidden here: hiding it from JavaScript
-    // meant a hard refresh painted it first and left it on screen until the overview finished
-    // loading — or for good, if the load failed.
-    // The status line stays in the markup because trendStatus() writes to it, but the range
-    // status above the tiles is what the operator reads, so it is not shown.
-    const trendStatusEl = document.querySelector(".ep-overview-trend__status");
-    if (trendStatusEl) trendStatusEl.style.display = "none";
-
     if (dateToggle) dateToggle.addEventListener("change", () => {
       const isRange = dateToggle.checked;
       if (quickView) quickView.style.display = isRange ? "none" : "";
@@ -318,212 +307,74 @@
       if (isRange && fromDate && toDate) applyRange(fromDate.value, toDate.value);
       else loadQuickPeriod(document.querySelector('[data-filter="date"]').value);
     });
-    loadQuickPeriod(document.querySelector('[data-filter="date"]').value);
+    // The period on screen has just been loaded; reading it again here would be the same
+    // request twice on every sign-in.
   }
 
-  function trendStatus(message, isError) {
-    const status = document.querySelector("[data-overview-trend-status]");
-    if (!status) return;
-    status.textContent = message;
-    status.classList.toggle("is-error", !!isError);
-  }
+  // ─── Inverters ───────────────────────────────────────────────────────
+  const INVERTER = "inverter";
 
-  function renderTrendChart(trend) {
-    const host = document.querySelector("[data-overview-trend-chart]");
-    if (!host) return;
-    const series = trend.series || [];
-    if (!trend.labels.length || !series.length) {
-      host.innerHTML = '<p class="ep-overview-trend__empty">No trend data is available for this range.</p>';
-      return;
-    }
-
-    // A wide, shallow viewBox. The SVG is width:100% with a preserved aspect
-    // ratio, so the rendered height is containerWidth * height / width — a wider
-    // box means a shorter chart. Tuned so the three tiles and the chart fit on
-    // one laptop screen without scrolling.
-    // 1100 keeps the scale factor near 1:1 at laptop widths, so the 11px axis
-    // labels stay readable; a much wider box shrinks all the text with it.
-    const width = 1100;
-    const height = 220;
-    const left = 46;
-    const right = 44;
-    const top = 14;
-    const bottom = 34;
-    const plotWidth = width - left - right;
-    const plotHeight = height - top - bottom;
-    // Active and Solved issues share the right-hand axis, so it must fit the larger of the two.
-    const issueMax = Math.max(0, ...series.filter((item) => item.axis === "count")
-      .flatMap((item) => item.values.map(Number)));
-    const issueStep = Math.max(1, Math.ceil(issueMax / 4));
-    const issueAxisMax = issueStep * 4;
-    const bucketWidth = plotWidth / trend.labels.length;
-    const colors = { washing: "washing", pm: "pm", issues: "issues", solved: "solved" };
-    const grid = [0, 25, 50, 75, 100].map((value, index) => {
-      const y = top + plotHeight - value * plotHeight / 100;
-      const issueValue = index * issueStep;
-      return '<g><line class="ep-overview-trend__grid" x1="' + left + '" y1="' + y +
-        '" x2="' + (width - right) + '" y2="' + y + '"></line><text class="ep-overview-trend__axis" x="' +
-        (left - 8) + '" y="' + (y + 4) + '" text-anchor="end">' + value + '%</text>' +
-        '<text class="ep-overview-trend__axis" x="' + (width - right + 8) + '" y="' + (y + 4) +
-        '" text-anchor="start">' + issueValue + '</text></g>';
-    }).join("");
-
-    // Each measure is drawn as a trend line rather than a group of bars: over a
-    // long range the eye follows the direction of travel, which bars two or
-    // three pixels wide cannot show. Buckets keep their centres, so the x
-    // labels still sit under the points they name.
-    const pointX = (index) => left + index * bucketWidth + bucketWidth / 2;
-    const pointY = (item, value) => {
-      const scaled = item.axis === "percent"
-        ? Math.max(0, Math.min(100, Number(value))) / 100
-        : Math.max(0, Number(value)) / issueAxisMax;
-      return top + plotHeight - scaled * plotHeight;
-    };
-    // Dots would crowd into a solid band on a long range, so they appear only
-    // when the buckets are few enough to read individually.
-    const showDots = trend.labels.length <= 40;
-    const dot = (cls, x, y) => '<circle class="ep-overview-trend__dot ep-overview-trend__dot--' +
-      cls + '" cx="' + x + '" cy="' + y + '" r="2.5"></circle>';
-    const lines = series.map((item) => {
-      const cls = colors[item.key] || "issues";
-      // A missing value is a gap in the data, not a zero, so the line breaks
-      // and resumes instead of diving to the axis and back.
-      const segments = [];
-      let run = [];
-      item.values.forEach((value, index) => {
-        if (value === null || value === undefined) {
-          if (run.length) segments.push(run);
-          run = [];
-          return;
-        }
-        run.push([pointX(index), pointY(item, value)]);
-      });
-      if (run.length) segments.push(run);
-      return segments.map((points) => {
-        // A lone point between two gaps has no line to draw, so it is always
-        // marked — otherwise that bucket would render as nothing at all.
-        if (points.length === 1) return dot(cls, points[0][0], points[0][1]);
-        const path = '<polyline class="ep-overview-trend__line ep-overview-trend__line--' + cls +
-          '" points="' + points.map((point) => point[0] + "," + point[1]).join(" ") + '"></polyline>';
-        return path + (showDots ? points.map((point) => dot(cls, point[0], point[1])).join("") : "");
-      }).join("");
-    }).join("");
-
-    // Ten ticks spread evenly across whatever range is shown, always including the
-    // first and last bucket, so a month and a year are read the same way. Picking
-    // the positions (rather than stepping by a divisor) keeps the count steady
-    // instead of landing on 6 for one range and 16 for the next.
-    const TICK_TARGET = 10;
-    const lastIndex = trend.labels.length - 1;
-    const tickCount = Math.min(TICK_TARGET, trend.labels.length);
-    const xIndices = tickCount <= 1
-      ? [0]
-      : Array.from(new Set(Array.from({ length: tickCount }, (_, position) =>
-          Math.round(position * lastIndex / (tickCount - 1)))));
-    const xLabels = xIndices.map((index) => '<text class="ep-overview-trend__x-label" x="' +
-      (left + index * bucketWidth + bucketWidth / 2) +
-      '" y="' + (height - 12) + '" text-anchor="' + (index === 0 ? "start" : index === trend.labels.length - 1 ? "end" : "middle") +
-      '">' + fmt.escape(trend.labels[index]) + '</text>').join("");
-
-    // Every bar used to carry its own tooltip. A line has no comparable area to
-    // hover, so one transparent target per bucket spans the plot height and
-    // reports all three measures for that date together — easier to compare.
-    const hovers = trend.labels.map((label, index) => {
-      const readout = series.map((item) => {
-        const value = item.values[index];
-        return item.label + ": " + (value === null || value === undefined
-          ? "no data"
-          : value + (item.axis === "percent" ? "%" : ""));
-      }).join("\n");
-      return '<rect class="ep-overview-trend__hover" x="' + (left + index * bucketWidth) +
-        '" y="' + top + '" width="' + bucketWidth + '" height="' + plotHeight +
-        '"><title>' + fmt.escape(label + "\n" + readout) + '</title></rect>';
-    }).join("");
-
-    const legend = series.map((item) => {
-      const cls = colors[item.key] || "health";
-      return '<span class="ep-overview-trend__legend-item"><i class="ep-overview-trend__legend-mark ep-overview-trend__legend-mark--' +
-        cls + '"></i>' + fmt.escape(item.label) + '</span>';
-    }).join("");
-    // min-height:0 overrides the stylesheet's 220px floor, which would otherwise
-    // keep the chart taller than the viewBox needs.
-    host.innerHTML = '<svg class="ep-overview-trend__svg" style="min-height:0" viewBox="0 0 ' + width + " " + height +
-      '" role="img" aria-label="Module Cleaning compliance, PM compliance, active and solved site issues from ' +
-      fmt.escape(trend.startDate) + " to " + fmt.escape(trend.endDate) +
-      '. Left axis: compliance percentage. Right axis: issue count.">' + grid + lines + xLabels +
-      '<text class="ep-overview-trend__axis-label" x="' + left + '" y="12">Compliance (%)</text>' +
-      '<text class="ep-overview-trend__axis-label" x="' + (width - right) + '" y="12" text-anchor="end">Issues</text>' +
-      hovers + '</svg><div class="ep-overview-trend__legend">' +
-      legend + '</div>';
-  }
+  function isInverter(name) { return String(name || "").trim().toLowerCase() === INVERTER; }
 
   /**
-   * Redraw the chart for the range already in state — used when a filter changes.
+   * The inverter figures for whatever the filters currently select.
    *
-   * Coalesced: narrowing by plant, then district, then company used to fire a
-   * request per change, and only the last one's answer was ever drawn. One
-   * short delay collapses a burst of filter changes into a single request.
+   * `total` is the number of inverters configured for those plants (PM unit configuration —
+   * the only stored count of units). `down` comes from the server's own per-plant count of open
+   * inverter tickets and the units they name, so the tile reads counts rather than the ticket
+   * list. A plant with no configured units contributes nothing to `total`, so the tile says
+   * "not configured" rather than showing a total that is really a guess.
    */
-  function reloadTrendForFilters() {
-    if (!state || !state.rangeStart || !state.rangeEnd) return;
-    if (trendTimer) clearTimeout(trendTimer);
-    trendTimer = setTimeout(function () {
-      trendTimer = null;
-      if (!state || !state.rangeStart || !state.rangeEnd) return;
-      loadTrend(state.rangeStart, state.rangeEnd);
-    }, 150);
+  function inverterTotals() {
+    const codes = new Set(state ? state.rows.map(({ plant }) => plant.siteCode) : []);
+    const scoped = (row) => !row.siteCode || codes.has(row.siteCode);
+    let total = 0;
+    let plantsWithUnits = 0;
+    inverters.units.forEach((row) => {
+      if (!isInverter(row.equipment_type) || !scoped(row)) return;
+      total += Number(row.total_units) || 0;
+      plantsWithUnits += 1;
+    });
+    let down = 0;
+    let tickets = 0;
+    let affected = 0;
+    inverters.issues.forEach((row) => {
+      if (row.site_code && !codes.has(row.site_code)) return;   // outside the filtered plants
+      tickets += Number(row.open) || 0;
+      down += Number(row.units) || 0;
+      affected += 1;
+    });
+    if (total) down = Math.min(down, total);
+    return {
+      total: total,
+      down: down,
+      running: total ? total - down : null,
+      tickets: tickets,
+      plants: affected,
+      configured: plantsWithUnits > 0,
+      restricted: inverters.unitsRestricted
+    };
   }
 
-  /**
-   * Draw the chart for an explicit range. The dates always come from
-   * `applyRange` (the Range selector), never from controls of its own.
-   */
-  function loadTrend(startDate, endDate) {
-    if (!state) return;
-    // The Range selector draws immediately; drop any filter reload still
-    // waiting out its delay so it cannot fire a second, identical request.
-    if (trendTimer) { clearTimeout(trendTimer); trendTimer = null; }
-    if (!startDate || !endDate || startDate > endDate) {
-      trendRequest += 1;
-      trendStatus("Choose a start date on or before the end date.", true);
-      return;
-    }
-    if (endDate > state.businessDate) {
-      trendRequest += 1;
-      trendStatus("The trend end date cannot be in the future.", true);
-      return;
-    }
-    const requestId = ++trendRequest;
-    const trendRows = state.allRows.filter(({ plant }) => {
-      if (filters.plant !== "__all" && plant.siteCode !== filters.plant) return false;
-      if (filters.company !== "__all" && (plant.projectCompany || "") !== filters.company) return false;
-      if (!districtMatches(plant)) return false;
-      return true;
+  /** One request each, both optional: the tile degrades to what the role may read. */
+  function loadInverters() {
+    const api = global.Solar91PortalAPI;
+    if (!api || inverters.loaded) return;
+    inverters.loaded = true;
+    // The unit configuration is open to the O&M Head and Assignees only; other roles still
+    // get the open-ticket half of the tile.
+    api.request("/api/pm-plan/unit-config").then((body) => {
+      inverters.units = (body && body.configs) || [];
+      render();
+    }).catch(() => {
+      inverters.unitsRestricted = true;
+      render();
     });
-    if (!trendRows.length) {
-      trendStatus("No plants match the selected filters.", false);
-      renderTrendChart({ labels: [], series: [] });
-      return;
-    }
-    const siteCodes = trendRows.length === state.allRows.length &&
-      filters.plant === "__all" && filters.company === "__all" && filters.district === "__all"
-      ? []
-      : trendRows.map(({ plant }) => plant.siteCode);
-    trendStatus("Loading trend…", false);
-    data.fetchPortfolioTrend(startDate, endDate, siteCodes).then((trend) => {
-      if (!state || requestId !== trendRequest) return;
-      renderTrendChart(trend);
-      const plantName = filters.plant !== "__all"
-        ? (trendRows[0].plant.displayName || filters.plant)
-        : trendRows.length === state.allRows.length ? "all plants" : trendRows.length + " filtered plants";
-      trendStatus("Showing module cleaning compliance, PM compliance and active site issues for " + plantName +
-        " · " + trend.startDate + " to " + trend.endDate + ".", false);
-    }).catch((error) => {
-      if (requestId !== trendRequest) return;
-      trendStatus("Could not load trend: " + error.message, true);
-      const host = document.querySelector("[data-overview-trend-chart]");
-      if (host) host.innerHTML = '<p class="ep-overview-trend__empty">Trend could not be loaded.</p>';
-    });
+    // Counts per plant, not the tickets themselves: the tile needs how many units are affected.
+    api.request("/api/issues/equipment-summary?vertical=Inverter").then((body) => {
+      inverters.issues = (body && body.plants) || [];
+      render();
+    }).catch(() => {});
   }
 
   // ─── Rendering helpers ───────────────────────────────────────────────
@@ -594,12 +445,20 @@
       return { dot: "green", tag: "Healthy" };
     }
 
+    const inv = inverterTotals();
+    const inverterPill = !inv.total && !inv.tickets
+      ? { dot: "", tag: "N/A" }
+      : inv.down > 0
+        ? { dot: "red", tag: "Attention" }
+        : { dot: "green", tag: "All running" };
+
     const pmP  = pill("PM", pmPct, totals.pmOverdue);
     const wshP = pill("Module Cleaning", wshPct, totals.washingOverdue);
     const isP  = issuePill(totals.criticalIssues, openIss);
 
     const ICON_PM = `<svg class="ep-metric__icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"></rect><path d="M16 2v4M8 2v4M3 10h18"></path><path d="m9 16 2 2 4-4"></path></svg>`;
     const ICON_WASH = `<svg class="ep-metric__icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v6"></path><path d="M6 8h12l-1.5 12h-9L6 8z"></path><path d="M4.22 10.22A8 8 0 0 0 12 22a8 8 0 0 0 7.78-11.78"></path></svg>`;
+    const ICON_INVERTER = `<svg class="ep-metric__icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"></rect><path d="M13 7l-4 6h3l-1 4 4-6h-3l1-4z"></path></svg>`;
     const ICON_ISSUES = `<svg class="ep-metric__icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>`;
 
     const cards = [
@@ -624,6 +483,31 @@
           { strong: true,  dot: "green", text: `${fmt.formatNumber(totals.washingCompleted)} cycles done` },
           { strong: false, dot: totals.washingOverdue > 0 ? "red" : "amber", text: `${fmt.formatNumber(totals.washingPending)} pending · ${fmt.formatNumber(totals.washingOverdue)} overdue` }
         ]
+      },
+      {
+        title: "Inverters",
+        destination: "inverters",
+        icon: ICON_INVERTER,
+        value: inv.total
+          ? fmt.formatNumber(inv.running) + " / " + fmt.formatNumber(inv.total)
+          : (inv.tickets ? fmt.formatNumber(inv.tickets) : "—"),
+        pill: inverterPill,
+        hints: inv.total
+          ? [
+            { strong: true, dot: inv.down > 0 ? "red" : "green",
+              text: fmt.formatNumber(inv.running) + " running · " + fmt.formatNumber(inv.down) + " not running" },
+            { strong: false,
+              text: fmt.formatNumber(inv.tickets) + " open inverter issues · " +
+                fmt.formatNumber(inv.plants) + " plants affected" }
+          ]
+          : [
+            { strong: true, dot: inv.tickets > 0 ? "red" : "green",
+              text: fmt.formatNumber(inv.tickets) + " open inverter issues" },
+            { strong: false,
+              text: inv.restricted
+                ? "Unit counts are not available to your role"
+                : "No inverter units configured for these plants" }
+          ]
       },
       {
         title: "Open Site Issues",
@@ -870,6 +754,24 @@
       if (!state || !state.rangeStart || !state.rangeEnd) return;
       const destination = card.getAttribute("data-overview-destination");
       const dateRange = { startDate: state.rangeStart, endDate: state.rangeEnd };
+      // The inverter tile opens the same site-issues page, showing inverter tickets only.
+      if (destination === "inverters") {
+        // The register's script is fetched on first use, so the preset is set once it is there.
+        const openRegister = () => {
+          if (global.Solar91PortalIssues) global.Solar91PortalIssues.presetEquipment("Inverter");
+          if (filters.plant !== "__all") {
+            const inverterRow = state.allRows.find(({ plant }) => plant.siteCode === filters.plant);
+            if (inverterRow) {
+              global.Solar91PortalNav.selectPlantPage(filters.plant, "health", dateRange, inverterRow.plant);
+            }
+          } else {
+            global.Solar91PortalNav.selectView("health", dateRange);
+          }
+        };
+        if (global.Solar91Modules) global.Solar91Modules.load("site-issues").then(openRegister).catch(openRegister);
+        else openRegister();
+        return;
+      }
       if (filters.plant !== "__all") {
         const row = state.allRows.find(({ plant }) => plant.siteCode === filters.plant);
         if (row) global.Solar91PortalNav.selectPlantPage(filters.plant, destination, dateRange, row.plant);
@@ -960,10 +862,15 @@
     if (loadingPortfolio) return;
     loadingPortfolio = true;
     if (refresh) data.invalidate();
-    data.fetchPortfolio(!!refresh).then((portfolio) => {
+    // One request opens the page. It carries the plants (for the filters), the business date
+    // (for the date controls) and the figures for the period the Range selector starts on, so
+    // the whole portfolio no longer has to be read first just to learn today's date.
+    const period = (document.querySelector('[data-filter="date"]') || {}).value || DEFAULT_PERIOD;
+    data.fetchPortfolioPeriod(period, !!refresh).then((portfolio) => {
       loadingPortfolio = false;
       lastLoadedAt = Date.now();
-      if (!state) {
+      const first = !state;
+      if (first) {
         state = {
           allRows: portfolio.rows,
           periodRows: portfolio.rows,
@@ -972,21 +879,20 @@
           businessDate: portfolio.businessDate,
           sort: { column: "health", dir: "asc" }
         };
-        populateFilterOptions(portfolio.rows);
-        render();
       } else {
         state.allRows = portfolio.rows;
         state.periodRows = portfolio.rows;
         state.businessDate = portfolio.businessDate || state.businessDate;
-        populateFilterOptions(portfolio.rows);
         activityCache = null;
-        if (state.rangeStart && state.rangeEnd) {
-          rangeKey = "";                       // the same period, read again
-          applyRange(state.rangeStart, state.rangeEnd);
-        } else {
-          recomputeAndRender();
-        }
       }
+      // The dates this period resolved to, recorded so the Range selector agrees with the
+      // figures on screen and does not read the same period again.
+      state.rangeStart = portfolio.startDate;
+      state.rangeEnd = portfolio.endDate;
+      rangeKey = portfolio.startDate + ":" + portfolio.endDate;
+      populateFilterOptions(portfolio.rows, first);
+      rangeStatus("Showing results from " + portfolio.startDate + " to " + portfolio.endDate + ".", false);
+      recomputeAndRender();
       stampDataTime(portfolio.asOf);
       showWarnings(portfolio.warnings);
       if (global.Solar91Perf) global.Solar91Perf.mark("overview_usable");
@@ -1031,6 +937,7 @@
     wireInteractions();
     wireVisibilityRefresh();
     loadPortfolio(false);
+    loadInverters();
   }
 
   global.Solar91PortalOverview = {

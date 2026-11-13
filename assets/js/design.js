@@ -236,7 +236,11 @@
   function portfolioRowHTML(r) {
     var p = r.plant, has = present(p), href = designLink(p);
     return "<tr>" +
-      '<td class="ep-pt__codecell ep-dsn__sticky">' + codeLink(p, false) + '<span class="ep-pt__name">' + fmt.escape(p.displayName || p.plantName) + "</span></td>" +
+      '<td class="ep-pt__codecell ep-dsn__sticky">' + codeLink(p, false) +
+        // The code still opens the design folder, so the name is what opens the plant in the portal.
+        '<button type="button" class="ep-plantlink ep-plantlink--name" data-open-plant="' + fmt.escape(p.siteCode) +
+        '" title="Open ' + fmt.escape(p.displayName || p.plantName) + ' in the Plants tab"><span class="ep-pt__name">' +
+        fmt.escape(p.displayName || p.plantName) + "</span></button></td>" +
       "<td>" + (href ? '<a class="ep-pt__loc" href="' + fmt.escape(href) + '" target="_blank" rel="noopener noreferrer" title="Open the design folder in a new tab">Open ↗</a>'
         : '<span class="ep-pt__cctv-placeholder"' + (canOpenFolder() ? ">Not set" : ' title="' + fmt.escape(RESTRICTED_NOTE) + '">Restricted') + "</span>") + "</td>" +
       '<td class="num mono">' + countIn(REGISTER, has) + "/" + REGISTER.length + "</td>" +

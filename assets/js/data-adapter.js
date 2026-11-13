@@ -114,6 +114,8 @@
   }
 
   /** Plants + profiles + totals in a single request. Cached briefly. */
+  const periodCache = new Map();
+
   function fetchPortfolio(force) {
     const stale = Date.now() - portfolioLoadedAt > PORTFOLIO_TTL_MS;
     if (!portfolioPromise || force || stale) {
@@ -134,6 +136,42 @@
       });
     }
     return portfolioPromise;
+  }
+
+  /**
+   * The portfolio for one of the Range selector's named periods (today / yesterday / week /
+   * month / all), resolved against the business date by the server.
+   *
+   * The Overview used to read the whole portfolio first, purely to learn today's business date,
+   * and then read it again for the chosen period — two responses of the same size on every
+   * sign-in. This is the one request it now opens on; the answer carries the business date and
+   * the dates the period resolved to.
+   */
+  function fetchPortfolioPeriod(period, force) {
+    const key = "period:" + period;
+    if (force) periodCache.delete(key);
+    if (!periodCache.has(key)) {
+      periodCache.set(key, api().request("/api/portal/overview/range?period=" + encodeURIComponent(period))
+        .then(normalizeRangeBody)
+        .catch(function (error) {
+          periodCache.delete(key);
+          throw error;
+        }));
+      setTimeout(function () { periodCache.delete(key); }, PORTFOLIO_TTL_MS);
+    }
+    return periodCache.get(key);
+  }
+
+  function normalizeRangeBody(body) {
+    return {
+      rows: (body.rows || []).map(normalizeRow),
+      totals: body.totals || {},
+      startDate: body.startDate,
+      endDate: body.endDate,
+      businessDate: body.businessDate || null,
+      scope: body.scope || "portfolio",
+      warnings: body.warnings || []
+    };
   }
 
   function fetchPortfolioRange(startDate, endDate) {
@@ -331,6 +369,7 @@
     fetchCalendarMonth,
     fetchPortfolio,
     fetchPortfolioRange,
+    fetchPortfolioPeriod,
     fetchPortfolioTrend,
     aggregatePortfolio,
     classifyCondition,

@@ -614,11 +614,14 @@ def washing_assignees(db: Annotated[Session, Depends(get_db)], user: Annotated[U
 
 @router.get("/washing/overview")
 def washing_overview(db: Annotated[Session, Depends(get_db)], user: Annotated[User, Depends(get_current_user)], include_tables: bool = False, report_days: int = 35, month: str | None = None,
-                     plant_id: UUID | None = None, include_reports: bool = True):
+                     plant_id: UUID | None = None, include_reports: bool = True, summary: bool = False):
     """Washing overview. ``plant_id`` computes one plant only (scope is unchanged: a plant outside the caller's scope
-    simply yields no row); ``include_reports=false`` omits the report list when only the figures are needed."""
+    simply yields no row); ``include_reports=false`` omits the report list when only the figures are needed;
+    ``summary=true`` also omits each plant's day-by-day status, cycle rows and productivity breakdown, which is most
+    of the response and is needed only by a plant's own calendar."""
     return get_overview(db, user, include_tables=include_tables, report_days=report_days, month=month,
-                        include_reports=include_reports, plant_ids={plant_id} if plant_id else None)
+                        include_reports=include_reports, plant_ids={plant_id} if plant_id else None,
+                        summary=summary)
 
 
 @router.get("/washing/day-activity")

@@ -70,9 +70,11 @@
    Neutral palette: dark numbers, grey pill, 6px status dot only. */
 .ep-metrics {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  /* Four tiles: PM, Module Cleaning, Inverters, Open Site Issues. */
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
-@media (max-width: 1180px) { .ep-metrics { grid-template-columns: 1fr; } }
+@media (max-width: 1500px) { .ep-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 760px) { .ep-metrics { grid-template-columns: 1fr; } }
 
 .ep-metric {
   padding: 20px 24px;
@@ -89,7 +91,13 @@
   outline-offset: -3px;
 }
 .ep-metric:last-child { border-right: 0; }
-@media (max-width: 1180px) {
+/* Two tiles to a row: the right-hand one of each pair ends the row, and the last
+   row carries no rule under it. */
+@media (max-width: 1500px) {
+  .ep-metric:nth-child(2n) { border-right: 0; }
+  .ep-metric:nth-child(-n+2) { border-bottom: 1px solid var(--ep-border-soft); }
+}
+@media (max-width: 760px) {
   .ep-metric { border-right: 0; border-bottom: 1px solid var(--ep-border-soft); }
   .ep-metric:last-child { border-bottom: 0; }
 }
@@ -1266,3 +1274,84 @@
 .ep-overview-notice { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 0 0 12px; padding: 10px 14px; border: 1px solid #f5c26b; border-radius: var(--ep-radius-md, 8px); background: #fff8eb; color: #7a4a00; font-size: var(--ep-fs-sm, 13px); }
 .ep-overview-notice.is-error { border-color: #f1a7a1; background: #fdf1f0; color: #8a1c13; }
 .ep-overview-notice button { padding: 4px 10px; border: 1px solid currentColor; border-radius: 999px; background: transparent; color: inherit; font: inherit; font-weight: 600; cursor: pointer; }
+
+/* ── Sortable column headings ──────────────────────────────────────────
+   A heading is a button carrying the label and a pair of arrows. Both arrows
+   are faint until the column is the one in use, when the arrow pointing the
+   way the rows run turns solid — the same reading as a spreadsheet. */
+.ep-sort {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  text-align: inherit;
+  cursor: pointer;
+}
+th.num .ep-sort { justify-content: center; }
+.ep-sort:hover { color: var(--ep-text); }
+.ep-sort:focus-visible { outline: 2px solid var(--ep-accent); outline-offset: 2px; border-radius: 3px; }
+.ep-sort__label { overflow-wrap: anywhere; }
+.ep-sort__arrows {
+  display: inline-flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: 2px;
+  line-height: 0;
+}
+.ep-sort__arrows svg { display: block; fill: currentColor; opacity: 0.25; }
+.ep-sort:hover .ep-sort__arrows svg { opacity: 0.45; }
+.ep-sort.is-active { color: var(--ep-accent); }
+.ep-sort[data-dir="asc"] .ep-sort__up,
+.ep-sort[data-dir="desc"] .ep-sort__down { opacity: 1; }
+.ep-sort[data-dir="asc"] .ep-sort__down,
+.ep-sort[data-dir="desc"] .ep-sort__up { opacity: 0.2; }
+
+/* ── Plant cell as a link into the Plants tab ──────────────────────────
+   Used wherever a portfolio table names a plant: the cell keeps its stacked
+   code-over-name layout and only gains a hover state and a pointer. */
+.ep-plantlink {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.ep-plantlink:hover .ep-pt__code,
+.ep-plantlink:hover strong { color: var(--ep-accent); text-decoration: underline; }
+.ep-plantlink:focus-visible { outline: 2px solid var(--ep-accent); outline-offset: 2px; border-radius: 4px; }
+.ep-plantlink--name { display: block; }
+
+/* ── Page skeleton ─────────────────────────────────────────────────────
+   Stands in while a page's script is fetched on first use (assets/js/modules.js),
+   so the frame and heading appear at once instead of a blank panel. */
+.ep-skeleton { padding: 24px; }
+.ep-skeleton__bar,
+.ep-skeleton__block {
+  background: linear-gradient(90deg, var(--ep-bg-muted) 25%, var(--ep-border-soft, #eef1ef) 37%, var(--ep-bg-muted) 63%);
+  background-size: 400% 100%;
+  border-radius: 6px;
+  animation: ep-skeleton-sheen 1.4s ease-in-out infinite;
+}
+.ep-skeleton__bar--title { width: 240px; height: 22px; margin-bottom: 10px; }
+.ep-skeleton__bar--sub { width: 150px; height: 13px; margin-bottom: 20px; }
+.ep-skeleton__block { height: 320px; border-radius: 12px; }
+@keyframes ep-skeleton-sheen {
+  0% { background-position: 100% 50%; }
+  100% { background-position: 0 50%; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ep-skeleton__bar, .ep-skeleton__block { animation: none; }
+}

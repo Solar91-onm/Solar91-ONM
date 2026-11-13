@@ -1,0 +1,154 @@
+/* washing-board.css — the Module Cleaning board: one card per plant.
+   The card's top edge and its ring carry the plant's lateness colour, so the
+   board can be read at arm's length before any of the text is. */
+
+.ep-wb__tallies {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.ep-wb__tally {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 7px 12px;
+  border: 1px solid var(--ep-border);
+  border-radius: 999px;
+  background: var(--ep-surface);
+  font-size: 12px;
+  color: var(--ep-text-muted);
+  cursor: pointer;
+}
+.ep-wb__tally strong { font-size: 14px; color: var(--ep-text); }
+.ep-wb__tally:hover { border-color: var(--ep-accent); }
+.ep-wb__tally.is-on { border-color: var(--ep-accent); background: var(--ep-accent-soft, rgba(37, 99, 235, 0.08)); }
+.ep-wb__tally.is-on strong { color: var(--ep-accent); }
+.ep-wb__tally--ontrack strong { color: var(--ep-green, #16a34a); }
+.ep-wb__tally--behind strong { color: var(--ep-amber, #d97706); }
+.ep-wb__tally--late strong { color: var(--ep-red, #dc2626); }
+
+.ep-wb__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(290px, 1fr));
+  gap: 12px;
+}
+
+.ep-wb__card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 14px 12px;
+  border: 1px solid var(--ep-border);
+  border-top: 3px solid var(--ep-border);
+  border-radius: 12px;
+  background: var(--ep-surface);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: box-shadow 0.12s ease, transform 0.12s ease;
+}
+.ep-wb__card:hover { box-shadow: 0 6px 18px rgba(15, 23, 42, 0.1); transform: translateY(-1px); }
+.ep-wb__card:focus-visible { outline: 2px solid var(--ep-accent); outline-offset: 2px; }
+.ep-wb__card--ontrack { border-top-color: var(--ep-green, #16a34a); }
+.ep-wb__card--behind  { border-top-color: var(--ep-amber, #d97706); }
+.ep-wb__card--late    { border-top-color: var(--ep-red, #dc2626); }
+.ep-wb__card--done    { border-top-color: var(--ep-accent); }
+
+.ep-wb__head { display: flex; align-items: flex-start; gap: 8px; }
+.ep-wb__name {
+  flex: 1 1 auto;
+  font-size: 15px;
+  font-weight: 650;
+  color: var(--ep-text);
+  overflow-wrap: anywhere;
+}
+.ep-wb__code {
+  flex: 0 0 auto;
+  padding: 3px 9px;
+  border: 1px solid var(--ep-border);
+  border-radius: 999px;
+  font-family: var(--ep-font-mono, "JetBrains Mono", monospace);
+  font-size: 11px;
+  color: var(--ep-text-muted);
+}
+.ep-wb__date { font-size: 12px; color: var(--ep-text-muted); }
+
+.ep-wb__body { display: flex; align-items: center; gap: 14px; }
+.ep-wb__gauge { position: relative; flex: 0 0 auto; width: 64px; height: 64px; }
+.ep-wb__ring { width: 64px; height: 64px; transform: rotate(-90deg); }
+.ep-wb__ring circle { fill: none; stroke-width: 5; }
+.ep-wb__ring-track { stroke: var(--ep-border-soft, #e5e7eb); }
+.ep-wb__ring-fill { stroke-linecap: round; stroke: var(--ep-accent); }
+.ep-wb__ring-fill--ontrack { stroke: var(--ep-green, #16a34a); }
+.ep-wb__ring-fill--behind  { stroke: var(--ep-amber, #d97706); }
+.ep-wb__ring-fill--late    { stroke: var(--ep-red, #dc2626); }
+.ep-wb__ring-text {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  line-height: 1.1;
+}
+.ep-wb__ring-text strong { font-size: 14px; color: var(--ep-text); }
+.ep-wb__ring-text small { font-size: 9px; color: var(--ep-text-muted); }
+
+.ep-wb__facts { display: flex; flex: 1 1 auto; flex-direction: column; gap: 4px; min-width: 0; }
+.ep-wb__pips { display: inline-flex; gap: 5px; }
+.ep-wb__pip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 21px;
+  height: 21px;
+  border: 1px solid var(--ep-border);
+  border-radius: 50%;
+  font-size: 11px;
+  color: var(--ep-text-muted);
+}
+.ep-wb__pip.is-current { border-color: var(--ep-accent); color: var(--ep-accent); font-weight: 650; }
+.ep-wb__pip.is-done { border-color: var(--ep-green, #16a34a); background: var(--ep-green, #16a34a); color: #fff; }
+.ep-wb__tables { font-size: 12px; color: var(--ep-text); }
+.ep-wb__note { font-size: 11px; color: var(--ep-text-muted); overflow-wrap: anywhere; }
+
+.ep-wb__foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-top: 9px;
+  border-top: 1px dashed var(--ep-border-soft, #e5e7eb);
+}
+.ep-wb__pill {
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  background: var(--ep-bg-muted);
+  color: var(--ep-text-muted);
+}
+.ep-wb__pill--ontrack { background: rgba(22, 163, 74, 0.12); color: var(--ep-green, #16a34a); }
+.ep-wb__pill--behind  { background: rgba(217, 119, 6, 0.14); color: var(--ep-amber, #b45309); }
+.ep-wb__pill--late    { background: rgba(220, 38, 38, 0.12); color: var(--ep-red, #dc2626); }
+.ep-wb__pill--done    { background: rgba(37, 99, 235, 0.12); color: var(--ep-accent); }
+.ep-wb__assignee {
+  flex: 1 1 auto;
+  font-size: 11px;
+  color: var(--ep-text-muted);
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.ep-pt__empty-card {
+  padding: 28px;
+  border: 1px dashed var(--ep-border);
+  border-radius: 12px;
+  background: var(--ep-surface);
+  color: var(--ep-text-muted);
+  text-align: center;
+}
+
+@media (max-width: 560px) {
+  .ep-wb__grid { grid-template-columns: 1fr; }
+}

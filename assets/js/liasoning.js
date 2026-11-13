@@ -24,18 +24,20 @@
   var fmt = global.Solar91PortalFormat;
 
   var COLUMNS = [
-    { key: "code", label: "Site Code" },
-    { key: "loa", label: "LOA", align: "num" },
-    { key: "ppa", label: "PPA", align: "num" },
-    { key: "tariff", label: "Tariff (Rs/Unit)", align: "num" },
-    { key: "land", label: "Registered Land Lease", align: "num" },
-    { key: "commissioning", label: "Commissioning Documents", align: "num" }
+    { key: "code", label: "Site Code", sort: function (r) { return r.plant.siteCode; } },
+    { key: "loa", label: "LOA", align: "num", sort: function (r) { return isoDate(record(r.plant).loa_date); } },
+    { key: "ppa", label: "PPA", align: "num", sort: function (r) { return isoDate(record(r.plant).ppa_date); } },
+    { key: "tariff", label: "Tariff (Rs/Unit)", align: "num", sort: function (r) { return tariffOf(r.plant); } },
+    { key: "land", label: "Registered Land Lease", align: "num",
+      sort: function (r) { return linkOf(r.plant, "land_lease_url"); } },
+    { key: "commissioning", label: "Commissioning Documents", align: "num",
+      sort: function (r) { return linkOf(r.plant, "commissioning_docs_url"); } }
   ];
   var VIEWER_ROLES = ["O&M Head", "Assignee", "Administration"];
   var MAX_TARIFF = 1000;
 
   var mode = { kind: "all", siteCode: null };
-  var ui = { search: "", spv: "__all", district: "__all" };
+  var ui = { search: "", spv: "__all", district: "__all", sort: { key: "code", dir: "asc" } };
   var st = { rows: [] };
   var token = 0, searchTimer = null;
 
@@ -101,9 +103,13 @@
 
   function rowHTML(entry, editor) {
     var p = entry.plant, r = record(p), tariff = tariffOf(p);
+    var codeInner = '<span class="ep-pt__code">' + fmt.escape(p.siteCode) + '</span><span class="ep-pt__name">' +
+      fmt.escape(p.displayName || p.plantName) + "</span>";
     return "<tr>" +
-      '<td class="ep-pt__codecell"><span class="ep-pt__code">' + fmt.escape(p.siteCode) + '</span><span class="ep-pt__name">' +
-        fmt.escape(p.displayName || p.plantName) + "</span></td>" +
+      '<td class="ep-pt__codecell">' + (single()
+        ? codeInner
+        : '<button type="button" class="ep-plantlink" data-open-plant="' + fmt.escape(p.siteCode) +
+          '" title="Open ' + fmt.escape(p.displayName || p.plantName) + ' in the Plants tab">' + codeInner + "</button>") + "</td>" +
       '<td class="num mono">' + (isoDate(r.loa_date) ? fmt.escape(showDate(r.loa_date)) : placeholder()) + "</td>" +
       '<td class="num mono">' + (isoDate(r.ppa_date) ? fmt.escape(showDate(r.ppa_date)) : placeholder()) + "</td>" +
       '<td class="num mono">' + (tariff === null ? placeholder() : fmt.escape(showTariff(tariff))) + "</td>" +
@@ -117,13 +123,14 @@
   function visibleRows() {
     if (single()) return st.rows.filter(function (r) { return r.plant.siteCode === mode.siteCode; });
     var term = ui.search.trim().toLowerCase();
-    return st.rows.filter(function (r) {
+    var rows = st.rows.filter(function (r) {
       var p = r.plant;
       if (term && [p.siteCode, p.displayName || "", p.plantName || "", p.projectCompany || "", p.district || ""].join(" ").toLowerCase().indexOf(term) === -1) return false;
       if (ui.spv !== "__all" && (p.projectCompany || "") !== ui.spv) return false;
       if (ui.district !== "__all" && (p.district || "") !== ui.district) return false;
       return true;
-    }).sort(function (a, b) { return a.plant.siteCode.localeCompare(b.plant.siteCode); });
+    });
+    return global.Solar91PortalSort.apply(rows, ui.sort, COLUMNS);
   }
 
   function opts(list, selected, label) {
@@ -169,7 +176,9 @@
           (one ? "" : '<button class="ep-pt__export" type="button" data-lia-export>CSV</button>') + "</div>" +
         '<div class="ep-pt__table-wrap"><div class="ep-pt__scroll" tabindex="0" role="region" aria-label="Liasoning by plant">' +
           '<table class="ep-pt__table ep-lia__table' + (editor ? " has-edit" : "") + '"><thead><tr>' +
-            COLUMNS.map(function (c) { return "<th" + (c.align === "num" ? ' class="num"' : "") + ">" + c.label + "</th>"; }).join("") +
+            (one
+              ? COLUMNS.map(function (c) { return "<th" + (c.align === "num" ? ' class="num"' : "") + ">" + c.label + "</th>"; }).join("")
+              : global.Solar91PortalSort.headerHTML(COLUMNS, ui.sort, "data-lia-sort")) +
             (editor ? '<th class="num">Edit</th>' : "") + "</tr></thead><tbody>" +
             (rows.length ? rows.map(function (r) { return rowHTML(r, editor); }).join("")
               : '<tr><td colspan="' + cols + '" class="ep-pt__empty">' +
@@ -301,6 +310,7 @@
     container.querySelectorAll("[data-lia-filter]").forEach(function (sel) {
       sel.addEventListener("change", function () { ui[sel.getAttribute("data-lia-filter")] = sel.value; render(container); });
     });
+    global.Solar91PortalSort.wire(container, ui.sort, function () { render(container); }, "data-lia-sort");
     var exp = container.querySelector("[data-lia-export]");
     if (exp) exp.addEventListener("click", exportCSV);
     container.querySelectorAll("[data-lia-edit]").forEach(function (btn) {
@@ -313,7 +323,7 @@
     if (!container) return;
     var mine = ++token;
     mode = { kind: (opts && opts.siteCode) ? "single" : "all", siteCode: opts ? opts.siteCode : null };
-    ui = { search: "", spv: "__all", district: "__all" };
+    ui = { search: "", spv: "__all", district: "__all", sort: { key: "code", dir: "asc" } };
     container.innerHTML = '<div class="ep-pt__loading">Loading Liasoning…</div>';
     return data.fetchPortfolio().then(function (portfolio) {
       if (mine !== token) return;                           // a newer page replaced this one

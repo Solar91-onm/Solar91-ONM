@@ -320,9 +320,12 @@
   box-shadow: var(--ep-shadow-sm);
 }
 
+.ep-calendar__grid--weeks-1 { grid-template-rows: 34px minmax(0, 1fr); }
 .ep-calendar__grid--weeks-4 { grid-template-rows: 34px repeat(4, minmax(0, 1fr)); }
 .ep-calendar__grid--weeks-5 { grid-template-rows: 34px repeat(5, minmax(0, 1fr)); }
 .ep-calendar__grid--weeks-6 { grid-template-rows: 34px repeat(6, minmax(0, 1fr)); }
+/* One week needs the height of one week, not of a whole month. */
+.ep-calendar__grid--week { height: clamp(170px, calc(100dvh - 520px), 320px); }
 
 .ep-calendar__weekday {
   padding: 9px 10px;
@@ -1636,6 +1639,7 @@
   .ep-calendar__filter--search { flex-basis: 100%; }
   .ep-wash-cycle-card { width: 100%; }
   .ep-calendar__grid { height: clamp(210px, calc(100dvh - 450px), 480px); }
+  .ep-calendar__grid--weeks-1 { grid-template-rows: 28px minmax(0, 1fr); }
   .ep-calendar__grid--weeks-4 { grid-template-rows: 28px repeat(4, minmax(0, 1fr)); }
   .ep-calendar__grid--weeks-5 { grid-template-rows: 28px repeat(5, minmax(0, 1fr)); }
   .ep-calendar__grid--weeks-6 { grid-template-rows: 28px repeat(6, minmax(0, 1fr)); }

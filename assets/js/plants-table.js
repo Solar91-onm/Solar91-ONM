@@ -24,7 +24,7 @@
   var searchTimer = null;
   var mode = { kind: "all", siteCode: null };
   var detailSection = "details";
-  var ui = { search: "", spv: "__all", district: "__all", sort: "name" };
+  var ui = { search: "", spv: "__all", district: "__all", sort: { key: "code", dir: "asc" } };
   var DETAIL_SECTIONS = ["details", "design-mdl", "liasoning", "bom"];
   var DETAIL_SECTION_LABELS = {
     details: "Details",
@@ -97,35 +97,41 @@
       return true;
     });
 
-    rows.sort(function (a, b) {
-      switch (ui.sort) {
-        case "code":      return a.plant.siteCode.localeCompare(b.plant.siteCode);
-        case "ac":        return (b.plant.acCapacityKw || 0) - (a.plant.acCapacityKw || 0);
-        case "dc":        return (b.plant.dcCapacityKw || 0) - (a.plant.dcCapacityKw || 0);
-        case "cod":       return String(b.plant.commissionedOn || "").localeCompare(String(a.plant.commissionedOn || ""));
-        default:          return (a.plant.displayName || a.plant.plantName)
-                                   .localeCompare(b.plant.displayName || b.plant.plantName);
-      }
-    });
-    return rows;
+    return global.Solar91PortalSort.apply(rows, ui.sort, COLUMNS);
   }
 
   // ─── Columns (fixed order, both views) ───────────────────────────────
+  // `sort` reads the value the column is ordered by; a column without one
+  // (Edit) is not sortable.
   var COLUMNS = [
-    { key: "code",      label: "Plant Code" },
-    { key: "spv",       label: "SPV", align: "num" },
-    { key: "ac",        label: "AC (KW)",       align: "num" },
-    { key: "dc",        label: "DC (KWP)",      align: "num" },
-    { key: "district",  label: "District" },
-    { key: "discom",    label: "Discom" },
-    { key: "engineer",  label: "Site Engineer" },
-    { key: "assignee",  label: "Cleaning Assignee" },
-    { key: "pmAssignee",     label: "PM Assignee" },
-    { key: "healthAssignee", label: "Health Assignee" },
-    { key: "cod",       label: "COD",           align: "num" },
-    { key: "location",  label: "Location" },
-    { key: "cctv",      label: "CCTV" },
-    { key: "activity",  label: "Last Activity" },
+    { key: "code",      label: "Plant Code",
+      sort: function (r) { return r.plant.siteCode; } },
+    { key: "spv",       label: "SPV", align: "num",
+      sort: function (r) { var n = spvNumber(r.plant); return n === "—" ? null : Number(n); } },
+    { key: "ac",        label: "AC (KW)",       align: "num",
+      sort: function (r) { return r.plant.acCapacityKw; } },
+    { key: "dc",        label: "DC (KWP)",      align: "num",
+      sort: function (r) { return r.plant.dcCapacityKw; } },
+    { key: "district",  label: "District",
+      sort: function (r) { return r.plant.district; } },
+    { key: "discom",    label: "Discom",
+      sort: function (r) { return r.plant.discom; } },
+    { key: "engineer",  label: "Site Engineer",
+      sort: function (r) { return (r.plant.siteEngineers || []).join(", ") || r.plant.assignedEngineer; } },
+    { key: "assignee",  label: "Cleaning Assignee",
+      sort: function (r) { return r.plant.washingAssignee; } },
+    { key: "pmAssignee",     label: "PM Assignee",
+      sort: function (r) { return r.plant.pmAssignee; } },
+    { key: "healthAssignee", label: "Health Assignee",
+      sort: function (r) { return r.plant.healthAssignee; } },
+    { key: "cod",       label: "COD",           align: "num",
+      sort: function (r) { return r.plant.commissionedOn; } },
+    { key: "location",  label: "Location",
+      sort: function (r) { return r.plant.location || r.plant.mapsUrl; } },
+    { key: "cctv",      label: "CCTV",
+      sort: function (r) { return cctvUrl(r.plant); } },
+    { key: "activity",  label: "Last Activity",
+      sort: function (r) { return r.profile && r.profile.lastReportAt; } },
     { key: "edit",      label: "Edit",          align: "num" }
   ];
 
@@ -146,6 +152,14 @@
 
   function rowHTML(entry) {
     var p = entry.plant;
+    // In the portfolio view the code cell is the way into that plant's own page.
+    var codeInner = '<span class="ep-pt__code">' + fmt.escape(p.siteCode) + "</span>" +
+      '<span class="ep-pt__name">' + fmt.escape(p.displayName || p.plantName) + "</span>";
+    var codeCell = mode.kind === "single"
+      ? '<td class="ep-pt__codecell">' + codeInner + "</td>"
+      : '<td class="ep-pt__codecell"><button type="button" class="ep-plantlink" data-open-plant="' +
+        fmt.escape(p.siteCode) + '" title="Open ' + fmt.escape(p.displayName || p.plantName) +
+        ' in the Plants tab">' + codeInner + "</button></td>";
     var locationCell = "<td>" + (p.mapsUrl
         ? '<a class="ep-pt__loc" href="' + fmt.escape(p.mapsUrl) + '" target="_blank" rel="noopener" aria-label="View plant location" title="' +
             fmt.escape(p.location || p.district || "View plant location") + '">' +
@@ -158,10 +172,7 @@
         : '<span class="ep-pt__cctv-placeholder">Add link</span>') + "</td>";
     return "" +
       "<tr>" +
-        '<td class="ep-pt__codecell">' +
-          '<span class="ep-pt__code">' + fmt.escape(p.siteCode) + "</span>" +
-          '<span class="ep-pt__name">' + fmt.escape(p.displayName || p.plantName) + "</span>" +
-        "</td>" +
+        codeCell +
         '<td class="num"><span class="ep-pt__spv">' + fmt.escape(spvNumber(p)) + "</span></td>" +
         '<td class="num mono">' + numText(p.acCapacityKw) + "</td>" +
         '<td class="num mono">' + numText(p.dcCapacityKw) + "</td>" +
@@ -231,13 +242,6 @@
           '<option value="__all">All districts</option>' +
           opts(districts, ui.district) +
         "</select>" +
-        '<select class="ep-pt__select" data-pt-filter="sort" aria-label="Sort rows">' +
-          '<option value="name"' +      (ui.sort === "name"      ? " selected" : "") + ">Sort: name</option>" +
-          '<option value="code"' +      (ui.sort === "code"      ? " selected" : "") + ">Sort: plant code</option>" +
-          '<option value="ac"' +        (ui.sort === "ac"        ? " selected" : "") + ">Sort: AC capacity</option>" +
-          '<option value="dc"' +        (ui.sort === "dc"        ? " selected" : "") + ">Sort: DC capacity</option>" +
-          '<option value="cod"' +       (ui.sort === "cod"       ? " selected" : "") + ">Sort: COD (newest)</option>" +
-        "</select>" +
       "</div>";
   }
 
@@ -298,10 +302,12 @@
               (single ? "Plant details" : "Plant details table; scroll vertically to see more plants") + '">' +
               '<table class="ep-pt__table">' +
               "<thead><tr>" +
-                COLUMNS.map(function (c) {
-                  var cls = c.align === "num" ? ' class="num"' : "";
-                  return "<th" + cls + ">" + c.label + "</th>";
-                }).join("") +
+                // One plant has nothing to order, so its headings stay plain.
+                (single
+                  ? COLUMNS.map(function (c) {
+                      return "<th" + (c.align === "num" ? ' class="num"' : "") + ">" + c.label + "</th>";
+                    }).join("")
+                  : global.Solar91PortalSort.headerHTML(COLUMNS, ui.sort, "data-pt-sort")) +
               "</tr></thead>" +
               "<tbody>" +
                 (rows.length
@@ -424,6 +430,8 @@
         render(container);
       });
     });
+
+    global.Solar91PortalSort.wire(container, ui.sort, function () { render(container); }, "data-pt-sort");
 
     container.querySelectorAll("[data-pt-export]").forEach(function (btn) {
       btn.addEventListener("click", function () {

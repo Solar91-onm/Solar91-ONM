@@ -275,8 +275,62 @@
   }
 
   // ─── Content area routing ───────────────────────────────────────────
+
+  /**
+   * The page scripts this nav state needs. Only the Overview and the shell ship with the page;
+   * everything else is fetched the first time its page is opened (assets/js/modules.js).
+   *
+   * This mirrors the dispatch in renderContentArea below — the two must name the same module for
+   * the same state, so they are kept next to each other.
+   */
+  function modulesForState() {
+    if (navState.activeView === "overview") return [];
+    if (navState.activeView === "settings") return ["settings"];
+
+    var plantCode = navState.activeView === "plant-sub" ? navState.selectedPlant : null;
+    var pageId = navState.activeView === "plant-sub" ? navState.selectedSubPage
+      : navState.activeView === "view-sub" ? navState.selectedViewPage : null;
+    if (!pageId) return [];
+
+    if (pageId === "washing") return plantCode ? ["operations-calendar"] : ["washing-board"];
+    if (pageId === "pm") return ["operations-calendar"];
+    if (pageId === "health") return ["site-issues"];
+    if (pageId === "movable-assets") return ["movable-assets"];
+    if (pageId === "details") {
+      var section = navState.selectedDetailSection;
+      // The Details page hands Design/MDL, Liasoning and BOM to their own modules.
+      if (section === "design-mdl") return ["plants-table", "design"];
+      if (section === "liasoning") return ["plants-table", "liasoning"];
+      if (section === "bom") return ["plants-table", "bom"];
+      return ["plants-table"];
+    }
+    return [];
+  }
+
+  /** Where the page being opened draws itself, so a skeleton can stand in while its script loads. */
+  function hostForState() {
+    if (navState.activeView === "settings") return document.querySelector("[data-settings-host]");
+    var plantCode = navState.activeView === "plant-sub" ? navState.selectedPlant : null;
+    var pageId = navState.activeView === "plant-sub" ? navState.selectedSubPage
+      : navState.activeView === "view-sub" ? navState.selectedViewPage : null;
+    if (pageId === "washing" && !plantCode) return document.querySelector("[data-washing-board-host]");
+    if (pageId === "washing" || pageId === "pm") return document.querySelector("[data-calendar-host]");
+    if (pageId === "health") return document.querySelector("[data-issues-host]");
+    if (pageId === "movable-assets") return document.querySelector("[data-movable-assets-host]");
+    if (pageId === "details") {
+      return document.querySelector(plantCode ? "[data-plant-details-host]" : "[data-plants-table-host]");
+    }
+    return null;
+  }
+
+  var SKELETON = '<div class="ep-skeleton" role="status" aria-live="polite">' +
+    '<span class="ep-sr-only">Loading this page…</span>' +
+    '<div class="ep-skeleton__bar ep-skeleton__bar--title"></div>' +
+    '<div class="ep-skeleton__bar ep-skeleton__bar--sub"></div>' +
+    '<div class="ep-skeleton__block"></div></div>';
+
   // With the opt-in monitor on (perf.js), each page switch's synchronous render time is recorded by page.
-  function updateContentArea() {
+  function timedRender() {
     var perf = global.Solar91Perf;
     if (!perf || !perf.enabled) return renderContentArea();
     var page = navState.activeView === "plant-sub" ? "plant " + navState.selectedSubPage
@@ -286,6 +340,40 @@
     }
     return perf.time("navigate " + page, renderContentArea);
   }
+
+  /**
+   * Open the page the nav state names, loading its script first if this is the first visit.
+   *
+   * A page already loaded renders in the same tick as before. A first visit shows the page's
+   * frame and a skeleton immediately, then renders; if the script cannot be fetched the page says
+   * so and offers a retry rather than staying blank.
+   */
+  function updateContentArea() {
+    var needed = modulesForState();
+    if (!global.Solar91Modules || !needed.length || needed.every(global.Solar91Modules.isLoaded)) {
+      return timedRender();
+    }
+    var token = ++navToken;
+    var host = hostForState();
+    if (host && !host.childElementCount) host.innerHTML = SKELETON;
+    renderContentArea();                       // the page frame and title appear at once
+    if (host) host.innerHTML = SKELETON;
+    return global.Solar91Modules.load(needed).then(function () {
+      if (token !== navToken) return;          // the user moved on while this was loading
+      timedRender();
+    }).catch(function (error) {
+      if (token !== navToken || !host) return;
+      host.innerHTML = '<div class="ep-pt__error">' +
+        (error && error.message ? error.message : "This page could not be loaded.") +
+        ' <button type="button" data-nav-retry>Try again</button></div>';
+    });
+  }
+
+  var navToken = 0;
+
+  document.addEventListener("click", function (event) {
+    if (event.target.closest("[data-nav-retry]")) updateContentArea();
+  });
 
   // Last guard for restricted roles, whatever path changed navState.
   function enforceRolePages() {
@@ -307,6 +395,7 @@
     var overviewEl = document.querySelector('[data-tab-view="overview"]');
     var tableEl = document.querySelector('[data-tab-view="plants-table"]');
     var calendarEl = document.querySelector('[data-tab-view="calendar"]');
+    var washingBoardEl = document.querySelector('[data-tab-view="washing-board"]');
     var healthEl = document.querySelector('[data-tab-view="health"]');
     var movableAssetsEl = document.querySelector('[data-tab-view="movable-assets"]');
     var detailsEl = document.querySelector('[data-tab-view="plant-details"]');
@@ -318,7 +407,7 @@
     var phContext = document.querySelector("[data-placeholder-context]");
 
     function showOnly(el) {
-      [overviewEl, tableEl, calendarEl, healthEl, movableAssetsEl, detailsEl, settingsEl, placeholderEl].forEach(function (section) {
+      [overviewEl, tableEl, calendarEl, washingBoardEl, healthEl, movableAssetsEl, detailsEl, settingsEl, placeholderEl].forEach(function (section) {
         if (section) section.classList.toggle("is-visible", section === el);
       });
     }
@@ -333,7 +422,9 @@
       showOnly(settingsEl);
       if (titleEl) titleEl.textContent = "Login access";
       navState.selectedRange = null;
-      global.Solar91PortalSettings.render(document.querySelector("[data-settings-host]"));
+      if (global.Solar91PortalSettings) {
+        global.Solar91PortalSettings.render(document.querySelector("[data-settings-host]"));
+      }
       try { sessionStorage.setItem("solar91Portal.navState", JSON.stringify(navState)); } catch (_) {}
       return;
     }
@@ -381,7 +472,16 @@
 
     if (titleEl) titleEl.textContent = pageLabel;
 
-    if (calendarType) {
+    // Module Cleaning portfolio-wide is the board of plant cards: the calendar is
+    // per plant, and a card on the board is how you reach it.
+    if (calendarType === "washing" && !plantCode && global.Solar91PortalWashingBoard) {
+      showOnly(washingBoardEl);
+      global.Solar91PortalWashingBoard.show(document.querySelector("[data-washing-board-host]"));
+      try { sessionStorage.setItem("solar91Portal.navState", JSON.stringify(navState)); } catch (_) {}
+      return;
+    }
+
+    if (calendarType && global.Solar91PortalCalendar) {
       showOnly(calendarEl);
       global.Solar91PortalCalendar.render(
         document.querySelector("[data-calendar-host]"),
@@ -419,6 +519,14 @@
         document.querySelector("[data-movable-assets-host]"),
         { siteCode: plantCode }
       );
+    } else if (calendarType) {
+      showOnly(calendarEl);                      // script still loading; the skeleton is already there
+    } else if (isDetails) {
+      showOnly(plantCode ? detailsEl : tableEl);
+    } else if (pageId === "health") {
+      showOnly(healthEl);
+    } else if (pageId === "movable-assets") {
+      showOnly(movableAssetsEl);
     } else {
       showOnly(placeholderEl);
       if (phTitle) phTitle.textContent = pageLabel;
