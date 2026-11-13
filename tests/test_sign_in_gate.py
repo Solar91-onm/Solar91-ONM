@@ -145,3 +145,18 @@ def test_sign_in_network_failure_reads_plainly():
       assert.ok(/internet connection/.test(net.error),net.error);
       assert.ok(!/https?:|GET/.test(net.error),net.error);
     """)
+
+
+def test_signing_in_by_code_brings_the_portal_shell_back_without_a_refresh():
+    """The sign-in panel draws into #app, where the portal shell lives. The shell must be set aside, not destroyed,
+    and put back before the portal renders, or a code sign-in leaves the person on the sign-in screen until a refresh."""
+    gate = (ROOT / "frontend/static/js/auth-gate.js").read_text(encoding="utf-8")
+    app = (ROOT / "assets/js/app.js").read_text(encoding="utf-8")
+    # both screens that draw into #app set the shell aside first
+    assert gate.count("s91SetAsideShell();\n  document.getElementById(\"app\").innerHTML") == 2
+    assert "app.replaceChildren(...S91_SHELL_NODES)" in gate
+    restore = app.index("global.s91RestoreShell()")
+    assert restore < app.index("renderPortal({ name: AUTH_IDENTITY.name")
+    # one thing at a time: the resend offer is hidden while a code is checked, and it says "Resend code"
+    assert 'clearInterval(timer);$("clerk-code-resend").style.display="none";' in gate
+    assert '"Resend code in "+cool+"s"' in gate and "Send a new code" not in gate

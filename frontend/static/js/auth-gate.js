@@ -18,7 +18,22 @@ const AUTH_PROVIDER = (window.S91_CONFIG && window.S91_CONFIG.authProvider) || "
 const AUTH_IDENTITY={name:null,role:null};
 const S91_CODE_RESEND_SECONDS=60;
 
+/* The portal shell (sidebar, header, pages) lives inside #app, the same element the sign-in panel and these cards draw
+   into. Set the shell's nodes aside the first time either is drawn and put them back before the portal starts:
+   otherwise a sign-in by code had no portal left to show and only a page refresh brought it back. */
+let S91_SHELL_NODES=null;
+function s91SetAsideShell(){
+  const app=document.getElementById("app");
+  if(S91_SHELL_NODES===null&&app&&app.querySelector(".ep-shell"))S91_SHELL_NODES=Array.from(app.childNodes);
+}
+function s91RestoreShell(){
+  const app=document.getElementById("app");
+  if(!app||app.querySelector(".ep-shell")||!S91_SHELL_NODES)return;
+  app.replaceChildren(...S91_SHELL_NODES);
+}
+
 function authSetupCard(title, detail){
+  s91SetAsideShell();
   document.getElementById("app").innerHTML = '<div style="min-height:100vh;display:grid;place-items:center;padding:24px;background:#F4F6F5;font-family:Inter,system-ui,sans-serif"><div style="width:min(520px,100%);background:#fff;border:1px solid #E4E9E6;border-radius:16px;padding:24px;box-shadow:0 12px 38px rgba(16,24,20,.10)"><div style="display:flex;align-items:center;gap:10px"><img src="/static/brand/solar91-emblem.png" height="34" alt=""><img src="/static/brand/solar91-wordmark.png" height="22" alt="SOLAR 91"></div><h2 style="margin:8px 0 8px;font-size:22px">'+title+'</h2><p style="margin:0;color:#4F5B55;line-height:1.55">'+detail+'</p></div></div>';
 }
 async function ensureClerkReady(){
@@ -41,6 +56,7 @@ function showClerkSignIn(errorMessage){
   const greet=h<12?"Good morning":h<17?"Good afternoon":"Good evening";
   const EM='<img src="/static/brand/solar91-emblem.png" alt="">';
   const panels=Array.from({length:36},(_,i)=>'<div class="s91-pv" style="--d:'+((i%9)*0.25+Math.floor(i/9)*0.5)+'s"></div>').join("");
+  s91SetAsideShell();
   document.getElementById("app").innerHTML=
    '<div class="s91-auth">'+
     '<aside class="s91-hero" aria-hidden="true">'+
@@ -136,8 +152,8 @@ function s91ShowClerkCodeSignIn(prefillEmail,errorMessage){
   function tick(){
     const b=$("clerk-code-resend");
     if(!b||!document.body.contains(b)){clearInterval(timer);return}
-    if(cool>0){b.disabled=true;b.textContent="Send a new code in "+cool+"s";cool-=1}
-    else{clearInterval(timer);b.disabled=false;b.textContent="Send a new code"}
+    if(cool>0){b.disabled=true;b.textContent="Resend code in "+cool+"s";cool-=1}
+    else{clearInterval(timer);b.disabled=false;b.textContent="Resend code"}
   }
   function startCooldown(){cool=S91_CODE_RESEND_SECONDS;clearInterval(timer);timer=setInterval(tick,1000);tick()}
   async function requestCode(){
@@ -184,6 +200,8 @@ function s91ShowClerkCodeSignIn(prefillEmail,errorMessage){
         const token=$("clerk-code").value.replace(/\D/g,"");
         if(token.length<6){fail("Enter the code from the email.");return}
         submit.textContent="Verifying…";
+        // One thing at a time: no resend offer (or its countdown) while this code is being checked.
+        clearInterval(timer);$("clerk-code-resend").style.display="none";
         s91WakeServer();
         const pending=flow==="signIn"?signInAttempt:signUpAttempt;
         let attempt;
@@ -215,6 +233,7 @@ function s91ShowClerkCodeSignIn(prefillEmail,errorMessage){
       if(s91ClerkCode(err)==="session_exists"&&window.Clerk&&window.Clerk.session){await startSolar91App();return}
       fail(s91CodeError(err));
       submit.textContent=sent?"Verify and sign in":"Email me a code";
+      if(sent){$("clerk-code-resend").style.display="block";clearInterval(timer);timer=setInterval(tick,1000);tick()}
     }finally{
       busy=false;
       if(document.body.contains(submit))submit.disabled=false;

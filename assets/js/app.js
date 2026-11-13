@@ -124,6 +124,8 @@
         return;
       }
 
+      // After a sign-in by code the sign-in panel is still on screen: bring the portal shell back first.
+      if (typeof global.s91RestoreShell === "function") global.s91RestoreShell();
       renderPortal({ name: AUTH_IDENTITY.name, email: AUTH_IDENTITY.email, role: AUTH_IDENTITY.role });
     } catch (e) {
       var message = String((e && e.message) || e);
