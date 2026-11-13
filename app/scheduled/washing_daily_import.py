@@ -36,6 +36,8 @@ from app.scheduled.washing_cycles import (
     MONTHLY_CYCLE_TARGET,
     _completing_rows,
     _cycle_sequence,
+    _entered_by_om,
+    _sequence_entry,
     _day_label,
     _is_washing_manager,
     _month_key,
@@ -218,6 +220,8 @@ class _Planned:
     cycle_no: int
     cycle_completed: bool = False
     confirmed: bool = True       # only confirmed reports complete a cycle; pending ones still fill it
+    numbers: frozenset = frozenset()   # table numbers of a saved day (an upload itself carries counts only)
+    by_om: bool = False                # a saved day the O&M team entered: re-cleaned tables start the next cycle
 
 
 def _whole_number(text: str) -> int:
@@ -346,14 +350,15 @@ def import_daily(db: Session, user: User, filename: str, content: bytes, *, dry_
     for report in existing:
         state.setdefault((report.plant_id, report.cycle_month), []).append(_Planned(
             report.report_date, (0, report.created_at.timestamp() if report.created_at else 0.0),
-            report.tables_cleaned, report.cycle_no, False, report.review_status == "Confirmed"))
+            report.tables_cleaned, report.cycle_no, False, report.review_status == "Confirmed",
+            numbers=_sequence_entry(report)[2], by_om=_entered_by_om(report)))
     for sequence, record in enumerate(new_records):
         record["planned"] = _Planned(record["date"], (1, sequence), record["tables"], 1, confirmed=manager)
         state.setdefault((record["plant"].id, _month_key(record["date"])), []).append(record["planned"])
     extra_of: dict[int, bool] = {}
     for (plant_id, _month), rows_of_month in state.items():
         rows_of_month.sort(key=lambda row: (row.report_date, row.order))
-        for row, (cycle_no, extra) in zip(rows_of_month, _cycle_sequence([(row.tables_cleaned, True) for row in rows_of_month], totals.get(plant_id, 0))):
+        for row, (cycle_no, extra) in zip(rows_of_month, _cycle_sequence([(row.tables_cleaned, True, row.numbers, row.by_om) for row in rows_of_month], totals.get(plant_id, 0))):
             row.cycle_no = cycle_no
             extra_of[id(row)] = extra
         confirmed = [[row for row in rows_of_month if row.cycle_no == n and row.confirmed] for n in range(1, MONTHLY_CYCLE_TARGET + 1)]

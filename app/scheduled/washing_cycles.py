@@ -748,8 +748,11 @@ def _build_overview(db: Session, user: User, include_tables: bool = False, repor
             if report.cycle_completed and report.review_status == "Confirmed":
                 completed_by_month.setdefault(report.cycle_month, set()).add(report.cycle_no)
         cycles_this_month = len(completed_by_month.get(month, set()))
-        current_cycle = min(MONTHLY_CYCLE_TARGET, cycles_this_month + 1)
-        ledger = _cycle_ledger([r for r in reports if r.cycle_month == month], table_count)   # with carried-over tables
+        month_reports = [r for r in reports if r.cycle_month == month]
+        closed_cycles = _closed_incomplete(month_reports, table_count)   # left incomplete by an O&M re-clean
+        current_cycle = min(MONTHLY_CYCLE_TARGET, max(cycles_this_month, max(completed_by_month.get(month, set()), default=0),
+                                                      max(closed_cycles, default=0)) + 1)
+        ledger = _cycle_ledger(month_reports, table_count)   # with carried-over tables
         cleaned_confirmed = ledger[current_cycle]["confirmed"]
         cleaned_pending = ledger[current_cycle]["pending"]
         table_codes: list[str] = []
@@ -855,7 +858,8 @@ def _build_overview(db: Session, user: User, include_tables: bool = False, repor
             cycle_reports = [r for r in reports if r.cycle_month == month and r.cycle_no == cycle_no and r.review_status in ("Pending", "Confirmed")]
             done_on = completed_dates.get(cycle_no)
             started_on = min((r.report_date for r in cycle_reports if r.tables_cleaned), default=None) or min((r.report_date for r in cycle_reports), default=None)
-            state = "Completed" if done_on else ("In progress" if cycle_no == current_cycle and cycles_this_month < MONTHLY_CYCLE_TARGET else "Upcoming")
+            state = ("Completed" if done_on else "Missed" if cycle_no in closed_cycles else
+                     ("In progress" if cycle_no == current_cycle and cycles_this_month < MONTHLY_CYCLE_TARGET else "Upcoming"))
             due = due_dates[cycle_no - 1]
             planned_start = start_dates[cycle_no - 1]
             cycle_rows.append({
@@ -1068,22 +1072,52 @@ def _month_wash_summary(reports, table_count: int) -> dict:
     }
 
 
+OM_ENTRY_NOTE = "Entered by O&M"
+
+
+def _entered_by_om(report) -> bool:
+    """A day the O&M Head or a washing Assignee entered themselves (in the sheet, as a single day or by upload): it is
+    saved confirmed by its own author with the O&M note. A Site Engineer's day confirmed by O&M is not one."""
+    return bool(
+        report.review_status == "Confirmed" and report.reported_by_id is not None
+        and report.reviewed_by_id == report.reported_by_id and report.review_note == OM_ENTRY_NOTE
+    )
+
+
+def _sequence_entry(report) -> tuple[int, bool, frozenset, bool]:
+    """One saved day as `_cycle_sequence` reads it: (tables_cleaned, counts, table numbers, entered by O&M)."""
+    numbers = frozenset(n for n in (_code_number(code) for code in (report.cleaned_table_codes or [])) if n is not None)
+    return (report.tables_cleaned, report.review_status in ("Pending", "Confirmed"), numbers, _entered_by_om(report))
+
+
 def _cycle_sequence(entries, total_tables: int) -> list[tuple[int, bool]]:
     """Cycle of each day of one plant-month, in date order: (cycle_no, extra) per entry of `entries`, which are
-    (tables_cleaned, counts) in date order (counts = awaiting confirmation or confirmed; rejected days fill nothing).
+    (tables_cleaned, counts) or (tables_cleaned, counts, table_numbers, entered_by_om) in date order (counts = awaiting
+    confirmation or confirmed; rejected days fill nothing).
 
     A cycle fills up to the plant's table count. The day that reaches the count belongs to that cycle and completes
     it; the tables above the count carry over to the next cycle (206 tables per cycle, 234 recorded: 28 count in
     cycle 3), and later days go to the next cycle. Editing or back-filling a day moves the days after it accordingly.
-    After cycle 3 is full, further days stay on cycle 3 as extra washing (`extra`)."""
+    After cycle 3 is full, further days stay on cycle 3 as extra washing (`extra`).
+
+    Re-cleaning (O&M Head / Assignee entries only): a day they entered that lists a table already recorded in the open
+    cycle starts the next cycle - the whole day, even when only some of its tables repeat. The open cycle stays
+    incomplete and every later day counts in the new one. A Site Engineer's day never moves a cycle on; its repeated
+    tables are refused (_assert_distinct_tables). Cycle 3 has no next cycle, so a repeat there is refused too."""
     out: list[tuple[int, bool]] = []
-    cycle, counted = 1, 0
-    for tables, counts in entries:
+    cycle, counted, used = 1, 0, set()
+    for entry in entries:
+        tables, counts = entry[0], entry[1]
+        numbers = entry[2] if len(entry) > 2 else ()
+        by_om = bool(entry[3]) if len(entry) > 3 else False
+        if counts and by_om and cycle < MONTHLY_CYCLE_TARGET and used.intersection(numbers):
+            cycle, counted, used = cycle + 1, 0, set()
         out.append((cycle, cycle == MONTHLY_CYCLE_TARGET and total_tables > 0 and counted >= total_tables))
         if counts:
             counted += tables or 0
+            used.update(numbers)
             if total_tables > 0 and counted >= total_tables and cycle < MONTHLY_CYCLE_TARGET:
-                cycle, counted = cycle + 1, counted - total_tables
+                cycle, counted, used = cycle + 1, counted - total_tables, set()
     return out
 
 
@@ -1119,6 +1153,18 @@ def _cycle_ledger(reports, total_tables: int) -> dict[int, dict]:
                 "carried_in": recorded[n][0], "carried_out": recorded[n][2]} for n in recorded}
 
 
+def _closed_incomplete(reports, total_tables: int) -> set[int]:
+    """Cycles left incomplete because an O&M re-clean started a later cycle (_cycle_sequence): a later cycle already
+    has days, yet this one never reached the table count. They read as Missed and the month goes on in the later
+    cycle. Under the count rule alone a later cycle only gets days once the one before is full, so this is empty."""
+    active = [r for r in reports if r.review_status in ("Pending", "Confirmed")]
+    highest = max((r.cycle_no for r in active), default=0)
+    if total_tables <= 0 or highest < 2:
+        return set()
+    ledger = _cycle_ledger(active, total_tables)
+    return {n for n in range(1, highest) if ledger[n]["confirmed"] + ledger[n]["pending"] < total_tables}
+
+
 def _completed_cycles(db: Session, plant_id: UUID, month: str) -> set[int]:
     return set(db.scalars(select(WashingDailyReport.cycle_no).where(
         WashingDailyReport.plant_id == plant_id, WashingDailyReport.cycle_month == month,
@@ -1132,7 +1178,7 @@ def _resequence_month(db: Session, plant_id: UUID, month: str, total_tables: int
     rows = list(db.scalars(select(WashingDailyReport).where(
         WashingDailyReport.plant_id == plant_id, WashingDailyReport.cycle_month == month,
     ).order_by(WashingDailyReport.report_date, WashingDailyReport.created_at)))
-    sequence = _cycle_sequence([(row.tables_cleaned, row.review_status in ("Pending", "Confirmed")) for row in rows], total_tables)
+    sequence = _cycle_sequence([_sequence_entry(row) for row in rows], total_tables)
     moved = []
     for row, (cycle_no, _extra) in zip(rows, sequence):
         if row.cycle_no != cycle_no:
@@ -1255,7 +1301,7 @@ def _add_report(
         report.reviewed_by_id = user.id
         report.reviewed_by = user.display_name
         report.reviewed_at = datetime.now(timezone.utc)
-        report.review_note = "Entered by O&M"
+        report.review_note = OM_ENTRY_NOTE
     db.add(report)
     db.flush()
     # a back-filled day takes its place by date; the days after it move to the right cycle
@@ -1412,7 +1458,7 @@ def _assert_distinct_tables(db: Session, plant_id: UUID, months, total_tables: i
         rows = list(db.scalars(select(WashingDailyReport).where(
             WashingDailyReport.plant_id == plant_id, WashingDailyReport.cycle_month == month,
         ).order_by(WashingDailyReport.report_date, WashingDailyReport.created_at)))
-        sequence = _cycle_sequence([(row.tables_cleaned, row.review_status in ("Pending", "Confirmed")) for row in rows], total_tables)
+        sequence = _cycle_sequence([_sequence_entry(row) for row in rows], total_tables)
         seen: dict[tuple[int, int], WashingDailyReport] = {}
         for row, (cycle_no, extra) in zip(rows, sequence):
             if extra or row.review_status not in ("Pending", "Confirmed"):
@@ -1426,6 +1472,8 @@ def _assert_distinct_tables(db: Session, plant_id: UUID, months, total_tables: i
                     raise HTTPException(409, (
                         f"Table {number} is already recorded in cycle {cycle_no} on {_day_label(other.report_date)}. "
                         "A table can be cleaned only once per cycle; change that day or leave the table out."
+                        + (" Cycle 3 is the month's last cycle, so a re-clean cannot move on to a next cycle."
+                           if cycle_no >= MONTHLY_CYCLE_TARGET and _entered_by_om(row) else "")
                     ))
                 seen.setdefault((cycle_no, number), row)
 
@@ -1719,12 +1767,14 @@ def month_cycles(db: Session, user: User, plant_id: UUID, month: str) -> dict:
     today = business_today()
     cycles = []
     ledger = _cycle_ledger(reports, table_count)
+    closed = _closed_incomplete(reports, table_count)
     for n in range(1, MONTHLY_CYCLE_TARGET + 1):
         rows = [r for r in reports if r.cycle_no == n]
         confirmed, pending = ledger[n]["confirmed"], ledger[n]["pending"]
         done_on = next((r.report_date for r in rows if r.cycle_completed and r.review_status == "Confirmed"), None)
         due = dues[n - 1]
-        state = "Completed" if done_on else "In progress" if rows else ("Missed" if due < today else "Upcoming")
+        state = ("Completed" if done_on else "Missed" if n in closed else
+                 "In progress" if rows else ("Missed" if due < today else "Upcoming"))
         cycles.append({
             "cycle_no": n, "start_date": starts[n - 1].isoformat(), "due_date": due.isoformat(),
             "default_start_date": default_starts[n - 1].isoformat(), "default_due_date": default_dues[n - 1].isoformat(),

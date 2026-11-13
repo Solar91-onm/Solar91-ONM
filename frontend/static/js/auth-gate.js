@@ -17,9 +17,6 @@
 const AUTH_PROVIDER = (window.S91_CONFIG && window.S91_CONFIG.authProvider) || "clerk";
 const AUTH_IDENTITY={name:null,role:null};
 const S91_CODE_RESEND_SECONDS=60;
-// Once Clerk accepts the code the session exists, so a page reload signs in. If activating it or opening the portal
-// stalls longer than this, reload rather than leave "Signing you in…" on screen.
-const S91_SIGNIN_STALL_MS=15000;
 
 function authSetupCard(title, detail){
   document.getElementById("app").innerHTML = '<div style="min-height:100vh;display:grid;place-items:center;padding:24px;background:#F4F6F5;font-family:Inter,system-ui,sans-serif"><div style="width:min(520px,100%);background:#fff;border:1px solid #E4E9E6;border-radius:16px;padding:24px;box-shadow:0 12px 38px rgba(16,24,20,.10)"><div style="display:flex;align-items:center;gap:10px"><img src="/static/brand/solar91-emblem.png" height="34" alt=""><img src="/static/brand/solar91-wordmark.png" height="22" alt="SOLAR 91"></div><h2 style="margin:8px 0 8px;font-size:22px">'+title+'</h2><p style="margin:0;color:#4F5B55;line-height:1.55">'+detail+'</p></div></div>';
@@ -82,11 +79,6 @@ function showClerkSignIn(errorMessage){
   s91Alive(document.querySelector(".s91-mesh"));
 }
 
-/* Render's free plan puts the server to sleep after about 15 idle minutes, and the code sign-in talks only to Clerk,
-   so the first request to this server comes after the code is accepted. Waking it while the person reads the email
-   (and again while Clerk checks the code) keeps that request from waiting on a cold start. Sends no data or token. */
-function s91WakeServer(){try{fetch("/health/ready",{cache:"no-store",credentials:"omit"}).catch(()=>{})}catch(_){}}
-
 /* ---- Clerk email-code sign-in ---- */
 /* Same rule as app/auth/emails.py: Gmail ignores dots and +tags, so one mailbox = one account. Typos are never corrected. */
 function s91CanonEmail(v){
@@ -116,6 +108,14 @@ function s91CodeError(err){
   if(/network error|failed to fetch|load failed|networkerror/i.test(m))return "Could not reach the sign-in service. Check your internet connection and press the button again.";
   return m||"Something went wrong. Please try again.";
 }
+// Once Clerk accepts the code the session exists, so a page reload signs in. If activating it or opening the portal
+// stalls longer than this, reload rather than leave "Signing you in…" on screen.
+const S91_SIGNIN_STALL_MS=15000;
+/* Render's free plan puts the server to sleep after about 15 idle minutes, and the code sign-in talks only to Clerk,
+   so the first request to this server comes after the code is accepted. Waking it while the person reads the email
+   (and again while Clerk checks the code) keeps that request from waiting on a cold start. Sends no data or token. */
+function s91WakeServer(){try{fetch("/health/ready",{cache:"no-store",credentials:"omit"}).catch(()=>{})}catch(_){}}
+
 function s91ShowClerkCodeSignIn(prefillEmail,errorMessage){
   const box=document.querySelector(".s91-glow");
   if(!box)return;

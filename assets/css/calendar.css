@@ -1523,6 +1523,9 @@
 }
 
 .ep-calendar__record-row [data-record-error][hidden] { display: none; }
+/* An O&M re-clean: the day counts in the next cycle. */
+.ep-calendar__record-row [data-record-note] { grid-column: 3 / -1; color: var(--ep-amber); font-size: var(--ep-fs-xs); }
+.ep-calendar__record-row [data-record-note][hidden] { display: none; }
 .ep-calendar__record-remark-cell { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; }
 .ep-calendar__record-remark-cell > span { min-width: 0; overflow-wrap: anywhere; }
 .ep-calendar__record-edit {
@@ -1604,7 +1607,8 @@
   .ep-calendar__record-row { grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
   .ep-calendar__record-row > input,
   .ep-calendar__record-range,
-  .ep-calendar__record-row [data-record-error] { grid-column: 1 / -1; }
+  .ep-calendar__record-row [data-record-error],
+  .ep-calendar__record-row [data-record-note] { grid-column: 1 / -1; }
   .ep-calendar__record-range { max-width: 220px; }
   .ep-calendar__record-footer { padding-right: 14px; padding-left: 14px; }
 

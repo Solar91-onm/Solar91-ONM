@@ -62,13 +62,21 @@ def test_edit_can_make_a_day_scattered_and_completes_the_cycle(client, db):
     assert _row(db, d3).cycle_completed is True  # 1 + 1 + 2 fills the plant's 4 tables
 
 
-def test_edit_that_repeats_a_table_of_the_same_cycle_is_refused_and_changes_nothing(client, db):
-    _plant_row, _head, _assignee, (d1, _d2, _d3) = _confirmed_three_days(client, db)
+def test_engineer_edit_that_repeats_a_table_of_the_same_cycle_is_refused_and_changes_nothing(client, db):
+    # A Site Engineer's repeat is refused. (An O&M Head / Assignee repeat starts the next cycle instead:
+    # tests/test_washing_reclean_next_cycle.py.)
+    plant = _plant(db)
+    _setup_cycle_users(client, db, plant)
+    _engineer(client, db, plant)
+    d1, d2, d3 = _days(3)
+    saved = _sheet(client, plant, [_ranged(d1, 1, 1), _ranged(d2, 2, 2), _ranged(d3, 3, 3)])
+    assert saved.status_code == 200, saved.text
+    first = saved.json()["reports"][0]["id"]
 
-    refused = client.patch(f"{BASE}/daily-reports/{d1}", json={"table_numbers": [1, 2]})  # table 2 belongs to the next day
+    refused = client.patch(f"{BASE}/daily-reports/{first}", json={"table_numbers": [1, 2]})  # table 2 belongs to the next day
 
     assert refused.status_code == 409 and "Table 2 is already recorded in cycle 1" in refused.json()["detail"]
-    assert _row(db, d1).cleaned_table_codes == ["Table 001"] and _row(db, d1).tables_cleaned == 1
+    assert _row(db, first).cleaned_table_codes == ["Table 001"] and _row(db, first).tables_cleaned == 1
 
 
 def test_switching_a_day_to_not_done_requires_a_reason(client, db):
@@ -130,11 +138,12 @@ def test_sheet_records_days_from_the_end_and_as_scattered_tables(client, db):
     assert second["cleaned_table_codes"] == ["Table 001"]
 
 
-def test_sheet_refuses_a_table_cleaned_twice_in_one_cycle_and_saves_nothing(client, db):
+def test_engineer_sheet_refuses_a_table_cleaned_twice_in_one_cycle_and_saves_nothing(client, db):
+    # A Site Engineer's repeat is refused; an O&M repeat starts the next cycle (test_washing_reclean_next_cycle.py).
     plant = _plant(db)
-    head, _assignee = _setup_cycle_users(client, db, plant)
-    conftest._CURRENT_USER = head
-    d1, d2, d3 = _days(3, back=60)
+    _setup_cycle_users(client, db, plant)
+    _engineer(client, db, plant)
+    d1, d2, d3 = _days(3)
     assert _sheet(client, plant, [_picked(d1, [1, 3])]).status_code == 200
 
     clash = _sheet(client, plant, [_picked(d2, [2]), _picked(d3, [3])])  # table 3 was already cleaned on d1

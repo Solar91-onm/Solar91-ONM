@@ -319,10 +319,16 @@
       confirmedCarry = capCarry ? Math.max(0, confirmedTotal - tableCount) : 0;
       recordedCarry = capCarry ? Math.max(0, recordedTotal - tableCount) : 0;
       var percent = tableCount ? Math.min(100, Math.round(confirmed * 100 / tableCount)) : 0;
+      var overtaken = recorded < tableCount && reportsThroughDate.some(function (report) {
+        return Number(report.cycleNo) > cycleNumber &&
+          (report.reviewStatus === "Pending" || report.reviewStatus === "Confirmed");
+      });
       var status = !tableCount
         ? "Unavailable"
         : confirmed >= tableCount
           ? "Completed"
+          : overtaken
+            ? "Incomplete"
           : recorded > confirmed
             ? "Awaiting confirmation"
             : date < cycle.start_date
@@ -374,7 +380,7 @@
           reportsOnDate.length ? "No tables cleaned" : "No report on this date";
     var percent = selected ? selected.percent : 0;
     var assignee = plant.assignee_name || "No Assignee";
-    var statusClass = selected && selected.status === "Overdue" ? " is-overdue" :
+    var statusClass = selected && (selected.status === "Overdue" || selected.status === "Incomplete") ? " is-overdue" :
       selected && selected.status === "Awaiting confirmation" ? " is-awaiting" : "";
 
     return '<div class="ep-calendar__wash-tip-head"><strong>' +
@@ -1077,6 +1083,28 @@
     var cycleCount = (state.washingPlant.cycles || []).length || 3;
     var isLastCycle = Number(cycle.cycle_no) >= cycleCount;
     if (completedOn && completedOn < lastDate && !isLastCycle) lastDate = completedOn;
+    // An O&M re-clean can start the next cycle before this one is full (_cycle_sequence in
+    // app/scheduled/washing_cycles.py): this cycle's grid then ends the day before the next cycle's first day,
+    // and that cycle's grid starts on it.
+    var activeReports = (state.washingReports || []).filter(function (report) {
+      return report.review_status === "Pending" || report.review_status === "Confirmed";
+    });
+    var nextFirst = activeReports.filter(function (report) {
+      return Number(report.cycle_no) > Number(cycle.cycle_no);
+    }).reduce(function (first, report) {
+      return !first || report.report_date < first ? report.report_date : first;
+    }, "");
+    if (nextFirst && !isLastCycle) {
+      var dayBefore = new Date(nextFirst + "T12:00:00");
+      dayBefore.setDate(dayBefore.getDate() - 1);
+      var closedOn = dayBefore.getFullYear() + "-" + pad2(dayBefore.getMonth() + 1) + "-" + pad2(dayBefore.getDate());
+      if (closedOn < lastDate) lastDate = closedOn;
+    }
+    var ownFirst = activeReports.filter(function (report) {
+      return Number(report.cycle_no) === Number(cycle.cycle_no);
+    }).reduce(function (first, report) {
+      return !first || report.report_date < first ? report.report_date : first;
+    }, "");
     if (Number(cycle.cycle_no) > 1) {
       var previousCompletion = (state.washingReports || []).filter(function (report) {
         return Number(report.cycle_no) === Number(cycle.cycle_no) - 1 &&
@@ -1092,6 +1120,7 @@
         startDate = afterPrevious;
       }
     }
+    if (ownFirst && ownFirst < startDate) startDate = ownFirst;
     if (!canManageWashing()) {
       var firstAllowed = new Date(today + "T12:00:00");
       firstAllowed.setDate(firstAllowed.getDate() - 44);
@@ -1118,19 +1147,30 @@
         markUsed(savedUsed, total, report);
       }
     });
+    var movedTo = 0;
     var rows = dates.map(function (date) {
       var report = reportsByDate[date];
       if (report && report.review_status !== "Rejected") {
-        markUsed(used, total, report);
-        markUsed(savedUsed, total, report);
+        if (Number(report.cycle_no) === Number(cycle.cycle_no)) {
+          markUsed(used, total, report);
+          markUsed(savedUsed, total, report);
+        }
         return { date: date, report: report, numbers: tableNumbersOf(report) };
       }
       var draft = state.recordDrafts[date] || {};
-      var plan = planDay(state, draft, used, total);
+      var plan = planDay(state, draft, used, total, movedTo);
+      if (plan.moves) {
+        used = {};
+        movedTo = plan.moves;
+      }
       plan.numbers.forEach(function (number) { used[number] = true; });
       return {
         date: date, report: null, draft: draft, mode: plan.mode, numbers: plan.numbers, first: plan.first,
-        error: plan.error, full: plan.full, zero: plan.zero
+        error: plan.error, full: plan.full, zero: plan.zero,
+        note: movedTo && !plan.error && (plan.numbers.length || plan.zero) ? "Counts in cycle " + movedTo +
+          (plan.moves ? ": tables " + formatTableList(plan.repeated) + " were already cleaned in cycle " +
+            (movedTo - 1) + ", so this day starts cycle " + movedTo + " and cycle " + (movedTo - 1) +
+            " stays incomplete." : ".") : ""
       };
     });
     rows.cleanedTables = [];
@@ -1202,7 +1242,7 @@
 
   /** Which tables an unsaved day covers, given what the cycle has already used. Modes: "start" (the lowest free table
    *  up to the last one typed), "end" (the highest free table down to the lowest one typed) and "pick" (any list). */
-  function planDay(state, draft, used, total) {
+  function planDay(state, draft, used, total, movedTo) {
     var mode = draft.mode || (dayHasInput(draft) ? "start" : (state.recordMode || "start"));
     var free = [];
     for (var n = 1; n <= total; n += 1) if (!used[n]) free.push(n);
@@ -1214,8 +1254,20 @@
       var parsed = parseTableList(text, total);
       if (parsed.error) { plan.error = parsed.error; return plan; }
       var taken = parsed.numbers.filter(function (number) { return used[number]; });
-      if (taken.length) plan.error = "Table " + taken[0] + " is already cleaned in this cycle.";
-      else plan.numbers = parsed.numbers;
+      var cycleNo = movedTo || Number(state.recordCycle) || 1;
+      var lastCycle = (state.washingPlant && state.washingPlant.cycles || []).length || 3;
+      if (!taken.length) {
+        plan.numbers = parsed.numbers;
+      } else if (canManageWashing() && cycleNo < lastCycle) {
+        // Re-cleaned before the cycle was full: the whole day counts in the next cycle (the server decides the
+        // same way when it saves; Site Engineers cannot do this).
+        plan.numbers = parsed.numbers;
+        plan.moves = cycleNo + 1;
+        plan.repeated = taken;
+      } else {
+        plan.error = "Table " + taken[0] + " is already cleaned in this cycle." +
+          (canManageWashing() ? " Cycle " + lastCycle + " is the month\u2019s last cycle." : "");
+      }
       return plan;
     }
     var typed = draft.end;
@@ -1348,6 +1400,8 @@
           escape(row.draft.remarks || "") + '" aria-label="Remarks for ' + escape(dateLabel) + '"' + off + ' />' +
         '<span class="ep-calendar__record-error" data-record-error' + (row.error ? "" : " hidden") + '>' +
           escape(row.error) + '</span>' +
+        '<span class="ep-calendar__record-note" data-record-note' + (row.note ? "" : " hidden") + '>' +
+          escape(row.note || "") + '</span>' +
       '</div>';
     }).join("");
 
@@ -1387,7 +1441,8 @@
             ? '<div class="ep-calendar__record-table"><div class="ep-calendar__record-head"><span>Day</span><span>Tables</span><span>Table numbers</span><span>Remarks</span></div>' +
               days + '</div>'
             : '<p class="ep-calendar__empty">No reportable days for this cycle yet.</p>') +
-          '<p class="ep-calendar__record-help">From start: enter the last table cleaned. From end: enter the lowest table reached, counting down from the highest table not yet cleaned. Pick tables: type numbers or ranges, e.g. 1, 2, 4, 7-8, 13 or 100-91. Each table counts once per cycle. Tick 0 cleaned when nothing was cleaned that day; add the reason in Remarks.</p>' +
+          '<p class="ep-calendar__record-help">From start: enter the last table cleaned. From end: enter the lowest table reached, counting down from the highest table not yet cleaned. Pick tables: type numbers or ranges, e.g. 1, 2, 4, 7-8, 13 or 100-91. Each table counts once per cycle. Tick 0 cleaned when nothing was cleaned that day; add the reason in Remarks.' +
+            (canManageWashing() ? " O&amp;M Head / Assignee: picking tables already cleaned in this cycle starts the next cycle from that day; this cycle then stays incomplete." : "") + '</p>' +
         '</div>' +
         '<footer class="ep-calendar__record-footer"><button type="button" class="ep-calendar__close-button" data-calendar-action="close-record"' +
           (state.recordSaving ? " disabled" : "") + '>Cancel</button>' +
@@ -1849,6 +1904,11 @@
       if (error) {
         error.hidden = !item.error;
         error.textContent = item.error;
+      }
+      var note = row.querySelector("[data-record-note]");
+      if (note) {
+        note.hidden = !item.note;
+        note.textContent = item.note || "";
       }
       var endInput = row.querySelector("[data-record-end]");
       if (endInput) {

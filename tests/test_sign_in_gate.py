@@ -84,9 +84,9 @@ CODE_FORM_HARNESS = r"""
     const signInAttempt={status:'needs_first_factor',createdSessionId:null,
       supportedFirstFactors:[{strategy:'email_code',emailAddressId:'ea_1'}],prepareFirstFactor:async()=>{},
       attemptFirstFactor:async args=>{calls.attempts++;return attemptFirstFactor(signInAttempt,args)}};
-    const sandbox={setInterval:()=>1,clearInterval(){},esc:v=>String(v),S91_CODE_RESEND_SECONDS:60,
+    const sandbox={setInterval:()=>1,clearInterval(){},setTimeout,clearTimeout,console,esc:v=>String(v),S91_CODE_RESEND_SECONDS:60,
       startSolar91App:async()=>{calls.started++},
-      document:{querySelector:()=>({set innerHTML(v){}}),getElementById:el,body:{contains:()=>true}},
+      document:{querySelector:()=>({set innerHTML(v){},remove(){}}),getElementById:el,body:{contains:()=>true}},
       window:{Clerk:{session:null,client:{signIn:{create:async()=>signInAttempt}},
         setActive:async({session})=>{calls.setActive.push(session)}}}};
     vm.createContext(sandbox);vm.runInContext(s.slice(a,b)+';s91ShowClerkCodeSignIn("","")',sandbox);
