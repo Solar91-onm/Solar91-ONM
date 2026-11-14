@@ -347,6 +347,7 @@
       plant: issue.plantCode + " " + issue.plantName,
       equipment: issue.equipment,
       subpart: issue.subpart,
+      maker: issue.supplierMaker,
       problem: issue.problem,
       assignee: issue.assignee,
       status: issue.status
@@ -388,7 +389,7 @@
     menu.style.top = Math.round(top) + "px";
   }
 
-  var FILTERABLE_ISSUE_COLUMNS = ["plant", "equipment", "subpart", "problem", "assignee", "status"];
+  var FILTERABLE_ISSUE_COLUMNS = ["plant", "equipment", "subpart", "maker", "problem", "assignee", "status"];
 
   function issueColumnHeader(column) {
     var header = global.Solar91PortalSort.thHTML(column, state.columnSort, "data-issue-sort");

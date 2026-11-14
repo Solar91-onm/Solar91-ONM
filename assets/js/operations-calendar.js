@@ -147,8 +147,21 @@
 
   function statusClass(status) {
     if (status === "Completed" || status === "Confirmed") return "ep-calendar__event--complete";
-    if (status === "Overdue") return "ep-calendar__event--overdue";
+    if (status === "Really behind" || status === "Overdue" || status === "Rejected") {
+      return "ep-calendar__event--overdue";
+    }
+    if (status === "Behind") return "ep-calendar__event--behind";
+    if (status === "Awaiting confirmation" || status === "Pending") {
+      return "ep-calendar__event--awaiting";
+    }
+    if (status === "Scheduled") return "ep-calendar__event--scheduled";
     return "ep-calendar__event--pending";
+  }
+
+  function washingDeadlineStatus(cycle, today) {
+    if (cycle.state === "Completed") return "Completed";
+    if (cycle.due_date < today) return Number(cycle.late_days) >= 7 ? "Really behind" : "Behind";
+    return "Scheduled";
   }
 
   function isWashingCycleComplete(event, context) {
@@ -1791,12 +1804,13 @@
         var events = [];
         (cyclesData.cycles || []).forEach(function (cycle) {
           if (!cycle.due_date) return;
+          var lateDays = Number(cycle.late_days) || 0;
+          var deadlineStatus = washingDeadlineStatus(cycle, cyclesData.today);
           events.push({
             date: cycle.due_date,
             title: "Cycle " + cycle.cycle_no + " deadline",
-            status: cycle.state === "Completed"
-              ? "Completed"
-              : cycle.due_date < cyclesData.today ? "Overdue" : "Scheduled",
+            status: deadlineStatus,
+            lateDays: lateDays,
             plantSiteCode: selected.siteCode,
             plantName: selected.plantName,
             cycleNo: cycle.cycle_no,

@@ -602,7 +602,7 @@ def test_details_and_health_header_filters_are_limited_to_head_and_assignee():
     assert "columnFilterRowHTML" not in plants
     assert 'data-pt-column-filter="' not in plants
     assert 'FILTERABLE_COLUMNS.some(function (key)' in plants
-    assert '["plant", "equipment", "subpart", "problem", "assignee", "status"]' in issues
+    assert '["plant", "equipment", "subpart", "maker", "problem", "assignee", "status"]' in issues
     assert "if (state.canEdit && Object.keys(state.columnFilters).some(function (key)" in issues
     assert 'data-issue-column-filter-toggle="' in issues
     assert 'popover="auto"' in issues
@@ -743,7 +743,7 @@ def test_site_issue_register_places_id_before_action_and_labels_description():
     assert '{ key: "occurred", label: "Occurred on"' in columns
     assert '{ key: "etc", label: "Est. completion"' in columns
     assert 'subpart: issue.subpart' in issues
-    assert 'var FILTERABLE_ISSUE_COLUMNS = ["plant", "equipment", "subpart", "problem", "assignee", "status"]' in issues
+    assert 'var FILTERABLE_ISSUE_COLUMNS = ["plant", "equipment", "subpart", "maker", "problem", "assignee", "status"]' in issues
     # Both read stored fields: occurred_at and etc_at, already mapped onto the row.
     assert "occurredAt: String(issue.occurred_at" in issues
     assert "dueAt: issue.etc_at" in issues
@@ -1341,7 +1341,11 @@ def test_calendar_shows_confirmed_cycle_completion_distinct_from_deadline():
     assert 'cycleCompleted: report.review_status === "Confirmed" && report.cycle_completed === true' in calendar
     assert 'event.kind === "washing.done" && event.status === "Confirmed"' in calendar
     assert ".ep-calendar__event--cycle-complete {" in styles
+    assert "background: linear-gradient(120deg, #078a3d, #006b33);" in styles
+    assert ".ep-calendar__event--cycle-complete .ep-calendar__event-title," in styles
+    assert ".ep-calendar__event--cycle-complete .ep-calendar__event-tables { color: #fff; }" in styles
     assert ".ep-calendar__event--deadline:not(.ep-calendar__event--overdue)" in styles
+    assert "background: linear-gradient(120deg, #edf2fb, #dfe8f7);" in styles
 
     script = r"""
       const fs=require('fs'),vm=require('vm'),assert=require('assert');
@@ -1350,8 +1354,18 @@ def test_calendar_shows_confirmed_cycle_completion_distinct_from_deadline():
       const end=source.indexOf('  function visibleEvents(',start);
       assert(start>=0&&end>start,'calendar chip helpers missing');
       const box={escape:value=>String(value)};vm.createContext(box);
-      vm.runInContext(source.slice(start,end)+';this.chip=renderCalendarEventChip',box);
+      vm.runInContext(source.slice(start,end)+
+        ';this.chip=renderCalendarEventChip;this.statusClass=statusClass;this.deadlineStatus=washingDeadlineStatus',box);
       const context={type:'washing'};
+      assert.strictEqual(box.deadlineStatus({state:'In progress',due_date:'2026-11-10',late_days:2},'2026-11-14'),'Behind');
+      assert.strictEqual(box.deadlineStatus({state:'Missed',due_date:'2026-11-07',late_days:7},'2026-11-14'),'Really behind');
+      assert.strictEqual(box.deadlineStatus({state:'Upcoming',due_date:'2026-11-20',late_days:0},'2026-11-14'),'Scheduled');
+      assert.strictEqual(box.deadlineStatus({state:'Completed',due_date:'2026-11-10',late_days:0},'2026-11-14'),'Completed');
+      assert.strictEqual(box.statusClass('Behind'),'ep-calendar__event--behind');
+      assert.strictEqual(box.statusClass('Really behind'),'ep-calendar__event--overdue');
+      assert.strictEqual(box.statusClass('Awaiting confirmation'),'ep-calendar__event--awaiting');
+      assert.strictEqual(box.statusClass('Rejected'),'ep-calendar__event--overdue');
+      assert.strictEqual(box.statusClass('Scheduled'),'ep-calendar__event--scheduled');
       const plant=box.chip({title:'50 tables cleaned',status:'Completed',kind:'report',
         cycleNo:2,cycleCompleted:true,tablesCleaned:50,tablesList:'1–50'},context);
       assert(plant.includes('ep-calendar__event--cycle-complete'),'plant completion style');
