@@ -325,22 +325,20 @@
       '</div></section>';
   }
 
-  // The plant sits beside the ticket number, the two dates a ticket is judged by
-  // (when it happened, when it is expected to close) sit together, and Sub-problem
-  // stays beside Equipment - the same pair the Raise issue form captures.
+  // Keep the issue ID beside the row action so plant and issue details lead the register.
   // Status orders by how urgent the group is, not alphabetically.
   var COLUMNS = [
-    { key: "id", label: "Issue ID", sort: function (i) { return i.id; } },
     { key: "plant", label: "Plant", sort: function (i) { return i.plantCode; } },
     { key: "equipment", label: "Equipment", sort: function (i) { return i.equipment; } },
     { key: "subpart", label: "Sub-problem", sort: function (i) { return i.subpart; } },
     { key: "maker", label: "Maker / Supplier", sort: function (i) { return i.supplierMaker; } },
-    { key: "problem", label: "Problem", sort: function (i) { return i.problem; } },
+    { key: "problem", label: "Issue Description", sort: function (i) { return i.problem; } },
     { key: "occurred", label: "Occurred on", sort: function (i) { return i.occurredAt; } },
     { key: "etc", label: "Est. completion", sort: function (i) { return i.dueAt; } },
     { key: "assignee", label: "Assigned to", sort: function (i) { return i.assignee; } },
     { key: "status", label: "Status",
       sort: function (i) { return ["Unhealthy", "In Progress", "Solved"].indexOf(statusGroup(i.status)); } },
+    { key: "id", label: "Issue ID", sort: function (i) { return i.id; } },
     { key: "action", label: "Action" }
   ];
 
@@ -348,6 +346,7 @@
     var values = {
       plant: issue.plantCode + " " + issue.plantName,
       equipment: issue.equipment,
+      subpart: issue.subpart,
       problem: issue.problem,
       assignee: issue.assignee,
       status: issue.status
@@ -389,7 +388,7 @@
     menu.style.top = Math.round(top) + "px";
   }
 
-  var FILTERABLE_ISSUE_COLUMNS = ["plant", "equipment", "problem", "assignee", "status"];
+  var FILTERABLE_ISSUE_COLUMNS = ["plant", "equipment", "subpart", "problem", "assignee", "status"];
 
   function issueColumnHeader(column) {
     var header = global.Solar91PortalSort.thHTML(column, state.columnSort, "data-issue-sort");
@@ -472,30 +471,30 @@
         var labels = headers;
         return '<tr class="ep-issues__plant-row" data-issue-plant="' + escape(issue.plantCode) +
           '" tabindex="0" aria-label="Open Health for ' + escape(issue.plantName || issue.plantCode) + '">' +
-          '<td data-label="' + labels[0] + '"><button type="button" class="ep-issues__ticket-link" data-issue-open="' +
-            escape(issue.id) + '">' + escape(issue.id) + '</button></td>' +
-          '<td data-label="' + labels[1] + '"><button type="button" class="ep-plantlink" data-open-plant="' +
+          '<td data-label="' + labels[0] + '"><button type="button" class="ep-plantlink" data-open-plant="' +
             escape(issue.plantCode) + '" data-open-plant-page="health" title="Open Health for ' +
             escape(issue.plantName || issue.plantCode) + '"><strong>' + escape(issue.plantCode) + '</strong><small>' +
             escape(issue.plantName) + '</small></button></td>' +
-          '<td data-label="' + labels[2] + '"><strong>' + escape(issue.equipment) + '</strong></td>' +
-          '<td data-label="' + labels[3] + '">' + (issue.subpart
+          '<td data-label="' + labels[1] + '"><strong>' + escape(issue.equipment) + '</strong></td>' +
+          '<td data-label="' + labels[2] + '">' + (issue.subpart
             ? escape(issue.subpart)
             : '<span class="ep-issues__unassigned">Not recorded</span>') + '</td>' +
-          '<td data-label="' + labels[4] + '">' + (issue.supplierMaker
+          '<td data-label="' + labels[3] + '">' + (issue.supplierMaker
             ? '<strong>' + escape(issue.supplierMaker) + '</strong>' +
               (issue.serialNo ? "<small>S/N " + escape(issue.serialNo) + "</small>" : "")
             : '<span class="ep-issues__unassigned">Not recorded</span>') + '</td>' +
-          '<td data-label="' + labels[5] + '" class="ep-issues__problem">' + escape(issue.problem) + '</td>' +
-          '<td data-label="' + labels[6] + '" class="ep-issues__date">' +
+          '<td data-label="' + labels[4] + '" class="ep-issues__problem">' + escape(issue.problem) + '</td>' +
+          '<td data-label="' + labels[5] + '" class="ep-issues__date">' +
             occurrenceDateCell(issue.occurredAt) + '</td>' +
-          '<td data-label="' + labels[7] + '" class="ep-issues__date">' + etcCell(issue.dueAt) + '</td>' +
-          '<td data-label="' + labels[8] + '">' + (issue.assignee
+          '<td data-label="' + labels[6] + '" class="ep-issues__date">' + etcCell(issue.dueAt) + '</td>' +
+          '<td data-label="' + labels[7] + '">' + (issue.assignee
             ? '<span class="ep-issues__assignee"><i>' + escape(issue.assignee.split(/\s+/).map(function (part) { return part[0]; }).join("").slice(0, 2)) +
               '</i>' + escape(issue.assignee) + '</span>'
             : '<span class="ep-issues__unassigned">Unassigned</span>') + '</td>' +
-          '<td data-label="' + labels[9] + '"><span class="ep-issues__status ep-issues__status--' +
+          '<td data-label="' + labels[8] + '"><span class="ep-issues__status ep-issues__status--' +
             statusTone(issue.status) + '"><i></i>' + escape(issue.status) + '</span></td>' +
+          '<td data-label="' + labels[9] + '"><button type="button" class="ep-issues__ticket-link" data-issue-open="' +
+            escape(issue.id) + '">' + escape(issue.id) + '</button></td>' +
           '<td data-label="' + labels[10] + '">' + (state.liveMode && !state.canEdit
             ? '<span aria-label="Manage this saved ticket in Solar91 O&M">Saved</span>'
             : '<button type="button" class="ep-issues__button ep-issues__button--small" data-issue-edit="' +

@@ -519,6 +519,9 @@ def test_every_portfolio_table_sorts_from_its_column_headings():
     assert "ep-issues__column-filter-row" not in issues
     assert "ep-issues__th-content" in issues and "data-issue-column-filter" in issues
     assert ".ep-issues__th-content {" in issue_styles and "display: flex;" in issue_styles
+    assert ".ep-issues__table th {\n  height: 36px;" in issue_styles
+    assert "vertical-align: middle;" in issue_styles
+    assert "text-overflow: ellipsis;" in issue_styles
     assert 'data-issue-column-filter-toggle="' in issues
     assert 'popover="auto"' in issues
     assert 'data-issue-column-filter-search="' in issues
@@ -599,7 +602,7 @@ def test_details_and_health_header_filters_are_limited_to_head_and_assignee():
     assert "columnFilterRowHTML" not in plants
     assert 'data-pt-column-filter="' not in plants
     assert 'FILTERABLE_COLUMNS.some(function (key)' in plants
-    assert '["plant", "equipment", "problem", "assignee", "status"]' in issues
+    assert '["plant", "equipment", "subpart", "problem", "assignee", "status"]' in issues
     assert "if (state.canEdit && Object.keys(state.columnFilters).some(function (key)" in issues
     assert 'data-issue-column-filter-toggle="' in issues
     assert 'popover="auto"' in issues
@@ -727,16 +730,20 @@ def test_overview_inverter_tile_counts_units_and_opens_inverter_issues():
     assert 'state.equipmentFilter &&' in issues
 
 
-def test_site_issue_register_columns_read_id_plant_then_problem_dates():
-    """Plant sits beside the ticket number, and the two dates a ticket is judged by follow the
-    problem: Issue ID | Plant | Equipment | Sub-problem | Maker | Problem | Occurred | ETC | ..."""
+def test_site_issue_register_places_id_before_action_and_labels_description():
+    """Issue ID is beside Action, with the description and date columns before them."""
     issues = (PORTAL_ASSETS / "js" / "site-issues.js").read_text(encoding="utf-8")
     columns = issues[issues.index("var COLUMNS = ["):issues.index("  function renderTable(rows)")]
     order = re.findall(r'\{ key: "([a-zA-Z]+)"', columns)
-    assert order[:8] == ["id", "plant", "equipment", "subpart", "maker", "problem", "occurred", "etc"], order
-    assert order[-1] == "action"
+    assert order == [
+        "plant", "equipment", "subpart", "maker", "problem", "occurred",
+        "etc", "assignee", "status", "id", "action"
+    ], order
+    assert '{ key: "problem", label: "Issue Description"' in columns
     assert '{ key: "occurred", label: "Occurred on"' in columns
     assert '{ key: "etc", label: "Est. completion"' in columns
+    assert 'subpart: issue.subpart' in issues
+    assert 'var FILTERABLE_ISSUE_COLUMNS = ["plant", "equipment", "subpart", "problem", "assignee", "status"]' in issues
     # Both read stored fields: occurred_at and etc_at, already mapped onto the row.
     assert "occurredAt: String(issue.occurred_at" in issues
     assert "dueAt: issue.etc_at" in issues
@@ -1302,6 +1309,13 @@ def test_calendar_day_cells_show_saved_washing_table_numbers():
     script = r"""
       const fs=require('fs'),vm=require('vm'),assert=require('assert');
       const source=fs.readFileSync('assets/js/operations-calendar.js','utf8');
+      const helperStart=source.indexOf('function isWashingCycleComplete(');
+      assert(helperStart>=0,'isWashingCycleComplete missing');
+      const helperOpen=source.indexOf('{',helperStart);let helperDepth=0,helperEnd=-1;
+      for(let i=helperOpen;i<source.length;i++){
+        if(source[i]==='{')helperDepth++;
+        else if(source[i]==='}'&&--helperDepth===0){helperEnd=i+1;break}
+      }
       const start=source.indexOf('function washingTablesLabel(');
       assert(start>=0,'washingTablesLabel missing');
       const open=source.indexOf('{',start);let depth=0,end=-1;
@@ -1310,12 +1324,51 @@ def test_calendar_day_cells_show_saved_washing_table_numbers():
         else if(source[i]==='}'&&--depth===0){end=i+1;break}
       }
       const box={};vm.createContext(box);
-      vm.runInContext(source.slice(start,end)+';this.label=washingTablesLabel',box);
+      vm.runInContext(source.slice(helperStart,helperEnd)+'\n'+source.slice(start,end)+';this.label=washingTablesLabel',box);
       const label=box.label;
       assert.strictEqual(label({tablesCleaned:3,tablesList:'1–2, 4'},{type:'washing'}),'Tables: 1–2, 4');
       assert.strictEqual(label({tablesCleaned:3,tablesList:''},{type:'washing'}),'Table numbers not recorded');
       assert.strictEqual(label({tablesCleaned:0,tablesList:''},{type:'washing'}),'');
       assert.strictEqual(label({tablesCleaned:3,tablesList:'1–2, 4'},{type:'pm'}),'');
+    """
+    run = subprocess.run(["node", "-e", script], cwd=ROOT, capture_output=True, text=True, timeout=20)
+    assert run.returncode == 0, run.stderr or run.stdout
+
+
+def test_calendar_shows_confirmed_cycle_completion_distinct_from_deadline():
+    calendar = (PORTAL_ASSETS / "js" / "operations-calendar.js").read_text(encoding="utf-8")
+    styles = (PORTAL_ASSETS / "css" / "calendar.css").read_text(encoding="utf-8")
+    assert 'cycleCompleted: report.review_status === "Confirmed" && report.cycle_completed === true' in calendar
+    assert 'event.kind === "washing.done" && event.status === "Confirmed"' in calendar
+    assert ".ep-calendar__event--cycle-complete {" in styles
+    assert ".ep-calendar__event--deadline:not(.ep-calendar__event--overdue)" in styles
+
+    script = r"""
+      const fs=require('fs'),vm=require('vm'),assert=require('assert');
+      const source=fs.readFileSync('assets/js/operations-calendar.js','utf8');
+      const start=source.indexOf('function statusClass(');
+      const end=source.indexOf('  function visibleEvents(',start);
+      assert(start>=0&&end>start,'calendar chip helpers missing');
+      const box={escape:value=>String(value)};vm.createContext(box);
+      vm.runInContext(source.slice(start,end)+';this.chip=renderCalendarEventChip',box);
+      const context={type:'washing'};
+      const plant=box.chip({title:'50 tables cleaned',status:'Completed',kind:'report',
+        cycleNo:2,cycleCompleted:true,tablesCleaned:50,tablesList:'1–50'},context);
+      assert(plant.includes('ep-calendar__event--cycle-complete'),'plant completion style');
+      assert(plant.includes('Cycle 2 completed'),'plant completion message');
+      assert(plant.includes('50 cleaned · Tables: 1–50'),'plant table count and numbers');
+      const portfolio=box.chip({title:'Cycle 2 · 50 tables cleaned',status:'Confirmed',
+        kind:'washing.done',reference:'Cycle 2',tablesCleaned:50,tablesList:'1–50'},context);
+      assert(portfolio.includes('ep-calendar__event--cycle-complete'),'portfolio completion style');
+      assert(portfolio.includes('ep-calendar__event--complete'),'confirmed portfolio wash uses completed colors');
+      assert(portfolio.includes('Cycle 2 completed'),'portfolio completion message');
+      const awaiting=box.chip({title:'Cycle 2 · 50 tables cleaned',status:'Pending',
+        kind:'washing.done',reference:'Cycle 2',tablesCleaned:50,tablesList:'1–50'},context);
+      assert(!awaiting.includes('ep-calendar__event--cycle-complete'),'unconfirmed cycle is not complete');
+      assert(awaiting.includes('Cycle 2 · 50 tables cleaned'),'unconfirmed report keeps its report title');
+      const deadline=box.chip({title:'Cycle 2 deadline',status:'Completed',kind:'deadline'},context);
+      assert(deadline.includes('ep-calendar__event--deadline'),'deadline gets a distinct style');
+      assert(!deadline.includes('ep-calendar__event--cycle-complete'),'deadline is not a completion report');
     """
     run = subprocess.run(["node", "-e", script], cwd=ROOT, capture_output=True, text=True, timeout=20)
     assert run.returncode == 0, run.stderr or run.stdout
@@ -1427,6 +1480,16 @@ def test_record_sheet_tracks_exactly_which_tables_were_cleaned():
     assert "table_numbers: row.numbers," in calendar
     assert "formatTableList(row.numbers)" in calendar
     assert "Cleaned this cycle:" in calendar and "Not cleaned yet:" in calendar
+
+
+def test_record_sheet_keeps_number_entry_without_browser_stepper():
+    calendar = (PORTAL_ASSETS / "js" / "operations-calendar.js").read_text(encoding="utf-8")
+    styles = (PORTAL_ASSETS / "css" / "calendar.css").read_text(encoding="utf-8")
+    assert 'data-record-end value="' in calendar
+    assert 'data-record-edit-count value="' in calendar
+    assert ".ep-calendar__record-range input[data-record-end],\n.ep-calendar__record-row--editing input[data-record-edit-count] {\n  appearance: textfield;" in styles
+    assert "input[data-record-end]::-webkit-inner-spin-button" in styles
+    assert "input[data-record-edit-count]::-webkit-outer-spin-button" in styles
 
 
 def test_calendar_day_detail_lists_the_cleaned_tables():

@@ -634,53 +634,71 @@
 }
 
 .ep-issues__table th {
-  padding: 8px 4px;
+  height: 36px;
+  padding: 7px 3px;
   background: #f5f8f6;
   color: #647168;
   font-size: 7px;
   font-weight: 700;
   letter-spacing: .02em;
   text-align: left;
+  vertical-align: middle;
   text-transform: uppercase;
-  overflow-wrap: anywhere;
-  white-space: normal;
+  overflow: hidden;
+  white-space: nowrap;
 }
 
-.ep-issues__table th:nth-child(1) { width: 7%; }
-.ep-issues__table th:nth-child(2) { width: 10%; }
-.ep-issues__table th:nth-child(3) { width: 11%; }
-.ep-issues__table th:nth-child(4) { width: 10%; }
-.ep-issues__table th:nth-child(5) { width: 8%; }
-.ep-issues__table th:nth-child(6) { width: 10%; }
-.ep-issues__table th:nth-child(7) { width: 9%; }
-.ep-issues__table th:nth-child(8) { width: 9%; }
-.ep-issues__table th:nth-child(9) { width: 10%; }
-.ep-issues__table th:nth-child(10) { width: 9%; }
-.ep-issues__table th:nth-child(11) { width: 7%; }
+.ep-issues__table th:nth-child(1),
+.ep-issues__table td:nth-child(1) { width: 9%; }
+.ep-issues__table th:nth-child(2),
+.ep-issues__table td:nth-child(2) { width: 9%; }
+.ep-issues__table th:nth-child(3),
+.ep-issues__table td:nth-child(3) { width: 9%; }
+.ep-issues__table th:nth-child(4),
+.ep-issues__table td:nth-child(4) { width: 8%; }
+.ep-issues__table th:nth-child(5),
+.ep-issues__table td:nth-child(5) { width: 14%; }
+.ep-issues__table th:nth-child(6),
+.ep-issues__table td:nth-child(6) { width: 8%; }
+.ep-issues__table th:nth-child(7),
+.ep-issues__table td:nth-child(7) { width: 8%; }
+.ep-issues__table th:nth-child(8),
+.ep-issues__table td:nth-child(8) { width: 11%; }
+.ep-issues__table th:nth-child(9),
+.ep-issues__table td:nth-child(9) { width: 9%; }
+.ep-issues__table th:nth-child(10),
+.ep-issues__table td:nth-child(10) { width: 8%; }
+.ep-issues__table th:nth-child(11),
+.ep-issues__table td:nth-child(11) { width: 7%; }
 
-.ep-issues__th-filtered { padding: 5px 3px !important; }
+.ep-issues__th-filtered { padding: 4px 3px !important; }
 .ep-issues__th-content {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 2px;
+  min-width: 0;
+  width: 100%;
 }
 .ep-issues__th-content .ep-sort {
   min-width: 0;
   width: auto;
-  flex: 1 1 auto;
-  gap: 2px;
+  flex: 1 1 0;
+  align-items: center;
+  gap: 1px;
 }
 .ep-issues__th-content .ep-sort__label {
   min-width: 0;
-  overflow-wrap: normal;
-  white-space: normal;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .ep-issues__filter-toggle {
   display: grid;
-  flex: 0 0 15px;
+  flex: 0 0 13px;
   place-items: center;
-  width: 15px;
-  height: 18px;
+  width: 13px;
+  height: 16px;
   padding: 0;
   border: 1px solid transparent;
   border-radius: 4px;
@@ -767,17 +785,17 @@
 }
 .ep-issues__column-filter-empty[hidden] { display: none; }
 .ep-issues__table th .ep-sort__arrows {
-  flex: 0 0 7px;
+  flex: 0 0 6px;
 }
 .ep-issues__table th .ep-sort__arrows svg {
-  width: 7px;
+  width: 6px;
   height: 4px;
 }
 
 .ep-issues__table td {
   max-width: none;
   min-width: 0;
-  padding: 8px 4px;
+  padding: 7px 3px;
   border-top: 1px solid #edf0ee;
   color: #4c5a51;
   font-size: 9px;
@@ -797,18 +815,7 @@
   font-weight: 500;
   white-space: nowrap;
 }
-/* Column order: Issue ID, Plant, Equipment, Sub-problem, Maker, Problem, Occurred, ETC, ... */
-.ep-issues__table td:nth-child(1) { width: 7%; }
-.ep-issues__table td:nth-child(2) { width: 10%; }
-.ep-issues__table td:nth-child(3) { width: 11%; }
-.ep-issues__table td:nth-child(4) { width: 10%; }
-.ep-issues__table td:nth-child(5) { width: 8%; }
-.ep-issues__table td:nth-child(6) { width: 10%; }
-.ep-issues__table td:nth-child(7) { width: 9%; }
-.ep-issues__table td:nth-child(8) { width: 9%; }
-.ep-issues__table td:nth-child(9) { width: 10%; }
-.ep-issues__table td:nth-child(10) { width: 9%; }
-.ep-issues__table td:nth-child(11) { width: 7%; }
+/* Column order: Plant, Equipment, Sub-problem, Maker, Description, dates, assignee, status, ID, Action. */
 .ep-issues__problem { line-height: 1.4; }
 .ep-issues__date { white-space: nowrap; font-variant-numeric: tabular-nums; }
 

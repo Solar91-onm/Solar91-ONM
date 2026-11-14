@@ -146,9 +146,26 @@
   }
 
   function statusClass(status) {
-    if (status === "Completed") return "ep-calendar__event--complete";
+    if (status === "Completed" || status === "Confirmed") return "ep-calendar__event--complete";
     if (status === "Overdue") return "ep-calendar__event--overdue";
     return "ep-calendar__event--pending";
+  }
+
+  function isWashingCycleComplete(event, context) {
+    if (context.type !== "washing") return false;
+    if (event.cycleCompleted === true) return true;
+    return event.kind === "washing.done" && event.status === "Confirmed";
+  }
+
+  function eventChipTitle(event, context) {
+    if (!isWashingCycleComplete(event, context)) return String(event.title || "");
+    var cycle = event.cycleNo;
+    if (!cycle) {
+      var source = String(event.reference || event.title || "");
+      var match = source.match(/cycle\s+(\d+)/i);
+      if (match) cycle = match[1];
+    }
+    return (cycle ? "Cycle " + cycle : "Cycle") + " completed";
   }
 
   function washingTablesLabel(event, context) {
@@ -157,19 +174,27 @@
     var count = Number(event.tablesCleaned);
     if (!isFinite(count) || count <= 0) return "";
     var tables = String(event.tablesList || "").trim();
-    return tables ? "Tables: " + tables : "Table numbers not recorded";
+    var cycleComplete = isWashingCycleComplete(event, context);
+    var countLabel = cycleComplete ? count + " cleaned · " : "";
+    return tables
+      ? countLabel + "Tables: " + tables
+      : countLabel + "Table numbers not recorded";
   }
 
   function eventCellDescription(event, context) {
-    var title = String(event.title || "");
+    var title = eventChipTitle(event, context);
     var tables = washingTablesLabel(event, context);
     return tables ? title + " · " + tables : title;
   }
 
   function renderCalendarEventChip(event, context) {
     var tables = washingTablesLabel(event, context);
-    var title = String(event.title || "");
+    var cycleComplete = isWashingCycleComplete(event, context);
+    var deadline = event.kind === "deadline";
+    var title = eventChipTitle(event, context);
     return '<span class="ep-calendar__event ' + statusClass(event.status) +
+      (cycleComplete ? " ep-calendar__event--cycle-complete" : "") +
+      (deadline ? " ep-calendar__event--deadline" : "") +
       (tables ? " ep-calendar__event--washing-detail" : "") +
       '" title="' + escape(eventCellDescription(event, context)) + '">' +
       (tables
@@ -1794,6 +1819,7 @@
             plantSiteCode: selected.siteCode,
             plantName: selected.plantName,
             cycleNo: report.cycle_no,
+            cycleCompleted: report.review_status === "Confirmed" && report.cycle_completed === true,
             tablesCleaned: report.tables_cleaned,
             tablesList: formatTableList(tableNumbersOf(report)),
             reviewStatus: report.review_status,

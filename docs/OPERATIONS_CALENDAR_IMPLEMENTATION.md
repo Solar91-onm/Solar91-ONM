@@ -21,7 +21,7 @@ The calendar follows the application's shared top-level plant scope (`S.dashPlan
 
 - Issue with an authoritative Resolved/Closed/Completed/Fixed status: **green**, regardless of original severity. Otherwise Critical/High = deep red, Medium = amber, Low = slate-blue, unknown = neutral. The real backend values are not reclassified by inspecting remarks.
 - PM completed = green, cancelled = neutral, genuine past-due unfinished = amber, failed = red, otherwise scheduled = blue. The *Overdue* filter derives from actual `due_on` and status.
-- Washing report confirmed with `job_status=Done` = green; rejected or `Not done` = amber; pending review = teal. A configured cycle deadline is green **only** after confirmed completion, amber if overdue and incomplete, teal otherwise.
+- Washing report confirmed with `job_status=Done` = green; a confirmed cycle completion is shown on its actual report date with a distinct green completion chip. A configured cycle deadline remains a separate blue schedule chip (red when overdue); it is not used as a substitute for the completion date.
 - Every event also has an `ISS`, `PM` or `WASH` label; no colour-only communication.
 
 ## Open work carries forward
