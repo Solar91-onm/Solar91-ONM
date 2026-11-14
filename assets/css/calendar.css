@@ -1577,19 +1577,6 @@
   color: var(--ep-text);
   font: inherit;
 }
-.ep-calendar__record-range input[data-record-end],
-.ep-calendar__record-row--editing input[data-record-edit-count] {
-  appearance: textfield;
-  -moz-appearance: textfield;
-}
-.ep-calendar__record-range input[data-record-end]::-webkit-inner-spin-button,
-.ep-calendar__record-range input[data-record-end]::-webkit-outer-spin-button,
-.ep-calendar__record-row--editing input[data-record-edit-count]::-webkit-inner-spin-button,
-.ep-calendar__record-row--editing input[data-record-edit-count]::-webkit-outer-spin-button {
-  -webkit-appearance: none;
-  margin: 0;
-}
-
 .ep-calendar__record-row [data-record-error] {
   grid-column: 3 / -1;
   color: var(--ep-red);

@@ -158,12 +158,6 @@
     return "ep-calendar__event--pending";
   }
 
-  function washingDeadlineStatus(cycle, today) {
-    if (cycle.state === "Completed") return "Completed";
-    if (cycle.due_date < today) return Number(cycle.late_days) >= 7 ? "Really behind" : "Behind";
-    return "Scheduled";
-  }
-
   function isWashingCycleComplete(event, context) {
     if (context.type !== "washing") return false;
     if (event.cycleCompleted === true) return true;
@@ -1429,7 +1423,6 @@
    *  moves the following days' table numbers and cycles to match. */
   function renderRecordEditRow(state, row, dateLabel) {
     var edit = state.recordEdit;
-    var total = Number(state.washingPlant.table_count) || 0;
     var disabled = edit.saving ? " disabled" : "";
     var done = edit.status === "Done";
     return '<div class="ep-calendar__record-row ep-calendar__record-row--editing" data-record-edit-row="' + escape(edit.id) + '">' +
@@ -1442,7 +1435,7 @@
             '<input type="text" data-record-edit-list placeholder="e.g. 1-5, 9, 12 or 100-91" value="' + escape(edit.list) +
             '" aria-label="Table numbers cleaned on ' + escape(dateLabel) + '"' + disabled + ' />' +
             (edit.legacy
-              ? '<input type="number" min="1" max="' + total + '" step="1" data-record-edit-count value="' + escape(edit.count) +
+              ? '<input type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off" data-record-edit-count value="' + escape(edit.count) +
                 '" aria-label="Tables cleaned on ' + escape(dateLabel) + ' (no numbers saved)"' + disabled + ' />'
               : "") + '</div>'
         : '<select data-record-edit-reason aria-label="Reason for ' + escape(dateLabel) + '"' + disabled + '>' +
@@ -1489,7 +1482,6 @@
       var zero = row.zero;
       var off = row.full || state.recordSaving ? " disabled" : "";
       var count = row.numbers.length;
-      var total = Number(state.washingPlant.table_count) || 0;
       var modes = [["start", "From start"], ["end", "From end"], ["pick", "Pick tables"]];
       var inputs;
       if (row.mode === "pick") {
@@ -1498,8 +1490,7 @@
       } else {
         inputs = '<span data-record-start>' + (row.full || row.first === null ? "\u2014" : row.first) + '</span>' +
           '<span>' + (row.mode === "end" ? "\u2193" : "\u2013") + '</span>' +
-          '<input type="number" min="' + (row.mode === "end" ? 1 : (row.first || 1)) + '" max="' +
-          (row.mode === "end" ? (row.first || total) : total) + '" step="1" data-record-end value="' +
+          '<input type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off" data-record-end value="' +
           (zero ? "" : escape(row.draft.end === undefined ? "" : row.draft.end)) +
           '" aria-label="' + (row.mode === "end" ? "Lowest" : "Last") + ' table number for ' + escape(dateLabel) + '"' +
           (zero ? " disabled" : off) + ' />';
@@ -1659,7 +1650,7 @@
         (context.plantCode ? "Plant view" : "Views") + '</p><h1>' + escape(typeLabel) +
         '</h1><p class="ep-calendar__subtitle">' + escape(subtitle) +
         (state.liveWashing
-          ? " Cycle progress and dates come from saved module cleaning records. Hover a date for its reports and deadline."
+          ? " Cycle progress and dates come from saved module cleaning records. Hover a date for its reports."
           : " Entries are saved records on their scheduled date.") + '</p></div>' +
         '<div class="ep-calendar__head-actions"><span class="ep-calendar__count">' + escape(statusCounts) + '</span>' +
           (showRecordButton
@@ -1695,7 +1686,7 @@
       '</div>' +
       (state.truncated
         ? '<p class="ep-calendar__truncated" role="status">This month has more than ' + state.truncated +
-          ' entries; only the first ' + state.truncated + ' (earliest due) are shown. Open a single plant to see all of its entries.</p>'
+          ' entries; only the first ' + state.truncated + ' are shown. Open a single plant to see all of its entries.</p>'
         : "") +
       content +
       (hoverEnabled
@@ -1808,22 +1799,6 @@
           return cycle.state === "Completed";
         }).length;
         var events = [];
-        (cyclesData.cycles || []).forEach(function (cycle) {
-          if (!cycle.due_date) return;
-          var lateDays = Number(cycle.late_days) || 0;
-          var deadlineStatus = washingDeadlineStatus(cycle, cyclesData.today);
-          events.push({
-            date: cycle.due_date,
-            title: "Cycle " + cycle.cycle_no + " deadline",
-            status: deadlineStatus,
-            lateDays: lateDays,
-            plantSiteCode: selected.siteCode,
-            plantName: selected.plantName,
-            cycleNo: cycle.cycle_no,
-            source: "Saved cycle schedule",
-            kind: "deadline"
-          });
-        });
         (cyclesData.reports || []).forEach(function (report) {
           var status = report.review_status === "Pending"
             ? "Awaiting confirmation"
@@ -1933,7 +1908,8 @@
       if (requestId !== state.requestId) return;
       state.truncated = page.truncated ? (page.limit || page.entries.length) : 0;
       state.events = page.entries.filter(function (event) {
-        return (!state.rangeStart || event.date >= state.rangeStart) &&
+        return !(context.type === "washing" && event.source === "cycle") &&
+          (!state.rangeStart || event.date >= state.rangeStart) &&
           (!state.rangeEnd || event.date <= state.rangeEnd);
       }).sort(function (a, b) {
         return a.date.localeCompare(b.date) ||
@@ -2043,7 +2019,6 @@
       }
       var endInput = row.querySelector("[data-record-end]");
       if (endInput) {
-        endInput.min = item.mode === "end" ? 1 : (item.first || 1);
         endInput.disabled = item.full || item.zero || state.recordSaving;
         if (item.zero) endInput.value = "";
       }

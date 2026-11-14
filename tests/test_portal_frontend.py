@@ -1341,18 +1341,19 @@ def test_calendar_day_cells_show_saved_washing_table_numbers():
     assert run.returncode == 0, run.stderr or run.stdout
 
 
-def test_calendar_shows_confirmed_cycle_completion_distinct_from_deadline():
+def test_calendar_shows_confirmed_cycle_completion_without_deadline_chips():
     calendar = (PORTAL_ASSETS / "js" / "operations-calendar.js").read_text(encoding="utf-8")
     styles = (PORTAL_ASSETS / "css" / "calendar.css").read_text(encoding="utf-8")
     assert 'cycleCompleted: report.review_status === "Confirmed" && report.cycle_completed === true' in calendar
     assert 'event.kind === "washing.done" && event.status === "Confirmed"' in calendar
+    assert '!(context.type === "washing" && event.source === "cycle")' in calendar
+    assert 'title: "Cycle " + cycle.cycle_no + " deadline"' not in calendar
+    assert "Hover a date for its reports and deadline." not in calendar
     assert ".ep-calendar__event--cycle-complete {" in styles
     assert "background: linear-gradient(120deg, #006b32, #004b24);" in styles
     assert ".ep-calendar__day-events {\n  display: flex;\n  flex: 0 0 auto;" in styles
     assert ".ep-calendar__event--cycle-complete {\n  white-space: normal;\n  overflow-wrap: anywhere;" in styles
     assert ".ep-calendar__event--complete {" in styles
-    assert ".ep-calendar__event--deadline:not(.ep-calendar__event--overdue)" in styles
-    assert "background: linear-gradient(120deg, #edf2fb, #dfe8f7);" in styles
 
     script = r"""
       const fs=require('fs'),vm=require('vm'),assert=require('assert');
@@ -1362,12 +1363,8 @@ def test_calendar_shows_confirmed_cycle_completion_distinct_from_deadline():
       assert(start>=0&&end>start,'calendar chip helpers missing');
       const box={escape:value=>String(value)};vm.createContext(box);
       vm.runInContext(source.slice(start,end)+
-        ';this.chip=renderCalendarEventChip;this.statusClass=statusClass;this.deadlineStatus=washingDeadlineStatus',box);
+        ';this.chip=renderCalendarEventChip;this.statusClass=statusClass',box);
       const context={type:'washing'};
-      assert.strictEqual(box.deadlineStatus({state:'In progress',due_date:'2026-11-10',late_days:2},'2026-11-14'),'Behind');
-      assert.strictEqual(box.deadlineStatus({state:'Missed',due_date:'2026-11-07',late_days:7},'2026-11-14'),'Really behind');
-      assert.strictEqual(box.deadlineStatus({state:'Upcoming',due_date:'2026-11-20',late_days:0},'2026-11-14'),'Scheduled');
-      assert.strictEqual(box.deadlineStatus({state:'Completed',due_date:'2026-11-10',late_days:0},'2026-11-14'),'Completed');
       assert.strictEqual(box.statusClass('Behind'),'ep-calendar__event--behind');
       assert.strictEqual(box.statusClass('Really behind'),'ep-calendar__event--overdue');
       assert.strictEqual(box.statusClass('Awaiting confirmation'),'ep-calendar__event--awaiting');
@@ -1393,9 +1390,6 @@ def test_calendar_shows_confirmed_cycle_completion_distinct_from_deadline():
         kind:'washing.done',reference:'Cycle 2',tablesCleaned:50,tablesList:'1–50'},context);
       assert(!awaiting.includes('ep-calendar__event--cycle-complete'),'unconfirmed cycle is not complete');
       assert(awaiting.includes('Cycle 2 · 50 tables cleaned'),'unconfirmed report keeps its report title');
-      const deadline=box.chip({title:'Cycle 2 deadline',status:'Completed',kind:'deadline'},context);
-      assert(deadline.includes('ep-calendar__event--deadline'),'deadline gets a distinct style');
-      assert(!deadline.includes('ep-calendar__event--cycle-complete'),'deadline is not a completion report');
     """
     run = subprocess.run(["node", "-e", script], cwd=ROOT, capture_output=True, text=True, timeout=20)
     assert run.returncode == 0, run.stderr or run.stdout
@@ -1509,14 +1503,14 @@ def test_record_sheet_tracks_exactly_which_tables_were_cleaned():
     assert "Cleaned this cycle:" in calendar and "Not cleaned yet:" in calendar
 
 
-def test_record_sheet_keeps_number_entry_without_browser_stepper():
+def test_record_sheet_uses_wheel_safe_numeric_text_inputs():
     calendar = (PORTAL_ASSETS / "js" / "operations-calendar.js").read_text(encoding="utf-8")
-    styles = (PORTAL_ASSETS / "css" / "calendar.css").read_text(encoding="utf-8")
     assert 'data-record-end value="' in calendar
     assert 'data-record-edit-count value="' in calendar
-    assert ".ep-calendar__record-range input[data-record-end],\n.ep-calendar__record-row--editing input[data-record-edit-count] {\n  appearance: textfield;" in styles
-    assert "input[data-record-end]::-webkit-inner-spin-button" in styles
-    assert "input[data-record-edit-count]::-webkit-outer-spin-button" in styles
+    assert 'type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off" data-record-end' in calendar
+    assert 'type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off" data-record-edit-count' in calendar
+    assert not re.search(r'<input type="number"[^>]*data-record-end', calendar)
+    assert not re.search(r'<input type="number"[^>]*data-record-edit-count', calendar)
 
 
 def test_calendar_day_detail_lists_the_cleaned_tables():
