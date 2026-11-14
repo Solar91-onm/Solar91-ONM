@@ -70,6 +70,8 @@ DESIGN_LINK_ROLES = {"O&M Head", "Assignee", "Administration"}
 DESIGN_LINK_KEY = "design_link"
 LIASONING_KEY = "liasoning"
 RESTRICTED_CUSTOM_FIELDS = (DESIGN_LINK_KEY, LIASONING_KEY)
+SECURITY_CONTACT_KEYS = ("security_guard", "security_contacts")
+SECURITY_CONTACT_ROLES = {"O&M Head", "Administration"}
 
 
 def can_view_design_link(user: User | None) -> bool:
@@ -77,13 +79,16 @@ def can_view_design_link(user: User | None) -> bool:
 
 
 def visible_custom_fields(fields: dict[str, Any] | None, user: User | None) -> dict[str, Any]:
-    """A copy of a plant's custom_fields without the Design/MDL link and the Liasoning record for roles that may not open them.
+    """Return plant fields redacted for roles that cannot view restricted contacts or links.
 
     Always returns a new dict, so the ORM object's stored value is never changed by redaction.
     """
     out = dict(fields or {})
     if not can_view_design_link(user):
         for key in RESTRICTED_CUSTOM_FIELDS:
+            out.pop(key, None)
+    if user is None or not user.is_active or user.role not in SECURITY_CONTACT_ROLES:
+        for key in SECURITY_CONTACT_KEYS:
             out.pop(key, None)
     return out
 

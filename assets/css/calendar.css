@@ -616,6 +616,23 @@
   white-space: nowrap;
 }
 
+.ep-calendar__event--washing-detail {
+  display: grid;
+  gap: 1px;
+  white-space: normal;
+}
+.ep-calendar__event-title,
+.ep-calendar__event-tables {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ep-calendar__event-tables {
+  font-size: 9px;
+  font-weight: 600;
+}
+
 .ep-calendar__event--complete {
   border-left-color: var(--ep-accent);
   background: var(--ep-accent-soft);
@@ -1647,6 +1664,7 @@
   .ep-calendar__day { padding: 3px; gap: 2px; }
   .ep-calendar__day-number { width: 20px; height: 20px; font-size: var(--ep-fs-xs); }
   .ep-calendar__event { padding: 1px 2px; font-size: 8px; line-height: 1.15; }
+  .ep-calendar__event-tables { font-size: 7px; }
   .ep-calendar__modal { padding: 10px; }
   .ep-calendar__dialog { padding: 14px; }
   .ep-calendar__drawer { padding: 0; border-radius: var(--ep-radius-lg) 0 0 var(--ep-radius-lg); }

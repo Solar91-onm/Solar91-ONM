@@ -27,6 +27,74 @@ def test_head_can_create_update_delete_plant(client, db):
     assert client.delete(f'/api/plants/{plant_id}').status_code == 204
 
 
+def test_security_guard_mobile_must_be_ten_digits_and_is_persisted(client, db):
+    login_user(client, db)
+    plant = client.post('/api/plants', json={'site_code': 'GUARD01', 'plant_name': 'Guard Plant'})
+    assert plant.status_code == 201, plant.text
+    plant_id = plant.json()['id']
+
+    invalid = client.patch(f'/api/plants/{plant_id}', json={
+        'custom_fields': {'security_guard': {'guard_name': 'Asha', 'mobile_no': '12345'}}
+    })
+    assert invalid.status_code == 422
+
+    saved = client.patch(f'/api/plants/{plant_id}', json={
+        'custom_fields': {'security_guard': {'guard_name': ' Asha ', 'mobile_no': '9876543210'}}
+    })
+    assert saved.status_code == 200, saved.text
+    assert saved.json()['custom_fields']['security_guard'] == {
+        'guard_name': 'Asha',
+        'mobile_no': '9876543210',
+    }
+
+
+def test_security_contacts_support_multiple_people_and_day_night_shifts(client, db):
+    login_user(client, db)
+    plant = client.post('/api/plants', json={'site_code': 'SECURITY01', 'plant_name': 'Security Plant'})
+    assert plant.status_code == 201, plant.text
+    plant_id = plant.json()['id']
+
+    invalid = client.patch(f'/api/plants/{plant_id}', json={
+        'custom_fields': {'security_contacts': {
+            'site_engineers': [{'name': 'Engineer A', 'mobile_no': '12345', 'shift': 'day'}],
+            'guards': [],
+        }}
+    })
+    assert invalid.status_code == 422
+
+    invalid_shift = client.patch(f'/api/plants/{plant_id}', json={
+        'custom_fields': {'security_contacts': {
+            'site_engineers': [],
+            'guards': [{'name': 'Guard A', 'mobile_no': '9876543210', 'shift': 'rotating'}],
+        }}
+    })
+    assert invalid_shift.status_code == 422
+
+    saved = client.patch(f'/api/plants/{plant_id}', json={
+        'custom_fields': {'security_contacts': {
+            'site_engineers': [
+                {'name': ' Engineer A ', 'mobile_no': '9876543210', 'shift': 'night'},
+                {'name': 'Engineer B', 'mobile_no': '', 'shift': 'day'},
+            ],
+            'guards': [
+                {'name': 'Guard A', 'mobile_no': '9123456780', 'shift': 'day'},
+                {'name': 'Guard B', 'mobile_no': '9012345678', 'shift': 'night'},
+            ],
+        }}
+    })
+    assert saved.status_code == 200, saved.text
+    assert saved.json()['custom_fields']['security_contacts'] == {
+        'site_engineers': [
+            {'name': 'Engineer A', 'mobile_no': '9876543210', 'shift': 'night'},
+            {'name': 'Engineer B', 'mobile_no': '', 'shift': 'day'},
+        ],
+        'guards': [
+            {'name': 'Guard A', 'mobile_no': '9123456780', 'shift': 'day'},
+            {'name': 'Guard B', 'mobile_no': '9012345678', 'shift': 'night'},
+        ],
+    }
+
+
 def test_site_engineer_is_plant_scoped_and_cannot_manage_plants(client, db):
     plant_a = Plant(site_code='A01', plant_name='Plant A', assigned_engineer='Engineer A')
     plant_b = Plant(site_code='B01', plant_name='Plant B')

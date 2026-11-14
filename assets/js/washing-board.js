@@ -20,8 +20,15 @@
 
   var fmt = global.Solar91PortalFormat;
   var token = 0;
-  var st = { rows: [], month: "", selectedMonth: "", today: "", loading: false, error: "" };
-  var ui = { search: "", status: "__all", plant: "__all", cycle: "__all", date: "__all" };
+  var st = {
+    rows: [], month: "", selectedMonth: "", today: "", loading: false, error: "",
+    dayActivity: null, dayActivityDate: "", dayActivityLoading: false, dayActivityError: ""
+  };
+  var ui = {
+    search: "", status: "__all", plant: "__all", cycle: "__all", date: "__all",
+    entryStatus: "__all"
+  };
+  var dayActivityToken = 0;
 
   function api() { return global.Solar91PortalAPI; }
   function escape(value) { return fmt.escape(value === null || value === undefined ? "" : String(value)); }
@@ -101,14 +108,43 @@
   }
 
   function dateOptions() {
-    var dates = {};
-    st.rows.forEach(function (row) {
-      (row.cleaning_dates || []).forEach(function (date) { dates[date] = true; });
-    });
-    return Object.keys(dates).sort().map(function (date) {
+    var monthKeySelected = st.month || st.selectedMonth;
+    var match = String(monthKeySelected).match(/^(\d{4})-(\d{2})$/);
+    if (!match) return "";
+    var year = Number(match[1]);
+    var month = Number(match[2]);
+    var lastDay = new Date(year, month, 0).getDate();
+    if (st.today.slice(0, 7) === monthKeySelected) {
+      lastDay = Math.min(lastDay, Number(st.today.slice(8, 10)) || lastDay);
+    }
+    var dates = [];
+    for (var day = 1; day <= lastDay; day += 1) {
+      dates.push(monthKeySelected + "-" + pad2(day));
+    }
+    return dates.map(function (date) {
       return '<option value="' + escape(date) + '"' +
         (ui.date === date ? " selected" : "") + ">" + escape(shortDate(date)) + "</option>";
     }).join("");
+  }
+
+  function entryStatusMatches(status, selection) {
+    if (selection === "__all") return true;
+    if (selection === "missing") return status === "not_reported";
+    return selection === "recorded" &&
+      ["confirmed", "awaiting", "not_done", "rejected"].indexOf(status) !== -1;
+  }
+
+  function dayStatus(row) {
+    if (!st.dayActivity || st.dayActivity.date !== ui.date) return "";
+    return st.dayActivity.byCode["$" + row.site_code] || "";
+  }
+
+  function clearDayActivity() {
+    dayActivityToken += 1;
+    st.dayActivity = null;
+    st.dayActivityDate = "";
+    st.dayActivityLoading = false;
+    st.dayActivityError = "";
   }
 
   // ─── Card ────────────────────────────────────────────────────────────
@@ -139,7 +175,18 @@
     var status = statusOf(row);
     var target = Number(row.monthly_target) || 3;
     var name = row.plant || row.site_code;
+    var lastUpdated = shortDate(row.last_report_date);
     var late = Number(row.overdue_days) || 0;
+    var statusForDate = ui.date === "__all" ? "" : dayStatus(row);
+    var entryNote = statusForDate === "not_reported"
+      ? '<span class="ep-wb__entry-note">No entry · ' + escape(shortDate(ui.date)) + "</span>"
+      : ["confirmed", "awaiting", "not_done", "rejected"].indexOf(statusForDate) !== -1
+        ? '<span class="ep-wb__entry-note ep-wb__entry-note--recorded">Entry submitted · ' +
+          escape(shortDate(ui.date)) + "</span>"
+        : statusForDate === "paused"
+          ? '<span class="ep-wb__entry-note ep-wb__entry-note--paused">Inactive · ' +
+            escape(shortDate(ui.date)) + "</span>"
+          : "";
     return '<button type="button" class="ep-wb__card ep-wb__card--' + status.key +
       '" data-wb-plant="' + escape(row.site_code) + '" aria-label="Open the Module Cleaning calendar for ' +
       escape(name) + '">' +
@@ -147,7 +194,10 @@
         '<span class="ep-wb__name">' + escape(name) + "</span>" +
         '<span class="ep-wb__code">' + escape(row.site_code) + "</span>" +
       "</span>" +
-      '<span class="ep-wb__date">' + (shortDate(row.last_report_date) || "No records yet") + "</span>" +
+      '<span class="ep-wb__date">' +
+        (lastUpdated
+          ? '<span class="ep-wb__date-label">Last Updated :</span>' + escape(lastUpdated)
+          : "No records yet") + "</span>" +
       '<span class="ep-wb__body">' +
         '<span class="ep-wb__gauge">' + ringHTML(cycle, status) + "</span>" +
         '<span class="ep-wb__facts">' +
@@ -159,6 +209,7 @@
         "</span>" +
       "</span>" +
       '<span class="ep-wb__foot">' +
+        entryNote +
         '<span class="ep-wb__pill ep-wb__pill--' + status.key + '">' + escape(status.label) +
           (late > 0 ? " · " + late + "d" : "") + "</span>" +
         '<span class="ep-wb__assignee">' + escape(row.assignee_name || "Unassigned") + "</span>" +
@@ -174,7 +225,8 @@
       if (ui.plant !== "__all" && row.site_code !== ui.plant) return false;
       if (ui.cycle !== "__all" &&
           (row.cleaned_cycles || []).indexOf(Number(ui.cycle)) === -1) return false;
-      if (ui.date !== "__all" && (row.cleaning_dates || []).indexOf(ui.date) === -1) return false;
+      if (ui.entryStatus !== "__all" &&
+          !entryStatusMatches(dayStatus(row), ui.entryStatus)) return false;
       if (!term) return true;
       return [row.plant, row.site_code, row.district, row.assignee_name]
         .join(" ").toLowerCase().indexOf(term) !== -1;
@@ -217,16 +269,34 @@
         '<label><span>Cycle</span><select data-wb-filter="cycle" aria-label="Filter by cleaning cycle">' +
           '<option value="__all">All cycles</option>' + cycleOptions() + '</select></label>' +
         '<label><span>Cleaning date</span><select data-wb-filter="date" aria-label="Filter by cleaning date">' +
-          '<option value="__all">All dates with tables cleaned</option>' + dateOptions() + '</select></label>' +
+          '<option value="__all">All dates</option>' + dateOptions() + '</select></label>' +
+        '<label><span>Entry status</span><select data-wb-filter="entryStatus" aria-label="Filter by entry status"' +
+          (ui.date === "__all" ? " disabled" : "") + '>' +
+          '<option value="__all">All statuses</option>' +
+          '<option value="recorded"' + (ui.entryStatus === "recorded" ? " selected" : "") +
+            '>Entry submitted</option>' +
+          '<option value="missing"' + (ui.entryStatus === "missing" ? " selected" : "") +
+            '>No entry</option></select></label>' +
       '</div>' +
       (st.loading
         ? '<div class="ep-pt__loading" role="status">Loading Module Cleaning…</div>'
         : st.error
           ? '<div class="ep-pt__error" role="alert">Module Cleaning could not be loaded. ' +
             escape(st.error) + ' <button type="button" data-wb-retry>Try again</button></div>'
+          : st.dayActivityLoading
+            ? '<div class="ep-pt__loading" role="status">Checking entries for ' +
+              escape(shortDate(ui.date)) + '…</div>'
+            : st.dayActivityError
+              ? '<div class="ep-pt__error" role="alert">Entry status could not be loaded. ' +
+                escape(st.dayActivityError) + ' <button type="button" data-wb-retry-day>Try again</button></div>'
           : rows.length
         ? '<div class="ep-wb__grid">' + rows.map(cardHTML).join("") + "</div>"
-        : '<div class="ep-pt__empty-card">No plants match this search.</div>') +
+        : '<div class="ep-pt__empty-card">' +
+          (ui.entryStatus === "missing"
+            ? "No plants are missing an entry for " + escape(shortDate(ui.date)) + "."
+            : ui.entryStatus === "recorded"
+              ? "No plants have an entry for " + escape(shortDate(ui.date)) + "."
+              : "No plants match this search.") + '</div>') +
       "</div>";
     wire(container);
   }
@@ -238,11 +308,15 @@
         if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month.value)) return;
         st.selectedMonth = month.value;
         ui.date = "__all";
+        ui.entryStatus = "__all";
+        clearDayActivity();
         show(container, st.selectedMonth);
       });
     }
     var retry = container.querySelector("[data-wb-retry]");
     if (retry) retry.addEventListener("click", function () { show(container, st.selectedMonth); });
+    var retryDay = container.querySelector("[data-wb-retry-day]");
+    if (retryDay) retryDay.addEventListener("click", function () { loadDayActivity(container); });
     var search = container.querySelector("[data-wb-search]");
     if (search) {
       search.addEventListener("input", function () {
@@ -255,7 +329,16 @@
     }
     container.querySelectorAll("[data-wb-filter]").forEach(function (select) {
       select.addEventListener("change", function () {
-        ui[select.getAttribute("data-wb-filter")] = select.value;
+        var filter = select.getAttribute("data-wb-filter");
+        ui[filter] = select.value;
+        if (filter === "date" && ui.date === "__all") ui.entryStatus = "__all";
+        if (filter === "date" || filter === "entryStatus") {
+          if (ui.date !== "__all") {
+            loadDayActivity(container);
+            return;
+          }
+          clearDayActivity();
+        }
         render(container);
       });
     });
@@ -273,9 +356,61 @@
     });
   }
 
+  function loadDayActivity(container) {
+    var date = ui.date;
+    if (date === "__all") {
+      clearDayActivity();
+      render(container);
+      return;
+    }
+    if (st.dayActivity && st.dayActivity.date === date) {
+      render(container);
+      return;
+    }
+    if (st.dayActivityLoading && st.dayActivityDate === date) return;
+    var client = api();
+    if (!client || typeof client.request !== "function") {
+      st.dayActivityError = "The portal API client is not available.";
+      st.dayActivityLoading = false;
+      render(container);
+      return;
+    }
+    var mine = ++dayActivityToken;
+    st.dayActivity = null;
+    st.dayActivityDate = date;
+    st.dayActivityLoading = true;
+    st.dayActivityError = "";
+    render(container);
+    client.request("/api/scheduled/washing/day-activity?day=" + encodeURIComponent(date))
+      .then(function (body) {
+        if (mine !== dayActivityToken || ui.date !== date) return;
+        if (!body || !Array.isArray(body.plants)) {
+          throw new Error("The daily entry status response was incomplete.");
+        }
+        var byCode = Object.create(null);
+        body.plants.forEach(function (plant) {
+          if (plant.site_code) byCode["$" + plant.site_code] = plant.status;
+        });
+        var missing = st.rows.some(function (row) {
+          return !Object.prototype.hasOwnProperty.call(byCode, "$" + row.site_code);
+        });
+        if (missing) throw new Error("The daily entry status did not include every visible plant.");
+        st.dayActivity = { date: date, byCode: byCode };
+        st.dayActivityLoading = false;
+        if (container.isConnected) render(container);
+      })
+      .catch(function (error) {
+        if (mine !== dayActivityToken || ui.date !== date) return;
+        st.dayActivityLoading = false;
+        st.dayActivityError = error.message || "Please retry.";
+        if (container.isConnected) render(container);
+      });
+  }
+
   function show(container, selectedMonth) {
     if (!container) return;
     var mine = ++token;
+    clearDayActivity();
     var month = selectedMonth || st.selectedMonth || monthKey(new Date());
     st.selectedMonth = month;
     st.month = month;
@@ -293,7 +428,10 @@
       st.month = body.month || month;
       st.today = body.today || "";
       st.loading = false;
-      if (container.isConnected) render(container);
+      if (container.isConnected) {
+        if (ui.date !== "__all") loadDayActivity(container);
+        else render(container);
+      }
     }).catch(function (error) {
       if (mine !== token) return;
       st.loading = false;

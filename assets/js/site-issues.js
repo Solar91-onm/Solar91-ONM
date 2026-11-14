@@ -364,6 +364,84 @@
     return Object.keys(values).sort(function (a, b) { return a.localeCompare(b); });
   }
 
+  function filterColumnOptions(menu, term) {
+    var normalizedTerm = String(term || "").trim().toLowerCase();
+    var visibleCount = 0;
+    Array.prototype.forEach.call(menu.querySelectorAll("[data-issue-column-filter-option]"), function (option) {
+      var visible = !normalizedTerm ||
+        option.textContent.trim().toLowerCase().indexOf(normalizedTerm) !== -1;
+      option.hidden = !visible;
+      if (visible) visibleCount += 1;
+    });
+    var empty = menu.querySelector("[data-issue-column-filter-empty]");
+    if (empty) empty.hidden = visibleCount > 0;
+  }
+
+  function positionColumnFilter(toggle, menu) {
+    var toggleRect = toggle.getBoundingClientRect();
+    var menuRect = menu.getBoundingClientRect();
+    var left = Math.max(8, Math.min(toggleRect.left, global.innerWidth - menuRect.width - 8));
+    var top = toggleRect.bottom + 4;
+    if (top + menuRect.height > global.innerHeight - 8) {
+      top = Math.max(8, toggleRect.top - menuRect.height - 4);
+    }
+    menu.style.left = Math.round(left) + "px";
+    menu.style.top = Math.round(top) + "px";
+  }
+
+  var FILTERABLE_ISSUE_COLUMNS = ["plant", "equipment", "problem", "assignee", "status"];
+
+  function issueColumnHeader(column) {
+    var header = global.Solar91PortalSort.thHTML(column, state.columnSort, "data-issue-sort");
+    if (!state.canEdit || FILTERABLE_ISSUE_COLUMNS.indexOf(column.key) === -1) return header;
+
+    var menuId = "ep-issue-filter-menu-" + column.key;
+    var activeFilter = String(state.columnFilters[column.key] || "");
+    var options = issueColumnOptions(column.key).map(function (value) {
+      return '<button type="button" class="ep-issues__column-filter-option" data-issue-column-filter-option="' +
+        column.key + '" data-issue-column-filter-value="' + escape(value) + '" aria-pressed="' +
+        (activeFilter === value ? "true" : "false") + '">' + escape(value) + "</button>";
+    }).join("");
+    var filter = '<button type="button" class="ep-issues__filter-toggle' +
+      (activeFilter ? " is-filtered" : "") + '" data-issue-column-filter-toggle="' + column.key +
+      '" aria-label="Filter by ' + escape(column.label) + '" aria-controls="' + menuId +
+      '" aria-expanded="false" title="Filter by ' + escape(column.label) + '">' +
+      '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4"></path></svg></button>' +
+      '<div id="' + menuId + '" class="ep-issues__column-filter-menu" popover="auto" data-issue-column-filter-menu="' +
+      column.key + '">' +
+      '<input class="ep-issues__column-filter-search" type="search" data-issue-column-filter-search="' +
+      column.key + '" placeholder="Search options..." aria-label="Search ' + escape(column.label) + ' options" />' +
+      '<div class="ep-issues__column-filter-options">' +
+      '<button type="button" class="ep-issues__column-filter-option" data-issue-column-filter-option="' +
+      column.key + '" data-issue-column-filter-value="" aria-pressed="' +
+      (activeFilter ? "false" : "true") + '">All ' + escape(column.label) + "</button>" +
+      options + '</div><div class="ep-issues__column-filter-empty" data-issue-column-filter-empty hidden>' +
+      "No matching options</div></div>";
+    header = header.replace("<th", '<th class="ep-issues__th-filtered"');
+    var openEnd = header.indexOf(">") + 1;
+    var closeStart = header.lastIndexOf("</th>");
+    return header.slice(0, openEnd) + '<div class="ep-issues__th-content">' +
+      header.slice(openEnd, closeStart) + filter + "</div>" + header.slice(closeStart);
+  }
+
+  function wireColumnFilterMenus(host) {
+    Array.prototype.forEach.call(host.querySelectorAll("[data-issue-column-filter-menu]"), function (menu) {
+      var key = menu.getAttribute("data-issue-column-filter-menu");
+      var toggle = host.querySelector('[data-issue-column-filter-toggle="' + key + '"]');
+      menu.addEventListener("toggle", function () {
+        var isOpen = menu.matches(":popover-open");
+        if (toggle) toggle.setAttribute("aria-expanded", isOpen ? "true" : "false");
+        if (isOpen) {
+          var search = menu.querySelector("[data-issue-column-filter-search]");
+          if (search) {
+            search.value = "";
+            filterColumnOptions(menu, "");
+          }
+        }
+      });
+    });
+  }
+
   function occurrenceDateCell(value) {
     if (!value) return '<span class="ep-issues__unassigned">Not recorded</span>';
     var days = elapsedDays(value, localDate(new Date()));
@@ -388,23 +466,9 @@
         '<button type="button" class="ep-issues__button" data-issue-action="clear">Clear filters</button></div>';
     }
     var headers = COLUMNS.map(function (c) { return c.label; });
-    var filterRow = state.canEdit
-      ? '<tr class="ep-issues__column-filter-row">' + COLUMNS.map(function (column) {
-        var filterable = ["plant", "equipment", "problem", "assignee", "status"].indexOf(column.key) !== -1;
-        if (!filterable) return "<th></th>";
-        var listId = "ep-issue-filter-options-" + column.key;
-        var options = issueColumnOptions(column.key).map(function (value) {
-          return '<option value="' + escape(value) + '"></option>';
-        }).join("");
-        return '<th><input type="search" list="' + listId + '" data-issue-column-filter="' +
-          column.key + '" value="' + escape(state.columnFilters[column.key] || "") +
-          '" placeholder="Select or type" aria-label="Select or type to filter by ' +
-          escape(column.label) + '" /><datalist id="' + listId + '">' + options + '</datalist></th>';
-      }).join("") + '</tr>'
-      : "";
     return '<div class="ep-issues__table-wrap"><table class="ep-issues__table"><thead><tr>' +
-      global.Solar91PortalSort.headerHTML(COLUMNS, state.columnSort, "data-issue-sort") +
-      '</tr>' + filterRow + '</thead><tbody>' + rows.map(function (issue) {
+      COLUMNS.map(issueColumnHeader).join("") +
+      '</tr></thead><tbody>' + rows.map(function (issue) {
         var labels = headers;
         return '<tr class="ep-issues__plant-row" data-issue-plant="' + escape(issue.plantCode) +
           '" tabindex="0" aria-label="Open Health for ' + escape(issue.plantName || issue.plantCode) + '">' +
@@ -916,6 +980,7 @@
       '</div>' +
       renderDrawer(context) +
     '</div>';
+    wireColumnFilterMenus(host);
     var sort = host.querySelector('[data-issue-filter="sort"]');
     if (sort) sort.value = state.sort || "recent";
   }
@@ -1033,26 +1098,13 @@
     wiredHost = host;
     host.addEventListener("input", function (event) {
       if (!active || active.host !== host) return;
+      if (event.target.matches("[data-issue-column-filter-search]")) {
+        filterColumnOptions(event.target.closest("[data-issue-column-filter-menu]"), event.target.value);
+        return;
+      }
       if (event.target.matches("[data-issue-date-start]")) {
         state.issueDateDraftStart = event.target.value;
         state.issueDateError = "";
-        return;
-      }
-      if (event.target.matches("[data-issue-column-filter]") && state.canEdit) {
-        var key = event.target.getAttribute("data-issue-column-filter");
-        var pos = event.target.selectionStart;
-        state.columnFilters[key] = event.target.value;
-        if (searchTimer) clearTimeout(searchTimer);
-        searchTimer = setTimeout(function () {
-          searchTimer = null;
-          if (!active || active.host !== host) return;
-          renderView();
-          var input = host.querySelector('[data-issue-column-filter="' + key + '"]');
-          if (input) {
-            input.focus();
-            if (typeof input.setSelectionRange === "function") input.setSelectionRange(pos, pos);
-          }
-        }, 120);
         return;
       }
       if (event.target.matches("[data-issue-date-end]")) {
@@ -1287,6 +1339,28 @@
         siteCode: (active.context && active.context.plantCode) || "",
         onImported: function () { state.loaded = false; renderView(); }
       })) return;
+      var filterToggle = event.target.closest("[data-issue-column-filter-toggle]");
+      if (filterToggle && state.canEdit) {
+        var filterKey = filterToggle.getAttribute("data-issue-column-filter-toggle");
+        var filterMenu = host.querySelector('[data-issue-column-filter-menu="' + filterKey + '"]');
+        if (!filterMenu) return;
+        if (filterMenu.matches(":popover-open")) {
+          filterMenu.hidePopover();
+        } else {
+          filterMenu.showPopover();
+          positionColumnFilter(filterToggle, filterMenu);
+        }
+        return;
+      }
+      var filterOption = event.target.closest("[data-issue-column-filter-option]");
+      if (filterOption && state.canEdit) {
+        var optionKey = filterOption.getAttribute("data-issue-column-filter-option");
+        var optionMenu = filterOption.closest("[data-issue-column-filter-menu]");
+        if (optionMenu && optionMenu.matches(":popover-open")) optionMenu.hidePopover();
+        state.columnFilters[optionKey] = filterOption.getAttribute("data-issue-column-filter-value") || "";
+        renderView();
+        return;
+      }
       var sortButton = event.target.closest("[data-issue-sort]");
       if (sortButton) {
         global.Solar91PortalSort.next(state.columnSort, sortButton.getAttribute("data-issue-sort"));

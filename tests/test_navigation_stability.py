@@ -24,6 +24,14 @@ def test_portal_nav_bundle_served_and_revalidated(client):
     assert "must-revalidate" in stale.headers.get("cache-control","")
 
 
+def test_portal_navigation_restores_same_page_browser_history():
+    source = (ROOT / "assets/js/navigation.js").read_text(encoding="utf-8")
+    assert 'global.history.pushState(next, "")' in source
+    assert 'global.history.replaceState(next, "")' in source
+    assert 'global.addEventListener("popstate"' in source
+    assert "restoreNavigationHistory(event.state)" in source
+
+
 def test_supabase_public_config_not_secret_in_example():
     source=(ROOT/".env.example").read_text()
     assert "SUPABASE_URL=\n" in source

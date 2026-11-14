@@ -44,8 +44,31 @@ def test_sidebar_order_and_overview_metric_grid(client):
     page = _page(client)
     styles = (PORTAL_ASSETS / "css" / "components.css").read_text(encoding="utf-8")
     assert page.index('data-nav-group="views"') < page.index('data-nav-group="plants"')
+    assert '<span class="ep-nav-item__label">Dashboard</span>' in page
+    assert page.index('data-nav-group="plants"') < page.index('data-nav="security"')
+    assert '<span class="ep-nav-item__label">Overview</span>' in page
     assert ".ep-metrics {\n  display: grid;\n  grid-template-columns: repeat(2, minmax(0, 1fr));\n}" in styles
     assert "@media (max-width: 760px) { .ep-metrics { grid-template-columns: 1fr; } }" in styles
+
+
+def test_security_register_supports_multiple_contacts_and_edit_overlay():
+    security = (PORTAL_ASSETS / "js" / "security.js").read_text(encoding="utf-8")
+    styles = (PORTAL_ASSETS / "css" / "security.css").read_text(encoding="utf-8")
+    for label in ("Site Engineer", "Site Engineer No.", "Engineer Shift", "Guard Name", "Mobile No.", "Guard Shift"):
+        assert label in security
+    assert 'data-security-open-edit' in security
+    assert 'aria-modal="true"' in security
+    assert 'data-security-search' in security and 'data-security-site-filter' in security
+    assert 'data-security-contact-shift="' in security
+    assert 'data-security-add="engineer"' in security and 'data-security-add="guard"' in security
+    assert 'fields.security_contacts = payload.contacts;' in security
+    assert "<th>Actions</th>" not in security
+    assert ".ep-security__site-code {\n  text-align: center;" in styles
+    assert ".ep-security__overlay {" in styles and "overflow-x: hidden;" in styles
+    # The modal's flex child is the table wrapper; without its own sizing the table grows to fit
+    # every plant and pushes Save/Cancel outside the clipped modal, where no user can reach them.
+    assert ".ep-security__modal .ep-pt__table-wrap {" in styles
+    assert ".ep-security__modal .ep-security__scroll {" in styles
 
 
 def test_portal_route_redirects_to_the_app(client):
@@ -100,6 +123,8 @@ def test_every_referenced_asset_exists(client):
     assert referenced, "the page should reference local assets"
     missing = [path for path in sorted(referenced) if not _on_disk(path).is_file()]
     assert missing == [], f"page references files that do not exist: {missing}"
+    assert (PORTAL_ASSETS / "js" / "security.js").is_file()
+    assert (PORTAL_ASSETS / "css" / "security.css").is_file()
 
 
 def test_assets_are_content_hashed_for_cache_busting(client):
@@ -482,13 +507,28 @@ def test_every_portfolio_table_sorts_from_its_column_headings():
 
     # The tables that use it, and the old plants "Sort:" dropdown it replaced.
     table = (PORTAL_ASSETS / "js" / "plants-table.js").read_text(encoding="utf-8")
-    assert "Solar91PortalSort.headerHTML(COLUMNS, ui.sort, \"data-pt-sort\")" in table
+    assert "COLUMNS.map(columnHeaderHTML).join(\"\")" in table
+    assert 'global.Solar91PortalSort.thHTML(column, ui.sort, "data-pt-sort")' in table
     assert "Solar91PortalSort.apply(rows, ui.sort, COLUMNS)" in table
     assert "Sort: plant code" not in table
     liasoning = (PORTAL_ASSETS / "js" / "liasoning.js").read_text(encoding="utf-8")
     assert "Solar91PortalSort.headerHTML(COLUMNS, ui.sort, \"data-lia-sort\")" in liasoning
     issues = (PORTAL_ASSETS / "js" / "site-issues.js").read_text(encoding="utf-8")
-    assert "Solar91PortalSort.headerHTML(COLUMNS, state.columnSort, \"data-issue-sort\")" in issues
+    issue_styles = (PORTAL_ASSETS / "css" / "site-issues.css").read_text(encoding="utf-8")
+    assert 'Solar91PortalSort.thHTML(column, state.columnSort, "data-issue-sort")' in issues
+    assert "ep-issues__column-filter-row" not in issues
+    assert "ep-issues__th-content" in issues and "data-issue-column-filter" in issues
+    assert ".ep-issues__th-content {" in issue_styles and "display: flex;" in issue_styles
+    assert 'data-issue-column-filter-toggle="' in issues
+    assert 'popover="auto"' in issues
+    assert 'data-issue-column-filter-search="' in issues
+    assert 'data-issue-column-filter-option="' in issues
+    assert "function filterColumnOptions(menu, term)" in issues
+    assert ".ep-issues__table-wrap {\n  width: 100%;\n  min-width: 0;\n  overflow: hidden;" in issue_styles
+    assert ".ep-issues__table {\n  width: 100%;\n  border-collapse: collapse;\n  table-layout: fixed;" in issue_styles
+    assert ".ep-issues__table td .ep-issues__date-age {\n  display: block;" in issue_styles
+    # The phone card layout stacks the cells, so it must outrank the desktop per-column percentages.
+    assert ".ep-issues__table td:nth-child(n) { width: 100%; }" in issue_styles
 
 
 def test_sorting_orders_rows_and_keeps_blanks_last():
@@ -551,17 +591,23 @@ def test_details_and_health_header_filters_are_limited_to_head_and_assignee():
     plants = (PORTAL_ASSETS / "js" / "plants-table.js").read_text(encoding="utf-8")
     issues = (PORTAL_ASSETS / "js" / "site-issues.js").read_text(encoding="utf-8")
     assert '["O&M Head", "Assignee"].indexOf(user.role) !== -1' in plants
-    assert "function columnFilterRowHTML()" in plants
-    assert 'data-pt-column-filter="' in plants
+    assert "function columnHeaderHTML(column)" in plants
+    assert 'data-pt-column-filter-toggle="' in plants
+    assert 'data-pt-column-filter-search="' in plants
+    assert 'data-pt-column-filter-option="' in plants
+    assert 'popover="auto"' in plants
+    assert "columnFilterRowHTML" not in plants
+    assert 'data-pt-column-filter="' not in plants
     assert 'FILTERABLE_COLUMNS.some(function (key)' in plants
     assert '["plant", "equipment", "problem", "assignee", "status"]' in issues
-    assert 'data-issue-column-filter="' in issues
     assert "if (state.canEdit && Object.keys(state.columnFilters).some(function (key)" in issues
-    assert 'list="' + "' + listId +" in issues
-    assert '<datalist id="' + "' + listId +" in issues
+    assert 'data-issue-column-filter-toggle="' in issues
+    assert 'popover="auto"' in issues
+    assert 'data-issue-column-filter-search="' in issues
+    assert 'data-issue-column-filter-option="' in issues
     assert "function issueColumnOptions(key)" in issues
     assert "state.rows.forEach(function (issue)" in issues
-    assert 'placeholder="Select or type"' in issues
+    assert 'placeholder="Search options..."' in issues
 
 
 def test_health_occurrence_date_age_uses_calendar_days():
@@ -620,6 +666,9 @@ def test_module_cleaning_board_shows_every_plant_and_opens_one_plants_calendar()
     # What a card carries: cycle ring, the three cycle pips, tables cleaned, assignee.
     for piece in ("ep-wb__ring", "ep-wb__pips", "ep-wb__tables", "ep-wb__assignee", "No tables cleaned"):
         assert piece in board
+    assert 'class="ep-wb__date-label">Last Updated :' in board
+    assert ".ep-wb__date-label {" in styles
+    assert 'font-family: var(--ep-font-mono, "JetBrains Mono", monospace);' in styles
 
     # A card opens that plant's Module Cleaning page.
     assert 'Solar91PortalNav.selectPlantPage(card.getAttribute("data-wb-plant"), "washing")' in board
@@ -1193,7 +1242,83 @@ def test_module_cleaning_board_can_load_a_past_month():
     assert 'data-wb-filter="cycle"' in board
     assert 'data-wb-filter="date"' in board
     assert '(row.cleaned_cycles || []).indexOf(Number(ui.cycle))' in board
-    assert '(row.cleaning_dates || []).indexOf(ui.date)' in board
+    assert "function dateOptions()" in board
+
+
+def test_module_cleaning_board_filters_missing_entries_for_any_past_or_current_date():
+    board = (PORTAL_ASSETS / "js" / "washing-board.js").read_text(encoding="utf-8")
+    assert 'data-wb-filter="entryStatus"' in board
+    assert ">No entry</option>" in board
+    assert '"/api/scheduled/washing/day-activity?day="' in board
+    assert 'ui.entryStatus === "missing"' in board
+    assert 'if (ui.date !== "__all") {' in board
+    assert "No entry · " in board
+
+    script = r"""
+      const fs=require('fs'),vm=require('vm'),assert=require('assert');
+      const source=fs.readFileSync('assets/js/washing-board.js','utf8');
+      function extract(name){
+        const start=source.indexOf('function '+name+'(');
+        assert(start>=0,name+' missing');
+        const open=source.indexOf('{',start);let depth=0,end=-1;
+        for(let i=open;i<source.length;i++){
+          if(source[i]==='{')depth++;
+          else if(source[i]==='}'&&--depth===0){end=i+1;break}
+        }
+        return source.slice(start,end);
+      }
+      const box={
+        st:{month:'2026-10',selectedMonth:'2026-10',today:'2026-10-12'},
+        ui:{date:'__all'},
+        pad2:n=>String(n).padStart(2,'0'),
+        shortDate:s=>s,
+        escape:s=>String(s)
+      };
+      vm.createContext(box);
+      vm.runInContext(extract('dateOptions')+';this.dates=dateOptions;'+
+        extract('entryStatusMatches')+';this.matches=entryStatusMatches',box);
+      const dates=box.dates();
+      assert(dates.includes('value="2026-10-12"'));
+      assert(!dates.includes('value="2026-10-13"'),'future dates must not appear');
+      assert.strictEqual(box.matches('not_reported','missing'),true);
+      for(const status of ['confirmed','awaiting','not_done','rejected'])
+        assert.strictEqual(box.matches(status,'recorded'),true,status);
+      for(const status of ['paused','upcoming','not_reported'])
+        assert.strictEqual(box.matches(status,'recorded'),false,status);
+      assert.strictEqual(box.matches('paused','missing'),false);
+      assert.strictEqual(box.matches('not_reported','__all'),true);
+    """
+    run = subprocess.run(["node", "-e", script], cwd=ROOT, capture_output=True, text=True, timeout=20)
+    assert run.returncode == 0, run.stderr or run.stdout
+
+
+def test_calendar_day_cells_show_saved_washing_table_numbers():
+    calendar = (PORTAL_ASSETS / "js" / "operations-calendar.js").read_text(encoding="utf-8")
+    styles = (PORTAL_ASSETS / "css" / "calendar.css").read_text(encoding="utf-8")
+    assert "renderCalendarEventChip(event, context)" in calendar
+    assert "ep-calendar__event--washing-detail" in calendar
+    assert ".ep-calendar__event-tables {" in styles
+
+    script = r"""
+      const fs=require('fs'),vm=require('vm'),assert=require('assert');
+      const source=fs.readFileSync('assets/js/operations-calendar.js','utf8');
+      const start=source.indexOf('function washingTablesLabel(');
+      assert(start>=0,'washingTablesLabel missing');
+      const open=source.indexOf('{',start);let depth=0,end=-1;
+      for(let i=open;i<source.length;i++){
+        if(source[i]==='{')depth++;
+        else if(source[i]==='}'&&--depth===0){end=i+1;break}
+      }
+      const box={};vm.createContext(box);
+      vm.runInContext(source.slice(start,end)+';this.label=washingTablesLabel',box);
+      const label=box.label;
+      assert.strictEqual(label({tablesCleaned:3,tablesList:'1–2, 4'},{type:'washing'}),'Tables: 1–2, 4');
+      assert.strictEqual(label({tablesCleaned:3,tablesList:''},{type:'washing'}),'Table numbers not recorded');
+      assert.strictEqual(label({tablesCleaned:0,tablesList:''},{type:'washing'}),'');
+      assert.strictEqual(label({tablesCleaned:3,tablesList:'1–2, 4'},{type:'pm'}),'');
+    """
+    run = subprocess.run(["node", "-e", script], cwd=ROOT, capture_output=True, text=True, timeout=20)
+    assert run.returncode == 0, run.stderr or run.stdout
 
 
 def test_health_month_filter_uses_complete_month_bounds():

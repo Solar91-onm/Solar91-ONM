@@ -26,9 +26,10 @@ docs/           deployment runbook, workflow and performance notes
 
 ## Pages
 
-- **Overview**: portfolio tiles, PM and washing compliance, plant comparison, critical issues, recent activity.
+- **Dashboard**: portfolio tiles, PM and washing compliance, plant comparison, critical issues, recent activity.
 - **Plants → a plant**: Details (with Design/MDL, Liasoning and BOM), Health (issues), PM, Washing.
-- **Views**: the same pages for all plants together, plus Movable Assets.
+- **Overview**: operational pages for all plants together, plus Movable Assets.
+- **Security** (below Plants in the sidebar): the role-restricted contacts register for site engineers and guards.
 - **Settings**: team access and work categories.
 
 The server decides what each person can see. O&M Head and Administration see every plant, an Assignee sees their

@@ -6,7 +6,8 @@ function showInstallHelp(message){
   if(!_installHelp.open)_installHelp.showModal();
 }
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();_installEvt=e;});
-_ib.addEventListener('click',async()=>{
+// The portal shell has no in-page install button; without this guard the whole file threw on load.
+if(_ib)_ib.addEventListener('click',async()=>{
   if(!_installEvt){showInstallHelp('Your browser is not offering the automatic install prompt right now. Open this portal in your browser and use its install option:');return;}
   const installEvent=_installEvt;_installEvt=null;
   try{

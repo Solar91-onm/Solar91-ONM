@@ -100,7 +100,7 @@
         if (!term) return false;
         var column = COLUMNS.find(function (item) { return item.key === key; });
         var value = column && column.sort ? column.sort(r) : "";
-        return String(value || "").toLowerCase().indexOf(term) === -1;
+        return String(value || "").trim().toLowerCase() !== term;
       })) return false;
       return true;
     });
@@ -152,15 +152,125 @@
     return !!(user && ["O&M Head", "Assignee"].indexOf(user.role) !== -1);
   }
 
-  function columnFilterRowHTML() {
-    if (!canUseColumnFilters()) return "";
-    return '<tr class="ep-pt__column-filter-row">' + COLUMNS.map(function (column) {
-      return '<th>' + (FILTERABLE_COLUMNS.indexOf(column.key) !== -1
-        ? '<input type="search" data-pt-column-filter="' + column.key + '" value="' +
-          fmt.escape(ui.columnFilters[column.key] || "") + '" placeholder="Filter" aria-label="Filter by ' +
-          fmt.escape(column.label) + '" />'
-        : "") + '</th>';
-    }).join("") + '</tr>';
+  function columnFilterOptions(key) {
+    var column = COLUMNS.find(function (item) { return item.key === key; });
+    var values = Object.create(null);
+    if (!column || !column.sort) return [];
+    allRows.forEach(function (entry) {
+      var value = String(column.sort(entry) || "").trim();
+      if (value) values["$" + value.toLowerCase()] = value;
+    });
+    return Object.keys(values).map(function (valueKey) { return values[valueKey]; })
+      .sort(function (a, b) { return a.localeCompare(b); });
+  }
+
+  function filterColumnOptions(menu, term) {
+    var normalizedTerm = String(term || "").trim().toLowerCase();
+    var visibleCount = 0;
+    Array.prototype.forEach.call(menu.querySelectorAll("[data-pt-column-filter-option]"), function (option) {
+      var visible = !normalizedTerm ||
+        option.textContent.trim().toLowerCase().indexOf(normalizedTerm) !== -1;
+      option.hidden = !visible;
+      if (visible) visibleCount += 1;
+    });
+    var empty = menu.querySelector("[data-pt-column-filter-empty]");
+    if (empty) empty.hidden = visibleCount > 0;
+  }
+
+  function positionColumnFilter(toggle, menu) {
+    var toggleRect = toggle.getBoundingClientRect();
+    var menuRect = menu.getBoundingClientRect();
+    var left = Math.max(8, Math.min(toggleRect.left, global.innerWidth - menuRect.width - 8));
+    var top = toggleRect.bottom + 4;
+    if (top + menuRect.height > global.innerHeight - 8) {
+      top = Math.max(8, toggleRect.top - menuRect.height - 4);
+    }
+    menu.style.left = Math.round(left) + "px";
+    menu.style.top = Math.round(top) + "px";
+  }
+
+  function columnHeaderHTML(column) {
+    var header = global.Solar91PortalSort.thHTML(column, ui.sort, "data-pt-sort");
+    if (!canUseColumnFilters() || FILTERABLE_COLUMNS.indexOf(column.key) === -1) return header;
+
+    var menuId = "ep-pt-filter-menu-" + column.key;
+    var activeFilter = String(ui.columnFilters[column.key] || "");
+    var options = columnFilterOptions(column.key).map(function (value) {
+      return '<button type="button" class="ep-issues__column-filter-option" data-pt-column-filter-option="' +
+        column.key + '" data-pt-column-filter-value="' + fmt.escape(value) + '" aria-pressed="' +
+        (activeFilter.toLowerCase() === value.toLowerCase() ? "true" : "false") + '">' +
+        fmt.escape(value) + "</button>";
+    }).join("");
+    var filter = '<button type="button" class="ep-issues__filter-toggle' +
+      (activeFilter ? " is-filtered" : "") + '" data-pt-column-filter-toggle="' + column.key +
+      '" aria-label="Filter by ' + fmt.escape(column.label) + '" aria-controls="' + menuId +
+      '" aria-expanded="false" title="Filter by ' + fmt.escape(column.label) + '">' +
+      '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4"></path></svg></button>' +
+      '<div id="' + menuId + '" class="ep-issues__column-filter-menu" popover="auto" data-pt-column-filter-menu="' +
+      column.key + '">' +
+      '<input class="ep-issues__column-filter-search" type="search" data-pt-column-filter-search="' +
+      column.key + '" placeholder="Search options..." aria-label="Search ' + fmt.escape(column.label) + ' options" />' +
+      '<div class="ep-issues__column-filter-options">' +
+      '<button type="button" class="ep-issues__column-filter-option" data-pt-column-filter-option="' +
+      column.key + '" data-pt-column-filter-value="" aria-pressed="' +
+      (activeFilter ? "false" : "true") + '">All ' + fmt.escape(column.label) + "</button>" +
+      options + '</div><div class="ep-issues__column-filter-empty" data-pt-column-filter-empty hidden>' +
+      "No matching options</div></div>";
+    header = header.replace("<th", '<th class="ep-issues__th-filtered"');
+    var openEnd = header.indexOf(">") + 1;
+    var closeStart = header.lastIndexOf("</th>");
+    return header.slice(0, openEnd) + '<div class="ep-issues__th-content">' +
+      header.slice(openEnd, closeStart) + filter + "</div>" + header.slice(closeStart);
+  }
+
+  function wireColumnFilterMenus(container) {
+    Array.prototype.forEach.call(container.querySelectorAll("[data-pt-column-filter-menu]"), function (menu) {
+      var key = menu.getAttribute("data-pt-column-filter-menu");
+      var toggle = container.querySelector('[data-pt-column-filter-toggle="' + key + '"]');
+      menu.addEventListener("toggle", function () {
+        var isOpen = menu.matches(":popover-open");
+        if (toggle) toggle.setAttribute("aria-expanded", isOpen ? "true" : "false");
+        if (isOpen) {
+          var search = menu.querySelector("[data-pt-column-filter-search]");
+          if (search) {
+            search.value = "";
+            filterColumnOptions(menu, "");
+          }
+        }
+      });
+      var search = menu.querySelector("[data-pt-column-filter-search]");
+      if (search) {
+        search.addEventListener("input", function () {
+          filterColumnOptions(menu, search.value);
+        });
+      }
+    });
+
+    Array.prototype.forEach.call(container.querySelectorAll("[data-pt-column-filter-toggle]"), function (toggle) {
+      toggle.addEventListener("click", function () {
+        var key = toggle.getAttribute("data-pt-column-filter-toggle");
+        var menu = container.querySelector('[data-pt-column-filter-menu="' + key + '"]');
+        if (!menu) return;
+        if (menu.matches(":popover-open")) {
+          menu.hidePopover();
+        } else {
+          menu.showPopover();
+          positionColumnFilter(toggle, menu);
+          var search = menu.querySelector("[data-pt-column-filter-search]");
+          if (search) search.focus();
+        }
+      });
+    });
+
+    Array.prototype.forEach.call(container.querySelectorAll("[data-pt-column-filter-option]"), function (option) {
+      option.addEventListener("click", function () {
+        var key = option.getAttribute("data-pt-column-filter-option");
+        var menu = option.closest("[data-pt-column-filter-menu]");
+        if (menu && menu.matches(":popover-open")) menu.hidePopover();
+        ui.columnFilters[key] = option.getAttribute("data-pt-column-filter-value") || "";
+        render(container);
+      });
+    });
   }
 
   function cctvUrl(plant) {
@@ -331,8 +441,8 @@
                   ? COLUMNS.map(function (c) {
                       return "<th" + (c.align === "num" ? ' class="num"' : "") + ">" + c.label + "</th>";
                     }).join("")
-                  : global.Solar91PortalSort.headerHTML(COLUMNS, ui.sort, "data-pt-sort")) +
-              "</tr>" + (single ? "" : columnFilterRowHTML()) + "</thead>" +
+                  : COLUMNS.map(columnHeaderHTML).join("")) +
+              "</tr></thead>" +
               "<tbody>" +
                 (rows.length
                   ? rows.map(rowHTML).join("")
@@ -429,24 +539,7 @@
 
   // ─── Wiring ──────────────────────────────────────────────────────────
   function wire(container) {
-    container.querySelectorAll("[data-pt-column-filter]").forEach(function (input) {
-      input.addEventListener("input", function () {
-        var key = input.getAttribute("data-pt-column-filter");
-        var pos = input.selectionStart;
-        ui.columnFilters[key] = input.value;
-        if (searchTimer) clearTimeout(searchTimer);
-        searchTimer = setTimeout(function () {
-          searchTimer = null;
-          if (!container.isConnected) return;
-          render(container);
-          var again = container.querySelector('[data-pt-column-filter="' + key + '"]');
-          if (again) {
-            again.focus();
-            try { again.setSelectionRange(pos, pos); } catch (_) {}
-          }
-        }, 120);
-      });
-    });
+    wireColumnFilterMenus(container);
 
     var search = container.querySelector("[data-pt-search]");
     if (search) {

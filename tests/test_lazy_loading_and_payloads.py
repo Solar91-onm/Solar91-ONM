@@ -35,7 +35,7 @@ SHELL_SCRIPTS = ["format.js", "portal-api.js", "data-adapter.js", "modules.js",
 # Pages, fetched when first opened. The calendar alone is a quarter of the old payload.
 LAZY_MODULES = ["table-sort", "register-io", "plant-details", "plants-table", "site-issues",
                 "movable-assets", "bom", "design", "liasoning", "operations-calendar",
-                "washing-board", "categories", "settings"]
+                "washing-board", "categories", "security", "settings"]
 
 
 def _script_tags(page: str) -> list[str]:

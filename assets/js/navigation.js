@@ -4,7 +4,7 @@
  * Handles:
  *  - Overview (existing dashboard)
  *  - Plants group (expand/collapse, search, plant list, per-plant sub-nav)
- *  - Views group (expand/collapse, 5 portfolio-wide nav items)
+ *  - Overview group (expand/collapse, portfolio-wide nav items)
  *  - Active-state highlighting and content routing
  *
  * Role-based tab visibility from Phase 1 is preserved via ROLE_TAB_VISIBILITY.
@@ -36,7 +36,7 @@
     { id: "bom", label: "BOM" }
   ];
 
-  // "*" = every page. A list = only those plant pages, and no portfolio-wide Views
+  // "*" = every page. A list = only those plant pages, and no portfolio-wide Overview
   // or Login access. Data scope (one plant for a Site Engineer) is enforced by the server.
   var ROLE_TAB_VISIBILITY = {
     "O&M Head":        "*",
@@ -79,6 +79,125 @@
     expandedPlants: {},          // { siteCode: true } plants whose sub-menu is open (user's choice)
     detailsOpen: { plant: {}, view: false }   // Details sub-sections dropdown: per plant ({siteCode: true}) and for Views; closed until the user opens it
   };
+  var HISTORY_KEY = "solar91PortalNavigation";
+  var plantsLoaded = false;
+
+  function navigationSnapshot() {
+    return {
+      version: 1,
+      activeView: navState.activeView,
+      selectedPlant: navState.selectedPlant,
+      selectedSubPage: navState.selectedSubPage,
+      selectedViewPage: navState.selectedViewPage,
+      selectedDetailSection: navState.selectedDetailSection,
+      selectedRange: navState.selectedRange ? {
+        startDate: navState.selectedRange.startDate,
+        endDate: navState.selectedRange.endDate
+      } : null
+    };
+  }
+
+  function writeNavigationHistory(replace) {
+    var current = global.history.state;
+    var next = current && typeof current === "object" ? Object.assign({}, current) : {};
+    var previous = next[HISTORY_KEY];
+    var snapshot = navigationSnapshot();
+    if (!replace && previous && JSON.stringify(previous) === JSON.stringify(snapshot)) return;
+    next[HISTORY_KEY] = snapshot;
+    if (replace) global.history.replaceState(next, "");
+    else global.history.pushState(next, "");
+  }
+
+  function validHistorySnapshot(snapshot) {
+    if (!snapshot || snapshot.version !== 1) return null;
+    var details = snapshot.selectedDetailSection || "details";
+    if (details !== "details" && !DETAIL_SECTIONS.some(function (item) { return item.id === details; })) {
+      details = "details";
+    }
+    if (snapshot.activeView === "overview" || snapshot.activeView === "settings" ||
+        snapshot.activeView === "security") {
+      return {
+        activeView: snapshot.activeView,
+        selectedPlant: null,
+        selectedSubPage: null,
+        selectedViewPage: null,
+        selectedDetailSection: "details",
+        selectedRange: null
+      };
+    }
+    if (snapshot.activeView === "view-sub" &&
+        VIEW_SUB_PAGES.some(function (item) { return item.id === snapshot.selectedViewPage; })) {
+      return {
+        activeView: "view-sub",
+        selectedPlant: null,
+        selectedSubPage: null,
+        selectedViewPage: snapshot.selectedViewPage,
+        selectedDetailSection: snapshot.selectedViewPage === "details" ? details : "details",
+        selectedRange: snapshot.selectedRange &&
+          typeof snapshot.selectedRange.startDate === "string" &&
+          typeof snapshot.selectedRange.endDate === "string"
+          ? { startDate: snapshot.selectedRange.startDate, endDate: snapshot.selectedRange.endDate }
+          : null
+      };
+    }
+    if (snapshot.activeView === "plant-sub" && typeof snapshot.selectedPlant === "string" &&
+        snapshot.selectedPlant && PLANT_SUB_PAGES.some(function (item) { return item.id === snapshot.selectedSubPage; })) {
+      return {
+        activeView: "plant-sub",
+        selectedPlant: snapshot.selectedPlant,
+        selectedSubPage: snapshot.selectedSubPage,
+        selectedViewPage: null,
+        selectedDetailSection: snapshot.selectedSubPage === "details" ? details : "details",
+        selectedRange: snapshot.selectedRange &&
+          typeof snapshot.selectedRange.startDate === "string" &&
+          typeof snapshot.selectedRange.endDate === "string"
+          ? { startDate: snapshot.selectedRange.startDate, endDate: snapshot.selectedRange.endDate }
+          : null
+      };
+    }
+    return null;
+  }
+
+  function setNavigationState(snapshot) {
+    navState.activeView = snapshot.activeView;
+    navState.selectedPlant = snapshot.selectedPlant;
+    navState.selectedSubPage = snapshot.selectedSubPage;
+    navState.selectedViewPage = snapshot.selectedViewPage;
+    navState.selectedDetailSection = snapshot.selectedDetailSection;
+    navState.selectedRange = snapshot.selectedRange;
+    if (snapshot.activeView === "plant-sub") {
+      navState.expandedPlants[snapshot.selectedPlant] = true;
+      navState.detailsOpen.plant[snapshot.selectedPlant] = snapshot.selectedDetailSection !== "details";
+      setGroupExpanded("plants", true);
+    } else if (snapshot.activeView === "view-sub") {
+      navState.detailsOpen.view = snapshot.selectedDetailSection !== "details";
+      setGroupExpanded("views", true);
+    }
+  }
+
+  function setOverviewState() {
+    navState.activeView = "overview";
+    navState.selectedPlant = null;
+    navState.selectedSubPage = null;
+    navState.selectedViewPage = null;
+    navState.selectedDetailSection = "details";
+    navState.selectedRange = null;
+  }
+
+  function restoreNavigationHistory(state) {
+    var snapshot = state && typeof state === "object"
+      ? validHistorySnapshot(state[HISTORY_KEY]) : null;
+    if (snapshot && (!plantsLoaded || snapshot.activeView !== "plant-sub" ||
+        allPlants.some(function (plant) { return plant.siteCode === snapshot.selectedPlant; }))) {
+      setNavigationState(snapshot);
+    } else {
+      setOverviewState();
+    }
+    renderPlantList(document.querySelector("[data-plant-search]")?.value || "");
+    updateContentArea();
+    updateHighlights();
+    writeNavigationHistory(true);
+  }
 
   var CHEVRON_SVG = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg>';
 
@@ -202,6 +321,7 @@
     navState.activeView = "plant-sub";
     navState.selectedViewPage = null;
 
+    writeNavigationHistory(false);
     setGroupExpanded("plants", true);
     renderPlantList(document.querySelector("[data-plant-search]")?.value || "");
     updateContentArea();
@@ -211,7 +331,7 @@
   // ─── View selection ─────────────────────────────────────────────────
   function selectView(pageId, dateRange, detailSection) {
     if (restrictedPages()) {
-      // No portfolio-wide Views for this role: open the same page for their own plant instead.
+      // No portfolio-wide Overview for this role: open the same page for their own plant instead.
       if (allPlants.length === 1 && isPlantPageAllowed(pageId)) {
         selectPlantPage(allPlants[0].siteCode, pageId, dateRange);
       } else {
@@ -227,6 +347,7 @@
     navState.selectedSubPage = null;
     navState.selectedRange = dateRange || null;
 
+    writeNavigationHistory(false);
     renderPlantList(document.querySelector("[data-plant-search]")?.value || "");
     updateContentArea();
     updateHighlights();
@@ -249,6 +370,7 @@
     navState.selectedViewPage = null;
     navState.selectedRange = dateRange || null;
     setGroupExpanded("plants", true);
+    writeNavigationHistory(false);
     renderPlantList(document.querySelector("[data-plant-search]")?.value || "");
     updateContentArea();
     updateHighlights();
@@ -261,12 +383,9 @@
 
   // ─── Activate Overview ──────────────────────────────────────────────
   function activateOverview() {
-    navState.activeView = "overview";
-    navState.selectedPlant = null;
-    navState.selectedSubPage = null;
-    navState.selectedViewPage = null;
-    navState.selectedRange = null;
+    setOverviewState();
 
+    writeNavigationHistory(false);
     renderPlantList(document.querySelector("[data-plant-search]")?.value || "");
     updateContentArea();
     updateHighlights();
@@ -285,6 +404,7 @@
    */
   function modulesForState() {
     if (navState.activeView === "overview") return [];
+    if (navState.activeView === "security") return ["security"];
     if (navState.activeView === "settings") return ["settings"];
 
     var plantCode = navState.activeView === "plant-sub" ? navState.selectedPlant : null;
@@ -309,6 +429,7 @@
 
   /** Where the page being opened draws itself, so a skeleton can stand in while its script loads. */
   function hostForState() {
+    if (navState.activeView === "security") return document.querySelector("[data-security-host]");
     if (navState.activeView === "settings") return document.querySelector("[data-settings-host]");
     var plantCode = navState.activeView === "plant-sub" ? navState.selectedPlant : null;
     var pageId = navState.activeView === "plant-sub" ? navState.selectedSubPage
@@ -377,8 +498,13 @@
 
   // Last guard for restricted roles, whatever path changed navState.
   function enforceRolePages() {
+    if (navState.activeView === "security" &&
+        currentRole !== "O&M Head" && currentRole !== "Administration") {
+      navState.activeView = "overview";
+    }
     if (!restrictedPages()) return;
-    if (navState.activeView === "view-sub" || navState.activeView === "settings") {
+    if (navState.activeView === "view-sub" || navState.activeView === "settings" ||
+        navState.activeView === "security") {
       navState.activeView = "overview";
       navState.selectedViewPage = null;
     }
@@ -399,6 +525,7 @@
     var healthEl = document.querySelector('[data-tab-view="health"]');
     var movableAssetsEl = document.querySelector('[data-tab-view="movable-assets"]');
     var detailsEl = document.querySelector('[data-tab-view="plant-details"]');
+    var securityEl = document.querySelector('[data-tab-view="security"]');
     var settingsEl = document.querySelector('[data-tab-view="settings"]');
     var placeholderEl = document.querySelector('[data-tab-view="placeholder"]');
     var titleEl = document.querySelector("[data-topbar-title]");
@@ -407,14 +534,14 @@
     var phContext = document.querySelector("[data-placeholder-context]");
 
     function showOnly(el) {
-      [overviewEl, tableEl, calendarEl, washingBoardEl, healthEl, movableAssetsEl, detailsEl, settingsEl, placeholderEl].forEach(function (section) {
+      [overviewEl, tableEl, calendarEl, washingBoardEl, healthEl, movableAssetsEl, detailsEl, securityEl, settingsEl, placeholderEl].forEach(function (section) {
         if (section) section.classList.toggle("is-visible", section === el);
       });
     }
 
     if (navState.activeView === "overview") {
       showOnly(overviewEl);
-      if (titleEl) titleEl.textContent = "Overview";
+      if (titleEl) titleEl.textContent = "Dashboard";
       try { sessionStorage.setItem("solar91Portal.navState", JSON.stringify(navState)); } catch (_) {}
       return;
     }
@@ -424,6 +551,15 @@
       navState.selectedRange = null;
       if (global.Solar91PortalSettings) {
         global.Solar91PortalSettings.render(document.querySelector("[data-settings-host]"));
+      }
+      try { sessionStorage.setItem("solar91Portal.navState", JSON.stringify(navState)); } catch (_) {}
+      return;
+    }
+    if (navState.activeView === "security") {
+      showOnly(securityEl);
+      if (titleEl) titleEl.textContent = "Security";
+      if (global.Solar91PortalSecurity) {
+        global.Solar91PortalSecurity.show(document.querySelector("[data-security-host]"));
       }
       try { sessionStorage.setItem("solar91Portal.navState", JSON.stringify(navState)); } catch (_) {}
       return;
@@ -551,6 +687,10 @@
         btn.classList.toggle("is-active", navState.activeView === "settings");
         return;
       }
+      if (nav === "security") {
+        btn.classList.toggle("is-active", navState.activeView === "security");
+        return;
+      }
       if (nav.indexOf("plant:") === 0) return; // rendered with the selected plant sub-navigation
 
       var isActive = false;
@@ -570,7 +710,7 @@
     var plantsToggle = document.querySelector('[data-nav-group="plants"] .ep-nav-group__toggle');
     if (plantsToggle) plantsToggle.classList.toggle("has-active-child", navState.activeView === "plant-sub");
 
-    // Views group header highlight
+    // Overview group header highlight
     var viewsToggle = document.querySelector('[data-nav-group="views"] .ep-nav-group__toggle');
     if (viewsToggle) viewsToggle.classList.toggle("has-active-child", navState.activeView === "view-sub");
   }
@@ -583,9 +723,15 @@
     if (views) views.hidden = restricted;
     var settings = document.querySelector(".ep-sidebar__settings");
     if (settings) settings.hidden = restricted;
+    var security = document.querySelector('[data-nav="security"]');
+    if (security) security.hidden = role !== "O&M Head" && role !== "Administration";
+    if (navState.activeView === "security" && security && security.hidden) {
+      setOverviewState();
+    }
     renderPlantList(document.querySelector("[data-plant-search]")?.value || "");
     updateContentArea();
     updateHighlights();
+    writeNavigationHistory(true);
   }
 
   // ─── Wire all interactions ──────────────────────────────────────────
@@ -600,6 +746,20 @@
       navState.selectedSubPage = null;
       navState.selectedViewPage = null;
       navState.selectedRange = null;
+      writeNavigationHistory(false);
+      renderPlantList(document.querySelector("[data-plant-search]")?.value || "");
+      updateContentArea();
+      updateHighlights();
+    });
+    var securityBtn = document.querySelector('[data-nav="security"]');
+    if (securityBtn) securityBtn.addEventListener("click", function () {
+      if (currentRole !== "O&M Head" && currentRole !== "Administration") return;
+      navState.activeView = "security";
+      navState.selectedPlant = null;
+      navState.selectedSubPage = null;
+      navState.selectedViewPage = null;
+      navState.selectedRange = null;
+      writeNavigationHistory(false);
       renderPlantList(document.querySelector("[data-plant-search]")?.value || "");
       updateContentArea();
       updateHighlights();
@@ -656,6 +816,7 @@
             if (parts[2] === "details" && parts[3]) navState.detailsOpen.plant[parts[1]] = true;   // keep the chosen section visible
             navState.activeView = "plant-sub";
             navState.selectedViewPage = null;
+            writeNavigationHistory(false);
             renderPlantList(searchInput ? searchInput.value : "");
             updateContentArea();
             updateHighlights();
@@ -675,7 +836,8 @@
               navState.selectedPlant = null;
               navState.selectedSubPage = null;
               if (navState.activeView === "plant-sub") {
-                navState.activeView = "overview";
+                setOverviewState();
+                writeNavigationHistory(false);
                 updateContentArea();
               }
               renderPlantList(searchInput ? searchInput.value : "");
@@ -688,14 +850,14 @@
       });
     }
 
-    // Views > Details dropdown arrow (markup in index.html)
+    // Overview > Details dropdown arrow (markup in index.html)
     var viewsToggle = document.querySelector('[data-details-toggle="view"]');
     if (viewsToggle) viewsToggle.addEventListener("click", function (ev) {
       ev.stopPropagation();
       setDetailsOpen("view", !isDetailsOpen("view"));
     });
 
-    // Views sub-nav items (static in HTML)
+    // Overview sub-nav items (static in HTML)
     document.querySelectorAll('[data-nav-group="views"] [data-nav]').forEach(function (btn) {
       btn.addEventListener("click", function () {
         var nav = btn.getAttribute("data-nav");
@@ -715,19 +877,30 @@
       });
     }
 
-    // Restore state
-    var initial = "overview";
-    try {
-      var stored = sessionStorage.getItem("solar91Portal.activeTab");
-      if (stored === "overview") initial = "overview";
-    } catch (_) {}
-    activateOverview();
+    global.addEventListener("popstate", function (event) {
+      restoreNavigationHistory(event.state);
+    });
+    var initialState = global.history.state && typeof global.history.state === "object"
+      ? validHistorySnapshot(global.history.state[HISTORY_KEY]) : null;
+    if (initialState) setNavigationState(initialState);
+    else {
+      setOverviewState();
+      writeNavigationHistory(true);
+    }
   }
 
   // Called by app.js after catalog loads
   function loadPlants() {
     data.listPlants().then(function (plants) {
       populatePlantList(plants);
+      plantsLoaded = true;
+      if (navState.activeView === "plant-sub" &&
+          !allPlants.some(function (plant) { return plant.siteCode === navState.selectedPlant; })) {
+        setOverviewState();
+        updateContentArea();
+        updateHighlights();
+        writeNavigationHistory(true);
+      }
     });
   }
 

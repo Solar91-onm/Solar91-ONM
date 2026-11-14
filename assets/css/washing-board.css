@@ -127,6 +127,13 @@
   color: var(--ep-text-muted);
 }
 .ep-wb__date { font-size: 12px; color: var(--ep-text-muted); }
+.ep-wb__date-label {
+  margin-right: 5px;
+  color: var(--ep-text-faint);
+  font-family: var(--ep-font-mono, "JetBrains Mono", monospace);
+  font-size: 9px;
+  font-weight: 500;
+}
 
 .ep-wb__body { display: flex; align-items: center; gap: 14px; }
 .ep-wb__gauge { position: relative; flex: 0 0 auto; width: 64px; height: 64px; }
@@ -169,11 +176,20 @@
 
 .ep-wb__foot {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
   padding-top: 9px;
   border-top: 1px dashed var(--ep-border-soft, #e5e7eb);
 }
+.ep-wb__entry-note {
+  flex: 0 0 100%;
+  color: var(--ep-amber, #b45309);
+  font-size: 10px;
+  font-weight: 600;
+}
+.ep-wb__entry-note--recorded { color: var(--ep-green, #15803d); }
+.ep-wb__entry-note--paused { color: var(--ep-text-faint); }
 .ep-wb__pill {
   padding: 3px 10px;
   border-radius: 999px;

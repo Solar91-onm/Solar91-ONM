@@ -1011,23 +1011,6 @@
   overflow-wrap: anywhere;
 }
 .ep-pt__table thead th.num { text-align: center; }
-.ep-pt__table .ep-pt__column-filter-row th { padding: 4px; }
-.ep-pt__column-filter-row input {
-  width: 100%;
-  min-width: 0;
-  padding: 5px 4px;
-  border: 1px solid var(--ep-border);
-  border-radius: var(--ep-radius-sm);
-  background: var(--ep-bg);
-  color: var(--ep-text);
-  font: inherit;
-  font-size: 10px;
-  text-transform: none;
-}
-.ep-pt__column-filter-row input:focus-visible {
-  outline: 2px solid var(--ep-accent-ring);
-  border-color: var(--ep-accent);
-}
 .ep-pt__table tbody td {
   padding: 7px 6px;
   border-bottom: 1px solid var(--ep-border-soft);

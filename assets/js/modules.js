@@ -20,6 +20,7 @@
   /** What each page needs, including the modules those modules call into. */
   var NEEDS = {
     "plants-table": ["table-sort", "plant-details"],
+    security: [],
     liasoning: ["table-sort"],
     bom: ["table-sort"],
     "site-issues": ["table-sort", "register-io"],

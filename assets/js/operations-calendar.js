@@ -151,6 +151,34 @@
     return "ep-calendar__event--pending";
   }
 
+  function washingTablesLabel(event, context) {
+    if (context.type !== "washing" || event.tablesCleaned === null ||
+        event.tablesCleaned === undefined) return "";
+    var count = Number(event.tablesCleaned);
+    if (!isFinite(count) || count <= 0) return "";
+    var tables = String(event.tablesList || "").trim();
+    return tables ? "Tables: " + tables : "Table numbers not recorded";
+  }
+
+  function eventCellDescription(event, context) {
+    var title = String(event.title || "");
+    var tables = washingTablesLabel(event, context);
+    return tables ? title + " · " + tables : title;
+  }
+
+  function renderCalendarEventChip(event, context) {
+    var tables = washingTablesLabel(event, context);
+    var title = String(event.title || "");
+    return '<span class="ep-calendar__event ' + statusClass(event.status) +
+      (tables ? " ep-calendar__event--washing-detail" : "") +
+      '" title="' + escape(eventCellDescription(event, context)) + '">' +
+      (tables
+        ? '<span class="ep-calendar__event-title">' + escape(title) + "</span>" +
+          '<span class="ep-calendar__event-tables">' + escape(tables) + "</span>"
+        : escape(title)) +
+      "</span>";
+  }
+
   function visibleEvents(state) {
     var term = state.search.trim().toLowerCase();
     return state.events.filter(function (event) {
@@ -533,7 +561,7 @@
     tooltip.dataset.date = "";
   }
 
-  function renderCalendarGrid(state, events, hoverEnabled, hoverId) {
+  function renderCalendarGrid(state, events, hoverEnabled, hoverId, context) {
     var parts = monthParts(state.month);
     var firstDay = new Date(parts.year, parts.month - 1, 1).getDay();
     var daysInMonth = new Date(parts.year, parts.month, 0).getDate();
@@ -565,7 +593,7 @@
       var isToday = date === monthKey(new Date()) + "-" + pad2(new Date().getDate());
       var tooltip = date
         ? (state.tooltips[date] || (dayEvents.length
-          ? dayEvents.map(function (event) { return event.title; }).join("; ")
+          ? dayEvents.map(function (event) { return eventCellDescription(event, context); }).join("; ")
           : "No module cleaning report or cycle deadline recorded for this date."))
         : "";
       var classes = "ep-calendar__day";
@@ -582,8 +610,7 @@
         '><span class="ep-calendar__day-number">' + (inMonth ? dayNumber : "") + "</span>" +
         (dayEvents.length
           ? '<span class="ep-calendar__day-events">' + dayEvents.slice(0, 2).map(function (event) {
-              return '<span class="ep-calendar__event ' + statusClass(event.status) + '">' +
-                escape(event.title) + "</span>";
+              return renderCalendarEventChip(event, context);
             }).join("") +
             (dayEvents.length > 2
               ? '<span class="ep-calendar__more">+' + (dayEvents.length - 2) + " more</span>"
@@ -1576,7 +1603,7 @@
         '<p>Calendar could not be loaded: ' + escape(state.error) + '</p>' +
         '<button type="button" data-calendar-action="retry">Try again</button></div>';
     } else {
-      content = renderCalendarGrid(state, events, hoverEnabled, hoverId);
+      content = renderCalendarGrid(state, events, hoverEnabled, hoverId, context);
     }
     var showSetupButton = state.liveWashing && state.washingSetup &&
       context.plantCode && canManageWashing();
@@ -1786,7 +1813,7 @@
         });
         state.tooltips = {};
         events.forEach(function (event) {
-          var detail = event.title + " · Cycle " + event.cycleNo + " · " + event.status;
+          var detail = eventCellDescription(event, context) + " · Cycle " + event.cycleNo + " · " + event.status;
           if (event.reportedBy) detail += " · " + event.reportedBy;
           if (!state.tooltips[event.date]) state.tooltips[event.date] = [];
           state.tooltips[event.date].push(detail);

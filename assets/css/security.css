@@ -1,0 +1,249 @@
+.ep-security__open { margin-left: auto; }
+.ep-security__scroll { max-height: none; overflow-x: hidden; overflow-y: visible; }
+.ep-security__table { width: 100%; min-width: 0; table-layout: fixed; }
+.ep-security__table th:nth-child(1),
+.ep-security__table td:nth-child(1) { width: 12%; }
+.ep-security__table th:nth-child(2),
+.ep-security__table td:nth-child(2) { width: 18%; }
+.ep-security__table th:nth-child(3),
+.ep-security__table td:nth-child(3) { width: 13%; }
+.ep-security__table th:nth-child(4),
+.ep-security__table td:nth-child(4) { width: 10%; }
+.ep-security__table th:nth-child(5),
+.ep-security__table td:nth-child(5) { width: 18%; }
+.ep-security__table th:nth-child(6),
+.ep-security__table td:nth-child(6) { width: 13%; }
+.ep-security__table th:nth-child(7),
+.ep-security__table td:nth-child(7) { width: 16%; }
+.ep-security__table tbody td {
+  height: auto;
+  min-width: 0;
+  overflow: visible;
+  vertical-align: middle;
+  overflow-wrap: anywhere;
+}
+.ep-security__site-code {
+  text-align: center;
+  vertical-align: middle !important;
+}
+.ep-security__site-code .ep-pt__code { font-size: 11px; font-weight: 700; }
+.ep-security__site-actions { display: grid; gap: 5px; margin-top: 8px; }
+.ep-security__site-actions button {
+  padding: 4px 5px;
+  border: 1px solid var(--ep-border);
+  border-radius: var(--ep-radius-sm);
+  background: var(--ep-bg);
+  color: var(--ep-text-muted);
+  font: inherit;
+  font-size: 9px;
+  cursor: pointer;
+}
+.ep-security__site-actions button:hover { border-color: var(--ep-accent); color: var(--ep-accent-strong); }
+.ep-security__site-actions button:disabled,
+.ep-security__remove:disabled { opacity: .55; cursor: not-allowed; }
+.ep-security__stack { display: grid; min-width: 0; gap: 6px; }
+.ep-security__entry {
+  display: flex;
+  align-items: center;
+  min-height: 34px;
+  overflow-wrap: anywhere;
+}
+.ep-security__name-entry { display: flex; align-items: center; min-width: 0; gap: 4px; }
+.ep-security__input {
+  width: 100%;
+  min-width: 0;
+  min-height: 34px;
+  padding: 5px 7px;
+  border: 1px solid var(--ep-border);
+  border-radius: var(--ep-radius-sm);
+  background: var(--ep-bg);
+  color: var(--ep-text);
+  font: inherit;
+  font-size: 11px;
+}
+.ep-security__input:focus,
+.ep-security__shift:focus {
+  outline: 0;
+  border-color: var(--ep-accent);
+  box-shadow: 0 0 0 3px var(--ep-accent-ring);
+}
+.ep-security__input--mobile {
+  font-family: var(--ep-font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.ep-security__remove {
+  flex: 0 0 24px;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--ep-bg-muted);
+  color: var(--ep-text-muted);
+  font: inherit;
+  cursor: pointer;
+}
+.ep-security__remove:hover { background: var(--ep-red-soft); color: var(--ep-red); }
+.ep-security__shift {
+  width: 100%;
+  min-width: 0;
+  min-height: 34px;
+  padding: 4px 6px;
+  border: 1px solid var(--ep-border);
+  border-radius: var(--ep-radius-sm);
+  background: var(--ep-bg);
+  color: var(--ep-text);
+  font: inherit;
+  font-size: 11px;
+}
+.ep-security__shift-label {
+  display: inline-flex;
+  align-items: center;
+  min-height: 25px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 650;
+}
+.ep-security__shift-label.is-day { background: var(--ep-accent-soft); color: var(--ep-accent-strong); }
+.ep-security__shift-label.is-night { background: #edf0f7; color: #485b88; }
+.ep-security__notice {
+  padding: 10px 18px;
+  border-bottom: 1px solid var(--ep-border-soft);
+  color: var(--ep-accent-strong);
+  font-size: var(--ep-fs-sm);
+}
+.ep-security__notice.is-error { color: var(--ep-red); }
+.ep-security__overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(14, 21, 18, .42);
+}
+.ep-security__modal {
+  display: flex;
+  flex-direction: column;
+  width: min(1440px, 100%);
+  max-height: calc(100vh - 32px);
+  overflow: hidden;
+  border-radius: var(--ep-radius-lg);
+  background: var(--ep-bg);
+  box-shadow: var(--ep-shadow-pop);
+}
+.ep-security__modal-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 20px 12px;
+}
+.ep-security__modal-head h2 { margin: 0; font-size: var(--ep-fs-xl); color: var(--ep-text-strong); }
+.ep-security__modal-head p { margin: 4px 0 0; color: var(--ep-text-muted); font-size: var(--ep-fs-sm); }
+.ep-security__close {
+  flex: 0 0 32px;
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: var(--ep-radius-sm);
+  background: transparent;
+  color: var(--ep-text-muted);
+  font-size: 22px;
+  cursor: pointer;
+}
+.ep-security__close:hover { background: var(--ep-bg-muted); }
+.ep-security__filters {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(200px, 320px);
+  gap: 10px;
+  padding: 0 20px 12px;
+}
+.ep-security__filters label { display: grid; gap: 4px; color: var(--ep-text-muted); font-size: var(--ep-fs-xs); font-weight: 600; }
+.ep-security__filters input,
+.ep-security__filters select {
+  width: 100%;
+  min-width: 0;
+  min-height: 36px;
+  padding: 6px 9px;
+  border: 1px solid var(--ep-border);
+  border-radius: var(--ep-radius-sm);
+  background: var(--ep-bg);
+  color: var(--ep-text);
+  font: inherit;
+}
+.ep-security__filters input:focus,
+.ep-security__filters select:focus { outline: 0; border-color: var(--ep-accent); box-shadow: 0 0 0 3px var(--ep-accent-ring); }
+/* The modal's flex child is the table wrapper, not the scroller inside it. Without its own
+   flex sizing it grows to fit every plant and pushes the Save footer outside the clipped modal. */
+.ep-security__modal .ep-pt__table-wrap {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.ep-security__modal .ep-security__scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  border-top: 1px solid var(--ep-border-soft);
+}
+.ep-security__modal-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 20px 16px;
+  border-top: 1px solid var(--ep-border-soft);
+}
+.ep-security__cancel,
+.ep-security__save {
+  min-height: 34px;
+  padding: 6px 12px;
+  border: 1px solid var(--ep-border);
+  border-radius: var(--ep-radius-sm);
+  background: var(--ep-bg);
+  color: var(--ep-text);
+  font: inherit;
+  font-size: var(--ep-fs-sm);
+  font-weight: 600;
+  cursor: pointer;
+}
+.ep-security__save { border-color: var(--ep-accent); background: var(--ep-accent); color: #fff; }
+.ep-security__save:hover { background: var(--ep-accent-strong); }
+.ep-security__cancel:hover { background: var(--ep-bg-muted); }
+.ep-security__cancel:disabled,
+.ep-security__save:disabled,
+.ep-security__close:disabled { opacity: .55; cursor: not-allowed; }
+@media (max-width: 760px) {
+  .ep-security__scroll { max-height: none; overflow: visible; }
+  .ep-security__table,
+  .ep-security__table tbody,
+  .ep-security__table tr,
+  .ep-security__table td { display: block; width: 100%; }
+  .ep-security__table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); }
+  .ep-security__table tbody { display: grid; gap: 10px; }
+  .ep-security__table tr { padding: 8px 12px; border: 1px solid var(--ep-border-soft); border-radius: var(--ep-radius-md); }
+  .ep-security__table tbody td {
+    display: grid;
+    grid-template-columns: minmax(112px, 34%) minmax(0, 1fr);
+    gap: 8px;
+    width: 100% !important;
+    padding: 6px 0;
+    border: 0;
+    text-align: left;
+  }
+  .ep-security__table tbody td::before {
+    content: attr(data-label);
+    color: var(--ep-text-muted);
+    font-size: var(--ep-fs-xs);
+    font-weight: 650;
+  }
+  .ep-security__site-code { text-align: left; }
+  .ep-security__site-code .ep-pt__code { text-align: left; }
+  .ep-security__modal { max-height: calc(100vh - 16px); }
+  .ep-security__filters { grid-template-columns: 1fr; padding-right: 14px; padding-left: 14px; }
+  .ep-security__modal-head { padding-right: 14px; padding-left: 14px; }
+  .ep-security__modal-foot { padding-right: 14px; padding-left: 14px; }
+}
