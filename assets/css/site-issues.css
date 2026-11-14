@@ -655,9 +655,9 @@
 .ep-issues__table th:nth-child(3),
 .ep-issues__table td:nth-child(3) { width: 9%; }
 .ep-issues__table th:nth-child(4),
-.ep-issues__table td:nth-child(4) { width: 8%; }
+.ep-issues__table td:nth-child(4) { width: 14%; }
 .ep-issues__table th:nth-child(5),
-.ep-issues__table td:nth-child(5) { width: 14%; }
+.ep-issues__table td:nth-child(5) { width: 8%; }
 .ep-issues__table th:nth-child(6),
 .ep-issues__table td:nth-child(6) { width: 8%; }
 .ep-issues__table th:nth-child(7),
@@ -815,7 +815,7 @@
   font-weight: 500;
   white-space: nowrap;
 }
-/* Column order: Plant, Equipment, Sub-problem, Maker, Description, dates, assignee, status, ID, Action. */
+/* Column order: Plant, Equipment, Sub-problem, Description, Maker, dates, assignee, status, ID, Action. */
 .ep-issues__problem { line-height: 1.4; }
 .ep-issues__date { white-space: nowrap; font-variant-numeric: tabular-nums; }
 

@@ -331,8 +331,8 @@
     { key: "plant", label: "Plant", sort: function (i) { return i.plantCode; } },
     { key: "equipment", label: "Equipment", sort: function (i) { return i.equipment; } },
     { key: "subpart", label: "Sub-problem", sort: function (i) { return i.subpart; } },
-    { key: "maker", label: "Maker / Supplier", sort: function (i) { return i.supplierMaker; } },
     { key: "problem", label: "Issue Description", sort: function (i) { return i.problem; } },
+    { key: "maker", label: "Maker / Supplier", sort: function (i) { return i.supplierMaker; } },
     { key: "occurred", label: "Occurred on", sort: function (i) { return i.occurredAt; } },
     { key: "etc", label: "Est. completion", sort: function (i) { return i.dueAt; } },
     { key: "assignee", label: "Assigned to", sort: function (i) { return i.assignee; } },
@@ -480,11 +480,11 @@
           '<td data-label="' + labels[2] + '">' + (issue.subpart
             ? escape(issue.subpart)
             : '<span class="ep-issues__unassigned">Not recorded</span>') + '</td>' +
-          '<td data-label="' + labels[3] + '">' + (issue.supplierMaker
+          '<td data-label="' + labels[3] + '" class="ep-issues__problem">' + escape(issue.problem) + '</td>' +
+          '<td data-label="' + labels[4] + '">' + (issue.supplierMaker
             ? '<strong>' + escape(issue.supplierMaker) + '</strong>' +
               (issue.serialNo ? "<small>S/N " + escape(issue.serialNo) + "</small>" : "")
             : '<span class="ep-issues__unassigned">Not recorded</span>') + '</td>' +
-          '<td data-label="' + labels[4] + '" class="ep-issues__problem">' + escape(issue.problem) + '</td>' +
           '<td data-label="' + labels[5] + '" class="ep-issues__date">' +
             occurrenceDateCell(issue.occurredAt) + '</td>' +
           '<td data-label="' + labels[6] + '" class="ep-issues__date">' + etcCell(issue.dueAt) + '</td>' +

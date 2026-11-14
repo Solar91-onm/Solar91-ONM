@@ -54,8 +54,13 @@ def test_sidebar_order_and_overview_metric_grid(client):
 def test_security_register_supports_multiple_contacts_and_edit_overlay():
     security = (PORTAL_ASSETS / "js" / "security.js").read_text(encoding="utf-8")
     styles = (PORTAL_ASSETS / "css" / "security.css").read_text(encoding="utf-8")
-    for label in ("Site Engineer", "Site Engineer No.", "Engineer Shift", "Guard Name", "Mobile No.", "Guard Shift"):
+    for label in ("Site Engineer", "Site Engineer No.", "Engineer Shift", "Security Name", "Mobile No.", "Guard Shift"):
         assert label in security
+    assert "<th>Guard Name</th>" not in security
+    assert 'data-security-register-search' in security
+    assert "applyRegisterFilters(container)" in security
+    assert "plant code, site engineer, or security name" in security
+    assert 'data-security-table="register"' in security
     assert 'data-security-open-edit' in security
     assert 'aria-modal="true"' in security
     assert 'data-security-search' in security and 'data-security-site-filter' in security
@@ -736,7 +741,7 @@ def test_site_issue_register_places_id_before_action_and_labels_description():
     columns = issues[issues.index("var COLUMNS = ["):issues.index("  function renderTable(rows)")]
     order = re.findall(r'\{ key: "([a-zA-Z]+)"', columns)
     assert order == [
-        "plant", "equipment", "subpart", "maker", "problem", "occurred",
+        "plant", "equipment", "subpart", "problem", "maker", "occurred",
         "etc", "assignee", "status", "id", "action"
     ], order
     assert '{ key: "problem", label: "Issue Description"' in columns
@@ -1341,9 +1346,8 @@ def test_calendar_shows_confirmed_cycle_completion_distinct_from_deadline():
     assert 'cycleCompleted: report.review_status === "Confirmed" && report.cycle_completed === true' in calendar
     assert 'event.kind === "washing.done" && event.status === "Confirmed"' in calendar
     assert ".ep-calendar__event--cycle-complete {" in styles
-    assert "background: linear-gradient(120deg, #078a3d, #006b33);" in styles
-    assert ".ep-calendar__event--cycle-complete .ep-calendar__event-title," in styles
-    assert ".ep-calendar__event--cycle-complete .ep-calendar__event-tables { color: #fff; }" in styles
+    assert "background: linear-gradient(120deg, #006b32, #004b24);" in styles
+    assert ".ep-calendar__event--complete {" in styles
     assert ".ep-calendar__event--deadline:not(.ep-calendar__event--overdue)" in styles
     assert "background: linear-gradient(120deg, #edf2fb, #dfe8f7);" in styles
 
@@ -1368,12 +1372,18 @@ def test_calendar_shows_confirmed_cycle_completion_distinct_from_deadline():
       assert.strictEqual(box.statusClass('Scheduled'),'ep-calendar__event--scheduled');
       const plant=box.chip({title:'50 tables cleaned',status:'Completed',kind:'report',
         cycleNo:2,cycleCompleted:true,tablesCleaned:50,tablesList:'1–50'},context);
-      assert(plant.includes('ep-calendar__event--cycle-complete'),'plant completion style');
-      assert(plant.includes('Cycle 2 completed'),'plant completion message');
-      assert(plant.includes('50 cleaned · Tables: 1–50'),'plant table count and numbers');
+      const plantChips=plant.split('<span class="ep-calendar__event ');
+      assert.strictEqual(plantChips.length-1,2,'report and cycle completion render as separate chips');
+      assert(plantChips[1].includes('ep-calendar__event--complete'),'table report keeps regular completed style');
+      assert(!plantChips[1].includes('ep-calendar__event--cycle-complete'),'table report is not the completion chip');
+      assert(plantChips[1].includes('50 tables cleaned'),'table report title and count');
+      assert(plantChips[1].includes('Tables: 1–50'),'table report numbers');
+      assert(plantChips[2].includes('ep-calendar__event--cycle-complete'),'plant completion style');
+      assert(plantChips[2].includes('Cycle 2 completed'),'plant completion message');
       const portfolio=box.chip({title:'Cycle 2 · 50 tables cleaned',status:'Confirmed',
         kind:'washing.done',reference:'Cycle 2',tablesCleaned:50,tablesList:'1–50'},context);
-      assert(portfolio.includes('ep-calendar__event--cycle-complete'),'portfolio completion style');
+      assert.strictEqual((portfolio.match(/<span class="ep-calendar__event /g)||[]).length,2,
+        'portfolio report and cycle completion render as separate chips');
       assert(portfolio.includes('ep-calendar__event--complete'),'confirmed portfolio wash uses completed colors');
       assert(portfolio.includes('Cycle 2 completed'),'portfolio completion message');
       const awaiting=box.chip({title:'Cycle 2 · 50 tables cleaned',status:'Pending',

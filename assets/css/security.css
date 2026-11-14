@@ -1,4 +1,32 @@
 .ep-security__open { margin-left: auto; }
+.ep-security__register-filter {
+  display: flex;
+  justify-content: flex-end;
+}
+.ep-security__register-filter label {
+  display: grid;
+  width: min(100%, 440px);
+  gap: 4px;
+  color: var(--ep-text-muted);
+  font-size: var(--ep-fs-xs);
+  font-weight: 600;
+}
+.ep-security__register-filter input {
+  width: 100%;
+  min-width: 0;
+  min-height: 38px;
+  padding: 0 11px;
+  border: 1px solid var(--ep-border);
+  border-radius: var(--ep-radius-sm);
+  background: var(--ep-bg);
+  color: var(--ep-text);
+  font: inherit;
+}
+.ep-security__register-filter input:focus {
+  outline: 0;
+  border-color: var(--ep-accent);
+  box-shadow: 0 0 0 3px var(--ep-accent-ring);
+}
 .ep-security__scroll { max-height: none; overflow-x: hidden; overflow-y: visible; }
 .ep-security__table { width: 100%; min-width: 0; table-layout: fixed; }
 .ep-security__table th:nth-child(1),

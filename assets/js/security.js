@@ -14,6 +14,7 @@
   var saving = false;
   var notice = "";
   var noticeIsError = false;
+  var registerSearch = "";
   var filterText = "";
   var filterSiteCode = "";
   var wiredContainer = null;
@@ -146,7 +147,7 @@
         contactCell(contacts.engineers, "engineer", "mobile", editingRow, plant.siteCode) + "</td>" +
       '<td data-label="Engineer Shift">' +
         contactCell(contacts.engineers, "engineer", "shift", editingRow, plant.siteCode) + "</td>" +
-      '<td data-label="Guard Name">' +
+      '<td data-label="Security Name">' +
         contactCell(contacts.guards, "guard", "name", editingRow, plant.siteCode) + "</td>" +
       '<td data-label="Mobile No.">' +
         contactCell(contacts.guards, "guard", "mobile", editingRow, plant.siteCode) + "</td>" +
@@ -156,10 +157,11 @@
   }
 
   function tableHTML(editingRows) {
-    return '<div class="ep-pt__table-wrap"><div class="ep-pt__scroll ep-security__scroll" tabindex="0" role="region" aria-label="Site security contact table">' +
+    return '<div class="ep-pt__table-wrap"><div class="ep-pt__scroll ep-security__scroll" data-security-table="' +
+      (editingRows ? "editor" : "register") + '" tabindex="0" role="region" aria-label="Site security contact table">' +
       '<table class="ep-pt__table ep-security__table"><thead><tr>' +
         "<th>Site Code</th><th>Site Engineer</th><th>Site Engineer No.</th><th>Engineer Shift</th>" +
-        "<th>Guard Name</th><th>Mobile No.</th><th>Guard Shift</th>" +
+        "<th>Security Name</th><th>Mobile No.</th><th>Guard Shift</th>" +
       "</tr></thead><tbody>" +
         (plants.length
           ? plants.map(function (plant) { return rowHTML(plant, editingRows); }).join("")
@@ -206,6 +208,16 @@
     });
   }
 
+  function applyRegisterFilters(container) {
+    var term = registerSearch.trim().toLowerCase();
+    Array.prototype.forEach.call(
+      container.querySelectorAll('[data-security-table="register"] [data-security-row]'),
+      function (row) {
+        row.hidden = !!term && row.getAttribute("data-security-filter-text").indexOf(term) === -1;
+      }
+    );
+  }
+
   function updateRowFilterText(row) {
     var values = [row.getAttribute("data-security-filter-base") || ""];
     Array.prototype.forEach.call(row.querySelectorAll("[data-security-contact-name], [data-security-contact-mobile]"), function (input) {
@@ -229,6 +241,9 @@
           (editable ? '<button type="button" class="ep-pt__edit ep-security__open" data-security-open-edit' +
             '>Edit register</button>' : "") +
         "</div>" +
+        '<div class="ep-security__register-filter"><label><span>Search by plant code, site engineer, or security name</span>' +
+          '<input type="search" data-security-register-search value="' + fmt.escape(registerSearch) +
+          '" placeholder="Plant code, site engineer, security name..." autocomplete="off"></label></div>' +
         '<div class="ep-pt__card">' +
           (!editing && notice ? '<div class="ep-security__notice' + (noticeIsError ? " is-error" : "") +
             '" role="' + (noticeIsError ? "alert" : "status") + '">' + fmt.escape(notice) + "</div>" : "") +
@@ -236,6 +251,7 @@
         "</div>" +
         (editing ? editorHTML() : "") +
       "</div>";
+    applyRegisterFilters(container);
     if (editing) applyEditorFilters(container);
     wire(container);
   }
@@ -407,6 +423,11 @@
     if (wiredContainer === container) return;
     wiredContainer = container;
     container.addEventListener("input", function (event) {
+      if (event.target.matches("[data-security-register-search]")) {
+        registerSearch = event.target.value;
+        applyRegisterFilters(container);
+        return;
+      }
       if (event.target.matches("[data-security-search]")) {
         filterText = event.target.value;
         applyEditorFilters(container);

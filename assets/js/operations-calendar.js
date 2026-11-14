@@ -170,8 +170,11 @@
     return event.kind === "washing.done" && event.status === "Confirmed";
   }
 
-  function eventChipTitle(event, context) {
-    if (!isWashingCycleComplete(event, context)) return String(event.title || "");
+  function eventChipTitle(event) {
+    return String(event.title || "");
+  }
+
+  function cycleCompletionTitle(event) {
     var cycle = event.cycleNo;
     if (!cycle) {
       var source = String(event.reference || event.title || "");
@@ -187,26 +190,26 @@
     var count = Number(event.tablesCleaned);
     if (!isFinite(count) || count <= 0) return "";
     var tables = String(event.tablesList || "").trim();
-    var cycleComplete = isWashingCycleComplete(event, context);
-    var countLabel = cycleComplete ? count + " cleaned · " : "";
     return tables
-      ? countLabel + "Tables: " + tables
-      : countLabel + "Table numbers not recorded";
+      ? "Tables: " + tables
+      : "Table numbers not recorded";
   }
 
   function eventCellDescription(event, context) {
-    var title = eventChipTitle(event, context);
+    var title = eventChipTitle(event);
     var tables = washingTablesLabel(event, context);
-    return tables ? title + " · " + tables : title;
+    var description = tables ? title + " · " + tables : title;
+    return isWashingCycleComplete(event, context)
+      ? description + " · " + cycleCompletionTitle(event)
+      : description;
   }
 
   function renderCalendarEventChip(event, context) {
     var tables = washingTablesLabel(event, context);
     var cycleComplete = isWashingCycleComplete(event, context);
     var deadline = event.kind === "deadline";
-    var title = eventChipTitle(event, context);
-    return '<span class="ep-calendar__event ' + statusClass(event.status) +
-      (cycleComplete ? " ep-calendar__event--cycle-complete" : "") +
+    var title = eventChipTitle(event);
+    var reportChip = '<span class="ep-calendar__event ' + statusClass(event.status) +
       (deadline ? " ep-calendar__event--deadline" : "") +
       (tables ? " ep-calendar__event--washing-detail" : "") +
       '" title="' + escape(eventCellDescription(event, context)) + '">' +
@@ -215,6 +218,9 @@
           '<span class="ep-calendar__event-tables">' + escape(tables) + "</span>"
         : escape(title)) +
       "</span>";
+    if (!cycleComplete) return reportChip;
+    return reportChip + '<span class="ep-calendar__event ep-calendar__event--cycle-complete" title="' +
+      escape(cycleCompletionTitle(event)) + '">' + escape(cycleCompletionTitle(event)) + "</span>";
   }
 
   function visibleEvents(state) {
