@@ -51,6 +51,43 @@ button { font: inherit; cursor: pointer; }
   color: var(--ep-text-strong);
 }
 .is-sidebar-collapsed .ep-sidebar__brand span { display: none; }
+.ep-sidebar__history {
+  display: flex;
+  align-items: center;
+  gap: var(--ep-s-2);
+  padding: 8px var(--ep-s-4);
+  border-bottom: 1px solid var(--ep-border-soft);
+}
+.ep-sidebar__history-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 34px;
+  border: 1px solid var(--ep-border);
+  border-radius: var(--ep-radius-md);
+  background: var(--ep-bg);
+  color: var(--ep-text);
+  transition: background 120ms ease, border-color 120ms ease;
+}
+.ep-sidebar__history-button:hover {
+  background: var(--ep-bg-muted);
+  border-color: var(--ep-border-strong);
+}
+.ep-sidebar__history-button:focus-visible {
+  outline: 2px solid var(--ep-accent-strong);
+  outline-offset: 1px;
+}
+.is-sidebar-collapsed .ep-sidebar__history {
+  justify-content: center;
+  gap: 4px;
+  padding-right: 4px;
+  padding-left: 4px;
+}
+.is-sidebar-collapsed .ep-sidebar__history-button {
+  width: 28px;
+  height: 30px;
+}
 
 .ep-sidebar__section {
   padding: var(--ep-s-5) var(--ep-s-4) var(--ep-s-2);
