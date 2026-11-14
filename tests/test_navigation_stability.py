@@ -32,6 +32,18 @@ def test_portal_navigation_restores_same_page_browser_history():
     assert "restoreNavigationHistory(event.state)" in source
 
 
+def test_sidebar_has_browser_back_and_forward_controls():
+    template = (ROOT / "frontend/templates/index.html").read_text(encoding="utf-8")
+    navigation = (ROOT / "assets/js/navigation.js").read_text(encoding="utf-8")
+    styles = (ROOT / "assets/css/layout.css").read_text(encoding="utf-8")
+    assert 'data-navigation-history="back"' in template
+    assert 'data-navigation-history="forward"' in template
+    assert 'direction === "back") global.history.back()' in navigation
+    assert 'direction === "forward") global.history.forward()' in navigation
+    assert ".ep-sidebar__history" in styles
+    assert ".is-sidebar-collapsed .ep-sidebar__history" in styles
+
+
 def test_supabase_public_config_not_secret_in_example():
     source=(ROOT/".env.example").read_text()
     assert "SUPABASE_URL=\n" in source

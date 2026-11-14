@@ -877,6 +877,14 @@
       });
     }
 
+    document.querySelectorAll("[data-navigation-history]").forEach(function (button) {
+      button.addEventListener("click", function () {
+        var direction = button.getAttribute("data-navigation-history");
+        if (direction === "back") global.history.back();
+        else if (direction === "forward") global.history.forward();
+      });
+    });
+
     global.addEventListener("popstate", function (event) {
       restoreNavigationHistory(event.state);
     });

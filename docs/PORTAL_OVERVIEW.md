@@ -2,7 +2,7 @@
 
 - Plant, Project, and District choices show all values available to the signed-in user and do not narrow one another. Dashboard access is portfolio-wide for O&M Head, Assignee, and Administration; Site Engineers remain restricted to assigned plants.
 - The default Dashboard range is This month. Summary tiles and trends use the selected date range.
-- Browser Back and Forward restore visited portal views without reloading the page. Private O&M data is not cached for offline use.
+- Sidebar Back and Forward arrow buttons use browser history and restore visited portal views without reloading the page on desktop, mobile, and installed PWA layouts. Private O&M data is not cached for offline use.
 - Clicking PM Compliance, Washing Compliance, or Open Site Issues opens the matching page in Overview when All plants is selected. When one plant is selected, it opens that plant's matching page. The selected date range is carried to the destination.
 - The operational trend is a grouped bar chart for the selected plant or plants. Plant, Project, and District filters narrow the trend.
 - Washing compliance is the percentage of configured cycles due in each bucket that were confirmed complete on or before their configured due date. Plants without a washing setup are omitted from its denominator.
