@@ -1048,8 +1048,9 @@ def test_operations_calendar_month_dates_fit_one_responsive_frame():
     assert 'ep-calendar__grid--weeks-' + "' + (cells / 7)" in calendar
     for weeks in (4, 5, 6):
         assert f".ep-calendar__grid--weeks-{weeks}" in styles
-    assert "height: clamp(240px, calc(100dvh - 360px), 650px);" in styles
-    assert "height: clamp(210px, calc(100dvh - 450px), 480px);" in styles
+    assert ".ep-calendar__grid {\n  display: grid;\n  grid-template-columns: repeat(7, minmax(0, 1fr));\n  height: auto;" in styles
+    assert ".ep-calendar__grid--weeks-6 { grid-template-rows: 34px repeat(6, minmax(128px, auto)); }" in styles
+    assert ".ep-calendar__grid--weeks-6 { grid-template-rows: 28px repeat(6, minmax(144px, auto)); }" in styles
     assert ".ep-calendar__day {\n  display: flex;\n  min-width: 0;\n  min-height: 0;" in styles
 
 
@@ -1347,6 +1348,8 @@ def test_calendar_shows_confirmed_cycle_completion_distinct_from_deadline():
     assert 'event.kind === "washing.done" && event.status === "Confirmed"' in calendar
     assert ".ep-calendar__event--cycle-complete {" in styles
     assert "background: linear-gradient(120deg, #006b32, #004b24);" in styles
+    assert ".ep-calendar__day-events {\n  display: flex;\n  flex: 0 0 auto;" in styles
+    assert ".ep-calendar__event--cycle-complete {\n  white-space: normal;\n  overflow-wrap: anywhere;" in styles
     assert ".ep-calendar__event--complete {" in styles
     assert ".ep-calendar__event--deadline:not(.ep-calendar__event--overdue)" in styles
     assert "background: linear-gradient(120deg, #edf2fb, #dfe8f7);" in styles
