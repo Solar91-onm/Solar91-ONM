@@ -362,6 +362,7 @@
     open: false, loading: false, units: [], summary: null, tickets: [],
     unitsRestricted: false, unitsError: "", summaryError: "", ticketsError: "",
     canEdit: false, plantFilter: "", search: "", severity: "", status: "",
+    plantSearch: "", onlyIssues: false,   // the per-plant table's own toolbar
     saveMessage: "", saveError: false, navigationError: "",
     expanded: [],  // site codes whose open inverter tickets are unfolded under the plant row
     plantSort: { key: "", dir: "" }   // empty: the default order (worst running % first)
@@ -369,17 +370,17 @@
 
   // The per-plant health table, laid out like the Health register: sortable headings, short and
   // numeric columns centred. `sort` reads the value ordered by -- the number, not the HTML.
+  // Five columns on screen, not eight: maker and capacity share the Inverter cell, running and
+  // total share the Running cell. The CSV below still exports every field separately.
   const INVERTER_PLANT_COLUMNS = [
     { key: "plant", label: "Plant", sort: (row) => row.plant.siteCode },
-    { key: "total", label: "Total inverters", align: "num", sort: (row) => row.total },
-    { key: "maker", label: "Maker", align: "num", sort: (row) => (row.config && row.config.maker) || "" },
-    { key: "capacity", label: "Capacity (kW)", align: "num",
-      sort: (row) => (row.config && row.config.capacity_kw != null ? Number(row.config.capacity_kw) : null) },
+    { key: "inverter", label: "Inverter", sort: (row) => (row.config && row.config.maker) || "" },
     { key: "running", label: "Running", align: "num", sort: (row) => row.running },
-    { key: "down", label: "Not running", align: "num", sort: (row) => row.down },
-    { key: "percent", label: "Running %", align: "num", sort: (row) => row.percent },
-    { key: "tickets", label: "Open tickets", align: "num", sort: (row) => row.tickets }
+    { key: "percent", label: "Health", align: "num", sort: (row) => row.percent },
+    { key: "tickets", label: "Tickets", align: "num", sort: (row) => row.tickets }
   ];
+  const INVERTER_PLANT_COLUMN_COUNT = INVERTER_PLANT_COLUMNS.length;
+  const ICON_INVERTER_LARGE = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"></rect><path d="M13 7l-4 6h3l-1 4 4-6h-3l1-4z"></path></svg>`;
   const INVERTER_HISTORY_KEY = "solar91InverterHealthOpen";
   const OPEN_INVERTER_STATUSES = [
     "Open", "Assigned", "Acknowledged", "In Progress", "Pending Vendor", "Pending Parts/Vendor"
@@ -526,12 +527,6 @@
     return `<span class="ep-chip ${cls}">${fmt.escape(value)}</span>`;
   }
 
-  // A count behind a traffic light: green for running, red for not. An all-running plant gets NO
-  // red light on its zero, so a lit red dot in that column always means a real outage.
-  function inverterLightCell(tone, count) {
-    return `${tone ? `<span class="ep-hint-light ep-hint-light--${tone}" aria-hidden="true"></span>` : ""}${fmt.formatNumber(count)}`;
-  }
-
   function inverterPercentCell(percent) {
     if (percent === null) return `<span class="ep-text-faint">—</span>`;
     const tone = percent >= 85 ? "green" : percent >= 70 ? "amber" : "red";
@@ -550,7 +545,7 @@
       <span class="ep-ih__ticket-actions"><button type="button" class="ep-ih__ticket" data-ih-ticket="${fmt.escape(ticket.ticket_no || "")}" data-ih-site="${fmt.escape(siteCode)}">${fmt.escape(ticket.ticket_no || "Open ticket")}</button>
         ${inverterHealth.canEdit ? `<button type="button" class="ep-ih__button" data-ih-edit="${fmt.escape(ticket.ticket_no || "")}" data-ih-site="${fmt.escape(siteCode)}">Edit</button>` : ""}</span>
     </li>`).join("");
-    return `<tr class="ep-ih__down-row"><td colspan="8"><ul class="ep-ih__down-list">${items}</ul></td></tr>`;
+    return `<tr class="ep-ih__down-row"><td colspan="${INVERTER_PLANT_COLUMN_COUNT}"><ul class="ep-ih__down-list">${items}</ul></td></tr>`;
   }
 
   // The open inverter tickets of every plant in scope, grouped in ONE pass -- a plant missing
@@ -598,13 +593,46 @@
       `<th${column.align === "num" ? ' class="num"' : ""}>${fmt.escape(column.label)}</th>`).join("");
   }
 
+  // The toolbar above the per-plant table: free text over plant name, site code and maker, and
+  // "only plants with issues" — a plant with a down inverter or an open ticket.
+  function filteredInverterPlantRows(rows) {
+    const query = inverterHealth.plantSearch.trim().toLowerCase();
+    return rows.filter((row) => {
+      if (inverterHealth.onlyIssues && !(row.tickets > 0 || (row.down || 0) > 0)) return false;
+      if (!query) return true;
+      return [row.plant.displayName || row.plant.plantName, row.plant.siteCode,
+        row.plant.displayCode, (row.config && row.config.maker) || ""]
+        .join(" ").toLowerCase().indexOf(query) !== -1;
+    });
+  }
+
   // Per-plant rows in the chosen order; with no column chosen, the default (worst running % first).
   // The table and its CSV both read this, so the export always matches the screen.
   function sortedInverterPlantRows() {
-    const rows = inverterPlantRows(inverterHealthTotals());
+    const rows = filteredInverterPlantRows(inverterPlantRows(inverterHealthTotals()));
     const Sort = global.Solar91PortalSort;
     if (!Sort || !inverterHealth.plantSort.key) return rows;
     return Sort.apply(rows, inverterHealth.plantSort, INVERTER_PLANT_COLUMNS);
+  }
+
+  /**
+   * Fleet composition by inverter make, from the unit configuration already loaded — no request
+   * of its own. Units add up to the same total the hero band states.
+   */
+  function inverterFleetMakes(totals) {
+    const byMake = new Map();
+    totals.configs.forEach((config) => {
+      const units = Number(config.total_units) || 0;
+      if (!units) return;
+      const make = String(config.maker || "").trim() || "Make not recorded";
+      const entry = byMake.get(make) || { make, units: 0, plants: 0, kw: 0 };
+      entry.units += units;
+      entry.plants += 1;
+      entry.kw += (Number(config.capacity_kw) || 0) * units;
+      byMake.set(make, entry);
+    });
+    return Array.from(byMake.values())
+      .sort((a, b) => b.units - a.units || a.make.localeCompare(b.make));
   }
 
   function scopedInverterTickets() {
@@ -647,10 +675,7 @@
       if (severity) severityCounts[severity] += 1;
     });
     const donut = hasCounts && totals.total > 0
-      ? `<div class="ep-ih__donut" style="--ep-ih-running:${runningPercent}%" role="img" aria-label="${runningPercent}% running"><strong>${runningPercent}%</strong><span>running</span></div>`
-      : "";
-    const runningSummary = hasCounts && totals.total > 0
-      ? `<p class="ep-ih__donut-caption">${fmt.formatNumber(totals.running)} of ${fmt.formatNumber(totals.total)} inverters running</p>`
+      ? `<span class="ep-ih__donut" style="--ep-ih-running:${runningPercent}%" role="img" aria-label="${runningPercent}% running"><strong>${runningPercent}%</strong><span>Running</span></span>`
       : "";
     const reason = inverterHealth.unitsRestricted
       ? "Inverter counts are visible to the O&M Head and Assignees."
@@ -669,18 +694,38 @@
             aria-expanded="${isOpen}" title="${isOpen ? "Hide" : "Show"} the open inverter tickets for this plant"
             >${fmt.formatNumber(row.tickets)}<span aria-hidden="true">${isOpen ? "▾" : "▸"}</span></button>`
         : fmt.formatNumber(row.tickets);
+      // A plant with no unit configuration says so once, across the three cells that would
+      // otherwise repeat it.
+      const configuredCells = `
+        <td><span class="ep-ih__stack"><span class="ep-ih__stack-main">${inverterFactCell(row.config && row.config.maker)}</span>
+          <span class="ep-ih__stack-sub">${fmt.escape(fmt.decimalText(row.config && row.config.capacity_kw) || "—")} kW</span></span></td>
+        <td class="num"><span class="ep-ih__ratio">${row.down ? `<span class="ep-hint-light ep-hint-light--red" aria-hidden="true"></span>` : ""}<b>${fmt.formatNumber(row.running)}</b><span>/ ${fmt.formatNumber(row.total)}</span></span></td>
+        <td class="num">${inverterPercentCell(row.percent)}</td>`;
       const main = `<tr data-ih-plant-row="${fmt.escape(code)}" tabindex="0" role="button" aria-label="Filter tickets to ${fmt.escape(row.plant.displayName || row.plant.plantName)}">
         <td><div class="ep-plant-cell"><span class="ep-plant-cell__name">${fmt.escape(row.plant.displayName || row.plant.plantName)}</span><span class="ep-plant-cell__code">${fmt.escape(row.plant.displayCode || row.plant.siteCode)}</span></div></td>
-        <td class="num">${isConfigured ? fmt.formatNumber(row.total) : "Not configured"}</td>
-        <td class="num">${inverterFactCell(row.config && row.config.maker)}</td>
-        <td class="num">${inverterFactCell(fmt.decimalText(row.config && row.config.capacity_kw))}</td>
-        <td class="num">${isConfigured ? inverterLightCell("green", row.running) : "Not configured"}</td>
-        <td class="num">${isConfigured ? inverterLightCell(row.down ? "red" : "", row.down) : "Not configured"}</td>
-        <td class="num">${isConfigured ? inverterPercentCell(row.percent) : "Not configured"}</td>
-        <td class="num">${ticketCell}</td>
+        ${isConfigured ? configuredCells : `<td class="ep-ih__unset" colspan="3">Not configured</td>`}
+        <td class="num${row.tickets > 0 ? " ep-ih__tickets-open" : ""}">${ticketCell}</td>
       </tr>`;
       return main + (isOpen && open.length ? inverterDownRows(code, open) : "");
     }).join("");
+    const fleet = inverterFleetMakes(totals);
+    const fleetUnits = fleet.reduce((sum, item) => sum + item.units, 0);
+    const fleetKw = fleet.reduce((sum, item) => sum + item.kw, 0);
+    const fleetBar = fleetUnits
+      ? `<span class="ep-ih__fleet-bar" aria-hidden="true">${fleet.map((item, index) =>
+        `<span class="ep-ih__fleet-seg ep-ih__fleet-seg--${(index % 4) + 1}" style="width:${(100 * item.units / fleetUnits).toFixed(2)}%"></span>`).join("")}</span>
+        <ul class="ep-ih__fleet-legend">${fleet.map((item, index) =>
+          `<li><span class="ep-ih__fleet-dot ep-ih__fleet-seg--${(index % 4) + 1}" aria-hidden="true"></span>
+            <b>${fmt.escape(item.make)}</b>
+            <span>${fmt.formatNumber(item.units)} units · ${fmt.formatNumber(item.plants)} plants · ${fmt.formatNumber(Math.round(item.kw))} kW</span></li>`).join("")}</ul>`
+      : "";
+    const severityTotal = Object.keys(severityCounts)
+      .reduce((sum, key) => sum + severityCounts[key], 0);
+    // Four chips all reading 0 say nothing; one tick says the same thing in one glance.
+    const severityBlock = severityTotal
+      ? `<span class="ep-ih__severity-chips">${Object.keys(severityCounts).filter((severity) => severityCounts[severity] > 0)
+        .map((severity) => `<span>${inverterSeverityChip(severity)} <b>${fmt.formatNumber(severityCounts[severity])}</b></span>`).join("")}</span>`
+      : `<span class="ep-ih__all-clear">✓ All clear</span>`;
     const ticketRows = filteredTickets.map((ticket) => {
       const plant = inverterDetailsPlant(ticket);
       const plantName = plant ? (plant.displayName || plant.plantName) : "Plant unavailable";
@@ -721,7 +766,10 @@
     ).join("");
 
     host.innerHTML = `<section class="ep-ih" aria-labelledby="ep-ih-title">
-      <header class="ep-ih__header"><div><h1 id="ep-ih-title">Inverter Health</h1><p>${fmt.escape(inverterScopeLabel())}</p></div>
+      <header class="ep-ih__header"><div class="ep-ih__header-main">
+          <span class="ep-ih__header-chip" aria-hidden="true">${ICON_INVERTER_LARGE}</span>
+          <div><h1 id="ep-ih-title">Inverter Health</h1><p>${fmt.escape(inverterScopeLabel())}</p></div>
+        </div>
         <button type="button" class="ep-ih__close" data-ih-close aria-label="Close Inverter Health">×</button></header>
       <div class="ep-ih__content">
         ${inverterHealth.loading ? `<p class="ep-ih__notice" role="status">Loading inverter health…</p>` : ""}
@@ -729,19 +777,49 @@
         ${inverterHealth.ticketsError ? `<p class="ep-ih__notice ep-ih__notice--error" role="alert">${fmt.escape(inverterHealth.ticketsError)}</p>` : ""}
         ${inverterHealth.navigationError ? `<p class="ep-ih__notice ep-ih__notice--error" role="alert">${fmt.escape(inverterHealth.navigationError)}</p>` : ""}
         ${inverterHealth.unitsError && !inverterHealth.unitsRestricted ? `<p class="ep-ih__notice" role="status">${fmt.escape(inverterHealth.unitsError)}</p>` : ""}
-        <section class="ep-ih__summary" aria-label="Inverter summary">
-          ${donut ? `<article class="ep-panel ep-ih__ring-card">${donut}${runningSummary}</article>` : ""}
-          ${hasCounts && totals.total > 0 ? `<article class="ep-panel ep-ih__stat"><span>Running</span><strong class="ep-ih__green">${fmt.formatNumber(totals.running)}</strong></article>
-          <article class="ep-panel ep-ih__stat"><span>Not running</span><strong class="ep-ih__red">${fmt.formatNumber(totals.down)}</strong></article>` : ""}
-          <article class="ep-panel ep-ih__stat"><span>Open tickets</span><strong>${fmt.formatNumber(totals.tickets)}</strong><small>${fmt.formatNumber(totals.affected)} plants affected</small></article>
-          <article class="ep-panel ep-ih__severity"><span>Open ticket severity</span><div>${Object.keys(severityCounts).map((severity) =>
-            `<span>${inverterSeverityChip(severity)} <b>${fmt.formatNumber(severityCounts[severity])}</b></span>`).join("")}</div></article>
+        <section class="ep-panel ep-ih__hero" aria-label="Inverter summary">
+          <div class="ep-ih__hero-lead">
+            ${donut}
+            <div class="ep-ih__hero-text">
+              <strong>${hasCounts && totals.total
+                ? fmt.formatNumber(totals.running) + " of " + fmt.formatNumber(totals.total) + " inverters running"
+                : fmt.formatNumber(totals.tickets) + " open inverter tickets"}</strong>
+              <span>${fmt.escape(inverterScopeLabel())}</span>
+            </div>
+          </div>
+          <div class="ep-ih__kpis">
+            <div class="ep-ih__kpi">
+              <span class="ep-ih__kpi-label">Not running</span>
+              <strong class="${totals.down > 0 ? "ep-ih__red" : "ep-ih__muted"}">${hasCounts ? fmt.formatNumber(totals.down) : "—"}</strong>
+              <small>${fmt.formatNumber(totals.affected)} plants affected</small>
+            </div>
+            <div class="ep-ih__kpi">
+              <span class="ep-ih__kpi-label">Open tickets</span>
+              <strong class="${totals.tickets > 0 ? "" : "ep-ih__muted"}">${fmt.formatNumber(totals.tickets)}</strong>
+              <small>${severityBlock}</small>
+            </div>
+            <div class="ep-ih__kpi">
+              <span class="ep-ih__kpi-label">Fleet capacity</span>
+              <strong>${fleetKw ? (fleetKw / 1000).toFixed(2) : "—"}<em> MW</em></strong>
+              <small>${fmt.formatNumber(fleet.length)} make${fleet.length === 1 ? "" : "s"} in service</small>
+            </div>
+          </div>
         </section>
         ${reason ? `<p class="ep-ih__reason">${reason}</p>` : ""}
-        <section class="ep-panel"><div class="ep-panel__head"><span class="ep-panel__title">Per-plant health</span>
-          <button type="button" class="ep-ih__button" data-ih-export-plants>Export CSV</button></div>
+        ${fleetBar ? `<section class="ep-panel ep-ih__fleet"><div class="ep-panel__head"><span class="ep-panel__title">Fleet composition</span>
+          <span class="ep-panel__subtitle">${fmt.formatNumber(fleetUnits)} configured inverters</span></div>
+          <div class="ep-ih__fleet-body">${fleetBar}</div></section>` : ""}
+        <section class="ep-panel"><div class="ep-panel__head"><span class="ep-panel__title">Per-plant health</span></div>
+          <div class="ep-ih__toolbar">
+            <input type="search" placeholder="Search plant, code or make" aria-label="Search plants" data-ih-plant-search value="${fmt.escape(inverterHealth.plantSearch)}">
+            <label class="ep-ih__check"><input type="checkbox" data-ih-only-issues${inverterHealth.onlyIssues ? " checked" : ""}> Only plants with issues</label>
+            <button type="button" class="ep-ih__button ep-ih__toolbar-end" data-ih-export-plants>Export CSV</button>
+          </div>
           <div class="ep-table-wrap"><table class="ep-table ep-ih__plant-table"><thead><tr>${inverterPlantHeader()}</tr></thead>
-            <tbody>${plantTable || `<tr><td colspan="8">No plants in this Dashboard scope.</td></tr>`}</tbody></table></div></section>
+            <tbody>${plantTable || `<tr><td colspan="${INVERTER_PLANT_COLUMN_COUNT}"><div class="ep-ih__empty"><strong>No plants to show</strong><span>${
+              inverterHealth.plantSearch || inverterHealth.onlyIssues
+                ? "No plant in this scope matches the filters above."
+                : "No plants in this Dashboard scope."}</span></div></td></tr>`}</tbody></table></div></section>
         <section class="ep-panel"><div class="ep-panel__head"><span class="ep-panel__title">Open inverter tickets${scope ? " · " + fmt.escape(scope.plant.displayName || scope.plant.plantName) : ""}</span>
           ${inverterHealth.plantFilter ? `<button type="button" class="ep-ih__button" data-ih-clear-plant>All plants</button>` : ""}
           <button type="button" class="ep-ih__button" data-ih-export>Export CSV</button></div>
@@ -977,16 +1055,20 @@
       }
     });
     host.addEventListener("input", (event) => {
-      if (event.target.matches("[data-ih-search]")) {
-        inverterHealth.search = event.target.value;
-        renderInverterHealth();
-        const input = host.querySelector("[data-ih-search]");
-        if (input) { input.focus(); input.setSelectionRange(input.value.length, input.value.length); }
-      }
+      // Both search boxes re-render the panel, so the caret has to be put back where it was.
+      const selector = event.target.matches("[data-ih-search]") ? "[data-ih-search]"
+        : event.target.matches("[data-ih-plant-search]") ? "[data-ih-plant-search]" : "";
+      if (!selector) return;
+      if (selector === "[data-ih-search]") inverterHealth.search = event.target.value;
+      else inverterHealth.plantSearch = event.target.value;
+      renderInverterHealth();
+      const input = host.querySelector(selector);
+      if (input) { input.focus(); input.setSelectionRange(input.value.length, input.value.length); }
     });
     host.addEventListener("change", (event) => {
       if (event.target.matches("[data-ih-severity]")) inverterHealth.severity = event.target.value;
       else if (event.target.matches("[data-ih-status]")) inverterHealth.status = event.target.value;
+      else if (event.target.matches("[data-ih-only-issues]")) inverterHealth.onlyIssues = event.target.checked;
       else return;
       renderInverterHealth();
     });
@@ -1049,9 +1131,11 @@
       return `<span class="ep-bar"><span class="ep-bar__value ep-bar__value--grey">N/A</span></span>`;
     }
     const colour = pct >= 85 ? "green" : pct >= 70 ? "amber" : "red";
+    // Module cleaning can pass 100% (extra washing after all three cycles): the figure is shown in
+    // full, while the bar itself stops at a full track.
     return (
       `<span class="ep-bar">` +
-        `<span class="ep-bar__track"><span class="ep-bar__fill ep-bar__fill--${colour}" style="width:${pct}%"></span></span>` +
+        `<span class="ep-bar__track"><span class="ep-bar__fill ep-bar__fill--${colour}" style="width:${Math.min(100, pct)}%"></span></span>` +
         `<span class="ep-bar__value">${pct}%</span>` +
       `</span>`
     );
@@ -1115,79 +1199,126 @@
     const ICON_WASH = `<svg class="ep-metric__icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v6"></path><path d="M6 8h12l-1.5 12h-9L6 8z"></path><path d="M4.22 10.22A8 8 0 0 0 12 22a8 8 0 0 0 7.78-11.78"></path></svg>`;
     const ICON_INVERTER = `<svg class="ep-metric__icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"></rect><path d="M13 7l-4 6h3l-1 4 4-6h-3l1-4z"></path></svg>`;
     const ICON_ISSUES = `<svg class="ep-metric__icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>`;
+    const CHEVRON = `<svg class="ep-metric__chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"></path></svg>`;
+
+    // The tile's own state, used for the icon chip, the headline figure and the meter. The
+    // thresholds are the pills' above: this only names the colour they already decided.
+    const toneOfPill = (pill) => pill.dot === "red" ? "red" : pill.dot === "amber" ? "amber"
+      : pill.dot === "green" ? "accent" : "neutral";
+    const pmScheduled = totals.pmCompleted + totals.pmPending + totals.pmOverdue;
+    const pmEmpty = pmPct === null || pmScheduled === 0;
+    const issueClosed = totals.closedIssues;
+    const issueUnsolved = totals.unsolvedIssues;
+    const issueSpan = issueUnsolved + issueClosed;
+    const clamp = (value) => Math.max(0, Math.min(100, Number(value) || 0));
 
     const cards = [
       {
         title: "PM Compliance",
         destination: "pm",
         icon: ICON_PM,
-        value: pmPct === null ? "—" : pmPct + "%",
-        pill: pmP,
-        hints: [
-          { strong: true,  dot: "green", text: `${fmt.formatNumber(totals.pmCompleted)} completed activities` },
-          { strong: false, dot: totals.pmOverdue > 0 ? "red" : "amber", text: `${fmt.formatNumber(totals.pmPending)} pending · ${fmt.formatNumber(totals.pmOverdue)} overdue` }
+        tone: pmEmpty ? "neutral" : toneOfPill(pmP),
+        // Nothing scheduled is not 0% — a bare dash there reads as a broken tile.
+        empty: pmEmpty ? "No activities this month" : "",
+        figure: pmEmpty ? null : { value: String(pmPct), unit: "%", caption: "of activities completed" },
+        meter: pmEmpty ? [] : [
+          { width: clamp(pmPct), tone: "accent" },
+          { width: 100 - clamp(pmPct), tone: "short" }
+        ],
+        legend: [
+          { dot: pmEmpty ? "" : "green", label: "Completed", value: fmt.formatNumber(totals.pmCompleted) },
+          { dot: "", label: "Pending", value: fmt.formatNumber(totals.pmPending) },
+          { dot: totals.pmOverdue > 0 ? "red" : "", label: "Overdue", value: fmt.formatNumber(totals.pmOverdue), bad: totals.pmOverdue > 0 }
         ]
       },
       {
         title: "Module Cleaning Compliance",
         destination: "washing",
         icon: ICON_WASH,
-        value: wshPct === null ? "—" : wshPct + "%",
-        pill: wshP,
-        hints: [
-          { strong: true,  dot: "green", text: `${fmt.formatNumber(totals.washingCompleted)} cycles done` },
-          { strong: false, dot: totals.washingOverdue > 0 ? "red" : "amber", text: `${fmt.formatNumber(totals.washingPending)} pending · ${fmt.formatNumber(totals.washingOverdue)} overdue` }
+        tone: wshPct === null ? "neutral" : toneOfPill(wshP),
+        empty: wshPct === null ? "No cleaning scheduled" : "",
+        figure: wshPct === null ? null : { value: String(wshPct), unit: "%", caption: "of cycles complete" },
+        meter: wshPct === null ? [] : [
+          { width: clamp(wshPct), tone: "accent" },
+          { width: 100 - clamp(wshPct), tone: "short" }
+        ],
+        legend: [
+          { dot: wshPct === null ? "" : "green", label: "Cycles done", value: fmt.formatNumber(totals.washingCompleted) },
+          { dot: "", label: "Pending", value: fmt.formatNumber(totals.washingPending) },
+          { dot: totals.washingOverdue > 0 ? "red" : "", label: "Overdue", value: fmt.formatNumber(totals.washingOverdue), bad: totals.washingOverdue > 0 }
         ]
       },
       {
         title: "Inverters",
         destination: "inverters",
         icon: ICON_INVERTER,
-        value: inv.total
-          ? inv.runningPercent + "%"
-          : (inv.tickets ? fmt.formatNumber(inv.tickets) : "—"),
-        pill: inverterPill,
-        hints: inv.total
+        tone: toneOfPill(inverterPill),
+        empty: inv.total || inv.tickets ? "" : (inv.restricted
+          ? "Unit counts are not available to your role"
+          : "No inverter units configured"),
+        figure: inv.total
+          ? { value: String(inv.runningPercent), unit: "%", caption: "of inverters running" }
+          : (inv.tickets ? { value: fmt.formatNumber(inv.tickets), unit: "", caption: "open inverter issues" } : null),
+        meter: inv.total ? [{ width: clamp(inv.runningPercent), tone: "accent" }] : [],
+        legend: inv.total
           ? [
-            { strong: true, dot: inv.down > 0 ? "red" : "green",
-              text: fmt.formatNumber(inv.running) + " of " + fmt.formatNumber(inv.total) + " inverters running" },
-            { strong: false,
-              text: fmt.formatNumber(inv.down) + " not running · " +
-                fmt.formatNumber(inv.tickets) + " open inverter issues · " +
-                fmt.formatNumber(inv.plants) + " plants affected" }
+            { dot: "green", label: "Running", value: fmt.formatNumber(inv.running) },
+            { dot: inv.down > 0 ? "red" : "", label: "Not running", value: fmt.formatNumber(inv.down), bad: inv.down > 0 },
+            { dot: inv.tickets > 0 ? "red" : "", label: "Open tickets", value: fmt.formatNumber(inv.tickets), bad: inv.tickets > 0 }
           ]
           : [
-            { strong: true, dot: inv.tickets > 0 ? "red" : "green",
-              text: fmt.formatNumber(inv.tickets) + " open inverter issues" },
-            { strong: false,
-              text: inv.restricted
-                ? "Unit counts are not available to your role"
-                : "No inverter units configured for these plants" }
+            { dot: inv.tickets > 0 ? "red" : "", label: "Open tickets", value: fmt.formatNumber(inv.tickets), bad: inv.tickets > 0 },
+            { dot: "", label: "Plants affected", value: fmt.formatNumber(inv.plants) },
+            { dot: "", label: "Units configured", value: fmt.formatNumber(inv.total) }
           ]
       },
       {
         title: "Open Site Issues",
         destination: "health",
         icon: ICON_ISSUES,
-        value: fmt.formatNumber(openIss),
-        pill: isP,
-        hints: [
-          { strong: true,  dot: totals.unsolvedIssues > 0 ? "red" : "green", text: `${fmt.formatNumber(totals.unsolvedIssues)} unsolved · ${fmt.formatNumber(totals.inProgressIssues)} in progress` },
-          { strong: false, text: `${fmt.formatNumber(totals.closedIssues)} closed to date · ${fmt.formatNumber(totals.plantsWithOpenIssues)} plants affected` }
+        tone: toneOfPill(isP),
+        empty: "",
+        figure: { value: fmt.formatNumber(openIss), unit: "", caption: "open across the portfolio" },
+        // Stacked: what is still unsolved against what has been closed to date.
+        meter: issueSpan ? [
+          { width: clamp(100 * issueUnsolved / issueSpan), tone: "red" },
+          { width: clamp(100 * issueClosed / issueSpan), tone: "accent" }
+        ] : [],
+        legend: [
+          { dot: issueUnsolved > 0 ? "red" : "", label: "Unsolved", value: fmt.formatNumber(issueUnsolved), bad: issueUnsolved > 0 },
+          { dot: "", label: "In progress", value: fmt.formatNumber(totals.inProgressIssues) },
+          { dot: issueClosed > 0 ? "green" : "", label: "Closed to date", value: fmt.formatNumber(issueClosed) }
         ]
       }
     ];
 
+    const meterHTML = (segments) =>
+      `<span class="ep-meter" aria-hidden="true">${segments.map((segment) =>
+        `<span class="ep-meter__seg ep-meter__seg--${segment.tone}" style="width:${clamp(segment.width)}%"></span>`).join("")}</span>`;
+
+    // A real <button>: clickable and reachable by keyboard without a role/tabindex of our own.
     document.querySelector("[data-overview-metrics]").innerHTML = cards.map((c) => `
-      <div class="ep-metric" role="link" tabindex="0" data-overview-destination="${c.destination}" aria-label="${fmt.escape(c.title)}">
-        <div class="ep-metric__head">
-          <span class="ep-metric__title">${c.icon || ""}${fmt.escape(c.title)}</span>
-        </div>
-        <div class="ep-metric__value">${c.value}</div>
-        <div class="ep-metric__hints">
-          ${c.hints.map((h) => `<span class="${h.strong ? "ep-metric__hint-strong" : "ep-metric__hint"}">${h.dot ? `<span class="ep-hint-light ep-hint-light--${h.dot}"></span>` : ""}${fmt.escape(h.text)}</span>`).join("")}
-        </div>
-      </div>
+      <button type="button" class="ep-metric ep-metric--${c.tone}" data-overview-destination="${c.destination}"
+        aria-label="${fmt.escape(c.title + (c.figure ? ": " + c.figure.value + c.figure.unit + " " + c.figure.caption : ", " + c.empty))}">
+        <span class="ep-metric__head">
+          <span class="ep-metric__chip">${c.icon || ""}</span>
+          <span class="ep-metric__title">${fmt.escape(c.title)}</span>
+          ${CHEVRON}
+        </span>
+        ${c.figure
+          ? `<span class="ep-metric__figure"><span class="ep-metric__value">${fmt.escape(c.figure.value)}</span>` +
+            `${c.figure.unit ? `<span class="ep-metric__unit">${fmt.escape(c.figure.unit)}</span>` : ""}` +
+            `<span class="ep-metric__caption">${fmt.escape(c.figure.caption)}</span></span>`
+          : `<span class="ep-metric__figure"><span class="ep-metric__empty">${fmt.escape(c.empty)}</span></span>`}
+        ${meterHTML(c.meter)}
+        <span class="ep-metric__legend">
+          ${c.legend.map((item) => `<span class="ep-metric__stat">
+            <span class="ep-hint-light${item.dot ? " ep-hint-light--" + item.dot : ""}"></span>
+            <span class="ep-metric__stat-label">${fmt.escape(item.label)}</span>
+            <b class="ep-metric__stat-value${item.bad ? " is-bad" : ""}">${item.value}</b>
+          </span>`).join("")}
+        </span>
+      </button>
     `).join("");
   }
 
@@ -1429,7 +1560,9 @@
       metrics.addEventListener("keydown", (ev) => {
         if (ev.key !== "Enter" && ev.key !== " ") return;
         const card = ev.target.closest("[data-overview-destination]");
-        if (!card) return;
+        // A <button> already fires a click for Enter and Space; handling the key here as well
+        // would open the destination twice.
+        if (!card || card.tagName === "BUTTON") return;
         ev.preventDefault();
         openMetricDestination(card);
       });

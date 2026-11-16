@@ -54,19 +54,17 @@
 .ep-security__table th[aria-sort="descending"] .ep-security__sort-indicator::before { content: "\2193"; opacity: 1; }
 .ep-security__sort:hover { color: var(--ep-accent-strong); }
 .ep-security__table th:nth-child(1),
-.ep-security__table td:nth-child(1) { width: 12%; }
+.ep-security__table td:nth-child(1) { width: 14%; }
 .ep-security__table th:nth-child(2),
-.ep-security__table td:nth-child(2) { width: 18%; }
+.ep-security__table td:nth-child(2) { width: 20%; }
 .ep-security__table th:nth-child(3),
-.ep-security__table td:nth-child(3) { width: 13%; }
+.ep-security__table td:nth-child(3) { width: 15%; }
 .ep-security__table th:nth-child(4),
-.ep-security__table td:nth-child(4) { width: 10%; }
+.ep-security__table td:nth-child(4) { width: 20%; }
 .ep-security__table th:nth-child(5),
-.ep-security__table td:nth-child(5) { width: 18%; }
+.ep-security__table td:nth-child(5) { width: 15%; }
 .ep-security__table th:nth-child(6),
-.ep-security__table td:nth-child(6) { width: 13%; }
-.ep-security__table th:nth-child(7),
-.ep-security__table td:nth-child(7) { width: 16%; }
+.ep-security__table td:nth-child(6) { width: 16%; }
 .ep-security__table tbody td {
   height: auto;
   min-width: 0;

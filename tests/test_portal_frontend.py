@@ -47,15 +47,18 @@ def test_sidebar_order_and_overview_metric_grid(client):
     assert '<span class="ep-nav-item__label">Dashboard</span>' in page
     assert page.index('data-nav-group="plants"') < page.index('data-nav="security"')
     assert '<span class="ep-nav-item__label">Overview</span>' in page
-    assert ".ep-metrics {\n  display: grid;\n  grid-template-columns: repeat(2, minmax(0, 1fr));\n}" in styles
+    # Four tiles, two to a row, each its own card with a gap between them.
+    assert "  grid-template-columns: repeat(2, minmax(0, 1fr));\n  gap: var(--ep-s-4);" in styles
     assert "@media (max-width: 760px) { .ep-metrics { grid-template-columns: 1fr; } }" in styles
 
 
 def test_security_register_supports_multiple_contacts_and_edit_overlay():
     security = (PORTAL_ASSETS / "js" / "security.js").read_text(encoding="utf-8")
     styles = (PORTAL_ASSETS / "css" / "security.css").read_text(encoding="utf-8")
-    for label in ("Site Engineer", "Site Engineer No.", "Engineer Shift", "Security Name", "Mobile No.", "Guard Shift"):
+    for label in ("Site Engineer", "Site Engineer No.", "Security Name", "Mobile No.", "Guard Shift"):
         assert label in security
+    # The engineer's duty shift is not tracked in the register; only guards keep a shift.
+    assert "Engineer Shift" not in security
     assert "<th>Guard Name</th>" not in security
     assert 'data-security-register-search' in security
     assert "applyRegisterFilters(container)" in security
@@ -68,7 +71,7 @@ def test_security_register_supports_multiple_contacts_and_edit_overlay():
     assert 'data-security-add="engineer"' in security and 'data-security-add="guard"' in security
     assert 'fields.security_contacts = payload.contacts;' in security
     assert 'var registerSort = { column: 0, direction: "ascending" };' in security
-    assert 'var sortableRegisterColumns = [0, 1, 3, 4, 6];' in security
+    assert 'var sortableRegisterColumns = [0, 1, 3, 5];' in security
     assert 'if (editingRows || sortableRegisterColumns.indexOf(column) === -1)' in security
     assert 'data-security-sort="' in security and 'data-security-sort-value="' in security
     assert '\'<td data-label="Site Engineer No.">\'' in security
@@ -208,7 +211,9 @@ def test_overview_filters_keep_full_options_and_metric_tiles_open_scoped_pages()
     assert 'destination: "health"' in overview
     assert "global.Solar91PortalNav.selectView(destination, dateRange)" in overview
     assert "global.Solar91PortalNav.selectPlantPage(filters.plant, destination, dateRange, row.plant)" in overview
-    assert 'role="link" tabindex="0"' in overview
+    # Each tile is a real button: clickable and reachable by keyboard without a role of our own.
+    assert '<button type="button" class="ep-metric ep-metric--${c.tone}"' in overview
+    assert 'role="link" tabindex="0"' not in overview
     navigation = (PORTAL_ASSETS / "js" / "navigation.js").read_text(encoding="utf-8")
     assert "selectView: selectView" in navigation
     assert ">All SPV</option>" in page
@@ -460,8 +465,8 @@ def test_record_sheet_lets_om_re_clean_tables_into_the_next_cycle():
         month: '2026-10', recordCycle: cycleNo, washingDataToday: '2026-10-05', washingReports: reports,
         recordDrafts: drafts || {}, washingPlant: { cycles, table_count: 10, monthly_target: 3 } });
 
-      // Unsaved: the Head picks 1-3 again on the 3rd; the 4th, from the start, is planned in cycle 2.
-      const drafts = { '2026-10-03': { mode: 'pick', list: '2-5' }, '2026-10-04': { mode: 'start', end: '3' } };
+      // Unsaved: the Head picks 1-3 again on the 3rd; the 4th is then planned in cycle 2 too.
+      const drafts = { '2026-10-03': { list: '2-5' }, '2026-10-04': { list: '1' } };
       const planned = rows([day1], 1, drafts);
       const third = planned.find((r) => r.date === '2026-10-03');
       if (third.error) fail('O&M re-clean should not be an error: ' + third.error);
@@ -488,7 +493,7 @@ def test_record_sheet_lets_om_re_clean_tables_into_the_next_cycle():
 
       // Cycle 3 has no next cycle: a repeat there is an error even for the Head.
       const c3day = Object.assign({}, day1, { id: 'c', report_date: '2026-10-02', cycle_no: 3 });
-      const last = rows([c3day], 3, { '2026-10-04': { mode: 'pick', list: '1' } }).find((r) => r.date === '2026-10-04');
+      const last = rows([c3day], 3, { '2026-10-04': { list: '1' } }).find((r) => r.date === '2026-10-04');
       if (!/last cycle/.test(last.error)) fail('cycle 3 repeat: ' + last.error);
     """
     run = subprocess.run(["node", "-e", script], cwd=ROOT, capture_output=True, text=True, timeout=30)
@@ -729,9 +734,11 @@ def test_overview_inverter_tile_counts_units_and_opens_standalone_health():
     assert "tickets += Number(row.open) || 0;" in overview
     assert "down += Number(row.units) || 0;" in overview
     assert "runningPercent: total ? Math.round(running / total * 100) : null" in overview
-    assert 'value: inv.total\n          ? inv.runningPercent + "%"' in overview
-    assert 'fmt.formatNumber(inv.running) + " of " + fmt.formatNumber(inv.total) + " inverters running"' in overview
-    assert 'fmt.formatNumber(inv.down) + " not running · "' in overview
+    assert 'figure: inv.total\n          ? { value: String(inv.runningPercent), unit: "%"' in overview
+    # The legend states running, not running and open tickets against the headline percentage.
+    assert '{ dot: "green", label: "Running", value: fmt.formatNumber(inv.running) }' in overview
+    assert 'label: "Not running", value: fmt.formatNumber(inv.down), bad: inv.down > 0' in overview
+    assert 'label: "Open tickets", value: fmt.formatNumber(inv.tickets), bad: inv.tickets > 0' in overview
     # The filters narrow it: only the plants the tiles are showing are counted.
     assert "const codes = new Set(state ? state.rows.map(({ plant }) => plant.siteCode) : []);" in overview
     # The unit configuration is not open to every role; the tile still shows the tickets.
@@ -1650,20 +1657,25 @@ def test_record_sheet_lets_managers_edit_saved_days_through_the_report_patch():
     assert ".ep-calendar__record-row--editing" in styles and ".ep-calendar__record-edit" in styles
 
 
-def test_record_sheet_saves_a_zero_tables_day_like_the_excel_upload():
+def test_record_sheet_saves_a_not_done_day_with_its_reason():
     calendar = (PORTAL_ASSETS / "js" / "operations-calendar.js").read_text(encoding="utf-8")
-    assert "data-record-zero" in calendar and "0 cleaned" in calendar
-    # a ticked day is sent as not done / "Other" / 0 tables and never carries a table range
-    assert 'job_status: "Not done",' in calendar and 'exception_reason: "Other",' in calendar
+    # The old "0 cleaned" tick is gone: a day with nothing cleaned picks its reason from the list the
+    # API accepts, so compliance and the month's records read the real reason instead of "Other".
+    assert "data-record-zero" not in calendar and "0 cleaned" not in calendar
+    assert "data-record-notdone" in calendar
+    assert 'NOT_DONE_REASONS = ["Rain", "Water shortage", "Machine breakdown", "Access restriction", "Safety stand-down", "Other"]' in calendar
+    assert 'job_status: "Not done",' in calendar and "exception_reason: row.draft.reason," in calendar
     assert "tables_cleaned: 0," in calendar
-    # Save is enabled for a zero day even though no last table number was typed
+    # Save is enabled for a not-done day even though no table number was typed
     assert "function rowEntered(row)" in calendar and "row.zero" in calendar
 
 
 def test_record_sheet_tracks_exactly_which_tables_were_cleaned():
     calendar = (PORTAL_ASSETS / "js" / "operations-calendar.js").read_text(encoding="utf-8")
-    # three ways to enter a day: from the start, from the end, or any list such as 1, 2, 4, 7-8, 13 / 100-91
-    assert 'modes = [["start", "From start"], ["end", "From end"], ["pick", "Pick tables"]]' in calendar
+    # one way to enter a day: the list of tables cleaned, such as 1, 2, 4, 7-8, 13 / 100-91
+    assert "data-record-list placeholder=" in calendar
+    assert "From start" not in calendar and "From end" not in calendar
+    assert "data-record-mode" not in calendar and "data-record-end" not in calendar
     assert "function parseTableList(text, total)" in calendar and "function planDay(state, draft, used, total, movedTo)" in calendar
     # the exact tables are sent, shown for every saved day, and summarised for the cycle
     assert "table_numbers: row.numbers," in calendar
@@ -1673,11 +1685,8 @@ def test_record_sheet_tracks_exactly_which_tables_were_cleaned():
 
 def test_record_sheet_uses_wheel_safe_numeric_text_inputs():
     calendar = (PORTAL_ASSETS / "js" / "operations-calendar.js").read_text(encoding="utf-8")
-    assert 'data-record-end value="' in calendar
     assert 'data-record-edit-count value="' in calendar
-    assert 'type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off" data-record-end' in calendar
     assert 'type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off" data-record-edit-count' in calendar
-    assert not re.search(r'<input type="number"[^>]*data-record-end', calendar)
     assert not re.search(r'<input type="number"[^>]*data-record-edit-count', calendar)
 
 
@@ -2197,17 +2206,14 @@ def test_inverter_health_shows_maker_and_capacity_after_the_unit_count():
 
     block = overview[overview.index("INVERTER_PLANT_COLUMNS = ["):]
     block = block[:block.index("\n  ];")]
-    # Maker and Capacity sit between Total inverters and Running, in that order.
-    keys = [key for key in ("total", "maker", "capacity", "running") if f'"{key}"' in block]
-    assert keys == ["total", "maker", "capacity", "running"]
-    assert '{ key: "maker", label: "Maker"' in block
-    assert '{ key: "capacity", label: "Capacity (kW)"' in block
-    assert '<tr><td colspan="8">No plants in this Dashboard scope.</td></tr>' in overview
+    # Maker and capacity now share the Inverter column, which sorts by maker.
+    assert '{ key: "inverter", label: "Inverter", sort: (row) => (row.config && row.config.maker)' in block
+    assert 'colspan="${INVERTER_PLANT_COLUMN_COUNT}"' in overview
 
-    body = overview[overview.index('data-ih-plant-row='):]
-    body = body[:body.index("</tr>")]
-    assert body.index("fmt.formatNumber(row.total)") < body.index("row.config.maker") \
-        < body.index("row.config.capacity_kw") < body.index('inverterLightCell("green", row.running)')
+    cells = overview[overview.index("const configuredCells ="):]
+    cells = cells[:cells.index("`;")]
+    assert cells.index("row.config.maker") < cells.index("row.config.capacity_kw") \
+        < cells.index("fmt.formatNumber(row.running)")
 
     # One trailing-zero trimmer, shared with the BOM quantity cell -- not a second copy.
     assert "function decimalText(value)" in fmt and "decimalText: decimalText" in fmt
@@ -2254,7 +2260,7 @@ def test_inverter_health_unfolds_the_down_inverters_of_a_plant():
     assert "ticket.serial_no" in block and "ticket.subcategory" in block and "ticket.description" in block
     # Edit only for the roles that may edit, and it is the existing Health-register button.
     assert 'inverterHealth.canEdit ? `<button type="button" class="ep-ih__button" data-ih-edit=' in block
-    assert 'colspan="8"' in block
+    assert 'colspan="${INVERTER_PLANT_COLUMN_COUNT}"' in block
 
     # The unfold button sits inside the plant row, so it must be read before the row's own click.
     handler = overview[overview.index('const unfold = event.target.closest("[data-ih-unfold]");'):]
@@ -2268,13 +2274,115 @@ def test_inverter_counts_carry_traffic_lights_and_a_clean_plant_shows_no_red():
     overview = (PORTAL_ASSETS / "js" / "overview.js").read_text(encoding="utf-8")
     styles = (PORTAL_ASSETS / "css" / "components.css").read_text(encoding="utf-8")
 
-    assert 'inverterLightCell("green", row.running)' in overview
-    # Nothing down means nothing to signal: the red light is not emitted at all.
-    assert 'inverterLightCell(row.down ? "red" : "", row.down)' in overview
-    assert '${tone ? `<span class="ep-hint-light ep-hint-light--${tone}"' in overview
+    # Running and total share one cell; the red light is emitted only when something IS down,
+    # so a lit red dot in that column always means a real outage.
+    assert '<b>${fmt.formatNumber(row.running)}</b><span>/ ${fmt.formatNumber(row.total)}</span>' in overview
+    assert '${row.down ? `<span class="ep-hint-light ep-hint-light--red" aria-hidden="true"></span>` : ""}' in overview
     # It reuses the portal's existing traffic-light primitive rather than a second one.
     assert ".ep-hint-light--green" in styles and ".ep-hint-light--red" in styles
     assert ".ep-light--green" not in styles
+
+
+def test_progress_bar_fill_is_block_level_so_every_bar_actually_paints():
+    """Regression: .ep-bar__fill is a <span> carrying an inline width.
+
+    Width and height do not apply to a non-replaced inline element, so without display:block
+    every bar in the portal — plant health, PM, module cleaning, inverter running % — painted
+    as an empty grey track whatever the number behind it was."""
+    styles = (PORTAL_ASSETS / "css" / "components.css").read_text(encoding="utf-8")
+    fill = styles[styles.index(".ep-bar__fill {"):]
+    fill = fill[:fill.index("}")]
+    assert "display: block;" in fill
+    assert "height: 100%;" in fill
+    # The meter on the Dashboard tiles carries fills of its own, and has the same requirement.
+    assert ".ep-meter__seg { display: block; height: 100%; }" in styles
+
+
+def test_dashboard_tiles_are_buttons_with_state_coloured_figures_and_meters():
+    """Four tiles, each a real button carrying its own figure, meter and legend."""
+    overview = (PORTAL_ASSETS / "js" / "overview.js").read_text(encoding="utf-8")
+    styles = (PORTAL_ASSETS / "css" / "components.css").read_text(encoding="utf-8")
+
+    # A button, so Enter and Space reach it without a role or tabindex of our own — and the
+    # keydown handler must then stand aside, or the destination opens twice.
+    assert '<button type="button" class="ep-metric ep-metric--${c.tone}"' in overview
+    assert 'if (!card || card.tagName === "BUTTON") return;' in overview
+    assert ".ep-metric:focus-visible {\n  outline: 2px solid var(--ep-accent);" in styles
+
+    # The headline figure is coloured by the tile's state, from the tokens.
+    assert ".ep-metric--accent .ep-metric__value, .ep-metric--accent .ep-metric__unit { color: var(--ep-accent); }" in styles
+    assert ".ep-metric--red    .ep-metric__value, .ep-metric--red    .ep-metric__unit { color: var(--ep-red); }" in styles
+    assert ".ep-metric--neutral .ep-metric__value, .ep-metric--neutral .ep-metric__unit { color: var(--ep-text-muted); }" in styles
+    # Icon chip tinted by the same state.
+    assert ".ep-metric--accent .ep-metric__chip { background: var(--ep-accent-soft); color: var(--ep-accent-strong); }" in styles
+    assert ".ep-metric--red    .ep-metric__chip { background: var(--ep-red-soft); color: var(--ep-red); }" in styles
+
+    # Nothing scheduled reads as a sentence, not as a bare dash that looks like a broken tile.
+    assert 'empty: pmEmpty ? "No activities this month" : ""' in overview
+    assert "const pmEmpty = pmPct === null || pmScheduled === 0;" in overview
+    assert 'class="ep-metric__empty"' in overview
+    assert 'meter: pmEmpty ? [] : [' in overview
+
+    # Open site issues stacks what is unsolved against what has been closed to date.
+    assert '{ width: clamp(100 * issueUnsolved / issueSpan), tone: "red" }' in overview
+    assert '{ width: clamp(100 * issueClosed / issueSpan), tone: "accent" }' in overview
+
+    # The legend is pushed to the bottom of the tile so all four line up.
+    assert ".ep-metric__legend {" in styles
+    assert "margin-top: auto;" in styles
+    assert ".ep-metric__stat-value.is-bad { color: var(--ep-red); }" in styles
+    # And the tile shows it is clickable.
+    assert "ep-metric__chevron" in overview
+    assert ".ep-metric:hover { transform: translateY(-2px);" in styles
+
+
+def test_inverter_health_hero_band_fleet_composition_and_fitted_ticket_table():
+    """The drill-down's own presentation: one hero card, fleet composition, five plant columns."""
+    overview = (PORTAL_ASSETS / "js" / "overview.js").read_text(encoding="utf-8")
+    styles = (PORTAL_ASSETS / "css" / "components.css").read_text(encoding="utf-8")
+
+    # One hero card with the ring and three KPIs on hairline rules, not five ragged cards.
+    assert 'class="ep-panel ep-ih__hero"' in overview
+    assert ".ep-ih__kpi { display: flex;" in styles and "border-left: 1px solid var(--ep-border-soft);" in styles
+    assert "width: 104px; height: 104px; flex: 0 0 104px;" in styles
+    assert "ep-ih__ring-card" not in overview      # the five separate stat cards are gone
+
+    # All-zero severities say so once instead of four chips reading 0.
+    assert 'const severityBlock = severityTotal' in overview
+    assert '<span class="ep-ih__all-clear">✓ All clear</span>' in overview
+    assert "filter((severity) => severityCounts[severity] > 0)" in overview
+
+    # Fleet composition is derived from the unit configuration already loaded.
+    assert "function inverterFleetMakes(totals)" in overview
+    assert "totals.configs.forEach((config)" in overview
+    fleet_block = overview[overview.index("function inverterFleetMakes(totals)"):]
+    fleet_block = fleet_block[:fleet_block.index("\n  }")]
+    assert "api.request" not in fleet_block and "/api/" not in fleet_block
+    assert "const fleetUnits = fleet.reduce((sum, item) => sum + item.units, 0);" in overview
+    assert "units · " in overview and "plants · " in overview and "kW" in overview
+    # Lightness steps of the brand green, never three different hues.
+    assert ".ep-ih__fleet-seg--1 { background: var(--ep-accent-strong); }" in styles
+    assert ".ep-ih__fleet-seg--3 { background: color-mix(in srgb, var(--ep-accent) 55%, #FFFFFF); }" in styles
+
+    # The per-plant toolbar: search, the issues-only filter, and the export moved up into it.
+    assert "data-ih-plant-search" in overview and "data-ih-only-issues" in overview
+    assert "function filteredInverterPlantRows(rows)" in overview
+    assert "inverterHealth.onlyIssues && !(row.tickets > 0 || (row.down || 0) > 0)" in overview
+
+    # An unconfigured plant says so once, across the three cells that would repeat it.
+    assert '<td class="ep-ih__unset" colspan="3">Not configured</td>' in overview
+    assert overview.count("Not configured</td>") == 1
+
+    # The CSV still carries every field separately, whatever the screen merges.
+    csv = overview[overview.index("function exportInverterPlantCsv()"):]
+    csv = csv[:csv.index("downloadCsv(")]
+    for column in ('"Total inverters"', '"Maker"', '"Capacity (kW)"', '"Running"',
+                   '"Not running"', '"Running %"', '"Open tickets"', '"Site code"'):
+        assert column in csv, column
+
+    # The ticket table fits the frame instead of scrolling sideways.
+    assert "min-width: 1420px" not in styles
+    assert ".ep-ih__tickets { table-layout: fixed; width: 100%; min-width: 0; }" in styles
 
 
 def test_inverter_health_plant_table_is_sortable_and_aligned_like_the_register():
@@ -2290,10 +2398,11 @@ def test_inverter_health_plant_table_is_sortable_and_aligned_like_the_register()
     block = block[:block.index("\n  ];")]
     # Plant code, Running and Not running are sorted by value; every column carries a reader.
     assert 'sort: (row) => row.plant.siteCode' in block
-    assert 'sort: (row) => row.running' in block and 'sort: (row) => row.down' in block
-    assert block.count("sort: (row)") == 8
+    assert 'sort: (row) => row.running' in block and 'sort: (row) => row.percent' in block
+    # Five columns on screen: maker and capacity share Inverter, running and total share Running.
+    assert block.count("sort: (row)") == 5
     # The short/numeric columns are centred, which is the register's own alignment.
-    assert block.count('align: "num"') == 7
+    assert block.count('align: "num"') == 3
     assert ".ep-ih__plant-table th.num,\n.ep-ih__plant-table td.num { text-align: center; }" in styles
     assert ".ep-ih__plant-table th.num .ep-sort { justify-content: center; }" in styles
 

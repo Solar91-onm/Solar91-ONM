@@ -314,6 +314,8 @@
       washingCompleted: 0, washingPending: 0, washingOverdue: 0,
       dcCapacityMw: 0, acCapacityMw: 0
     };
+    let washingScoreSum = 0;
+    let washingScored = 0;
     rows.forEach(function (row) {
       const plant = row.plant, profile = row.profile;
       const cond = profile.derivedCondition;
@@ -336,6 +338,13 @@
         totals.washingCompleted += profile.washing.completed || 0;
         totals.washingPending   += profile.washing.pending || 0;
         totals.washingOverdue   += profile.washing.overdue || 0;
+        // The plant's own monthly score (confirmed tables against the tables due so far). A plant
+        // that cleans past three cycles reads over 100% on its own row, but counts as 100 here so
+        // one plant's extra washing cannot hide another's shortfall.
+        if (typeof profile.washing.compliancePercent === "number") {
+          washingScoreSum += Math.min(100, profile.washing.compliancePercent);
+          washingScored += 1;
+        }
       }
       if (plant.dcCapacityKw) totals.dcCapacityMw += plant.dcCapacityKw / 1000;
       if (plant.acCapacityKw) totals.acCapacityMw += plant.acCapacityKw / 1000;
@@ -343,8 +352,12 @@
 
     const pmTotal = totals.pmCompleted + totals.pmPending + totals.pmOverdue;
     totals.pmCompliancePercent = pmTotal === 0 ? null : Math.round((totals.pmCompleted / pmTotal) * 100);
-    const wshTotal = totals.washingCompleted + totals.washingPending + totals.washingOverdue;
-    totals.washingCompliancePercent = wshTotal === 0 ? null : Math.round((totals.washingCompleted / wshTotal) * 100);
+    // Module cleaning compliance is the average of the plants' monthly scores, which move with
+    // every confirmed day. Counting whole completed cycles instead left the tile frozen between
+    // cycle completions, so a month of daily cleaning showed no change at all.
+    totals.washingCompliancePercent = washingScored
+      ? Math.round(washingScoreSum / washingScored)
+      : null;
     totals.dcCapacityMw = Math.round(totals.dcCapacityMw * 100) / 100;
     totals.acCapacityMw = Math.round(totals.acCapacityMw * 100) / 100;
     return totals;

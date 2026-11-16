@@ -812,6 +812,14 @@ def _build_overview(db: Session, user: User, include_tables: bool = False, repor
                 completed_dates.setdefault(report.cycle_no, report.report_date)
         due_by_today = min(MONTHLY_CYCLE_TARGET, (today.day - 1) // 10 + 1)
         completed_due = sum(1 for cycle_no in completed_dates if cycle_no <= due_by_today)
+        # Monthly compliance is counted in tables, not completed cycles, so cleaning done after all three
+        # cycles are complete still counts: confirmed tables this month against the tables due so far
+        # (tables per cycle × cycles due by today). Three full cycles is 100%; extra washing goes past it.
+        month_confirmed_tables = sum(
+            report.tables_cleaned for report in month_reports if report.review_status == "Confirmed"
+        )
+        monthly_tables_due = table_count * due_by_today
+        monthly_compliance = round(100 * month_confirmed_tables / monthly_tables_due) if monthly_tables_due else 100
         today_target = _daily_table_target(table_count, today, config.cycle_overrides)
         compliance = _cycle_compliance(table_count, today, config.cycle_overrides, ledger, excused_dates)
         due_dates = _cycle_due_dates(today, config.cycle_overrides)
@@ -930,7 +938,11 @@ def _build_overview(db: Session, user: User, include_tables: bool = False, repor
             "daily_compliance_percent": 100 if today in excused_dates else (
                 min(100, round(100 * today_cleaned / today_target)) if today_target else 100
             ),
-            "monthly_compliance_percent": round(100 * completed_due / due_by_today) if due_by_today else 100,
+            "monthly_compliance_percent": monthly_compliance,
+            "monthly_tables_confirmed": month_confirmed_tables,
+            "monthly_tables_due": monthly_tables_due,
+            "monthly_cycles_due": due_by_today,
+            "monthly_cycles_completed_due": completed_due,
             "cycle_compliance": compliance,
             "cycle_compliance_percent": compliance["percent"],
             "average_delay_days": round(sum(delays) / len(delays), 1) if delays else 0,
@@ -992,8 +1004,10 @@ def _build_overview(db: Session, user: User, include_tables: bool = False, repor
             "tables_due_today": sum(row["tables_due_today"] for row in plant_rows),
             "tables_washed_today": sum(row["tables_washed_today"] for row in plant_rows),
             "tables_pending_today": sum(row["tables_pending_today"] for row in plant_rows),
+            # A plant may read over 100% on its own row, but it is counted as 100% here so that one
+            # plant's extra washing cannot hide another plant's shortfall in the portfolio figure.
             "monthly_compliance_percent": round(
-                sum(row["monthly_compliance_percent"] for row in plant_rows) / len(plant_rows)
+                sum(min(100, row["monthly_compliance_percent"]) for row in plant_rows) / len(plant_rows)
             ) if plant_rows else 100,
             "cycle_compliance": _portfolio_compliance(plant_rows),
             "average_delay_days": round(
@@ -1022,7 +1036,9 @@ def _build_overview(db: Session, user: User, include_tables: bool = False, repor
     })
     if not manager:
         # Compliance / delay / ranking figures are O&M performance metrics; field users never receive them.
-        hidden = ("cycle_compliance", "cycle_compliance_percent", "monthly_compliance_percent", "daily_compliance_percent", "average_delay_days",
+        hidden = ("cycle_compliance", "cycle_compliance_percent", "monthly_compliance_percent", "daily_compliance_percent",
+                  "monthly_tables_confirmed", "monthly_tables_due", "monthly_cycles_due", "monthly_cycles_completed_due",
+                  "average_delay_days",
                   "compliance_threshold_percent", "overdue_days", "overdue_bucket", "overdue_cycle", "productivity",
                   "daily_productivity", "exceptions_this_month", "tables_due_today", "tables_pending_today",
                   "excused_days_late_cycle", "delay_excused")

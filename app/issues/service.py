@@ -417,10 +417,10 @@ class IssueService:
         before=row.status
         now=datetime.now(timezone.utc)
         if next_status == "Resolved":
+            # The resolution details and fix photos are optional, so a transition without them
+            # resolves the ticket with an empty resolution.
             if resolve is None:
-                raise HTTPException(422, "Resolution details and fix photo evidence are required")
-            if not resolve.root_cause.strip() or not resolve.corrective_action.strip():
-                raise HTTPException(422, "Root cause and corrective action are required")
+                resolve = ResolveRequest()
             evidence_by_id = {
                 str(entry.get("id")): entry
                 for entry in (row.legacy_payload or {}).get("evidence", [])

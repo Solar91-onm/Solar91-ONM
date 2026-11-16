@@ -118,9 +118,11 @@ class ProgressRequest(BaseModel):
 
 class ResolveRequest(BaseModel):
     note: str | None = None
-    root_cause: str = Field(min_length=1, max_length=4000)
-    corrective_action: str = Field(min_length=1, max_length=4000)
-    evidence_ids: list[str] = Field(min_length=1, max_length=10)
+    # The resolution is optional: a ticket can be resolved with no root cause, corrective
+    # action or fix photos. What is sent is still stored and capped.
+    root_cause: str = Field(default="", max_length=4000)
+    corrective_action: str = Field(default="", max_length=4000)
+    evidence_ids: list[str] = Field(default_factory=list, max_length=10)
     fixed_on: date | None = None
     remark: str | None = Field(default=None, max_length=4000)
 

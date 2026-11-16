@@ -357,7 +357,7 @@ def build_profile(
             ),
         }
 
-    washing_block = dict(_EMPTY_BLOCK)
+    washing_block = dict(_EMPTY_BLOCK, cycleCompliancePercent=None)
     if washing:
         if "cycles_this_month" not in washing:
             completed = int(washing.get("completed") or 0)
@@ -369,6 +369,7 @@ def build_profile(
                 "pending": pending,
                 "overdue": overdue,
                 "compliancePercent": _percent(completed, target),
+                "cycleCompliancePercent": _percent(completed, target),
                 "currentCycle": None,
                 "monthlyTarget": target,
                 "overdueDays": None,
@@ -387,8 +388,12 @@ def build_profile(
                 "completed": completed,
                 "pending": max(0, target - completed),
                 "overdue": 1 if overdue_days > 0 else 0,
-                # _cycle_compliance in app/scheduled/washing_cycles.py is authoritative.
-                "compliancePercent": washing.get("cycle_compliance_percent"),
+                # The plant's score for the month: confirmed tables against the tables due so far
+                # (washing_cycles._build_overview is authoritative). It is uncapped, so cleaning done
+                # after all three cycles are complete reads above 100%.
+                "compliancePercent": washing.get("monthly_compliance_percent"),
+                # The current cycle's own compliance, capped at 100 (_cycle_compliance).
+                "cycleCompliancePercent": washing.get("cycle_compliance_percent"),
                 "currentCycle": washing.get("current_cycle"),
                 "monthlyTarget": target,
                 "overdueDays": overdue_days,
@@ -993,6 +998,7 @@ def aggregate(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "dcCapacityMw": 0.0, "acCapacityMw": 0.0,
         "commissionedPlants": 0,
     }
+    washing_scores: list[float] = []
     for row in rows:
         plant, profile = row["plant"], row["profile"]
         condition = profile.get("derivedCondition") or "unknown"
@@ -1014,6 +1020,11 @@ def aggregate(rows: list[dict[str, Any]]) -> dict[str, Any]:
                 value = data.get(field)
                 if isinstance(value, int):
                     totals[prefix + suffix] += value
+        # A plant over 100% (extra washing after all three cycles) counts as 100 here, so one
+        # plant's extra work cannot hide another plant's shortfall in the portfolio figure.
+        washing_score = (profile.get("washing") or {}).get("compliancePercent")
+        if isinstance(washing_score, (int, float)):
+            washing_scores.append(min(100, washing_score))
 
         if plant.get("dc_capacity_kw"):
             totals["dcCapacityMw"] += plant["dc_capacity_kw"] / 1000
@@ -1024,8 +1035,12 @@ def aggregate(rows: list[dict[str, Any]]) -> dict[str, Any]:
 
     pm_total = totals["pmCompleted"] + totals["pmPending"] + totals["pmOverdue"]
     totals["pmCompliancePercent"] = _percent(totals["pmCompleted"], pm_total)
-    wash_total = totals["washingCompleted"] + totals["washingPending"] + totals["washingOverdue"]
-    totals["washingCompliancePercent"] = _percent(totals["washingCompleted"], wash_total)
+    # Module cleaning compliance is the average of the plants' monthly scores, which move with
+    # every confirmed day. Counting whole completed cycles left the tile unchanged between cycle
+    # completions, so a month of daily cleaning showed no movement at all.
+    totals["washingCompliancePercent"] = (
+        round(sum(washing_scores) / len(washing_scores)) if washing_scores else None
+    )
     totals["dcCapacityMw"] = round(totals["dcCapacityMw"], 2)
     totals["acCapacityMw"] = round(totals["acCapacityMw"], 2)
     return totals

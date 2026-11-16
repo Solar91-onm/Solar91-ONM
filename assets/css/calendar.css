@@ -1616,17 +1616,6 @@
   font: inherit;
 }
 .ep-calendar__record-range { flex-wrap: wrap; }
-.ep-calendar__record-mode {
-  flex-basis: 100%;
-  min-height: 30px;
-  padding: 0 6px;
-  border: 1px solid var(--ep-border);
-  border-radius: var(--ep-radius-sm);
-  background: var(--ep-bg);
-  color: var(--ep-text);
-  font: inherit;
-  font-size: var(--ep-fs-xs);
-}
 .ep-calendar__record-tables {
   margin: 0 0 12px;
   padding: 10px 12px;
@@ -1638,16 +1627,17 @@
   line-height: 1.5;
   overflow-wrap: anywhere;
 }
-.ep-calendar__record-zero {
-  display: flex;
+.ep-calendar__record-notdone {
   flex-basis: 100%;
-  align-items: center;
-  gap: 6px;
-  color: var(--ep-text-faint);
+  min-height: 30px;
+  padding: 0 6px;
+  border: 1px solid var(--ep-border);
+  border-radius: var(--ep-radius-sm);
+  background: var(--ep-bg);
+  color: var(--ep-text);
+  font: inherit;
   font-size: var(--ep-fs-xs);
-  cursor: pointer;
 }
-.ep-calendar__record-zero input { width: auto; min-width: 0; min-height: 0; margin: 0; padding: 0; }
 .ep-calendar__record-edit-actions { grid-column: 1 / -1; display: flex; justify-content: flex-end; gap: 8px; }
 .ep-calendar__record-row--editing [role="alert"] { grid-column: 1 / -1; }
 .ep-calendar__record-notice { margin: 0 0 10px; color: var(--ep-accent-strong); font-size: var(--ep-fs-sm); }

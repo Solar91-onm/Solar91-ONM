@@ -678,7 +678,7 @@
           '<input name="resolutionRemark" value="' + escape(value("resolutionRemark", "")) + '" maxlength="4000" /></label>' +
         '<label class="ep-issues__wizard-field">Fix photos' +
           '<input name="resolutionEvidence" type="file" accept="image/jpeg,image/png,image/webp" multiple />' +
-          '<small>At least one photo of the completed fix is required, up to 10.</small></label>' +
+          '<small>Optional: add up to 10 photos of the completed fix.</small></label>' +
       '</fieldset>' +
       '<label class="ep-issues__wizard-field">Issue details' +
         '<textarea name="problem" required rows="4" maxlength="4000">' + escape(value("problem", issue.problem)) + '</textarea></label>' +
@@ -1996,9 +1996,8 @@
       var correctiveAction = read("correctiveAction");
       var photoInput = form.elements.resolutionEvidence;
       var photos = photoInput && photoInput.files ? Array.prototype.slice.call(photoInput.files) : [];
-      if (!rootCause) return fail("Add the root cause before resolving this ticket.");
-      if (!correctiveAction) return fail("Add the corrective action before resolving this ticket.");
-      if (!photos.length) return fail("Attach at least one photo of the completed fix.");
+      // Root cause, corrective action and fix photos are all optional: a ticket can be resolved
+      // with the resolution left blank.
 
       // Walk the stages in between first, so the transition the API expects is legal.
       (STEPS_BEFORE_RESOLVE[issue.status] || []).forEach(function (stage) {
@@ -2011,9 +2010,12 @@
         // post as files. They are downscaled first all the same: a fix photo costs the bucket
         // the same 2048px WebP as any other, not a 5 MB camera original.
         var evidence = photoEvidence();
-        var ready = evidence ? evidence.prepare(photos)
-          : Promise.resolve(photos.map(function (file) { return { blob: file, name: file.name }; }));
+        var ready = !photos.length
+          ? Promise.resolve([])
+          : (evidence ? evidence.prepare(photos)
+            : Promise.resolve(photos.map(function (file) { return { blob: file, name: file.name }; })));
         return ready.then(function (prepared) {
+          if (!prepared.length) return [];
           var files = new FormData();
           prepared.forEach(function (item) { files.append("files", item.blob, item.name); });
           return api.request(base + "/evidence", { method: "POST", body: files });
@@ -2023,7 +2025,7 @@
             body: {
               root_cause: rootCause,
               corrective_action: correctiveAction,
-              evidence_ids: uploaded.map(function (entry) { return entry.id; }),
+              evidence_ids: (uploaded || []).map(function (entry) { return entry.id; }),
               fixed_on: read("fixedOn") || null,
               remark: read("resolutionRemark") || null,
               note: reason || null

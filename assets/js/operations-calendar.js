@@ -138,7 +138,6 @@
         recordPendingPhotos: {},
         recordPhotoOpenId: "",
         recordEdit: null,
-        recordMode: "start",
         recordSaving: false,
         recordError: "",
         recordNotice: "",
@@ -1285,7 +1284,7 @@
       }
       plan.numbers.forEach(function (number) { used[number] = true; });
       return {
-        date: date, report: null, draft: draft, mode: plan.mode, numbers: plan.numbers, first: plan.first,
+        date: date, report: null, draft: draft, numbers: plan.numbers,
         error: plan.error, full: plan.full, zero: plan.zero,
         note: movedTo && !plan.error && (plan.numbers.length || plan.zero) ? "Counts in cycle " + movedTo +
           (plan.moves ? ": tables " + formatTableList(plan.repeated) + " were already cleaned in cycle " +
@@ -1355,62 +1354,32 @@
     return parts.join(", ");
   }
 
-  function dayHasInput(draft) {
-    return !!(draft && (draft.zero || (draft.end !== undefined && draft.end !== "" && draft.end !== null) ||
-      String(draft.list || "").trim() !== ""));
-  }
-
-  /** Which tables an unsaved day covers, given what the cycle has already used. Modes: "start" (the lowest free table
-   *  up to the last one typed), "end" (the highest free table down to the lowest one typed) and "pick" (any list). */
+  /** Which tables an unsaved day covers, given what the cycle has already used. A day is always entered as the
+   *  list of tables cleaned ("pick"); the older "from start" and "from end" shortcuts were removed. */
   function planDay(state, draft, used, total, movedTo) {
-    var mode = draft.mode || (dayHasInput(draft) ? "start" : (state.recordMode || "start"));
     var free = [];
     for (var n = 1; n <= total; n += 1) if (!used[n]) free.push(n);
-    var plan = { mode: mode, numbers: [], first: null, error: "", full: free.length === 0, zero: !!draft.zero };
+    var plan = { numbers: [], error: "", full: free.length === 0, zero: !!draft.reason };
     if (plan.zero || plan.full) return plan;
-    if (mode === "pick") {
-      var text = String(draft.list || "").trim();
-      if (!text) return plan;
-      var parsed = parseTableList(text, total);
-      if (parsed.error) { plan.error = parsed.error; return plan; }
-      var taken = parsed.numbers.filter(function (number) { return used[number]; });
-      var cycleNo = movedTo || Number(state.recordCycle) || 1;
-      var lastCycle = (state.washingPlant && state.washingPlant.cycles || []).length || 3;
-      if (!taken.length) {
-        plan.numbers = parsed.numbers;
-      } else if (canManageWashing() && cycleNo < lastCycle) {
-        // Re-cleaned before the cycle was full: the whole day counts in the next cycle (the server decides the
-        // same way when it saves; Site Engineers cannot do this).
-        plan.numbers = parsed.numbers;
-        plan.moves = cycleNo + 1;
-        plan.repeated = taken;
-      } else {
-        plan.error = "Table " + taken[0] + " is already cleaned in this cycle." +
-          (canManageWashing() ? " Cycle " + lastCycle + " is the month\u2019s last cycle." : "");
-      }
-      return plan;
+    var text = String(draft.list || "").trim();
+    if (!text) return plan;
+    var parsed = parseTableList(text, total);
+    if (parsed.error) { plan.error = parsed.error; return plan; }
+    var taken = parsed.numbers.filter(function (number) { return used[number]; });
+    var cycleNo = movedTo || Number(state.recordCycle) || 1;
+    var lastCycle = (state.washingPlant && state.washingPlant.cycles || []).length || 3;
+    if (!taken.length) {
+      plan.numbers = parsed.numbers;
+    } else if (canManageWashing() && cycleNo < lastCycle) {
+      // Re-cleaned before the cycle was full: the whole day counts in the next cycle (the server decides the
+      // same way when it saves; Site Engineers cannot do this).
+      plan.numbers = parsed.numbers;
+      plan.moves = cycleNo + 1;
+      plan.repeated = taken;
+    } else {
+      plan.error = "Table " + taken[0] + " is already cleaned in this cycle." +
+        (canManageWashing() ? " Cycle " + lastCycle + " is the month\u2019s last cycle." : "");
     }
-    var typed = draft.end;
-    var has = typed !== undefined && typed !== "" && typed !== null;
-    if (mode === "end") {
-      plan.first = free[free.length - 1];
-      if (!has) return plan;
-      var low = Number(typed);
-      if (!Number.isInteger(low) || low < 1 || low > plan.first) {
-        plan.error = "Use a number from 1 to " + plan.first + ".";
-        return plan;
-      }
-      plan.numbers = free.filter(function (number) { return number >= low; });
-      return plan;
-    }
-    plan.first = free[0];
-    if (!has) return plan;
-    var last = Number(typed);
-    if (!Number.isInteger(last) || last < plan.first || last > total) {
-      plan.error = "Use a number from " + plan.first + " to " + total + ".";
-      return plan;
-    }
-    plan.numbers = free.filter(function (number) { return number <= last; });
     return plan;
   }
 
@@ -1709,33 +1678,27 @@
               '" aria-label="Edit ' + escape(dateLabel) + '">Edit</button>'
             : "") + '</span>' + renderRecordPhotos(state, row.report) + '</div>';
       }
+      var reason = row.draft.reason || "";
       var zero = row.zero;
       var off = row.full || state.recordSaving ? " disabled" : "";
       var count = row.numbers.length;
-      var modes = [["start", "From start"], ["end", "From end"], ["pick", "Pick tables"]];
-      var inputs;
-      if (row.mode === "pick") {
-        inputs = '<input type="text" data-record-list placeholder="e.g. 1-5, 9, 12" value="' + escape(row.draft.list || "") +
-          '" aria-label="Table numbers for ' + escape(dateLabel) + '"' + (zero ? " disabled" : off) + ' />';
-      } else {
-        inputs = '<span data-record-start>' + (row.full || row.first === null ? "\u2014" : row.first) + '</span>' +
-          '<span>' + (row.mode === "end" ? "\u2193" : "\u2013") + '</span>' +
-          '<input type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off" data-record-end value="' +
-          (zero ? "" : escape(row.draft.end === undefined ? "" : row.draft.end)) +
-          '" aria-label="' + (row.mode === "end" ? "Lowest" : "Last") + ' table number for ' + escape(dateLabel) + '"' +
-          (zero ? " disabled" : off) + ' />';
-      }
+      // Tables are always entered as the numbers cleaned that day: there is no "from start" or
+      // "from end" shortcut, so no mode picker either.
+      var inputs = '<input type="text" data-record-list placeholder="e.g. 1-5, 9, 12" value="' + escape(row.draft.list || "") +
+        '" aria-label="Table numbers for ' + escape(dateLabel) + '"' + (zero ? " disabled" : off) + ' />';
+      // A day with nothing cleaned is a "Not done" day with its reason, not a 0 count: the reason is
+      // what the compliance score and the month's records read.
+      var notDone = '<select data-record-notdone class="ep-calendar__record-notdone"' + off +
+        ' aria-label="Not done reason for ' + escape(dateLabel) + '">' +
+        '<option value="">Tables cleaned</option>' +
+        '<optgroup label="Not done">' + NOT_DONE_REASONS.map(function (item) {
+          return '<option value="' + escape(item) + '"' + (reason === item ? " selected" : "") + '>' + escape(item) + '</option>';
+        }).join("") + '</optgroup></select>';
       return '<div class="ep-calendar__record-row" data-record-date="' + row.date + '">' +
         '<label><span class="ep-calendar__record-mobile-label">Day</span><strong>' + escape(dateLabel) + '</strong></label>' +
         '<span class="ep-calendar__record-count" data-record-count>' +
-          (zero ? "0" : (count ? count : '<span aria-label="Not entered">\u2014</span>')) + '</span>' +
-        '<div class="ep-calendar__record-range">' +
-          '<select data-record-mode class="ep-calendar__record-mode" aria-label="How tables were cleaned on ' + escape(dateLabel) + '"' +
-            (zero ? " disabled" : off) + '>' + modes.map(function (mode) {
-              return '<option value="' + mode[0] + '"' + (row.mode === mode[0] ? " selected" : "") + '>' + mode[1] + '</option>';
-            }).join("") + '</select>' + inputs +
-          '<label class="ep-calendar__record-zero"><input type="checkbox" data-record-zero' + (zero ? " checked" : "") + off +
-          ' aria-label="No tables cleaned on ' + escape(dateLabel) + '" /> 0 cleaned</label></div>' +
+          (zero ? "Not done" : (count ? count : '<span aria-label="Not entered">\u2014</span>')) + '</span>' +
+        '<div class="ep-calendar__record-range">' + inputs + notDone + '</div>' +
         '<input type="text" data-record-remarks maxlength="4000" placeholder="Remarks" value="' +
           escape(row.draft.remarks || "") + '" aria-label="Remarks for ' + escape(dateLabel) + '"' + off + ' />' +
         '<span class="ep-calendar__record-error" data-record-error' + (row.error ? "" : " hidden") + '>' +
@@ -1781,7 +1744,7 @@
             ? '<div class="ep-calendar__record-table"><div class="ep-calendar__record-head"><span>Day</span><span>Tables</span><span>Table numbers</span><span>Remarks</span></div>' +
               days + '</div>'
             : '<p class="ep-calendar__empty">No reportable days for this cycle yet.</p>') +
-          '<p class="ep-calendar__record-help">From start: enter the last table cleaned. From end: enter the lowest table reached, counting down from the highest table not yet cleaned. Pick tables: type numbers or ranges, e.g. 1, 2, 4, 7-8, 13 or 100-91. Each table counts once per cycle. Tick 0 cleaned when nothing was cleaned that day; add the reason in Remarks.' +
+          '<p class="ep-calendar__record-help">Type the tables cleaned that day as numbers or ranges, e.g. 1, 2, 4, 7-8, 13 or 100-91. Each table counts once per cycle. When nothing was cleaned, choose the not-done reason for that day and add the details in Remarks.' +
             (canManageWashing() ? " O&amp;M Head / Assignee: picking tables already cleaned in this cycle starts the next cycle from that day; this cycle then stays incomplete." : "") + '</p>' +
         '</div>' +
         '<footer class="ep-calendar__record-footer"><button type="button" class="ep-calendar__close-button" data-calendar-action="close-record"' +
@@ -2213,31 +2176,22 @@
   function syncRecordRangeInputs(host, state) {
     host.querySelectorAll("[data-record-date]").forEach(function (row) {
       var date = row.dataset.recordDate;
-      var endInput = row.querySelector("[data-record-end]");
       var listInput = row.querySelector("[data-record-list]");
       var remarksInput = row.querySelector("[data-record-remarks]");
-      var zeroInput = row.querySelector("[data-record-zero]");
-      var modeInput = row.querySelector("[data-record-mode]");
-      var previous = state.recordDrafts[date] || {};
-      var zero = !!(zeroInput && zeroInput.checked);
-      var draft = {
-        end: zero || !endInput ? "" : endInput.value,
-        list: zero || !listInput ? "" : listInput.value,
-        zero: zero,
+      var reasonInput = row.querySelector("[data-record-notdone]");
+      var reason = reasonInput ? reasonInput.value : "";
+      state.recordDrafts[date] = {
+        list: reason || !listInput ? "" : listInput.value,
+        reason: reason,
         remarks: remarksInput ? remarksInput.value : ""
       };
-      // A day keeps its own way of entering once it has been chosen or filled; empty days follow the last choice.
-      if (modeInput && (previous.mode || dayHasInput(draft))) draft.mode = modeInput.value;
-      state.recordDrafts[date] = draft;
     });
     var rows = recordRows(state);
     rows.forEach(function (item) {
       if (item.report) return;
       var row = host.querySelector('[data-record-date="' + item.date + '"]');
       if (!row) return;
-      var start = row.querySelector("[data-record-start]");
-      if (start) start.textContent = item.full || item.first === null ? "\u2014" : item.first;
-      row.querySelector("[data-record-count]").textContent = item.zero ? "0" : (item.numbers.length || "\u2014");
+      row.querySelector("[data-record-count]").textContent = item.zero ? "Not done" : (item.numbers.length || "\u2014");
       var error = row.querySelector("[data-record-error]");
       if (error) {
         error.hidden = !item.error;
@@ -2248,18 +2202,11 @@
         note.hidden = !item.note;
         note.textContent = item.note || "";
       }
-      var endInput = row.querySelector("[data-record-end]");
-      if (endInput) {
-        endInput.disabled = item.full || item.zero || state.recordSaving;
-        if (item.zero) endInput.value = "";
-      }
       var listInput = row.querySelector("[data-record-list]");
       if (listInput) {
         listInput.disabled = item.full || item.zero || state.recordSaving;
         if (item.zero) listInput.value = "";
       }
-      var mode = row.querySelector("[data-record-mode]");
-      if (mode) mode.disabled = item.full || item.zero || state.recordSaving;
     });
     var summary = host.querySelector(".ep-calendar__record-tables");
     if (summary) {
@@ -2586,12 +2533,12 @@
         rows.forEach(function (row) {
           if (row.report) return;
           if (row.zero) {
-            // Same convention as the daily Excel upload: a day with nothing cleaned is saved as not done, reason
-            // "Other", and what happened goes in Remarks. It never takes a table number.
+            // A day with nothing cleaned is saved as not done with the reason chosen for it, and the
+            // details go in Remarks. It never takes a table number.
             entries.push({
               report_date: row.date,
               job_status: "Not done",
-              exception_reason: "Other",
+              exception_reason: row.draft.reason,
               tables_cleaned: 0,
               remarks: row.draft.remarks || null
             });
@@ -2610,7 +2557,7 @@
         if (invalidRange || !entries.length) {
           state.recordError = invalidRange
             ? "Check the days marked in red: a table can be cleaned only once per cycle, and each number must be a table of this plant."
-            : "Enter a last table number, or tick 0 cleaned, for at least one day.";
+            : "Enter the tables cleaned, or choose a not-done reason, for at least one day.";
           renderView(host, state, context);
           return;
         }
@@ -2622,6 +2569,9 @@
           body: { plant_id: state.washingSetup.plantId, entries: entries }
         }).then(function (result) {
           if (!active || active.host !== host || active.state !== state) return;
+          // The Dashboard's module cleaning score reads the portfolio, which is cached for a
+          // minute: drop it so the new day is counted as soon as the Dashboard is opened.
+          if (data && data.invalidate) data.invalidate();
           state.recordSaving = false;
           state.recordDrafts = {};
           var reports = Array.isArray(result.reports) ? result.reports : [];
@@ -2826,7 +2776,7 @@
       } else if (filter === "modal-search") {
         active.state.modalSearch = event.target.value;
         refreshKeepingFocus(host, active.state, active.context, '[data-calendar-filter="modal-search"]');
-      } else if (event.target.matches("[data-record-end], [data-record-list], [data-record-remarks], [data-record-zero]") &&
+      } else if (event.target.matches("[data-record-list], [data-record-remarks]") &&
                  active.state.recordOpen) {
         syncRecordRangeInputs(host, active.state);
       }
@@ -2872,20 +2822,11 @@
 
     host.addEventListener("change", function (event) {
       if (!active || active.host !== host || !active.state.recordOpen) return;
-      if (event.target.matches("[data-record-mode]")) {
-        var modeState = active.state;
-        syncRecordRangeInputs(host, modeState);
-        var modeRow = event.target.closest("[data-record-date]");
-        if (!modeRow) return;
-        // Switching how a day is entered clears that day's numbers, which mean something different in each mode.
-        var draft = modeState.recordDrafts[modeRow.dataset.recordDate] || {};
-        draft.mode = event.target.value;
-        draft.end = "";
-        draft.list = "";
-        modeState.recordDrafts[modeRow.dataset.recordDate] = draft;
-        modeState.recordMode = event.target.value;
-        renderView(host, modeState, active.context);
-      }
+      if (!event.target.matches("[data-record-notdone]")) return;
+      // Marking a day not done clears the tables typed for it, and clearing the reason opens them again.
+      syncRecordRangeInputs(host, active.state);
+      active.state.recordError = "";
+      renderView(host, active.state, active.context);
     });
 
     host.addEventListener("change", function (event) {

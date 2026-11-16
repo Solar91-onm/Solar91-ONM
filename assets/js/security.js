@@ -16,7 +16,7 @@
   var noticeIsError = false;
   var registerSearch = "";
   var registerSort = { column: 0, direction: "ascending" };
-  var sortableRegisterColumns = [0, 1, 3, 4, 6];
+  var sortableRegisterColumns = [0, 1, 3, 5];
   var filterText = "";
   var filterSiteCode = "";
   var wiredContainer = null;
@@ -138,9 +138,6 @@
         ' aria-label="Add guard for ' + fmt.escape(plant.siteCode) + '">+ Guard</button></div>'
       : "";
     var engineerNames = contacts.engineers.map(function (contact) { return contact.name; }).join(" ");
-    var engineerShifts = contacts.engineers.map(function (contact) {
-      return contact.shift === "night" ? "Night" : "Day";
-    }).join(" ");
     var guardNames = contacts.guards.map(function (contact) { return contact.name; }).join(" ");
     var guardShifts = contacts.guards.map(function (contact) {
       return contact.shift === "night" ? "Night" : "Day";
@@ -156,8 +153,6 @@
         contactCell(contacts.engineers, "engineer", "name", editingRow, plant.siteCode) + "</td>" +
       '<td data-label="Site Engineer No.">' +
         contactCell(contacts.engineers, "engineer", "mobile", editingRow, plant.siteCode) + "</td>" +
-      '<td data-security-sort-value="' + fmt.escape(engineerShifts) + '" data-label="Engineer Shift">' +
-        contactCell(contacts.engineers, "engineer", "shift", editingRow, plant.siteCode) + "</td>" +
       '<td data-security-sort-value="' + fmt.escape(guardNames) + '" data-label="Security Name">' +
         contactCell(contacts.guards, "guard", "name", editingRow, plant.siteCode) + "</td>" +
       '<td data-label="Mobile No.">' +
@@ -181,7 +176,7 @@
 
   function tableHTML(editingRows) {
     var headings = [
-      "Site Code", "Site Engineer", "Site Engineer No.", "Engineer Shift",
+      "Site Code", "Site Engineer", "Site Engineer No.",
       "Security Name", "Mobile No.", "Guard Shift"
     ];
     return '<div class="ep-pt__table-wrap"><div class="ep-pt__scroll ep-security__scroll" data-security-table="' +
@@ -193,7 +188,7 @@
       "</tr></thead><tbody>" +
         (plants.length
           ? plants.map(function (plant) { return rowHTML(plant, editingRows); }).join("")
-          : '<tr><td colspan="7" class="ep-pt__empty">No plants are available in your account scope.</td></tr>') +
+          : '<tr><td colspan="6" class="ep-pt__empty">No plants are available in your account scope.</td></tr>') +
       "</tbody></table></div></div>";
   }
 
@@ -207,7 +202,7 @@
     return '<div class="ep-security__overlay" data-security-overlay>' +
       '<section class="ep-security__modal" role="dialog" aria-modal="true" aria-labelledby="ep-security-editor-title">' +
         '<header class="ep-security__modal-head"><div><h2 id="ep-security-editor-title">Edit Security Register</h2>' +
-          '<p>Manage multiple site engineers and guards, including each person’s duty shift.</p></div>' +
+          '<p>Manage multiple site engineers and guards, including each guard’s duty shift.</p></div>' +
           '<button type="button" class="ep-security__close" data-security-close aria-label="Close editor"' +
           (saving ? " disabled" : "") + '>×</button></header>' +
         (notice ? '<div class="ep-security__notice' + (noticeIsError ? " is-error" : "") +
