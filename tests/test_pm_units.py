@@ -251,3 +251,60 @@ def test_all_plants_job_skips_plants_without_that_category_configured(client, db
     configs = {(c["plant_id"], c["equipment_type"]): c for c in body["configs"]}
     assert configs[(str(with_inv.id), "Inverter")]["total_units"] == 2
     assert configs[(str(without.id), "Transformer")]["total_units"] == 1
+
+
+# ── Inverter maker and capacity (migration 044) ──────────────────────────────
+
+def _cfg_body(**over):
+    b = {"plant": "KRN_01", "equipment_type": "Inverter", "total_units": 10, "units_per_day": 2}
+    b.update(over)
+    return b
+
+
+def test_unit_config_carries_maker_and_capacity(client, db):
+    login_user(client, db, role="O&M Head")
+    _plant(db)
+    saved = client.put("/api/pm-plan/unit-config", json=_cfg_body(maker="Sungrow", capacity_kw=300))
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["maker"] == "Sungrow" and saved.json()["capacity_kw"] == 300
+
+    row = db.query(PMUnitConfig).one()
+    db.refresh(row)
+    assert row.maker == "Sungrow" and float(row.capacity_kw) == 300
+
+    cfg = client.get("/api/pm-plan/unit-config").json()["configs"][0]
+    assert cfg["maker"] == "Sungrow"
+    # A JSON number, not a string: the page formats and trims it as a number.
+    assert isinstance(cfg["capacity_kw"], (int, float)) and cfg["capacity_kw"] == 300
+
+
+def test_unit_config_put_without_the_new_fields_keeps_them(client, db):
+    """The regression that would silently erase the loaded data.
+
+    The Inverter Health settings form posts only the two counts. An omitted field must be
+    left exactly as stored -- only an explicit null clears it."""
+    login_user(client, db, role="O&M Head")
+    _plant(db)
+    client.put("/api/pm-plan/unit-config", json=_cfg_body(maker="Sineng", capacity_kw="295.00"))
+
+    counts_only = client.put("/api/pm-plan/unit-config", json=_cfg_body(total_units=12, units_per_day=3))
+    assert counts_only.status_code == 200
+    assert counts_only.json()["maker"] == "Sineng" and counts_only.json()["capacity_kw"] == 295
+    row = db.query(PMUnitConfig).one()
+    db.refresh(row)
+    assert row.total_units == 12 and row.maker == "Sineng" and float(row.capacity_kw) == 295
+
+    # An explicit null is a different instruction: it clears the stored value.
+    cleared = client.put("/api/pm-plan/unit-config", json=_cfg_body(maker=None, capacity_kw=None))
+    assert cleared.status_code == 200
+    assert cleared.json()["maker"] is None and cleared.json()["capacity_kw"] is None
+
+
+def test_unit_config_rejects_a_non_positive_capacity(client, db):
+    login_user(client, db, role="O&M Head")
+    _plant(db)
+    for bad in (0, -5):
+        assert client.put("/api/pm-plan/unit-config", json=_cfg_body(capacity_kw=bad)).status_code == 422
+    assert client.put("/api/pm-plan/unit-config", json=_cfg_body(capacity_kw="300.123")).status_code == 422
+    assert client.put("/api/pm-plan/unit-config", json=_cfg_body(maker="x" * 121)).status_code == 422
+    assert db.query(PMUnitConfig).count() == 0

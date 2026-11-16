@@ -189,11 +189,7 @@
   // the raw digits, no thousands separators (5334, not "5,334": a BOQ quantity is checked against
   // the sheet, not read as money) and trailing zeros trimmed (5368.23, 7180.8, 12, never "12.000").
   // Only this cell is unformatted; every other numeric cell in the portal keeps fmt.formatNumber.
-  function qtyText(value) {
-    if (value === null || value === undefined || value === "") return "";
-    var n = Number(value);
-    return isFinite(n) ? String(n) : String(value);
-  }
+  function qtyText(value) { return fmt.decimalText(value); }
 
   function qtyCell(value) {
     var text = qtyText(value);

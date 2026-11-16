@@ -2184,3 +2184,168 @@ def test_a_site_engineer_sees_the_merged_page_without_design_liasoning_or_bom():
     nav = (PORTAL_ASSETS / "js" / "navigation.js").read_text(encoding="utf-8")
     assert 'if (navState.selectedSubPage === "details" && !canShowPlantDetailSections())' in nav
     assert 'if (page.id === "details" && canShowPlantDetailSections())' in nav
+
+
+def test_inverter_health_shows_maker_and_capacity_after_the_unit_count():
+    """Migration 044's two columns reach the Inverter Health drill-down.
+
+    They sit immediately after "Total inverters", a null reads as a muted dash, and the
+    capacity prints with its trailing zeros trimmed (275, never 275.00)."""
+    overview = (PORTAL_ASSETS / "js" / "overview.js").read_text(encoding="utf-8")
+    fmt = (PORTAL_ASSETS / "js" / "format.js").read_text(encoding="utf-8")
+    bom = (PORTAL_ASSETS / "js" / "bom.js").read_text(encoding="utf-8")
+
+    block = overview[overview.index("INVERTER_PLANT_COLUMNS = ["):]
+    block = block[:block.index("\n  ];")]
+    # Maker and Capacity sit between Total inverters and Running, in that order.
+    keys = [key for key in ("total", "maker", "capacity", "running") if f'"{key}"' in block]
+    assert keys == ["total", "maker", "capacity", "running"]
+    assert '{ key: "maker", label: "Maker"' in block
+    assert '{ key: "capacity", label: "Capacity (kW)"' in block
+    assert '<tr><td colspan="8">No plants in this Dashboard scope.</td></tr>' in overview
+
+    body = overview[overview.index('data-ih-plant-row='):]
+    body = body[:body.index("</tr>")]
+    assert body.index("fmt.formatNumber(row.total)") < body.index("row.config.maker") \
+        < body.index("row.config.capacity_kw") < body.index('inverterLightCell("green", row.running)')
+
+    # One trailing-zero trimmer, shared with the BOM quantity cell -- not a second copy.
+    assert "function decimalText(value)" in fmt and "decimalText: decimalText" in fmt
+    assert "function qtyText(value) { return fmt.decimalText(value); }" in bom
+    assert "fmt.decimalText(row.config && row.config.capacity_kw)" in overview
+
+    # Absent values read as a muted dash, never "undefined", "null" or "NaN".
+    assert 'return value === null || value === undefined || value === ""' in overview
+    assert '<span class="ep-text-faint">—</span>' in overview
+
+    # Editable in the settings panel, and saved in the same PUT as the two counts. All four
+    # fields go through one cell helper, so they share the read-only-by-role behaviour.
+    assert 'data-ih-${attr}="${fmt.escape(plant.siteCode)}"' in overview
+    assert 'settingsCell(plant, config, "maker", `type="text" maxlength="120"' in overview
+    assert 'settingsCell(plant, config, "capacity", `type="number" step="0.01" min="0.01"' in overview
+    assert '${inverterHealth.canEdit ? "" : " readonly"}' in overview
+    assert "total_units: total, units_per_day: perDay,\n        maker: maker, capacity_kw: capacity" in overview
+    assert '<th>Units/day</th><th>Maker</th><th>Capacity (kW)</th>' in overview
+
+    # And the per-plant CSV carries them in the same position as the table.
+    assert '"Total inverters", "Maker", "Capacity (kW)",\n      "Running"' in overview
+    assert "data-ih-export-plants" in overview
+
+
+def test_inverter_health_unfolds_the_down_inverters_of_a_plant():
+    """A plant row with open inverter tickets unfolds them: unit, sub-problem, description.
+
+    Only a plant that actually has one can be unfolded, Edit is offered to the roles that may
+    edit, and it reuses the Health register path rather than a second edit surface."""
+    overview = (PORTAL_ASSETS / "js" / "overview.js").read_text(encoding="utf-8")
+    styles = (PORTAL_ASSETS / "css" / "components.css").read_text(encoding="utf-8")
+
+    # Grouped once per render, not re-scanned once per plant row.
+    assert "function inverterTicketsByPlant()" in overview
+    assert "const openByPlant = inverterTicketsByPlant();" in overview
+    assert "const open = openByPlant.get(code) || [];" in overview
+    assert "const isOpen = inverterHealth.expanded.indexOf(code) !== -1;" in overview
+    # No tickets, no unfold control -- the cell stays a plain count.
+    assert "const ticketCell = open.length" in overview
+    assert "return main + (isOpen && open.length ? inverterDownRows(code, open) : \"\");" in overview
+
+    block = overview[overview.index("function inverterDownRows"):]
+    block = block[:block.index("\n  }\n")]
+    assert "ticket.serial_no" in block and "ticket.subcategory" in block and "ticket.description" in block
+    # Edit only for the roles that may edit, and it is the existing Health-register button.
+    assert 'inverterHealth.canEdit ? `<button type="button" class="ep-ih__button" data-ih-edit=' in block
+    assert 'colspan="8"' in block
+
+    # The unfold button sits inside the plant row, so it must be read before the row's own click.
+    handler = overview[overview.index('const unfold = event.target.closest("[data-ih-unfold]");'):]
+    assert handler.index("inverterHealth.expanded.push(code)") \
+        < handler.index('const plant = event.target.closest("[data-ih-plant-row]");')
+    assert "inverterHealth.expanded = [];" in overview        # reset when the drill-down reopens
+    assert ".ep-ih__down-list" in styles and ".ep-ih__unfold" in styles
+
+
+def test_inverter_counts_carry_traffic_lights_and_a_clean_plant_shows_no_red():
+    overview = (PORTAL_ASSETS / "js" / "overview.js").read_text(encoding="utf-8")
+    styles = (PORTAL_ASSETS / "css" / "components.css").read_text(encoding="utf-8")
+
+    assert 'inverterLightCell("green", row.running)' in overview
+    # Nothing down means nothing to signal: the red light is not emitted at all.
+    assert 'inverterLightCell(row.down ? "red" : "", row.down)' in overview
+    assert '${tone ? `<span class="ep-hint-light ep-hint-light--${tone}"' in overview
+    # It reuses the portal's existing traffic-light primitive rather than a second one.
+    assert ".ep-hint-light--green" in styles and ".ep-hint-light--red" in styles
+    assert ".ep-light--green" not in styles
+
+
+def test_inverter_health_plant_table_is_sortable_and_aligned_like_the_register():
+    """Register-style layout: centred headings over centred entries, every column sortable.
+
+    Running, Not running and the plant code are ordered by their value, not by the rendered
+    HTML, and the CSV follows whatever order is on screen."""
+    overview = (PORTAL_ASSETS / "js" / "overview.js").read_text(encoding="utf-8")
+    page = TEMPLATE.read_text(encoding="utf-8")
+    styles = (PORTAL_ASSETS / "css" / "components.css").read_text(encoding="utf-8")
+
+    block = overview[overview.index("INVERTER_PLANT_COLUMNS = ["):]
+    block = block[:block.index("\n  ];")]
+    # Plant code, Running and Not running are sorted by value; every column carries a reader.
+    assert 'sort: (row) => row.plant.siteCode' in block
+    assert 'sort: (row) => row.running' in block and 'sort: (row) => row.down' in block
+    assert block.count("sort: (row)") == 8
+    # The short/numeric columns are centred, which is the register's own alignment.
+    assert block.count('align: "num"') == 7
+    assert ".ep-ih__plant-table th.num,\n.ep-ih__plant-table td.num { text-align: center; }" in styles
+    assert ".ep-ih__plant-table th.num .ep-sort { justify-content: center; }" in styles
+
+    # Sorting is the shared table-sort module, fetched on first open; plain headings until then.
+    assert 'return Sort.headerHTML(INVERTER_PLANT_COLUMNS, inverterHealth.plantSort, "data-ih-sort")' in overview
+    assert 'Sort.apply(rows, inverterHealth.plantSort, INVERTER_PLANT_COLUMNS)' in overview
+    assert 'Sort.next(inverterHealth.plantSort, sortBy.getAttribute("data-ih-sort"))' in overview
+    assert 'global.Solar91Modules.load("table-sort").then(renderInverterHealth)' in overview
+    assert '"table-sort": "/assets/js/table-sort.js"' in page
+
+    # One ordering feeds both the table and its export.
+    assert "const plants = sortedInverterPlantRows();" in overview
+    assert "const values = sortedInverterPlantRows().map((row) => [" in overview
+    assert 'inverterHealth.plantSort = { key: "", dir: "" };' in overview   # reset on reopen
+
+
+def test_inverter_plant_sorting_and_capacity_formatting_behave():
+    """Run the real table-sort and format modules over the Inverter Health column readers."""
+    script = """
+      global.window = global;
+      require('./assets/js/format.js');
+      require('./assets/js/table-sort.js');
+      const Sort = global.Solar91PortalSort, fmt = global.Solar91PortalFormat;
+      const columns = [
+        { key: 'plant', label: 'Plant', sort: (r) => r.plant.siteCode },
+        { key: 'running', label: 'Running', align: 'num', sort: (r) => r.running },
+        { key: 'down', label: 'Not running', align: 'num', sort: (r) => r.down }
+      ];
+      const rows = [
+        { plant: { siteCode: 'C03' }, running: 8, down: 2 },
+        { plant: { siteCode: 'A01' }, running: 10, down: 0 },
+        { plant: { siteCode: 'B02' }, running: null, down: null }
+      ];
+      const codes = (state) => Sort.apply(rows, state, columns).map((r) => r.plant.siteCode).join(',');
+      const fail = (m) => { console.error(m); process.exit(1); };
+
+      if (codes({ key: 'running', dir: 'asc' }) !== 'C03,A01,B02') fail('running ascending: ' + codes({ key: 'running', dir: 'asc' }));
+      if (codes({ key: 'running', dir: 'desc' }) !== 'A01,C03,B02') fail('running descending: ' + codes({ key: 'running', dir: 'desc' }));
+      if (codes({ key: 'down', dir: 'desc' }) !== 'C03,A01,B02') fail('not-running descending: ' + codes({ key: 'down', dir: 'desc' }));
+      if (codes({ key: 'plant', dir: 'asc' }) !== 'A01,B02,C03') fail('plant code ascending');
+      if (codes({ key: 'plant', dir: 'desc' }) !== 'C03,B02,A01') fail('plant code descending');
+
+      // Clicking the sorted column flips it; a new column starts ascending.
+      const state = { key: '', dir: '' };
+      Sort.next(state, 'down');
+      if (state.dir !== 'asc') fail('a new column must start ascending');
+      Sort.next(state, 'down');
+      if (state.dir !== 'desc') fail('the sorted column must flip');
+
+      // Capacity prints without trailing zeros, and a null is left to the caller as "".
+      const shown = ['275.00', '295.00', 300, '275.50', null, undefined, ''].map(fmt.decimalText).join('|');
+      if (shown !== '275|295|300|275.5|||') fail('capacity formatting: ' + shown);
+    """
+    run = subprocess.run(["node", "-e", script], cwd=ROOT, capture_output=True, text=True, timeout=30)
+    assert run.returncode == 0, run.stderr or run.stdout

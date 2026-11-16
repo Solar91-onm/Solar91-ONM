@@ -15,6 +15,7 @@ import io
 import csv
 import uuid
 from datetime import date, datetime, timedelta
+from decimal import Decimal
 from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile
@@ -474,7 +475,13 @@ def _equipped_plants(db: Session, plants: list[Plant], equipment_type: str) -> t
     return [p for p in plants if p.id in have], [p for p in plants if p.id not in have]
 
 
-def _save_config(db: Session, user: User, plant: Plant, etype: str, total: int | None, per_day: int | None) -> PMUnitConfig | None:
+# A field the caller did not send must stay as stored. `None` means "clear it", which is a
+# different instruction, so omission cannot be spelled with None -- it is spelled with this.
+KEEP: Any = object()
+
+
+def _save_config(db: Session, user: User, plant: Plant, etype: str, total: int | None, per_day: int | None,
+                 maker: Any = KEEP, capacity_kw: Any = KEEP) -> PMUnitConfig | None:
     if not total or not per_day:
         return None
     if per_day > total:
@@ -484,6 +491,10 @@ def _save_config(db: Session, user: User, plant: Plant, etype: str, total: int |
         row = PMUnitConfig(plant_id=plant.id, equipment_type=etype, total_units=total, units_per_day=per_day)
         db.add(row)
     row.total_units, row.units_per_day, row.updated_by = total, per_day, user.id
+    if maker is not KEEP:
+        row.maker = maker
+    if capacity_kw is not KEEP:
+        row.capacity_kw = capacity_kw
     db.flush()
     return row
 
@@ -677,6 +688,16 @@ class UnitConfigIn(BaseModel):
     equipment_type: str
     total_units: int = Field(ge=1, le=500)
     units_per_day: int = Field(ge=1, le=500)
+    # Optional (migration 044). OMITTED is not the same as null: an omitted field keeps the
+    # stored value, an explicit null clears it. `model_fields_set` tells the two apart, so the
+    # existing Inverter Health form -- which posts only the two counts -- cannot wipe them.
+    maker: str | None = Field(default=None, max_length=120)
+    capacity_kw: Decimal | None = Field(default=None, gt=0, max_digits=10, decimal_places=2)
+
+    @field_validator("maker")
+    @classmethod
+    def _maker(cls, v: str | None) -> str | None:
+        return (v or "").strip() or None
 
     @field_validator("equipment_type")
     @classmethod
@@ -693,7 +714,8 @@ def _config_out(c: PMUnitConfig, plant: Plant | None) -> dict[str, Any]:
     cap = max(1, c.units_per_day)
     return {"id": str(c.id), "plant_id": str(c.plant_id), "plant": plant.plant_name if plant else "",
             "site_code": plant.site_code if plant else "", "equipment_type": c.equipment_type,
-            "total_units": c.total_units, "units_per_day": c.units_per_day, "days": -(-c.total_units // cap)}
+            "total_units": c.total_units, "units_per_day": c.units_per_day, "days": -(-c.total_units // cap),
+            "maker": c.maker, "capacity_kw": float(c.capacity_kw) if c.capacity_kw is not None else None}
 
 
 @router.get("/unit-config")
@@ -715,10 +737,18 @@ def save_unit_config(payload: UnitConfigIn, db: Annotated[Session, Depends(get_d
     plant = _resolve_plants(db, [payload.plant])[0]
     if user.role == "Assignee" and plant.id not in (user_scoped_plant_ids(db, user) or set()):
         raise HTTPException(403, f"{plant.plant_name} is outside your assigned plants")
-    row = _save_config(db, user, plant, payload.equipment_type, payload.total_units, payload.units_per_day)
+    sent = payload.model_fields_set
+    row = _save_config(db, user, plant, payload.equipment_type, payload.total_units, payload.units_per_day,
+                       maker=payload.maker if "maker" in sent else KEEP,
+                       capacity_kw=payload.capacity_kw if "capacity_kw" in sent else KEEP)
+    logged = {"plant": plant.plant_name, "equipment_type": payload.equipment_type,
+              "total_units": payload.total_units, "units_per_day": payload.units_per_day}
+    if "maker" in sent:
+        logged["maker"] = payload.maker
+    if "capacity_kw" in sent:
+        logged["capacity_kw"] = float(payload.capacity_kw) if payload.capacity_kw is not None else None
     db.add(AuditLog(user_id=user.id, actor_name=user.display_name, action="Saved PM unit configuration", module="Scheduled O&M",
-                    metadata_json={"plant": plant.plant_name, "equipment_type": payload.equipment_type,
-                                   "total_units": payload.total_units, "units_per_day": payload.units_per_day}))
+                    metadata_json=logged))
     db.commit()
     return _config_out(row, plant)
 

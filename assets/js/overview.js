@@ -362,8 +362,24 @@
     open: false, loading: false, units: [], summary: null, tickets: [],
     unitsRestricted: false, unitsError: "", summaryError: "", ticketsError: "",
     canEdit: false, plantFilter: "", search: "", severity: "", status: "",
-    saveMessage: "", saveError: false, navigationError: ""
+    saveMessage: "", saveError: false, navigationError: "",
+    expanded: [],  // site codes whose open inverter tickets are unfolded under the plant row
+    plantSort: { key: "", dir: "" }   // empty: the default order (worst running % first)
   };
+
+  // The per-plant health table, laid out like the Health register: sortable headings, short and
+  // numeric columns centred. `sort` reads the value ordered by -- the number, not the HTML.
+  const INVERTER_PLANT_COLUMNS = [
+    { key: "plant", label: "Plant", sort: (row) => row.plant.siteCode },
+    { key: "total", label: "Total inverters", align: "num", sort: (row) => row.total },
+    { key: "maker", label: "Maker", align: "num", sort: (row) => (row.config && row.config.maker) || "" },
+    { key: "capacity", label: "Capacity (kW)", align: "num",
+      sort: (row) => (row.config && row.config.capacity_kw != null ? Number(row.config.capacity_kw) : null) },
+    { key: "running", label: "Running", align: "num", sort: (row) => row.running },
+    { key: "down", label: "Not running", align: "num", sort: (row) => row.down },
+    { key: "percent", label: "Running %", align: "num", sort: (row) => row.percent },
+    { key: "tickets", label: "Open tickets", align: "num", sort: (row) => row.tickets }
+  ];
   const INVERTER_HISTORY_KEY = "solar91InverterHealthOpen";
   const OPEN_INVERTER_STATUSES = [
     "Open", "Assigned", "Acknowledged", "In Progress", "Pending Vendor", "Pending Parts/Vendor"
@@ -510,10 +526,51 @@
     return `<span class="ep-chip ${cls}">${fmt.escape(value)}</span>`;
   }
 
+  // A count behind a traffic light: green for running, red for not. An all-running plant gets NO
+  // red light on its zero, so a lit red dot in that column always means a real outage.
+  function inverterLightCell(tone, count) {
+    return `${tone ? `<span class="ep-hint-light ep-hint-light--${tone}" aria-hidden="true"></span>` : ""}${fmt.formatNumber(count)}`;
+  }
+
   function inverterPercentCell(percent) {
     if (percent === null) return `<span class="ep-text-faint">—</span>`;
     const tone = percent >= 85 ? "green" : percent >= 70 ? "amber" : "red";
     return `<span class="ep-bar"><span class="ep-bar__track"><span class="ep-bar__fill ep-bar__fill--${tone}" style="width:${percent}%"></span></span><span class="ep-bar__value">${percent}%</span></span>`;
+  }
+
+  // One plant's down inverters, unfolded under its row: unit, sub-problem, description -- the
+  // Health register's own facts -- plus the ticket and, for the roles that may, its Edit. One
+  // full-width row, so the table (and its CSV) keeps one line per plant.
+  function inverterDownRows(siteCode, tickets) {
+    const items = tickets.map((ticket) => `<li class="ep-ih__down">
+      <span class="ep-ih__down-unit">${fmt.escape(ticket.serial_no || "Unit not recorded")}</span>
+      <span class="ep-ih__down-sub">${fmt.escape(ticket.subcategory || "—")}</span>
+      <span class="ep-ih__description" title="${fmt.escape(ticket.description || "")}">${fmt.escape(ticket.description || "—")}</span>
+      ${inverterSeverityChip(ticket.severity)}
+      <span class="ep-ih__ticket-actions"><button type="button" class="ep-ih__ticket" data-ih-ticket="${fmt.escape(ticket.ticket_no || "")}" data-ih-site="${fmt.escape(siteCode)}">${fmt.escape(ticket.ticket_no || "Open ticket")}</button>
+        ${inverterHealth.canEdit ? `<button type="button" class="ep-ih__button" data-ih-edit="${fmt.escape(ticket.ticket_no || "")}" data-ih-site="${fmt.escape(siteCode)}">Edit</button>` : ""}</span>
+    </li>`).join("");
+    return `<tr class="ep-ih__down-row"><td colspan="8"><ul class="ep-ih__down-list">${items}</ul></td></tr>`;
+  }
+
+  // The open inverter tickets of every plant in scope, grouped in ONE pass -- a plant missing
+  // from the map has none, and so cannot be unfolded. Built once per render, not once per row.
+  function inverterTicketsByPlant() {
+    const byPlant = new Map();
+    scopedInverterTickets().forEach((ticket) => {
+      const plant = inverterDetailsPlant(ticket);
+      if (!plant) return;
+      const list = byPlant.get(plant.siteCode);
+      if (list) list.push(ticket);
+      else byPlant.set(plant.siteCode, [ticket]);
+    });
+    return byPlant;
+  }
+
+  // A recorded fact (maker, capacity). Absent reads as a muted dash, never "undefined"/"NaN".
+  function inverterFactCell(value) {
+    return value === null || value === undefined || value === ""
+      ? `<span class="ep-text-faint">—</span>` : fmt.escape(String(value));
   }
 
   function inverterPlantRows(totals) {
@@ -531,6 +588,23 @@
       return (a.percent === null ? 0 : a.percent - b.percent) ||
         a.plant.siteCode.localeCompare(b.plant.siteCode);
     });
+  }
+
+  // Sortable headings when table-sort is loaded, plain ones (still aligned) until it is.
+  function inverterPlantHeader() {
+    const Sort = global.Solar91PortalSort;
+    if (Sort) return Sort.headerHTML(INVERTER_PLANT_COLUMNS, inverterHealth.plantSort, "data-ih-sort");
+    return INVERTER_PLANT_COLUMNS.map((column) =>
+      `<th${column.align === "num" ? ' class="num"' : ""}>${fmt.escape(column.label)}</th>`).join("");
+  }
+
+  // Per-plant rows in the chosen order; with no column chosen, the default (worst running % first).
+  // The table and its CSV both read this, so the export always matches the screen.
+  function sortedInverterPlantRows() {
+    const rows = inverterPlantRows(inverterHealthTotals());
+    const Sort = global.Solar91PortalSort;
+    if (!Sort || !inverterHealth.plantSort.key) return rows;
+    return Sort.apply(rows, inverterHealth.plantSort, INVERTER_PLANT_COLUMNS);
   }
 
   function scopedInverterTickets() {
@@ -560,7 +634,7 @@
     const host = document.querySelector("[data-inverter-health]");
     if (!host || !inverterHealth.open) return;
     const totals = inverterHealthTotals();
-    const plants = inverterPlantRows(totals);
+    const plants = sortedInverterPlantRows();
     const filteredTickets = filteredInverterTickets();
     const scope = inverterHealth.plantFilter
       ? plants.find((row) => row.plant.siteCode === inverterHealth.plantFilter)
@@ -583,16 +657,29 @@
       : inverterHealth.unitsError
         ? fmt.escape(inverterHealth.unitsError)
         : !totals.total ? "No inverter units are configured for the plants in this scope." : "";
+    const openByPlant = inverterTicketsByPlant();
     const plantTable = plants.map((row) => {
       const isConfigured = !!row.config;
-      return `<tr data-ih-plant-row="${fmt.escape(row.plant.siteCode)}" tabindex="0" role="button" aria-label="Filter tickets to ${fmt.escape(row.plant.displayName || row.plant.plantName)}">
+      const code = row.plant.siteCode;
+      const open = openByPlant.get(code) || [];
+      const isOpen = inverterHealth.expanded.indexOf(code) !== -1;
+      // Only a plant that actually has a down inverter can be unfolded; the rest read as a count.
+      const ticketCell = open.length
+        ? `<button type="button" class="ep-ih__unfold${isOpen ? " is-open" : ""}" data-ih-unfold="${fmt.escape(code)}"
+            aria-expanded="${isOpen}" title="${isOpen ? "Hide" : "Show"} the open inverter tickets for this plant"
+            >${fmt.formatNumber(row.tickets)}<span aria-hidden="true">${isOpen ? "▾" : "▸"}</span></button>`
+        : fmt.formatNumber(row.tickets);
+      const main = `<tr data-ih-plant-row="${fmt.escape(code)}" tabindex="0" role="button" aria-label="Filter tickets to ${fmt.escape(row.plant.displayName || row.plant.plantName)}">
         <td><div class="ep-plant-cell"><span class="ep-plant-cell__name">${fmt.escape(row.plant.displayName || row.plant.plantName)}</span><span class="ep-plant-cell__code">${fmt.escape(row.plant.displayCode || row.plant.siteCode)}</span></div></td>
-        <td>${isConfigured ? fmt.formatNumber(row.total) : "Not configured"}</td>
-        <td>${isConfigured ? fmt.formatNumber(row.running) : "Not configured"}</td>
-        <td>${isConfigured ? fmt.formatNumber(row.down) : "Not configured"}</td>
-        <td>${isConfigured ? inverterPercentCell(row.percent) : "Not configured"}</td>
-        <td>${fmt.formatNumber(row.tickets)}</td>
+        <td class="num">${isConfigured ? fmt.formatNumber(row.total) : "Not configured"}</td>
+        <td class="num">${inverterFactCell(row.config && row.config.maker)}</td>
+        <td class="num">${inverterFactCell(fmt.decimalText(row.config && row.config.capacity_kw))}</td>
+        <td class="num">${isConfigured ? inverterLightCell("green", row.running) : "Not configured"}</td>
+        <td class="num">${isConfigured ? inverterLightCell(row.down ? "red" : "", row.down) : "Not configured"}</td>
+        <td class="num">${isConfigured ? inverterPercentCell(row.percent) : "Not configured"}</td>
+        <td class="num">${ticketCell}</td>
       </tr>`;
+      return main + (isOpen && open.length ? inverterDownRows(code, open) : "");
     }).join("");
     const ticketRows = filteredTickets.map((ticket) => {
       const plant = inverterDetailsPlant(ticket);
@@ -614,18 +701,20 @@
           ${inverterHealth.canEdit ? `<button type="button" class="ep-ih__button" data-ih-edit="${fmt.escape(ticket.ticket_no || "")}" data-ih-site="${fmt.escape(code)}">Edit</button>` : ""}</span></td>
       </tr>`;
     }).join("");
+    // One unit-configuration cell: the stored value when there is one, a blank the O&M Head or an
+    // Assignee can fill when there is not, and read-only for every other role.
+    const settingsCell = (plant, config, attr, attrs, value, blank) => !config && !inverterHealth.canEdit ? blank
+      : `<input ${attrs} data-ih-${attr}="${fmt.escape(plant.siteCode)}" value="${fmt.escape(value)}"${inverterHealth.canEdit ? "" : " readonly"}>`;
+    const COUNT_ATTRS = `type="number" min="1" max="500" required`;
     const settingsRows = plants.map(({ plant, config }) =>
       `<tr><td>${fmt.escape(plant.displayName || plant.plantName)}</td>
-        <td>${config
-          ? `<input type="number" min="1" max="500" required data-ih-total="${fmt.escape(plant.siteCode)}" value="${fmt.escape(config.total_units)}" ${inverterHealth.canEdit ? "" : "readonly"}>`
-          : (inverterHealth.canEdit
-            ? `<input type="number" min="1" max="500" required data-ih-total="${fmt.escape(plant.siteCode)}" value="1">`
-            : `<span class="ep-text-faint">Not configured</span>`)}</td>
-        <td>${config
-          ? `<input type="number" min="1" max="500" required data-ih-units-day="${fmt.escape(plant.siteCode)}" value="${fmt.escape(config.units_per_day)}" ${inverterHealth.canEdit ? "" : "readonly"}>`
-          : (inverterHealth.canEdit
-            ? `<input type="number" min="1" max="500" required data-ih-units-day="${fmt.escape(plant.siteCode)}" value="1">`
-            : "—")}</td>
+        <td>${settingsCell(plant, config, "total", COUNT_ATTRS, config ? config.total_units : 1,
+          `<span class="ep-text-faint">Not configured</span>`)}</td>
+        <td>${settingsCell(plant, config, "units-day", COUNT_ATTRS, config ? config.units_per_day : 1, "—")}</td>
+        <td>${settingsCell(plant, config, "maker", `type="text" maxlength="120" placeholder="Maker"`,
+          (config && config.maker) || "", "—")}</td>
+        <td>${settingsCell(plant, config, "capacity", `type="number" step="0.01" min="0.01" placeholder="kW"`,
+          fmt.decimalText(config && config.capacity_kw), "—")}</td>
         <td>${inverterHealth.canEdit
           ? `<button type="button" class="ep-ih__button" data-ih-save="${fmt.escape(plant.siteCode)}">${config ? "Save" : "Add"}</button>`
           : ""}</td></tr>`
@@ -649,9 +738,10 @@
             `<span>${inverterSeverityChip(severity)} <b>${fmt.formatNumber(severityCounts[severity])}</b></span>`).join("")}</div></article>
         </section>
         ${reason ? `<p class="ep-ih__reason">${reason}</p>` : ""}
-        <section class="ep-panel"><div class="ep-panel__head"><span class="ep-panel__title">Per-plant health</span></div>
-          <div class="ep-table-wrap"><table class="ep-table ep-ih__plant-table"><thead><tr><th>Plant</th><th>Total inverters</th><th>Running</th><th>Not running</th><th>Running %</th><th>Open tickets</th></tr></thead>
-            <tbody>${plantTable || `<tr><td colspan="6">No plants in this Dashboard scope.</td></tr>`}</tbody></table></div></section>
+        <section class="ep-panel"><div class="ep-panel__head"><span class="ep-panel__title">Per-plant health</span>
+          <button type="button" class="ep-ih__button" data-ih-export-plants>Export CSV</button></div>
+          <div class="ep-table-wrap"><table class="ep-table ep-ih__plant-table"><thead><tr>${inverterPlantHeader()}</tr></thead>
+            <tbody>${plantTable || `<tr><td colspan="8">No plants in this Dashboard scope.</td></tr>`}</tbody></table></div></section>
         <section class="ep-panel"><div class="ep-panel__head"><span class="ep-panel__title">Open inverter tickets${scope ? " · " + fmt.escape(scope.plant.displayName || scope.plant.plantName) : ""}</span>
           ${inverterHealth.plantFilter ? `<button type="button" class="ep-ih__button" data-ih-clear-plant>All plants</button>` : ""}
           <button type="button" class="ep-ih__button" data-ih-export>Export CSV</button></div>
@@ -667,7 +757,7 @@
                 : `<strong>✓ All inverters running</strong><span>No open inverter tickets in this scope.</span>`}</div></td></tr>`}</tbody></table></div>
         </section>
         ${inverterHealth.unitsRestricted || inverterHealth.unitsError ? "" : `<details class="ep-panel ep-ih__settings" ${host.querySelector(".ep-ih__settings[open]") ? "open" : ""}><summary>Inverter unit configuration</summary>
-          <div class="ep-table-wrap"><table class="ep-table"><thead><tr><th>Plant</th><th>Total units</th><th>Units/day</th><th></th></tr></thead><tbody>${settingsRows}</tbody></table></div>
+          <div class="ep-table-wrap"><table class="ep-table"><thead><tr><th>Plant</th><th>Total units</th><th>Units/day</th><th>Maker</th><th>Capacity (kW)</th><th></th></tr></thead><tbody>${settingsRows}</tbody></table></div>
           ${!inverterHealth.canEdit ? `<p class="ep-ih__reason">Unit configuration is read-only for your role.</p>` : ""}
           <p class="ep-ih__save-status${inverterHealth.saveError ? " is-error" : ""}" data-ih-save-status aria-live="polite">${fmt.escape(inverterHealth.saveMessage)}</p>
         </details>`}
@@ -708,13 +798,51 @@
       inverterHealth.search = "";
       inverterHealth.severity = "";
       inverterHealth.status = "";
+      inverterHealth.expanded = [];
+      inverterHealth.plantSort = { key: "", dir: "" };
     }
     inverterHealth.navigationError = "";
     const host = document.querySelector("[data-inverter-health]");
     if (host) host.hidden = false;
+    // The sortable headings need the shared table-sort module, which the Dashboard shell does not
+    // ship. Fetch it on first open; until it lands the headings are plain but correct.
+    if (!global.Solar91PortalSort && global.Solar91Modules) {
+      global.Solar91Modules.load("table-sort").then(renderInverterHealth).catch(() => {});
+    }
     loadInverterHealth();
     const close = host && host.querySelector("[data-ih-close]");
     if (close) close.focus({ preventScroll: true });
+  }
+
+  function downloadCsv(name, columns, values) {
+    const csvCell = (value) => {
+      let text = String(value == null ? "" : value);
+      if (/^[\t\r ]*[=+\-@]/.test(text)) text = "'" + text;
+      return '"' + text.replace(/"/g, '""') + '"';
+    };
+    const csv = [columns].concat(values).map((row) => row.map(csvCell).join(",")).join("\r\n");
+    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = name;
+    link.click();
+    global.setTimeout(() => URL.revokeObjectURL(url), 0);
+  }
+
+  // The per-plant health table, exported with the same columns in the same order as on screen.
+  function exportInverterPlantCsv() {
+    const columns = ["Plant", "Site code", "Total inverters", "Maker", "Capacity (kW)",
+      "Running", "Not running", "Running %", "Open tickets"];
+    const values = sortedInverterPlantRows().map((row) => [
+      row.plant.displayName || row.plant.plantName, row.plant.siteCode,
+      row.config ? row.total : "Not configured",
+      (row.config && row.config.maker) || "",
+      fmt.decimalText(row.config && row.config.capacity_kw),
+      row.config ? row.running : "Not configured",
+      row.config ? row.down : "Not configured",
+      row.percent === null ? "" : row.percent + "%",
+      row.tickets]);
+    downloadCsv("inverter-health-plants.csv", columns, values);
   }
 
   function exportInverterCsv() {
@@ -728,18 +856,7 @@
         ticket.subcategory || "", ticket.description || "", ticket.severity || "", ticket.status || "",
         ticket.occurred_at || "", ticket.etc_at || "", ticket.assignee_text || "", ticket.ticket_no || ""];
     });
-    const csvCell = (value) => {
-      let text = String(value == null ? "" : value);
-      if (/^[\t\r ]*[=+\-@]/.test(text)) text = "'" + text;
-      return '"' + text.replace(/"/g, '""') + '"';
-    };
-    const csv = [columns].concat(values).map((row) => row.map(csvCell).join(",")).join("\r\n");
-    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = "inverter-health.csv";
-    link.click();
-    global.setTimeout(() => URL.revokeObjectURL(url), 0);
+    downloadCsv("inverter-health.csv", columns, values);
   }
 
   function saveInverterConfig(siteCode, button) {
@@ -748,15 +865,30 @@
       .find((input) => input.dataset.ihTotal === siteCode);
     const perDayInput = Array.from(host.querySelectorAll("[data-ih-units-day]"))
       .find((input) => input.dataset.ihUnitsDay === siteCode);
+    const makerInput = Array.from(host.querySelectorAll("[data-ih-maker]"))
+      .find((input) => input.dataset.ihMaker === siteCode);
+    const capacityInput = Array.from(host.querySelectorAll("[data-ih-capacity]"))
+      .find((input) => input.dataset.ihCapacity === siteCode);
     const status = host.querySelector("[data-ih-save-status]");
     const total = Number(totalInput && totalInput.value);
     const perDay = Number(perDayInput && perDayInput.value);
+    const fail = (message) => {
+      inverterHealth.saveMessage = message;
+      inverterHealth.saveError = true;
+      status.textContent = message;
+      status.classList.add("is-error");
+    };
     if (!Number.isInteger(total) || total < 1 || total > 500 ||
         !Number.isInteger(perDay) || perDay < 1 || perDay > 500) {
-      inverterHealth.saveMessage = "Total units and units/day must each be between 1 and 500.";
-      inverterHealth.saveError = true;
-      status.textContent = inverterHealth.saveMessage;
-      status.classList.add("is-error");
+      fail("Total units and units/day must each be between 1 and 500.");
+      return;
+    }
+    // Both new fields are optional: blank clears what is stored, a rating must be positive.
+    const maker = ((makerInput && makerInput.value) || "").trim().slice(0, 120) || null;
+    const capacityText = ((capacityInput && capacityInput.value) || "").trim();
+    const capacity = capacityText === "" ? null : Number(capacityText);
+    if (capacity !== null && (!isFinite(capacity) || capacity <= 0)) {
+      fail("Capacity (kW) must be a positive number, or left blank.");
       return;
     }
     button.disabled = true;
@@ -765,7 +897,8 @@
     status.textContent = inverterHealth.saveMessage;
     global.Solar91PortalAPI.request("/api/pm-plan/unit-config", {
       method: "PUT",
-      body: { plant: siteCode, equipment_type: "Inverter", total_units: total, units_per_day: perDay }
+      body: { plant: siteCode, equipment_type: "Inverter", total_units: total, units_per_day: perDay,
+        maker: maker, capacity_kw: capacity }
     }).then(() => {
       inverterHealth.saveMessage = "Configuration saved.";
       inverterHealth.saveError = false;
@@ -788,9 +921,33 @@
     host.addEventListener("click", (event) => {
       const close = event.target.closest("[data-ih-close]");
       if (close) { closeInverterHealth(); return; }
+      const sortBy = event.target.closest("[data-ih-sort]");
+      if (sortBy) {
+        const Sort = global.Solar91PortalSort;
+        if (Sort) {
+          Sort.next(inverterHealth.plantSort, sortBy.getAttribute("data-ih-sort"));
+          renderInverterHealth();
+          const again = host.querySelector('[data-ih-sort="' + inverterHealth.plantSort.key + '"]');
+          if (again) again.focus();
+        }
+        return;
+      }
+      const unfold = event.target.closest("[data-ih-unfold]");
+      if (unfold) {
+        const code = unfold.dataset.ihUnfold;
+        const at = inverterHealth.expanded.indexOf(code);
+        if (at === -1) inverterHealth.expanded.push(code);
+        else inverterHealth.expanded.splice(at, 1);
+        renderInverterHealth();
+        const again = Array.from(host.querySelectorAll("[data-ih-unfold]"))
+          .find((button) => button.dataset.ihUnfold === code);
+        if (again) again.focus();
+        return;
+      }
       const plant = event.target.closest("[data-ih-plant-row]");
       if (plant) { inverterHealth.plantFilter = plant.dataset.ihPlantRow; renderInverterHealth(); return; }
       if (event.target.closest("[data-ih-clear-plant]")) { inverterHealth.plantFilter = ""; renderInverterHealth(); return; }
+      if (event.target.closest("[data-ih-export-plants]")) { exportInverterPlantCsv(); return; }
       if (event.target.closest("[data-ih-export]")) { exportInverterCsv(); return; }
       const save = event.target.closest("[data-ih-save]");
       if (save) { saveInverterConfig(save.dataset.ihSave, save); return; }

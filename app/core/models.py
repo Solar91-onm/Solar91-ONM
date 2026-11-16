@@ -743,6 +743,10 @@ class PMUnitConfig(Base, TimestampMixin):
     equipment_type: Mapped[str] = mapped_column(String(120), nullable=False)
     total_units: Mapped[int] = mapped_column(Integer, nullable=False)
     units_per_day: Mapped[int] = mapped_column(Integer, nullable=False)
+    # Migration 044. Who made the unit and the nameplate rating of ONE unit, in kW.
+    # Both optional: a configuration saved before 044 has neither recorded.
+    maker: Mapped[str | None] = mapped_column(String(120))
+    capacity_kw: Mapped[Decimal | None] = mapped_column(Numeric(10, 2))
     updated_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
     __table_args__ = (UniqueConstraint("plant_id", "equipment_type"),)
 

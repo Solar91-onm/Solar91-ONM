@@ -36,6 +36,18 @@
   }
 
   /**
+   * A stored decimal printed exactly as stored: the raw digits, no thousands
+   * separators and no trailing zeros (5368.23, 7180.8, 275, never "275.00").
+   * Used by the BOM quantity cell and the inverter capacity cell; "" for a blank,
+   * so the caller decides what an absent value looks like.
+   */
+  function decimalText(value) {
+    if (value === null || value === undefined || value === "") return "";
+    var n = Number(value);
+    return isFinite(n) ? String(n) : String(value);
+  }
+
+  /**
    * Spreadsheet formula-injection guard (OWASP). Text starting with = + - @ or a
    * control character is prefixed with an apostrophe, so a spreadsheet shows it
    * instead of running it. A plain number such as -5 stays numeric.
@@ -46,5 +58,6 @@
   }
 
   global.Solar91PortalFormat = {
-    csvText: csvText, escape: escape, formatNumber: formatNumber, formatDate: formatDate, relativeTime: relativeTime };
+    csvText: csvText, decimalText: decimalText, escape: escape, formatNumber: formatNumber,
+    formatDate: formatDate, relativeTime: relativeTime };
 }(window));

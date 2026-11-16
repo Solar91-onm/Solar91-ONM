@@ -1330,10 +1330,33 @@
 .ep-ih__reason, .ep-ih__notice { margin: 0; color: var(--ep-text-muted); font-size: var(--ep-fs-sm); }
 .ep-ih__notice { padding: 9px 12px; border: 1px solid var(--ep-border); border-radius: var(--ep-radius-md); background: var(--ep-bg); }
 .ep-ih__notice--error, .ep-ih__save-status.is-error { color: var(--ep-red); }
+/* Laid out like the Health register table: the short and numeric columns are centred, and the
+   heading is centred over its own entries rather than drifting left of them. */
+.ep-ih__plant-table th.num,
+.ep-ih__plant-table td.num { text-align: center; }
+.ep-ih__plant-table th.num .ep-sort { justify-content: center; }
 .ep-ih__plant-table tbody tr[data-ih-plant-row] { cursor: pointer; }
 .ep-ih__plant-table .ep-bar { min-width: 110px; }
 .ep-ih__plant-table .ep-bar__value { min-width: 42px; }
 .ep-ih__tickets { min-width: 1420px; }
+/* Running / Not running traffic light: the portal's own .ep-hint-light, spaced off the count.
+   The red one is only emitted when something IS down, so an all-running plant shows a bare zero. */
+.ep-ih__plant-table .ep-hint-light { margin-right: 7px; vertical-align: middle; }
+
+/* The open-ticket count of a plant that has down inverters unfolds its tickets under the row. */
+.ep-ih__unfold {
+  display: inline-flex; align-items: center; gap: 5px; padding: 0; border: 0; background: transparent;
+  color: var(--ep-accent-strong); font: inherit; font-weight: 650; cursor: pointer;
+}
+.ep-ih__down-row > td { padding: 0 16px 12px; background: var(--ep-bg); }
+.ep-ih__down-list { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.ep-ih__down {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 8px 12px;
+  border: 1px solid var(--ep-border); border-radius: var(--ep-radius-md); font-size: var(--ep-fs-sm);
+}
+.ep-ih__down-unit { font-weight: 650; color: var(--ep-text-strong); }
+.ep-ih__down-sub { color: var(--ep-text-muted); }
+.ep-ih__down .ep-ih__ticket-actions { margin-left: auto; }
 .ep-ih__ticket-actions { display: inline-flex; align-items: center; gap: 10px; white-space: nowrap; }
 .ep-ih__description { display: -webkit-box; max-width: 300px; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; white-space: normal; }
 .ep-ih__ticket { padding: 0; border: 0; background: transparent; color: var(--ep-accent-strong); font: inherit; font-weight: 650; text-decoration: underline; cursor: pointer; }
