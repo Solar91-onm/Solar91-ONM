@@ -1290,6 +1290,13 @@ def test_plant_washing_range_sheet_and_health_issue_wizard_are_wired():
     assert "function syncRecordRangeInputs" in calendar
     assert "previousCompletion" in calendar and "startDate = afterPrevious" in calendar
     assert "ep-calendar__record-modal" in calendar_styles
+    assert "function renderDraftRecordPhotos(state, row)" in calendar
+    assert 'data-record-draft-photo data-date="' in calendar
+    assert 'summary>Photos · selected photos upload when this entry is saved' in calendar
+    assert "recordPendingPhotos[draftKey]" in calendar
+    assert "Array.isArray(result.reports)" in calendar
+    assert "uploadRecordPhotoFile(host, state, item.report, item.phase, item.slot, item.file)" in calendar
+    assert 'data-record-photo-retry="' in calendar
 
     issues = (PORTAL_ASSETS / "js" / "site-issues.js").read_text(encoding="utf-8")
     issue_styles = (PORTAL_ASSETS / "css" / "site-issues.css").read_text(encoding="utf-8")
@@ -2067,3 +2074,113 @@ def test_only_the_om_head_role_can_remove_a_bom_line():
     assert holders == {"O&M Head"}, holders
     for role in ("Assignee", "Administration", "Site Engineer", "Viewer"):
         assert "plants.manage" not in ROLE_PERMISSIONS[role], role
+
+
+def test_the_merged_plant_page_renders_exactly_one_h1_on_either_branch():
+    """Details and Health are one stacked page now. Its heading and the portfolio heading
+    are mutually exclusive branches of one ternary, so the page must carry exactly one h1
+    whichever branch runs — two would be a document-outline bug, none a missing title."""
+    script = r"""
+      const fs = require('fs');
+      const vm = require('vm');
+      const source = fs.readFileSync('assets/js/plants-table.js', 'utf8');
+
+      const start = source.indexOf('var pageHeader = merged');
+      if (start < 0) throw new Error('the merged page header is missing');
+      const end = source.indexOf('var table =', start);
+      const expression = source.slice(start, end);
+
+      const fmt = { escape: (v) => String(v == null ? '' : v) };
+      const box = {
+        fmt,
+        title: 'Plant Details',
+        subtitle: 'Every plant in the portfolio',
+        plant: { displayName: 'Abhaypur I', plantName: 'Abhaypur I',
+                 siteCode: 'ABH01', district: 'Jaipur', discom: 'JVVNL' }
+      };
+      vm.createContext(box);
+
+      const countH1 = (html) => (html.match(/<h1[\s>]/g) || []).length;
+
+      // a) the merged plant page
+      box.merged = true;
+      vm.runInContext(expression + ';this.out = pageHeader;', box);
+      const mergedHtml = box.out;
+      if (countH1(mergedHtml) !== 1) {
+        throw new Error('merged plant page h1 count = ' + countH1(mergedHtml) + ': ' + mergedHtml);
+      }
+      if (mergedHtml.indexOf('Abhaypur I') === -1) throw new Error('the plant name is not the heading');
+      if (mergedHtml.indexOf('ABH01') === -1) throw new Error('the site code is missing from the subtitle');
+
+      // b) the portfolio page it is mutually exclusive with
+      box.merged = false;
+      vm.runInContext(expression + ';this.out = pageHeader;', box);
+      const portfolioHtml = box.out;
+      if (countH1(portfolioHtml) !== 1) {
+        throw new Error('portfolio page h1 count = ' + countH1(portfolioHtml) + ': ' + portfolioHtml);
+      }
+      if (portfolioHtml.indexOf('Plant Details') === -1) throw new Error('the portfolio title is missing');
+
+      // c) a plant that has not loaded yet still gets a heading, never an empty one
+      box.merged = true;
+      box.plant = null;
+      vm.runInContext(expression + ';this.out = pageHeader;', box);
+      if (countH1(box.out) !== 1) throw new Error('a pending plant must still have one h1');
+      if (box.out.indexOf('Plant Details') === -1) throw new Error('a pending plant has no fallback title');
+    """
+    run = subprocess.run(["node", "-e", script], cwd=ROOT, capture_output=True, text=True, timeout=30)
+    assert run.returncode == 0, run.stderr or run.stdout
+
+
+def test_a_site_engineer_sees_the_merged_page_without_design_liasoning_or_bom():
+    """A Site Engineer's plant pages are Health (which is the merged page), PM, Washing and
+    Movable assets. The Design/MDL, Liasoning and BOM sections hang off Details, which they
+    do not have, so the sub-navigation must not offer them and a direct selection must not
+    strand them on a section they cannot see."""
+    script = r"""
+      const fs = require('fs');
+      const vm = require('vm');
+      const source = fs.readFileSync('assets/js/navigation.js', 'utf8');
+
+      // The role map and the three functions that read it, lifted out together.
+      const grab = (marker, stop) => {
+        const start = source.indexOf(marker);
+        if (start < 0) throw new Error('missing: ' + marker);
+        const end = source.indexOf(stop, start);
+        return source.slice(start, end);
+      };
+      const roleMap = grab('var ROLE_TAB_VISIBILITY = {', '};') + '};';
+      const pagesConst = grab('var PLANT_SUB_PAGES', '];') + '];';
+      const helpers = grab('function restrictedPages()', 'function isPlantPageAllowed');
+
+      const box = { currentRole: null };
+      vm.createContext(box);
+      vm.runInContext(roleMap + pagesConst + helpers +
+        ';this.set = (r) => { currentRole = r; };' +
+        ';this.pages = () => plantPages().map((p) => p.id);' +
+        ';this.sections = () => canShowPlantDetailSections();', box);
+
+      box.set('Site Engineer');
+      const engineerPages = box.pages();
+      // Health maps onto the merged Details page, so the page is there under that id.
+      if (engineerPages.indexOf('details') === -1) {
+        throw new Error('a Site Engineer must still reach the merged page: ' + engineerPages);
+      }
+      if (box.sections() !== false) {
+        throw new Error('a Site Engineer must not get the Design/MDL, Liasoning or BOM sections');
+      }
+
+      box.set('O&M Head');
+      if (box.sections() !== true) throw new Error('the O&M Head keeps the detail sections');
+      box.set('Assignee');
+      if (box.sections() !== true) throw new Error('an Assignee keeps the detail sections');
+      box.set('Administration');
+      if (box.sections() !== true) throw new Error('Administration keeps the detail sections');
+    """
+    run = subprocess.run(["node", "-e", script], cwd=ROOT, capture_output=True, text=True, timeout=30)
+    assert run.returncode == 0, run.stderr or run.stdout
+
+    # And the render path refuses to leave a restricted role sitting on a detail section.
+    nav = (PORTAL_ASSETS / "js" / "navigation.js").read_text(encoding="utf-8")
+    assert 'if (navState.selectedSubPage === "details" && !canShowPlantDetailSections())' in nav
+    assert 'if (page.id === "details" && canShowPlantDetailSections())' in nav

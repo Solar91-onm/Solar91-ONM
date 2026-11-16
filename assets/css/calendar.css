@@ -1785,4 +1785,5 @@
 .ep-calendar__photo-remove { padding: 3px 7px; border: 1px solid var(--ep-border); border-radius: var(--ep-radius-sm); background: var(--ep-bg); color: var(--ep-text-muted); font: inherit; font-size: var(--ep-fs-xs); cursor: pointer; }
 .ep-calendar__photo-empty,
 .ep-calendar__photo-message { color: var(--ep-text-faint); font-size: var(--ep-fs-xs); }
+.ep-calendar__photo-file { display: block; max-width: 180px; overflow: hidden; color: var(--ep-text-muted); font-size: var(--ep-fs-xs); text-overflow: ellipsis; white-space: nowrap; }
 .ep-calendar__photo-error { max-width: 220px; color: var(--ep-red); font-size: var(--ep-fs-xs); }
