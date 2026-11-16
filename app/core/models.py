@@ -96,6 +96,7 @@ class SitePhoto(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), server_default=func.now(), nullable=False)
     __table_args__ = (
         Index("ix_site_photos_plant_created", "plant_id", "created_at"),
+        Index("ix_site_photos_link_created", "link_type", "link_id", "created_at"),
         Index("ux_site_photos_submission", "uploaded_by", "submission_id", "submission_index", unique=True),
         Index("ux_site_photos_washing_slot", "link_type", "link_id", "phase", "slot", unique=True,
               postgresql_where=text("link_type = 'washing' AND phase IS NOT NULL"),

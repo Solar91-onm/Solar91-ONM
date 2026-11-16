@@ -139,8 +139,11 @@ def list_photos(db: Annotated[Session, Depends(get_db)], user: Annotated[User, D
                 plant: str = "all", q: str = "", category: str = "all", uploader: str = "all", issue: str = "all",
                 link: str = "all", link_id: str | None = Query(None, max_length=120),
                 window: str = "30d", sort: str = "newest", offset: int = Query(0, ge=0, le=5000), limit: int = Query(60, ge=1, le=120),
-                meta: bool = True, cursor: str | None = Query(None, max_length=200)):
+                meta: bool = True, cursor: str | None = Query(None, max_length=200),
+                phase_slots: bool = False):
     _role(user)
+    if phase_slots and (link != "washing" or not link_id):
+        raise HTTPException(422, "Photo slot lookup requires a module cleaning report link")
     allowed = user_scoped_plant_ids(db, user)
     if allowed is not None and not allowed:
         return {"items": [], "total": 0, "summary": {"inWindow":0,"today":0,"awaiting":0,"unlinked":0}, "days": {}, "facets": {"uploaders":[],"issues":[]},
@@ -160,6 +163,14 @@ def list_photos(db: Annotated[Session, Depends(get_db)], user: Annotated[User, D
     if link != "all": stmt = stmt.where(SitePhoto.link_type == link)
     if link_id is not None:
         stmt = stmt.where(SitePhoto.link_id == link_id.strip())
+    if phase_slots:
+        # Match the washing-slot partial index so opening a daily record doesn't scan
+        # the full evidence table as it grows.
+        stmt = stmt.where(
+            SitePhoto.category == "washing",
+            SitePhoto.phase.is_not(None),
+            SitePhoto.phase.in_(("before", "after")),
+        )
     if q.strip():
         words = q.strip().split()[:8]
         for word in words:

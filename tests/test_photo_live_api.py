@@ -171,6 +171,33 @@ def test_washing_and_inventory_links_are_searchable_and_plant_checked(client,db)
         assert listing.json()['items'][0]['linkId']==ref
 
 
+def test_washing_record_photo_slot_lookup_returns_only_indexed_slots(client,db):
+    login_user(client,db)
+    p=plant(db,'Photo Slot Plant')
+    report=WashingDailyReport(plant_id=p.id,cycle_month='2026-10',cycle_no=1,
+        report_date=date(2026,10,29),job_status='Completed',reported_by='Field Engineer')
+    db.add(report);db.flush()
+    photos=[
+        SitePhoto(plant_id=p.id,uploader_name='Test User',category='washing',link_type='washing',
+            link_id=str(report.id),storage_path='before.webp',file_name='before.webp',
+            content_type='image/webp',size_bytes=10,phase='before',slot=1),
+        SitePhoto(plant_id=p.id,uploader_name='Test User',category='washing',link_type='washing',
+            link_id=str(report.id),storage_path='after.webp',file_name='after.webp',
+            content_type='image/webp',size_bytes=10,phase='after',slot=1),
+        SitePhoto(plant_id=p.id,uploader_name='Test User',category='washing',link_type='washing',
+            link_id=str(report.id),storage_path='legacy.webp',file_name='legacy.webp',
+            content_type='image/webp',size_bytes=10),
+    ]
+    db.add_all(photos);db.commit()
+
+    response=client.get('/api/photos',params={'link':'washing','link_id':str(report.id),
+        'phase_slots':'true','window':'all','limit':4,'meta':'false'})
+    assert response.status_code==200,response.text
+    assert {item['phase'] for item in response.json()['items']}=={'before','after'}
+    assert len(response.json()['items'])==2
+    assert client.get('/api/photos',params={'phase_slots':'true'}).status_code==422
+
+
 def test_further_gallery_pages_return_rows_only_and_thumbnails_are_small_webp(client,db):
     login_user(client,db)
     p=plant(db,'Paged Plant')

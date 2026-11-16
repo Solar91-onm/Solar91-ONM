@@ -166,7 +166,7 @@ def test_overview_area_filter_and_operational_trend_controls_are_wired(client):
     overview = (PORTAL_ASSETS / "js" / "overview.js").read_text(encoding="utf-8")
     adapter = (PORTAL_ASSETS / "js" / "data-adapter.js").read_text(encoding="utf-8")
     styles = (PORTAL_ASSETS / "css" / "components.css").read_text(encoding="utf-8")
-    overview_markup = page[page.index('data-tab-view="overview"'):page.index('data-tab-view="plants-table"')]
+    overview_markup = page[page.index('data-tab-view="overview"'):page.index('data-tab-view="info-health"')]
 
     assert 'data-filter="district"' in overview_markup
     assert "data-filter=\"period\"" not in overview_markup
@@ -742,6 +742,16 @@ def test_overview_inverter_tile_counts_units_and_opens_standalone_health():
     assert "openInverterHealth();" in overview
     assert 'data-inverter-health' in (TEMPLATE.read_text(encoding="utf-8"))
     assert "openTicket: openTicket" in issues
+    assert 'data-ih-edit="${fmt.escape(ticket.ticket_no || "")}"' in overview
+    assert 'global.Solar91PortalIssues.openTicket(ticket.dataset.ihTicket || ticket.dataset.ihEdit, code, mode)' in overview
+    assert "function openTicket(ticketNo, siteCode, mode)" in issues
+    assert 'state.modalMode = mode === "edit" ? "edit" : "details";' in issues
+    styles = (PORTAL_ASSETS / "css" / "components.css").read_text(encoding="utf-8")
+    assert "left: var(--ep-sidebar-w);" in styles
+    assert ".ep-shell.is-sidebar-collapsed .ep-inverter-health { left: var(--ep-sidebar-w-collapsed); }" in styles
+    assert 'data-navigation-history="back"' in TEMPLATE.read_text(encoding="utf-8")
+    assert 'data-navigation-history="forward"' in TEMPLATE.read_text(encoding="utf-8")
+    assert 'const INVERTER_HISTORY_KEY = "solar91InverterHealthOpen";' in overview
 
     navigation = (PORTAL_ASSETS / "js" / "navigation.js").read_text(encoding="utf-8")
     markup = TEMPLATE.read_text(encoding="utf-8")
@@ -812,8 +822,9 @@ def test_plant_and_view_sub_pages_are_the_live_pages_only():
     view_start = nav.index("VIEW_SUB_PAGES")
     view_section = nav[view_start:nav.index("];", view_start)]
     assert re.findall(r'id:\s*"([a-z-]+)"', view_section) == [
-        "details", "health", "pm", "washing", "movable-assets"
+        "details", "pm", "washing", "movable-assets"
     ]
+    assert '{ id: "details",         label: "Info & Health" }' in view_section
     page = TEMPLATE.read_text(encoding="utf-8")
     for dead in ("asset-warranty", "data-asset-warranty-host", "Solar91PortalAssetWarranty"):
         assert dead not in nav, dead
@@ -822,6 +833,37 @@ def test_plant_and_view_sub_pages_are_the_live_pages_only():
     assert not (PORTAL_ASSETS / "css" / "asset-warranty.css").exists()
     register = (PORTAL_ASSETS / "js" / "register-io.js").read_text(encoding="utf-8")
     assert "/api/asset-warranty" not in register
+
+
+def test_portfolio_info_health_uses_two_sections_and_keeps_health_deep_links():
+    nav = (PORTAL_ASSETS / "js" / "navigation.js").read_text(encoding="utf-8")
+    page = TEMPLATE.read_text(encoding="utf-8")
+    assert 'data-tab-view="info-health"' in page
+    assert 'data-view-section="info">Info</button>' in page
+    assert 'data-view-section="health">Health</button>' in page
+    assert 'data-nav="view:health"' not in page
+    assert 'if (pageId === "health") {' in nav
+    assert 'pageId = "details";' in nav
+    assert 'detailSection = "health";' in nav
+    assert 'snapshot.selectedViewPage === "health" ? "details" : snapshot.selectedViewPage' in nav
+    assert 'if (!plantCode && section === "health") return ["site-issues"];' in nav
+    assert 'navState.selectedDetailSection === "health"' in nav
+    assert 'document.querySelector("[data-issues-host]")' in nav
+
+
+def test_module_cleaning_photo_slot_reads_are_bounded_and_update_only_the_open_day():
+    calendar = (PORTAL_ASSETS / "js" / "operations-calendar.js").read_text(encoding="utf-8")
+    start = calendar.index("function loadRecordPhotos")
+    end = calendar.index("function uploadRecordPhoto", start)
+    loader = calendar[start:end]
+    model = (ROOT / "app" / "core" / "models.py").read_text(encoding="utf-8")
+    migration = (ROOT / "database" / "migrations" / "043_site_photo_link_lookup.sql").read_text(encoding="utf-8")
+    assert "&phase_slots=true&window=all&limit=4&meta=false" in loader
+    assert loader.count("updateRecordPhotoContent(host, state, reportId)") >= 3
+    assert "renderView(" not in loader
+    assert "Solar91PhotoEvidence.watch(container)" in calendar
+    assert 'Index("ix_site_photos_link_created", "link_type", "link_id", "created_at")' in model
+    assert "CREATE INDEX IF NOT EXISTS ix_site_photos_link_created" in migration
 
 
 def test_plant_details_page_is_wired_up():

@@ -113,9 +113,9 @@
           <div class="ep-nav-group__body">
             <div class="ep-nav-details-row">
               <button class="ep-nav-item ep-nav-item--sub" type="button" data-nav="view:details">
-                <span class="ep-nav-item__label">Details</span>
+                <span class="ep-nav-item__label">Info &amp; Health</span>
               </button>
-              <button class="ep-nav-chevron ep-nav-details-toggle" type="button" data-details-toggle="view" aria-expanded="false" aria-label="Show or hide Details sections" title="Show or hide sections">
+              <button class="ep-nav-chevron ep-nav-details-toggle" type="button" data-details-toggle="view" aria-expanded="false" aria-label="Show or hide Info sections" title="Show or hide sections">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg>
               </button>
             </div>
@@ -130,9 +130,6 @@
                 <span class="ep-nav-item__label">BOM</span>
               </button>
             </div>
-            <button class="ep-nav-item ep-nav-item--sub" type="button" data-nav="view:health">
-              <span class="ep-nav-item__label">Health</span>
-            </button>
             <button class="ep-nav-item ep-nav-item--sub" type="button" data-nav="view:pm">
               <span class="ep-nav-item__label">Preventive Maintenance</span>
             </button>
@@ -310,9 +307,22 @@
           </section>
           <div class="ep-inverter-health" data-inverter-health hidden></div>
 
-          <!-- ═════════════ PLANTS TABLE (Details pages) ═════════════ -->
-          <section class="ep-tab-view" data-tab-view="plants-table">
-            <div data-plants-table-host></div>
+          <!-- ═════════════ PORTFOLIO INFO & HEALTH ═════════════ -->
+          <section class="ep-tab-view" data-tab-view="info-health">
+            <div class="ep-view-section-switcher" role="tablist" aria-label="Info and Health sections" data-view-section-tabs>
+              <button type="button" role="tab" id="view-info-tab" aria-controls="view-info-panel"
+                aria-selected="true" data-view-section="info">Info</button>
+              <button type="button" role="tab" id="view-health-tab" aria-controls="view-health-panel"
+                aria-selected="false" tabindex="-1" data-view-section="health">Health</button>
+            </div>
+            <section class="ep-view-section-panel" role="tabpanel" id="view-info-panel"
+              aria-labelledby="view-info-tab" data-view-section-panel="info">
+              <div data-plants-table-host></div>
+            </section>
+            <section class="ep-view-section-panel" role="tabpanel" id="view-health-panel"
+              aria-labelledby="view-health-tab" data-view-section-panel="health" hidden>
+              <div data-issues-host></div>
+            </section>
           </section>
 
           <!-- ═════════════ PREVENTIVE MAINTENANCE / WASHING CALENDAR ═════════════ -->
@@ -323,11 +333,6 @@
 
           <section class="ep-tab-view" data-tab-view="calendar">
             <div data-calendar-host></div>
-          </section>
-
-          <!-- ═════════════ HEALTH / SITE ISSUES ═════════════ -->
-          <section class="ep-tab-view" data-tab-view="health">
-            <div data-issues-host></div>
           </section>
 
           <!-- MOVABLE ASSETS -->

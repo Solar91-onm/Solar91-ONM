@@ -1501,14 +1501,12 @@
     '</div>';
   }
 
-  function renderRecordPhotos(state, report) {
+  function renderRecordPhotoContent(state, report) {
     var opened = state.recordPhotoOpenId === report.id;
     var loading = state.recordPhotoLoading[report.id];
     var loaded = state.recordPhotosLoaded[report.id];
     var error = state.recordPhotoErrors[report.id];
-    return '<details class="ep-calendar__record-photos" data-record-photos="' + escape(report.id) + '"' +
-      (opened ? " open" : "") + '><summary>Photos</summary>' +
-      (!opened ? "" : loading
+    return !opened ? "" : loading
         ? '<p class="ep-calendar__photo-message" role="status">Loading photo slots…</p>'
         : error
           ? '<p class="ep-calendar__photo-error" role="alert">' + escape(error) +
@@ -1523,29 +1521,59 @@
                     '</div></div>';
                 }).join("") +
               '</div>'
-            : '<p class="ep-calendar__photo-message">Open to load this day’s photos.</p>') +
+            : '<p class="ep-calendar__photo-message">Open to load this day’s photos.</p>';
+  }
+
+  function renderRecordPhotos(state, report) {
+    var opened = state.recordPhotoOpenId === report.id;
+    return '<details class="ep-calendar__record-photos" data-record-photos="' + escape(report.id) + '"' +
+      (opened ? " open" : "") + '><summary>Photos</summary>' +
+      '<div data-record-photo-content="' + escape(report.id) + '">' +
+        renderRecordPhotoContent(state, report) +
+      '</div>' +
     '</details>';
   }
 
+  function updateRecordPhotoContent(host, state, reportId) {
+    var details = Array.prototype.find.call(host.querySelectorAll("[data-record-photos]"), function (item) {
+      return item.dataset.recordPhotos === reportId;
+    });
+    var container = details && details.querySelector("[data-record-photo-content]");
+    var report = (state.washingReports || []).find(function (item) {
+      return String(item.id) === reportId;
+    });
+    if (container && report) {
+      container.innerHTML = renderRecordPhotoContent(state, report);
+      if (global.Solar91PhotoEvidence) global.Solar91PhotoEvidence.watch(container);
+    }
+  }
+
   function loadRecordPhotos(host, state, reportId, retry) {
-    if (!retry && (state.recordPhotosLoaded[reportId] || state.recordPhotoLoading[reportId])) return;
+    if (!retry && state.recordPhotosLoaded[reportId]) {
+      updateRecordPhotoContent(host, state, reportId);
+      return;
+    }
+    if (!retry && state.recordPhotoLoading[reportId]) {
+      updateRecordPhotoContent(host, state, reportId);
+      return;
+    }
     state.recordPhotoLoading[reportId] = true;
     delete state.recordPhotoErrors[reportId];
-    renderView(host, state, active.context);
+    updateRecordPhotoContent(host, state, reportId);
     global.Solar91PortalAPI.request(
       "/api/photos?link=washing&link_id=" + encodeURIComponent(reportId) +
-      "&window=all&limit=20&meta=false"
+      "&phase_slots=true&window=all&limit=4&meta=false"
     ).then(function (result) {
       if (!active || active.host !== host || active.state !== state) return;
       state.recordPhotos[reportId] = result.items || [];
       state.recordPhotosLoaded[reportId] = true;
       state.recordPhotoLoading[reportId] = false;
-      renderView(host, state, active.context);
+      updateRecordPhotoContent(host, state, reportId);
     }).catch(function (error) {
       if (!active || active.host !== host || active.state !== state) return;
       state.recordPhotoLoading[reportId] = false;
       state.recordPhotoErrors[reportId] = error.message || "Photo slots could not be loaded.";
-      renderView(host, state, active.context);
+      updateRecordPhotoContent(host, state, reportId);
     });
   }
 

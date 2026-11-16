@@ -364,6 +364,7 @@
     canEdit: false, plantFilter: "", search: "", severity: "", status: "",
     saveMessage: "", saveError: false, navigationError: ""
   };
+  const INVERTER_HISTORY_KEY = "solar91InverterHealthOpen";
   const OPEN_INVERTER_STATUSES = [
     "Open", "Assigned", "Acknowledged", "In Progress", "Pending Vendor", "Pending Parts/Vendor"
   ];
@@ -609,7 +610,8 @@
         <td><span class="ep-chip ep-chip--grey">${fmt.escape(ticket.status || "—")}</span></td>
         <td>${fmt.escape(occurred)}</td><td>${fmt.escape(etc)}</td>
         <td>${fmt.escape(ticket.assignee_text || "—")}</td>
-        <td><button type="button" class="ep-ih__ticket" data-ih-ticket="${fmt.escape(ticket.ticket_no || "")}" data-ih-site="${fmt.escape(code)}">${fmt.escape(ticket.ticket_no || "Open ticket")}</button></td>
+        <td><span class="ep-ih__ticket-actions"><button type="button" class="ep-ih__ticket" data-ih-ticket="${fmt.escape(ticket.ticket_no || "")}" data-ih-site="${fmt.escape(code)}">${fmt.escape(ticket.ticket_no || "Open ticket")}</button>
+          ${inverterHealth.canEdit ? `<button type="button" class="ep-ih__button" data-ih-edit="${fmt.escape(ticket.ticket_no || "")}" data-ih-site="${fmt.escape(code)}">Edit</button>` : ""}</span></td>
       </tr>`;
     }).join("");
     const settingsRows = plants.map(({ plant, config }) =>
@@ -629,7 +631,7 @@
           : ""}</td></tr>`
     ).join("");
 
-    host.innerHTML = `<section class="ep-ih" role="dialog" aria-modal="true" aria-labelledby="ep-ih-title">
+    host.innerHTML = `<section class="ep-ih" aria-labelledby="ep-ih-title">
       <header class="ep-ih__header"><div><h1 id="ep-ih-title">Inverter Health</h1><p>${fmt.escape(inverterScopeLabel())}</p></div>
         <button type="button" class="ep-ih__close" data-ih-close aria-label="Close Inverter Health">×</button></header>
       <div class="ep-ih__content">
@@ -673,21 +675,40 @@
     </section>`;
   }
 
-  function closeInverterHealth() {
+  function closeInverterHealth(restoreHistory) {
     const host = document.querySelector("[data-inverter-health]");
     inverterHealth.open = false;
     if (host) host.hidden = true;
+    const current = global.history.state;
+    if (current && current[INVERTER_HISTORY_KEY]) {
+      if (restoreHistory !== false) global.history.back();
+      else {
+        const next = Object.assign({}, current);
+        delete next[INVERTER_HISTORY_KEY];
+        global.history.replaceState(next, "");
+      }
+    }
     const tile = document.querySelector('[data-overview-destination="inverters"]');
-    if (tile) tile.focus();
+    if (tile && restoreHistory !== false) tile.focus();
   }
 
-  function openInverterHealth() {
+  function openInverterHealth(fromHistory) {
     if (!state) return;
+    if (!fromHistory) {
+      const current = global.history.state;
+      if (!current || !current[INVERTER_HISTORY_KEY]) {
+        const next = current && typeof current === "object" ? Object.assign({}, current) : {};
+        next[INVERTER_HISTORY_KEY] = true;
+        global.history.pushState(next, "");
+      }
+    }
     inverterHealth.open = true;
-    inverterHealth.plantFilter = "";
-    inverterHealth.search = "";
-    inverterHealth.severity = "";
-    inverterHealth.status = "";
+    if (!fromHistory) {
+      inverterHealth.plantFilter = "";
+      inverterHealth.search = "";
+      inverterHealth.severity = "";
+      inverterHealth.status = "";
+    }
     inverterHealth.navigationError = "";
     const host = document.querySelector("[data-inverter-health]");
     if (host) host.hidden = false;
@@ -773,17 +794,18 @@
       if (event.target.closest("[data-ih-export]")) { exportInverterCsv(); return; }
       const save = event.target.closest("[data-ih-save]");
       if (save) { saveInverterConfig(save.dataset.ihSave, save); return; }
-      const ticket = event.target.closest("[data-ih-ticket]");
+      const ticket = event.target.closest("[data-ih-ticket], [data-ih-edit]");
       if (ticket) {
         const code = ticket.dataset.ihSite;
+        const mode = ticket.matches("[data-ih-edit]") ? "edit" : "details";
         const row = state && state.allRows.find(({ plant }) => plant.siteCode === code);
         const dateRange = state && { startDate: state.rangeStart, endDate: state.rangeEnd };
         const openTicketInHealth = () => {
           if (!global.Solar91PortalIssues) throw new Error("The Health issue register is unavailable.");
-          closeInverterHealth();
+          closeInverterHealth(false);
           if (row) global.Solar91PortalNav.selectPlantPage(code, "health", dateRange, row.plant);
           else global.Solar91PortalNav.selectView("health", dateRange);
-          global.Solar91PortalIssues.openTicket(ticket.dataset.ihTicket, code);
+          global.Solar91PortalIssues.openTicket(ticket.dataset.ihTicket || ticket.dataset.ihEdit, code, mode);
         };
         const reportNavigationError = (error) => {
           inverterHealth.navigationError = "Could not open the Health issue register: " +
@@ -820,6 +842,15 @@
     });
     document.addEventListener("keydown", (event) => {
       if (event.key === "Escape" && inverterHealth.open) closeInverterHealth();
+    });
+    document.addEventListener("click", (event) => {
+      const route = event.target.closest(".ep-sidebar [data-nav], .ep-sidebar .ep-nav-plant__toggle");
+      if (route && inverterHealth.open) closeInverterHealth(false);
+    }, true);
+    global.addEventListener("popstate", (event) => {
+      const isOpen = !!(event.state && event.state[INVERTER_HISTORY_KEY]);
+      if (isOpen && !inverterHealth.open) openInverterHealth(true);
+      else if (!isOpen && inverterHealth.open) closeInverterHealth(true);
     });
   }
 

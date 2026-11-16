@@ -1275,11 +1275,13 @@
 .ep-inverter-health {
   position: fixed;
   inset: 0;
+  left: var(--ep-sidebar-w);
   z-index: 120;
   overflow: auto;
   background: var(--ep-bg-page);
   color: var(--ep-text);
 }
+.ep-shell.is-sidebar-collapsed .ep-inverter-health { left: var(--ep-sidebar-w-collapsed); }
 .ep-ih { min-height: 100%; }
 .ep-ih__header {
   position: sticky;
@@ -1332,6 +1334,7 @@
 .ep-ih__plant-table .ep-bar { min-width: 110px; }
 .ep-ih__plant-table .ep-bar__value { min-width: 42px; }
 .ep-ih__tickets { min-width: 1420px; }
+.ep-ih__ticket-actions { display: inline-flex; align-items: center; gap: 10px; white-space: nowrap; }
 .ep-ih__description { display: -webkit-box; max-width: 300px; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; white-space: normal; }
 .ep-ih__ticket { padding: 0; border: 0; background: transparent; color: var(--ep-accent-strong); font: inherit; font-weight: 650; text-decoration: underline; cursor: pointer; }
 .ep-ih__toolbar { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px 16px; }
@@ -1351,6 +1354,31 @@
 .ep-ih__settings[open] summary { border-bottom: 1px solid var(--ep-border-soft); }
 .ep-ih__settings input { width: 100px; }
 .ep-ih__save-status { min-height: 18px; margin: 10px 18px; color: var(--ep-accent-strong); font-size: var(--ep-fs-sm); }
+.ep-view-section-switcher {
+  display: flex;
+  gap: 8px;
+  margin-bottom: var(--ep-s-4);
+  border-bottom: 1px solid var(--ep-border);
+}
+.ep-view-section-switcher button {
+  padding: 10px 14px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--ep-text-muted);
+  font: inherit;
+  cursor: pointer;
+}
+.ep-view-section-switcher button[aria-selected="true"] {
+  border-bottom-color: var(--ep-accent);
+  color: var(--ep-text-strong);
+  font-weight: 600;
+}
+.ep-view-section-switcher button:focus-visible {
+  outline: 2px solid var(--ep-accent);
+  outline-offset: -2px;
+}
+.ep-view-section-panel[hidden] { display: none !important; }
 @media (max-width: 1100px) {
   .ep-ih__summary { grid-template-columns: repeat(3, minmax(130px, 1fr)); }
   .ep-ih__severity { grid-column: span 2; }

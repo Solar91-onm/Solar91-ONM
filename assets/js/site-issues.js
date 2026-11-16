@@ -2142,7 +2142,7 @@
    */
   function presetEquipment(equipment) { pendingEquipment = equipment || ""; }
 
-  function openTicket(ticketNo, siteCode) {
+  function openTicket(ticketNo, siteCode, mode) {
     if (!active || !ticketNo) return;
     state.submitNotice = "";
     var url = "/api/issues?vertical=Inverter&status=open&limit=200";
@@ -2161,8 +2161,13 @@
       var mapped = mapApiIssue(issue, plantsById);
       if (!state.rows.some(function (row) { return row.dbId === mapped.dbId; })) state.rows.unshift(mapped);
       state.modalId = mapped.id;
-      state.modalMode = "details";
+      state.modalMode = mode === "edit" ? "edit" : "details";
+      state.editDraft = null;
+      state.submitError = "";
+      state.categoryError = "";
+      state.categoryLoading = false;
       renderView();
+      if (state.modalMode === "edit") loadCategoriesForEdit(active.host, state.modalId);
     }).catch(function (error) {
       state.submitNotice = "Could not open ticket " + ticketNo + ": " + (error.message || "please retry.");
       renderView();
