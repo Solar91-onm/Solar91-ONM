@@ -16,6 +16,8 @@ from tests.conftest import login_user
 class StorageStub:
     objects = {}
     fail_after = 0
+    base = 'https://storage.test'
+    bucket = 'photos'
     def __init__(self): pass
     def upload(self, path, data, content_type):
         if self.fail_after and len(self.objects) >= self.fail_after:
@@ -26,13 +28,19 @@ class StorageStub:
         return self.objects[path]
     def remove(self, paths):
         for path in paths: self.objects.pop(path, None)
+    def remove_strict(self, paths):
+        self.remove(paths)
+    def usage_bytes(self):
+        return sum(len(data) for data, _content_type in self.objects.values())
 
 
 @pytest.fixture(autouse=True)
 def fake_storage(monkeypatch):
+    from app.storage.usage import clear_bucket_usage_cache
     StorageStub.objects = {}
     StorageStub.fail_after = 0
     monkeypatch.setattr('app.photos.router.SupabaseStorage', StorageStub)
+    clear_bucket_usage_cache()
 
 
 def plant(db, name):
@@ -70,7 +78,7 @@ def test_saved_photo_search_refresh_image_and_issue_link(client, db):
     image=client.get(f"/api/photos/{row['id']}/image")
     assert image.status_code==200 and image.content[:4]==b'RIFF' and image.content[8:12]==b'WEBP'
     assert image.headers['content-type']=='image/webp'
-    assert image.headers['cache-control']=='private, no-store'
+    assert image.headers['cache-control']=='private, max-age=31536000, immutable'
     original=client.get(f"/api/photos/{row['id']}/image?size=original")
     assert original.status_code==200 and original.content[8:12]==b'WEBP' and original.headers['content-type']=='image/webp'
     assert len(StorageStub.objects)==4, 'both originals and separate thumbnails must exist'

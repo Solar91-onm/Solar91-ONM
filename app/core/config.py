@@ -50,6 +50,9 @@ class Settings(BaseSettings):
     photo_thumb_side: int = 640
     photo_thumb_quality: int = 70
     photo_webp_method: int = 4  # 0 fastest … 6 smallest; 4 balances CPU on the small Render instance
+    photo_retention_days: int = 30
+    storage_warn_bytes: int = 800_000_000
+    storage_block_bytes: int = 950_000_000
 
     allowed_origins: str = "http://localhost:8000,http://127.0.0.1:8000"
     trust_proxy_headers: bool = False

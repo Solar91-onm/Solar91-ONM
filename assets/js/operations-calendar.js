@@ -130,6 +130,12 @@
         recordOpen: false,
         recordCycle: 1,
         recordDrafts: {},
+        recordPhotos: {},
+        recordPhotosLoaded: {},
+        recordPhotoLoading: {},
+        recordPhotoBusy: {},
+        recordPhotoErrors: {},
+        recordPhotoOpenId: "",
         recordEdit: null,
         recordMode: "start",
         recordSaving: false,
@@ -1452,6 +1458,143 @@
     '</div>';
   }
 
+  function recordPhotoKey(reportId, phase, slot) {
+    return reportId + "|" + phase + "|" + slot;
+  }
+
+  function renderRecordPhotoSlot(state, report, phase, slot) {
+    var photos = state.recordPhotos[report.id] || [];
+    var photo = photos.find(function (item) {
+      return item.phase === phase && Number(item.slot) === slot;
+    });
+    var key = recordPhotoKey(report.id, phase, slot);
+    var busy = state.recordPhotoBusy[key];
+    var error = state.recordPhotoErrors[key] || "";
+    if (busy) {
+      return '<div class="ep-calendar__photo-slot is-busy" role="status">Uploading…</div>';
+    }
+    if (photo) {
+      return '<div class="ep-calendar__photo-slot is-filled">' +
+        '<button type="button" class="ep-calendar__photo-preview" data-washing-photo-open="' +
+          escape(photo.id) + '" data-washing-report="' + escape(report.id) + '" aria-label="Open ' +
+          escape(phase) + ' photo slot ' + slot + '">' +
+          '<img data-photo-src="' + escape(photo.thumbnailUrl) + '" loading="lazy" width="' +
+            Math.max(1, Number(photo.width) || 480) + '" height="' +
+            Math.max(1, Number(photo.height) || 360) + '" alt="' + escape(phase) + ' photo ' + slot + '" />' +
+        '</button>' +
+        (report.can_add_evidence
+            ? '<div class="ep-calendar__photo-actions"><label class="ep-calendar__photo-replace">Replace<input type="file" accept="image/jpeg,image/png,image/webp" capture="environment" data-washing-photo-file data-report-id="' +
+              escape(report.id) + '" data-phase="' + phase + '" data-slot="' + slot + '" /></label>' +
+              '<button type="button" class="ep-calendar__photo-remove" data-washing-photo-remove="' +
+            escape(photo.id) + '" data-washing-report="' + escape(report.id) + '" aria-label="Remove ' +
+              escape(phase) + ' photo slot ' + slot + '">Remove</button></div>'
+          : "") +
+        (error ? '<small class="ep-calendar__photo-error" role="alert">' + escape(error) + '</small>' : "") +
+      '</div>';
+    }
+    return '<div class="ep-calendar__photo-slot">' +
+      (report.can_add_evidence
+        ? '<label class="ep-calendar__photo-add">+ Add photo<input type="file" accept="image/jpeg,image/png,image/webp" capture="environment" data-washing-photo-file data-report-id="' +
+          escape(report.id) + '" data-phase="' + phase + '" data-slot="' + slot + '" /></label>'
+        : '<span class="ep-calendar__photo-empty">Not added</span>') +
+      (error ? '<small class="ep-calendar__photo-error" role="alert">' + escape(error) + '</small>' : "") +
+    '</div>';
+  }
+
+  function renderRecordPhotos(state, report) {
+    var opened = state.recordPhotoOpenId === report.id;
+    var loading = state.recordPhotoLoading[report.id];
+    var loaded = state.recordPhotosLoaded[report.id];
+    var error = state.recordPhotoErrors[report.id];
+    return '<details class="ep-calendar__record-photos" data-record-photos="' + escape(report.id) + '"' +
+      (opened ? " open" : "") + '><summary>Photos</summary>' +
+      (!opened ? "" : loading
+        ? '<p class="ep-calendar__photo-message" role="status">Loading photo slots…</p>'
+        : error
+          ? '<p class="ep-calendar__photo-error" role="alert">' + escape(error) +
+            ' <button type="button" data-washing-photo-retry="' + escape(report.id) + '">Retry</button></p>'
+          : loaded
+            ? '<div class="ep-calendar__photo-rows">' +
+                ["before", "after"].map(function (phase) {
+                  return '<div class="ep-calendar__photo-row"><strong>' +
+                    (phase === "before" ? "Before" : "After") + '</strong><div>' +
+                    renderRecordPhotoSlot(state, report, phase, 1) +
+                    renderRecordPhotoSlot(state, report, phase, 2) +
+                    '</div></div>';
+                }).join("") +
+              '</div>'
+            : '<p class="ep-calendar__photo-message">Open to load this day’s photos.</p>') +
+    '</details>';
+  }
+
+  function loadRecordPhotos(host, state, reportId, retry) {
+    if (!retry && (state.recordPhotosLoaded[reportId] || state.recordPhotoLoading[reportId])) return;
+    state.recordPhotoLoading[reportId] = true;
+    delete state.recordPhotoErrors[reportId];
+    renderView(host, state, active.context);
+    global.Solar91PortalAPI.request(
+      "/api/photos?link=washing&link_id=" + encodeURIComponent(reportId) +
+      "&window=all&limit=20&meta=false"
+    ).then(function (result) {
+      if (!active || active.host !== host || active.state !== state) return;
+      state.recordPhotos[reportId] = result.items || [];
+      state.recordPhotosLoaded[reportId] = true;
+      state.recordPhotoLoading[reportId] = false;
+      renderView(host, state, active.context);
+    }).catch(function (error) {
+      if (!active || active.host !== host || active.state !== state) return;
+      state.recordPhotoLoading[reportId] = false;
+      state.recordPhotoErrors[reportId] = error.message || "Photo slots could not be loaded.";
+      renderView(host, state, active.context);
+    });
+  }
+
+  function uploadRecordPhoto(host, state, input) {
+    var reportId = input.dataset.reportId;
+    var phase = input.dataset.phase;
+    var slot = Number(input.dataset.slot);
+    var file = input.files && input.files[0];
+    if (!file || !global.Solar91PhotoEvidence) return;
+    var key = recordPhotoKey(reportId, phase, slot);
+    if (state.recordPhotoBusy[key]) return;
+    state.recordPhotoBusy[key] = true;
+    delete state.recordPhotoErrors[key];
+    state.recordPhotoOpenId = reportId;
+    renderView(host, state, active.context);
+    global.Solar91PhotoEvidence.upload({
+      plantId: state.washingPlant.plant_id,
+      category: "washing",
+      linkType: "washing",
+      linkId: reportId,
+      phase: phase,
+      slot: slot,
+      files: [file],
+      submissionId: global.Solar91PhotoEvidence.submissionId()
+    }).then(function (result) {
+      if (!active || active.host !== host || active.state !== state) return;
+      var photo = result.records && result.records[0];
+      state.recordPhotos[reportId] = (state.recordPhotos[reportId] || []).filter(function (item) {
+        return !(item.phase === phase && Number(item.slot) === slot);
+      });
+      if (photo) state.recordPhotos[reportId].push(photo);
+      state.recordPhotosLoaded[reportId] = true;
+      state.recordPhotoBusy[key] = false;
+      delete state.recordPhotoErrors[key];
+      if (result.storage_warning && isStorageAdministrator()) state.recordNotice = result.storage_warning;
+      renderView(host, state, active.context);
+    }).catch(function (error) {
+      if (!active || active.host !== host || active.state !== state) return;
+      state.recordPhotoBusy[key] = false;
+      state.recordPhotoErrors[key] = error.message || "Photo upload failed. The cleaning report is still saved.";
+      renderView(host, state, active.context);
+    });
+  }
+
+  function isStorageAdministrator() {
+    var user = global.Solar91PortalAPI.currentUser();
+    return !!user && ["O&M Head", "Administration"].indexOf(user.role) !== -1;
+  }
+
   function renderRecordModal(state) {
     if (!state.recordOpen || !state.washingPlant) return "";
     var cycles = state.washingPlant.cycles || [];
@@ -1477,7 +1620,7 @@
           (row.report.can_edit && !state.recordSaving
             ? '<button type="button" class="ep-calendar__record-edit" data-record-edit="' + escape(row.report.id) +
               '" aria-label="Edit ' + escape(dateLabel) + '">Edit</button>'
-            : "") + '</span></div>';
+            : "") + '</span>' + renderRecordPhotos(state, row.report) + '</div>';
       }
       var zero = row.zero;
       var off = row.full || state.recordSaving ? " disabled" : "";
@@ -1706,6 +1849,7 @@
       renderSetupModal(state) +
       renderRecordModal(state) +
     '</div>';
+    if (global.Solar91PhotoEvidence) global.Solar91PhotoEvidence.watch(host);
   }
 
   function loadLiveWashing(host, state, context, requestId) {
@@ -2047,6 +2191,51 @@
 
     host.addEventListener("click", function (event) {
       if (!active || active.host !== host) return;
+      var photoOpen = event.target.closest("[data-washing-photo-open]");
+      if (photoOpen) {
+        var photoList = active.state.recordPhotos[photoOpen.dataset.washingReport] || [];
+        var selectedPhoto = photoList.find(function (item) {
+          return item.id === photoOpen.dataset.washingPhotoOpen;
+        });
+        if (selectedPhoto && global.Solar91PhotoEvidence) global.Solar91PhotoEvidence.open(selectedPhoto);
+        return;
+      }
+      var photoRetry = event.target.closest("[data-washing-photo-retry]");
+      if (photoRetry) {
+        loadRecordPhotos(host, active.state, photoRetry.dataset.washingPhotoRetry, true);
+        return;
+      }
+      var photoRemove = event.target.closest("[data-washing-photo-remove]");
+      if (photoRemove) {
+        var photoState = active.state;
+        var reportId = photoRemove.dataset.washingReport;
+        var photoId = photoRemove.dataset.washingPhotoRemove;
+        var removable = (photoState.recordPhotos[reportId] || []).find(function (item) {
+          return item.id === photoId;
+        });
+        if (!removable) return;
+        var removeKey = recordPhotoKey(reportId, removable.phase, removable.slot);
+        if (photoState.recordPhotoBusy[removeKey]) return;
+        photoState.recordPhotoBusy[removeKey] = true;
+        delete photoState.recordPhotoErrors[removeKey];
+        renderView(host, photoState, active.context);
+        global.Solar91PortalAPI.request("/api/photos/" + encodeURIComponent(photoId), { method: "DELETE" })
+          .then(function (result) {
+            if (!active || active.host !== host || active.state !== photoState) return;
+            photoState.recordPhotos[reportId] = (photoState.recordPhotos[reportId] || []).filter(function (item) {
+              return item.id !== photoId;
+            });
+            photoState.recordPhotoBusy[removeKey] = false;
+            if (result.cleanup_warning) photoState.recordPhotoErrors[removeKey] = result.cleanup_warning;
+            renderView(host, photoState, active.context);
+          }).catch(function (error) {
+            if (!active || active.host !== host || active.state !== photoState) return;
+            photoState.recordPhotoBusy[removeKey] = false;
+            photoState.recordPhotoErrors[removeKey] = error.message || "Photo could not be removed.";
+            renderView(host, photoState, active.context);
+          });
+        return;
+      }
       var cycleTab = event.target.closest("[data-record-cycle]");
       if (cycleTab && active.state.recordOpen) {
         active.state.recordCycle = Number(cycleTab.dataset.recordCycle);
@@ -2324,6 +2513,27 @@
             (error && error.message ? error.message : "Please retry.");
           renderView(host, state, active.context);
         });
+      }
+    });
+
+    host.addEventListener("toggle", function (event) {
+      if (!active || active.host !== host || !event.target.matches("[data-record-photos]")) return;
+      if (!event.target.open) {
+        if (active.state.recordPhotoOpenId === event.target.dataset.recordPhotos) {
+          active.state.recordPhotoOpenId = "";
+        }
+        return;
+      }
+      var reportId = event.target.dataset.recordPhotos;
+      active.state.recordPhotoOpenId = reportId;
+      loadRecordPhotos(host, active.state, reportId, false);
+    }, true);
+
+    host.addEventListener("change", function (event) {
+      if (!active || active.host !== host || !active.state.recordOpen) return;
+      if (event.target.matches("[data-washing-photo-file]")) {
+        uploadRecordPhoto(host, active.state, event.target);
+        return;
       }
     });
 

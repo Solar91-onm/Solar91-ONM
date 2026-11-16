@@ -439,7 +439,8 @@ def _report_out(report: WashingDailyReport, plant: Plant, viewer: User, config: 
         "exception_reason": report.exception_reason,
         "evidence": [
             {**{key: value for key, value in entry.items() if key != "storage_path"},
-             "url": f"/api/scheduled/washing/daily-reports/{report.id}/evidence/{entry.get('id')}"}
+             "url": f"/api/scheduled/washing/daily-reports/{report.id}/evidence/{entry.get('id')}?size=thumb",
+             "original_url": f"/api/scheduled/washing/daily-reports/{report.id}/evidence/{entry.get('id')}?size=original"}
             for entry in (report.evidence or [])
         ],
         "reported_by_id": str(report.reported_by_id) if report.reported_by_id else None,

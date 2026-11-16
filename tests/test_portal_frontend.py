@@ -67,6 +67,17 @@ def test_security_register_supports_multiple_contacts_and_edit_overlay():
     assert 'data-security-contact-shift="' in security
     assert 'data-security-add="engineer"' in security and 'data-security-add="guard"' in security
     assert 'fields.security_contacts = payload.contacts;' in security
+    assert 'var registerSort = { column: 0, direction: "ascending" };' in security
+    assert 'var sortableRegisterColumns = [0, 1, 3, 4, 6];' in security
+    assert 'if (editingRows || sortableRegisterColumns.indexOf(column) === -1)' in security
+    assert 'data-security-sort="' in security and 'data-security-sort-value="' in security
+    assert '\'<td data-label="Site Engineer No.">\'' in security
+    assert '\'<td data-label="Mobile No.">\'' in security
+    assert 'function applyRegisterSort(container)' in security
+    assert 'return headerHTML(label, index, editingRows);' in security
+    assert "registerSort.direction === \"ascending\" ? result : -result" in security
+    assert ".ep-security__table th[aria-sort=\"ascending\"]" in styles
+    assert ".ep-security__table th[aria-sort=\"descending\"]" in styles
     assert "<th>Actions</th>" not in security
     assert ".ep-security__site-code {\n  text-align: center;" in styles
     assert ".ep-security__overlay {" in styles and "overflow-x: hidden;" in styles
@@ -288,8 +299,8 @@ def test_register_import_export_is_offered_beside_raise_issue_and_set_up_pm():
     assert '"register-io": "/assets/js/register-io.js"' in page
     assert '<script defer src="/assets/js/register-io.js"' not in page
     modules = (PORTAL_ASSETS / "js" / "modules.js").read_text(encoding="utf-8")
-    assert '"site-issues": ["table-sort", "register-io"]' in modules
-    assert '"operations-calendar": ["register-io"]' in modules
+    assert '"site-issues": ["table-sort", "register-io", "photo-evidence"]' in modules
+    assert '"operations-calendar": ["register-io", "photo-evidence"]' in modules
 
     # It points at the importers that already existed, plus the new downloads.
     for url in ("/api/issues/import", "/api/issues/import/template", "/api/issues/export",
@@ -704,9 +715,8 @@ def test_a_plants_module_cleaning_calendar_opens_on_the_week():
     assert "displayWeek(state.weekStart)" in calendar
 
 
-def test_overview_inverter_tile_counts_units_and_opens_inverter_issues():
-    """The fourth tile: how many inverters are running against how many are installed, narrowed by
-    the Overview filters, opening the site-issues register filtered to inverter tickets."""
+def test_overview_inverter_tile_counts_units_and_opens_standalone_health():
+    """The fourth tile opens a standalone drill-down without registering another navigation view."""
     overview = (PORTAL_ASSETS / "js" / "overview.js").read_text(encoding="utf-8")
     issues = (PORTAL_ASSETS / "js" / "site-issues.js").read_text(encoding="utf-8")
 
@@ -718,21 +728,34 @@ def test_overview_inverter_tile_counts_units_and_opens_inverter_issues():
     assert '"/api/issues/equipment-summary?vertical=Inverter"' in overview
     assert "tickets += Number(row.open) || 0;" in overview
     assert "down += Number(row.units) || 0;" in overview
+    assert "runningPercent: total ? Math.round(running / total * 100) : null" in overview
+    assert 'value: inv.total\n          ? inv.runningPercent + "%"' in overview
+    assert 'fmt.formatNumber(inv.running) + " of " + fmt.formatNumber(inv.total) + " inverters running"' in overview
+    assert 'fmt.formatNumber(inv.down) + " not running · "' in overview
     # The filters narrow it: only the plants the tiles are showing are counted.
     assert "const codes = new Set(state ? state.rows.map(({ plant }) => plant.siteCode) : []);" in overview
     # The unit configuration is not open to every role; the tile still shows the tickets.
     assert "inverters.unitsRestricted = true;" in overview
     assert "Unit counts are not available to your role" in overview
-    # Opening it: this plant when one is filtered, the portfolio otherwise.
+    # Opening it does not route through the normal tab navigation.
     assert 'if (destination === "inverters") {' in overview
-    assert 'Solar91PortalIssues.presetEquipment("Inverter")' in overview
-    assert 'global.Solar91PortalNav.selectView("health", dateRange);' in overview
+    assert "openInverterHealth();" in overview
+    assert 'data-inverter-health' in (TEMPLATE.read_text(encoding="utf-8"))
+    assert "openTicket: openTicket" in issues
 
-    # The register honours the preset and offers a way back to every category.
-    assert "equipmentFilter:" in issues
-    assert "presetEquipment: presetEquipment" in issues
-    assert 'data-issue-action="clear-equipment"' in issues
-    assert 'state.equipmentFilter &&' in issues
+    navigation = (PORTAL_ASSETS / "js" / "navigation.js").read_text(encoding="utf-8")
+    markup = TEMPLATE.read_text(encoding="utf-8")
+    assert "inverter-health" not in navigation
+    assert 'data-tab-view="inverter-health"' not in markup
+    assert 'event.key === "Escape" && inverterHealth.open' in overview
+    assert 'status=open&limit=200' in overview
+    assert "calculateInverterTotals" in overview
+    # The tile and the drill-down must read the same arithmetic, or the two screens disagree
+    # about how many inverters are running for the very same data.
+    assert overview.count("calculateInverterTotals(") == 3, "one definition, used by both the tile and the drill-down"
+    tile = overview[overview.index("function inverterSummary"):] if "function inverterSummary" in overview else overview
+    assert "const totals = calculateInverterTotals(codes, inverters.units, inverters.issues);" in overview
+    assert "const counts = calculateInverterTotals(codes, inverterHealth.units, issueRows);" in overview
 
 
 def test_site_issue_register_places_id_before_action_and_labels_description():
@@ -780,11 +803,17 @@ def test_no_mock_data_module_remains():
 def test_plant_and_view_sub_pages_are_the_live_pages_only():
     """Asset & Warranty was removed from the portal; no sub-page, host or route may survive it."""
     nav = (PORTAL_ASSETS / "js" / "navigation.js").read_text(encoding="utf-8")
-    for block in ("PLANT_SUB_PAGES", "VIEW_SUB_PAGES"):
-        start = nav.index(block)
-        section = nav[start:nav.index("];", start)]
-        ids = re.findall(r'id:\s*"([a-z-]+)"', section)
-        assert ids == ["details", "health", "pm", "washing", "movable-assets"], (block, ids)
+    plant_start = nav.index("PLANT_SUB_PAGES")
+    plant_section = nav[plant_start:nav.index("];", plant_start)]
+    assert re.findall(r'id:\s*"([a-z-]+)"', plant_section) == [
+        "details", "pm", "washing", "movable-assets"
+    ]
+    assert '{ id: "details",         label: "Info & Health" }' in plant_section
+    view_start = nav.index("VIEW_SUB_PAGES")
+    view_section = nav[view_start:nav.index("];", view_start)]
+    assert re.findall(r'id:\s*"([a-z-]+)"', view_section) == [
+        "details", "health", "pm", "washing", "movable-assets"
+    ]
     page = TEMPLATE.read_text(encoding="utf-8")
     for dead in ("asset-warranty", "data-asset-warranty-host", "Solar91PortalAssetWarranty"):
         assert dead not in nav, dead
@@ -813,7 +842,7 @@ def test_single_plant_details_shows_only_that_plant_row():
     table = (PORTAL_ASSETS / "js" / "plants-table.js").read_text(encoding="utf-8")
     # A single plant shows its heading and row, without portfolio controls.
     assert '(single ? "" : toolbarHTML())' in table
-    assert '(single ? "" :\n            \'<div class="ep-pt__meta">\' +' in table
+    assert 'single ? "" :' in table
     assert 'data-pt-export="csv"' in table
     assert 'data-pt-export="excel"' in table
     editor = (PORTAL_ASSETS / "js" / "plant-details.js").read_text(encoding="utf-8")
@@ -822,14 +851,56 @@ def test_single_plant_details_shows_only_that_plant_row():
     assert "Solar91PortalPlantDetails" not in editor
 
 
+def test_plant_details_health_merge_preserves_site_engineer_scope_and_views_health():
+    nav = (PORTAL_ASSETS / "js" / "navigation.js").read_text(encoding="utf-8")
+    table = (PORTAL_ASSETS / "js" / "plants-table.js").read_text(encoding="utf-8")
+    issues = (PORTAL_ASSETS / "js" / "site-issues.js").read_text(encoding="utf-8")
+    page = TEMPLATE.read_text(encoding="utf-8")
+
+    assert '"Site Engineer":   ["health", "pm", "washing", "movable-assets"]' in nav
+    assert 'return pageId === "health" ? "details" : pageId;' in nav
+    assert 'pageId === "details" && allowed.indexOf("health") !== -1' in nav
+    assert 'if (navState.selectedSubPage === "details" && !canShowPlantDetailSections())' in nav
+
+    modules = nav[nav.index("function modulesForState()"):nav.index("function hostForState()")]
+    assert 'return plantCode ? ["plants-table", "site-issues"] : ["plants-table"];' in modules
+    assert 'if (section === "design-mdl") return ["plants-table", "design"];' in modules
+    assert 'if (section === "liasoning") return ["plants-table", "liasoning"];' in modules
+    assert 'if (section === "bom") return ["plants-table", "bom"];' in modules
+    assert 'document.querySelector(plantCode ? "[data-plant-details-host]"' in nav
+
+    assert 'document.querySelector("[data-plant-issues-host]")' in nav
+    assert 'document.querySelector("[data-issues-host]")' in nav
+    assert 'data-plant-issues-host' in page
+    assert 'data-issues-host' in page
+    assert 'context.plantDetailsMerged ? ""' in issues
+    assert 'plantDetailsMerged: true' in nav
+    assert '<h2>Health</h2>' in issues
+    assert 'data-plant-details-toggle' in table
+    assert 'global.localStorage.setItem(detailsCollapseKey(plant)' in table
+    merged_header = table[table.index("var pageHeader = merged"):table.index("var table =", table.index("var pageHeader = merged"))]
+    assert merged_header.count("<h1") == 2  # mutually exclusive merged and portfolio headers
+    assert "pageHeader + card" in table
+    assert '<h2>Health</h2>' in issues
+
+
 def test_plant_and_portfolio_details_sections_are_in_left_navigation():
     table = (PORTAL_ASSETS / "js" / "plants-table.js").read_text(encoding="utf-8")
     navigation = (PORTAL_ASSETS / "js" / "navigation.js").read_text(encoding="utf-8")
     page = TEMPLATE.read_text(encoding="utf-8")
+    plant_subnav = navigation[
+        navigation.index("function renderPlantSubNav"):navigation.index("function selectPlant(")
+    ]
     for section in ("design-mdl", "liasoning", "bom"):
         assert section in navigation
         assert f'data-nav="view:details:{section}"' in page
+        assert f'id: "{section}"' in navigation
     assert 'var navId = "plant:" + siteCode + ":" + page.id;' in navigation
+    assert 'if (page.id === "details" && canShowPlantDetailSections())' in plant_subnav
+    assert 'detailsToggleHTML("plant", siteCode)' in plant_subnav
+    assert "DETAIL_SECTIONS.map(function (section)" in plant_subnav
+    assert 'navId + ":" + section.id' in plant_subnav
+    assert 'return !allowed || allowed.indexOf("details") !== -1;' in navigation
     assert "(parts.length === 3 || parts.length === 4)" in navigation
     assert 'section: navState.selectedDetailSection' in navigation
     assert "data-pt-detail-tab" not in table
@@ -1428,6 +1499,54 @@ def test_health_loading_does_not_wait_for_categories_and_table_search_is_debounc
     assert 'data-issue-action="retry-categories"' in issues
     assert "setTimeout(function ()" in issues and "}, 120);" in issues
     assert "setTimeout(function ()" in plants and "}, 120);" in plants
+
+
+def test_issue_edit_loads_configured_categories_and_can_close_without_changing_them():
+    issues = (PORTAL_ASSETS / "js" / "site-issues.js").read_text(encoding="utf-8")
+    edit_form = issues[issues.index("function renderEditForm"):issues.index("function formatIssueDate")]
+
+    assert "loadCategoriesForEdit(host, state.modalId)" in issues
+    assert "function loadCategoriesForEdit(host, issueId)" in issues
+    assert '<select name="equipment">' in edit_form
+    assert "existing category" in issues
+    assert "Existing: ' + escape(selected)" in issues
+    assert 'data-issue-action="close-ticket"' in issues
+    assert '"/api/issues/" + encodeURIComponent(issue.dbId) + "/close"' in issues
+    script = r"""
+      const fs=require('fs'),vm=require('vm'),assert=require('assert');
+      const source=fs.readFileSync('assets/js/site-issues.js','utf8');
+      function extract(name) {
+        const start=source.indexOf('function '+name+'(');
+        assert(start>=0,name+' missing');
+        const open=source.indexOf('{',start);let depth=0;
+        for(let i=open;i<source.length;i++){
+          if(source[i]==='{')depth++;
+          else if(source[i]==='}'&&--depth===0)return source.slice(start,i+1);
+        }
+        throw new Error(name+' is incomplete');
+      }
+      const box={
+        CATEGORIES:[],
+        state:{categoryLoading:false,categoryError:''},
+        escape:(value)=>String(value).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+      };
+      vm.createContext(box);
+      vm.runInContext(
+        'function categoryNames(){return CATEGORIES.map(c=>c.name)}' +
+        'function subProblemsFor(name){const row=CATEGORIES.find(c=>c.name===name);return row?row.sub_problems:[]}' +
+        extract('renderEquipmentOptions')+extract('renderSubpartOptions')+
+        ';this.equipment=renderEquipmentOptions;this.subpart=renderSubpartOptions;',
+        box
+      );
+      assert.match(box.equipment('IDT'),/value="IDT" selected/);
+      assert.match(box.subpart('Not recorded','IDT'),/value="Not recorded" selected/);
+      box.CATEGORIES=[{name:'Inverter',sub_problems:['Fan failure']}];
+      assert.match(box.equipment('Inverter'),/value="Inverter" selected/);
+      assert.match(box.equipment('IDT'),/Existing: IDT/);
+      assert.match(box.subpart('Legacy fault','Inverter'),/Existing: Legacy fault/);
+    """
+    run = subprocess.run(["node", "-e", script], cwd=ROOT, capture_output=True, text=True, timeout=20)
+    assert run.returncode == 0, run.stderr or run.stdout
 
 
 # ── Syntax ───────────────────────────────────────────────────────────────────

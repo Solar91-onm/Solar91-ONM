@@ -316,6 +316,32 @@
 
   function isInverter(name) { return String(name || "").trim().toLowerCase() === INVERTER; }
 
+  function calculateInverterTotals(codes, unitRows, issueRows) {
+    let total = 0;
+    let plantsWithUnits = 0;
+    (unitRows || []).forEach((row) => {
+      if (!isInverter(row.equipment_type) || (row.site_code && !codes.has(row.site_code))) return;
+      total += Number(row.total_units) || 0;
+      plantsWithUnits += 1;
+    });
+    let down = 0;
+    let tickets = 0;
+    let affected = 0;
+    (issueRows || []).forEach((row) => {
+      if (row.site_code && !codes.has(row.site_code)) return;
+      tickets += Number(row.open) || 0;
+      down += Number(row.units) || 0;
+      affected += 1;
+    });
+    if (total) down = Math.min(down, total);
+    const running = total ? total - down : null;
+    return {
+      total: total, down: down, running: running,
+      runningPercent: total ? Math.round(running / total * 100) : null,
+      tickets: tickets, plants: affected, configured: plantsWithUnits > 0
+    };
+  }
+
   /**
    * The inverter figures for whatever the filters currently select.
    *
@@ -327,33 +353,474 @@
    */
   function inverterTotals() {
     const codes = new Set(state ? state.rows.map(({ plant }) => plant.siteCode) : []);
-    const scoped = (row) => !row.siteCode || codes.has(row.siteCode);
-    let total = 0;
-    let plantsWithUnits = 0;
-    inverters.units.forEach((row) => {
-      if (!isInverter(row.equipment_type) || !scoped(row)) return;
-      total += Number(row.total_units) || 0;
-      plantsWithUnits += 1;
+    const totals = calculateInverterTotals(codes, inverters.units, inverters.issues);
+    totals.restricted = inverters.unitsRestricted;
+    return totals;
+  }
+
+  const inverterHealth = {
+    open: false, loading: false, units: [], summary: null, tickets: [],
+    unitsRestricted: false, unitsError: "", summaryError: "", ticketsError: "",
+    canEdit: false, plantFilter: "", search: "", severity: "", status: "",
+    saveMessage: "", saveError: false, navigationError: ""
+  };
+  const OPEN_INVERTER_STATUSES = [
+    "Open", "Assigned", "Acknowledged", "In Progress", "Pending Vendor", "Pending Parts/Vendor"
+  ];
+
+  function inverterPlantScope() {
+    return state ? state.rows.map(({ plant }) => plant) : [];
+  }
+
+  function inverterScopeLabel() {
+    const parts = [];
+    const selected = filters.plant !== "__all" && state
+      ? state.allRows.find(({ plant }) => plant.siteCode === filters.plant) : null;
+    if (selected) {
+      parts.push(selected.plant.displayName || selected.plant.plantName);
+      if (filters.health !== "__all") {
+        const labels = { healthy: "Healthy", attention: "Attention required", critical: "Critical", unknown: "Not available" };
+        parts.push("Health: " + (labels[filters.health] || filters.health));
+      }
+    } else {
+      parts.push("All plants");
+      if (filters.company !== "__all") parts.push("SPV: " + filters.company);
+      if (filters.district !== "__all") parts.push("District: " + filters.district);
+      if (filters.health !== "__all") {
+        const labels = { healthy: "Healthy", attention: "Attention required", critical: "Critical", unknown: "Not available" };
+        parts.push("Health: " + (labels[filters.health] || filters.health));
+      }
+    }
+    return parts.join(" · ");
+  }
+
+  function inverterDetailsPlant(issue) {
+    const match = state && state.allRows.find(({ plant }) =>
+      String(plant.id || plant.dbId || "") === String(issue.plant_id || ""));
+    if (match) return match.plant;
+    return null;
+  }
+
+  function inverterHealthTotals() {
+    const plants = inverterPlantScope();
+    const codes = new Set(plants.map((plant) => plant.siteCode));
+    const configs = new Map();
+    inverterHealth.units.forEach((config) => {
+      if (!isInverter(config.equipment_type) || !codes.has(config.site_code)) return;
+      configs.set(config.site_code, config);
     });
-    let down = 0;
-    let tickets = 0;
-    let affected = 0;
-    inverters.issues.forEach((row) => {
-      if (row.site_code && !codes.has(row.site_code)) return;   // outside the filtered plants
-      tickets += Number(row.open) || 0;
-      down += Number(row.units) || 0;
-      affected += 1;
+    const plantCounts = new Map();
+    (inverterHealth.summary && inverterHealth.summary.plants || []).forEach((row) => {
+      if (!row.site_code || codes.has(row.site_code)) plantCounts.set(row.site_code, row);
     });
-    if (total) down = Math.min(down, total);
-    return {
-      total: total,
-      down: down,
-      running: total ? total - down : null,
-      tickets: tickets,
-      plants: affected,
-      configured: plantsWithUnits > 0,
-      restricted: inverters.unitsRestricted
+    const ticketCounts = new Map();
+    inverterHealth.tickets.forEach((ticket) => {
+      const plant = inverterDetailsPlant(ticket);
+      const code = plant ? plant.siteCode : "";
+      if (!code || !codes.has(code)) return;
+      const count = ticketCounts.get(code) || { open: 0, units: 0 };
+      count.open += 1;
+      count.units += ticket.unit_count == null ? 1 : Number(ticket.unit_count) || 0;
+      ticketCounts.set(code, count);
+    });
+
+    const issueRows = inverterHealth.summary
+      ? Array.from(plantCounts.entries()).map(([site_code, row]) => Object.assign({ site_code }, row))
+      : Array.from(ticketCounts.entries()).map(([site_code, row]) => Object.assign({ site_code }, row));
+    const counts = calculateInverterTotals(codes, inverterHealth.units, issueRows);
+    return Object.assign({}, counts, { affected: counts.plants, configs, plantCounts, ticketCounts });
+  }
+
+  function inverterHealthUrl() {
+    const codes = inverterPlantScope().map((plant) => plant.siteCode);
+    let url = "/api/issues?vertical=Inverter&status=open&limit=200";
+    if (codes.length === 1) url += "&site_code=" + encodeURIComponent(codes[0]);
+    return url;
+  }
+
+  function loadInverterHealth() {
+    const api = global.Solar91PortalAPI;
+    if (!api) {
+      inverterHealth.ticketsError = "Solar91 sign-in is not ready. Reload the page and try again.";
+      inverterHealth.loading = false;
+      renderInverterHealth();
+      return;
+    }
+    inverterHealth.loading = true;
+    inverterHealth.unitsError = "";
+    inverterHealth.summaryError = "";
+    inverterHealth.ticketsError = "";
+    renderInverterHealth();
+    const scopeCodes = new Set(inverterPlantScope().map((plant) => plant.siteCode));
+    // The tile already holds the unit configuration and the per-plant ticket counts, and this
+    // drill-down is opened from that tile. Reuse them rather than asking for the same two
+    // answers again: the figures must match the tile anyway, and a refetch could only make
+    // them disagree. Only the ticket list below is genuinely new.
+    const unitRequest = inverters.loaded && (inverters.units.length || inverters.unitsRestricted)
+      ? Promise.resolve().then(() => {
+        inverterHealth.units = inverters.units.filter((row) =>
+          isInverter(row.equipment_type) && scopeCodes.has(row.site_code));
+        inverterHealth.unitsRestricted = inverters.unitsRestricted;
+      })
+      : api.request("/api/pm-plan/unit-config").then((body) => {
+        inverters.units = (body && body.configs) || [];
+        inverters.loaded = true;
+        inverterHealth.units = inverters.units.filter((row) =>
+          isInverter(row.equipment_type) && scopeCodes.has(row.site_code));
+        inverterHealth.unitsRestricted = false;
+      }).catch((error) => {
+        inverterHealth.units = [];
+        inverterHealth.unitsRestricted = error && error.status === 403;
+        inverterHealth.unitsError = inverterHealth.unitsRestricted
+          ? "" : "Inverter unit counts could not be loaded: " + ((error && error.message) || "please retry.");
+      });
+    const summaryRequest = inverters.loaded && inverters.issues.length
+      ? Promise.resolve().then(() => { inverterHealth.summary = { plants: inverters.issues }; })
+      : api.request("/api/issues/equipment-summary?vertical=Inverter").then((body) => {
+        inverters.issues = (body && body.plants) || [];
+        inverterHealth.summary = body || { plants: [] };
+      }).catch((error) => {
+        inverterHealth.summary = null;
+        inverterHealth.summaryError = "Inverter ticket totals could not be loaded: " +
+          ((error && error.message) || "showing the tickets returned below.");
+      });
+    const ticketRequest = api.request(inverterHealthUrl()).then((rows) => {
+      inverterHealth.tickets = Array.isArray(rows) ? rows : [];
+    }).catch((error) => {
+      inverterHealth.tickets = [];
+      inverterHealth.ticketsError = "Open inverter tickets could not be loaded: " +
+        ((error && error.message) || "please retry.");
+    });
+    const roleRequest = api.session().then((session) => {
+      const role = session && session.user && session.user.role;
+      inverterHealth.canEdit = role === "O&M Head" || role === "Assignee";
+    }).catch(() => { inverterHealth.canEdit = false; });
+    Promise.all([unitRequest, summaryRequest, ticketRequest, roleRequest]).then(() => {
+      inverterHealth.loading = false;
+      renderInverterHealth();
+    });
+  }
+
+  function inverterSeverityChip(severity) {
+    const value = String(severity || "Low");
+    const cls = value.toLowerCase() === "critical" ? "ep-chip--critical"
+      : value.toLowerCase() === "high" ? "ep-chip--attention"
+        : value.toLowerCase() === "medium" ? "ep-chip--grey" : "ep-chip--healthy";
+    return `<span class="ep-chip ${cls}">${fmt.escape(value)}</span>`;
+  }
+
+  function inverterPercentCell(percent) {
+    if (percent === null) return `<span class="ep-text-faint">—</span>`;
+    const tone = percent >= 85 ? "green" : percent >= 70 ? "amber" : "red";
+    return `<span class="ep-bar"><span class="ep-bar__track"><span class="ep-bar__fill ep-bar__fill--${tone}" style="width:${percent}%"></span></span><span class="ep-bar__value">${percent}%</span></span>`;
+  }
+
+  function inverterPlantRows(totals) {
+    return inverterPlantScope().map((plant) => {
+      const config = totals.configs.get(plant.siteCode);
+      const count = totals.plantCounts.get(plant.siteCode) || totals.ticketCounts.get(plant.siteCode) || { open: 0, units: 0 };
+      const total = config ? Number(config.total_units) || 0 : null;
+      const down = total === null ? null : Math.min(Number(count.units) || 0, total);
+      const running = total === null ? null : total - down;
+      const percent = total ? Math.round(running / total * 100) : null;
+      return { plant, config, total, down, running, percent, tickets: Number(count.open) || 0 };
+    }).sort((a, b) => {
+      if (a.percent === null && b.percent !== null) return 1;
+      if (b.percent === null && a.percent !== null) return -1;
+      return (a.percent === null ? 0 : a.percent - b.percent) ||
+        a.plant.siteCode.localeCompare(b.plant.siteCode);
+    });
+  }
+
+  function scopedInverterTickets() {
+    const scopeCodes = new Set(inverterPlantScope().map((plant) => plant.siteCode));
+    return inverterHealth.tickets.filter((ticket) => {
+      const plant = inverterDetailsPlant(ticket);
+      return !!plant && scopeCodes.has(plant.siteCode);
+    });
+  }
+
+  function filteredInverterTickets() {
+    const query = inverterHealth.search.trim().toLowerCase();
+    return scopedInverterTickets().filter((ticket) => {
+      const plant = inverterDetailsPlant(ticket);
+      const code = plant ? plant.siteCode : "";
+      if (inverterHealth.plantFilter && code !== inverterHealth.plantFilter) return false;
+      if (inverterHealth.severity && ticket.severity !== inverterHealth.severity) return false;
+      if (inverterHealth.status && ticket.status !== inverterHealth.status) return false;
+      if (!query) return true;
+      return [ticket.ticket_no, ticket.serial_no, ticket.subcategory, ticket.description,
+        ticket.status, ticket.severity, ticket.assignee_text, code]
+        .join(" ").toLowerCase().indexOf(query) !== -1;
+    });
+  }
+
+  function renderInverterHealth() {
+    const host = document.querySelector("[data-inverter-health]");
+    if (!host || !inverterHealth.open) return;
+    const totals = inverterHealthTotals();
+    const plants = inverterPlantRows(totals);
+    const filteredTickets = filteredInverterTickets();
+    const scope = inverterHealth.plantFilter
+      ? plants.find((row) => row.plant.siteCode === inverterHealth.plantFilter)
+      : null;
+    const hasCounts = !inverterHealth.unitsRestricted && !inverterHealth.unitsError;
+    const runningPercent = totals.runningPercent;
+    const severityCounts = { Critical: 0, High: 0, Medium: 0, Low: 0 };
+    scopedInverterTickets().forEach((ticket) => {
+      const severity = Object.keys(severityCounts).find((key) => key.toLowerCase() === String(ticket.severity || "").toLowerCase());
+      if (severity) severityCounts[severity] += 1;
+    });
+    const donut = hasCounts && totals.total > 0
+      ? `<div class="ep-ih__donut" style="--ep-ih-running:${runningPercent}%" role="img" aria-label="${runningPercent}% running"><strong>${runningPercent}%</strong><span>running</span></div>`
+      : "";
+    const runningSummary = hasCounts && totals.total > 0
+      ? `<p class="ep-ih__donut-caption">${fmt.formatNumber(totals.running)} of ${fmt.formatNumber(totals.total)} inverters running</p>`
+      : "";
+    const reason = inverterHealth.unitsRestricted
+      ? "Inverter counts are visible to the O&M Head and Assignees."
+      : inverterHealth.unitsError
+        ? fmt.escape(inverterHealth.unitsError)
+        : !totals.total ? "No inverter units are configured for the plants in this scope." : "";
+    const plantTable = plants.map((row) => {
+      const isConfigured = !!row.config;
+      return `<tr data-ih-plant-row="${fmt.escape(row.plant.siteCode)}" tabindex="0" role="button" aria-label="Filter tickets to ${fmt.escape(row.plant.displayName || row.plant.plantName)}">
+        <td><div class="ep-plant-cell"><span class="ep-plant-cell__name">${fmt.escape(row.plant.displayName || row.plant.plantName)}</span><span class="ep-plant-cell__code">${fmt.escape(row.plant.displayCode || row.plant.siteCode)}</span></div></td>
+        <td>${isConfigured ? fmt.formatNumber(row.total) : "Not configured"}</td>
+        <td>${isConfigured ? fmt.formatNumber(row.running) : "Not configured"}</td>
+        <td>${isConfigured ? fmt.formatNumber(row.down) : "Not configured"}</td>
+        <td>${isConfigured ? inverterPercentCell(row.percent) : "Not configured"}</td>
+        <td>${fmt.formatNumber(row.tickets)}</td>
+      </tr>`;
+    }).join("");
+    const ticketRows = filteredTickets.map((ticket) => {
+      const plant = inverterDetailsPlant(ticket);
+      const plantName = plant ? (plant.displayName || plant.plantName) : "Plant unavailable";
+      const code = plant ? plant.siteCode : "";
+      const occurred = ticket.occurred_at ? String(ticket.occurred_at).slice(0, 10) : "—";
+      const etc = ticket.etc_at ? String(ticket.etc_at).slice(0, 10) : "—";
+      return `<tr>
+        <td><div class="ep-plant-cell"><span class="ep-plant-cell__name">${fmt.escape(plantName)}</span><span class="ep-plant-cell__code">${fmt.escape(code)}</span></div></td>
+        <td>${fmt.escape(ticket.serial_no || "Unit not recorded")}</td>
+        <td>${fmt.formatNumber(ticket.unit_count == null ? 1 : Number(ticket.unit_count) || 0)}</td>
+        <td>${fmt.escape(ticket.subcategory || "—")}</td>
+        <td><span class="ep-ih__description" title="${fmt.escape(ticket.description || "")}">${fmt.escape(ticket.description || "—")}</span></td>
+        <td>${inverterSeverityChip(ticket.severity)}</td>
+        <td><span class="ep-chip ep-chip--grey">${fmt.escape(ticket.status || "—")}</span></td>
+        <td>${fmt.escape(occurred)}</td><td>${fmt.escape(etc)}</td>
+        <td>${fmt.escape(ticket.assignee_text || "—")}</td>
+        <td><button type="button" class="ep-ih__ticket" data-ih-ticket="${fmt.escape(ticket.ticket_no || "")}" data-ih-site="${fmt.escape(code)}">${fmt.escape(ticket.ticket_no || "Open ticket")}</button></td>
+      </tr>`;
+    }).join("");
+    const settingsRows = plants.map(({ plant, config }) =>
+      `<tr><td>${fmt.escape(plant.displayName || plant.plantName)}</td>
+        <td>${config
+          ? `<input type="number" min="1" max="500" required data-ih-total="${fmt.escape(plant.siteCode)}" value="${fmt.escape(config.total_units)}" ${inverterHealth.canEdit ? "" : "readonly"}>`
+          : (inverterHealth.canEdit
+            ? `<input type="number" min="1" max="500" required data-ih-total="${fmt.escape(plant.siteCode)}" value="1">`
+            : `<span class="ep-text-faint">Not configured</span>`)}</td>
+        <td>${config
+          ? `<input type="number" min="1" max="500" required data-ih-units-day="${fmt.escape(plant.siteCode)}" value="${fmt.escape(config.units_per_day)}" ${inverterHealth.canEdit ? "" : "readonly"}>`
+          : (inverterHealth.canEdit
+            ? `<input type="number" min="1" max="500" required data-ih-units-day="${fmt.escape(plant.siteCode)}" value="1">`
+            : "—")}</td>
+        <td>${inverterHealth.canEdit
+          ? `<button type="button" class="ep-ih__button" data-ih-save="${fmt.escape(plant.siteCode)}">${config ? "Save" : "Add"}</button>`
+          : ""}</td></tr>`
+    ).join("");
+
+    host.innerHTML = `<section class="ep-ih" role="dialog" aria-modal="true" aria-labelledby="ep-ih-title">
+      <header class="ep-ih__header"><div><h1 id="ep-ih-title">Inverter Health</h1><p>${fmt.escape(inverterScopeLabel())}</p></div>
+        <button type="button" class="ep-ih__close" data-ih-close aria-label="Close Inverter Health">×</button></header>
+      <div class="ep-ih__content">
+        ${inverterHealth.loading ? `<p class="ep-ih__notice" role="status">Loading inverter health…</p>` : ""}
+        ${inverterHealth.summaryError ? `<p class="ep-ih__notice" role="status">${fmt.escape(inverterHealth.summaryError)}</p>` : ""}
+        ${inverterHealth.ticketsError ? `<p class="ep-ih__notice ep-ih__notice--error" role="alert">${fmt.escape(inverterHealth.ticketsError)}</p>` : ""}
+        ${inverterHealth.navigationError ? `<p class="ep-ih__notice ep-ih__notice--error" role="alert">${fmt.escape(inverterHealth.navigationError)}</p>` : ""}
+        ${inverterHealth.unitsError && !inverterHealth.unitsRestricted ? `<p class="ep-ih__notice" role="status">${fmt.escape(inverterHealth.unitsError)}</p>` : ""}
+        <section class="ep-ih__summary" aria-label="Inverter summary">
+          ${donut ? `<article class="ep-panel ep-ih__ring-card">${donut}${runningSummary}</article>` : ""}
+          ${hasCounts && totals.total > 0 ? `<article class="ep-panel ep-ih__stat"><span>Running</span><strong class="ep-ih__green">${fmt.formatNumber(totals.running)}</strong></article>
+          <article class="ep-panel ep-ih__stat"><span>Not running</span><strong class="ep-ih__red">${fmt.formatNumber(totals.down)}</strong></article>` : ""}
+          <article class="ep-panel ep-ih__stat"><span>Open tickets</span><strong>${fmt.formatNumber(totals.tickets)}</strong><small>${fmt.formatNumber(totals.affected)} plants affected</small></article>
+          <article class="ep-panel ep-ih__severity"><span>Open ticket severity</span><div>${Object.keys(severityCounts).map((severity) =>
+            `<span>${inverterSeverityChip(severity)} <b>${fmt.formatNumber(severityCounts[severity])}</b></span>`).join("")}</div></article>
+        </section>
+        ${reason ? `<p class="ep-ih__reason">${reason}</p>` : ""}
+        <section class="ep-panel"><div class="ep-panel__head"><span class="ep-panel__title">Per-plant health</span></div>
+          <div class="ep-table-wrap"><table class="ep-table ep-ih__plant-table"><thead><tr><th>Plant</th><th>Total inverters</th><th>Running</th><th>Not running</th><th>Running %</th><th>Open tickets</th></tr></thead>
+            <tbody>${plantTable || `<tr><td colspan="6">No plants in this Dashboard scope.</td></tr>`}</tbody></table></div></section>
+        <section class="ep-panel"><div class="ep-panel__head"><span class="ep-panel__title">Open inverter tickets${scope ? " · " + fmt.escape(scope.plant.displayName || scope.plant.plantName) : ""}</span>
+          ${inverterHealth.plantFilter ? `<button type="button" class="ep-ih__button" data-ih-clear-plant>All plants</button>` : ""}
+          <button type="button" class="ep-ih__button" data-ih-export>Export CSV</button></div>
+          <div class="ep-ih__toolbar"><input type="search" placeholder="Search tickets" aria-label="Search inverter tickets" data-ih-search value="${fmt.escape(inverterHealth.search)}">
+            <select aria-label="Filter by severity" data-ih-severity><option value="">All severities</option>${["Critical","High","Medium","Low"].map((item) => `<option${inverterHealth.severity === item ? " selected" : ""}>${item}</option>`).join("")}</select>
+            <select aria-label="Filter by status" data-ih-status><option value="">All statuses</option>${OPEN_INVERTER_STATUSES.map((item) => `<option${inverterHealth.status === item ? " selected" : ""}>${item}</option>`).join("")}</select>
+          </div>
+          <div class="ep-table-wrap"><table class="ep-table ep-ih__tickets"><thead><tr><th>Plant</th><th>Inverter</th><th>Units</th><th>Sub-problem</th><th>Issue description</th><th>Severity</th><th>Status</th><th>Reported</th><th>ETC</th><th>Assignee</th><th>Ticket</th></tr></thead>
+            <tbody>${ticketRows || `<tr><td colspan="11"><div class="ep-ih__empty">${inverterHealth.ticketsError
+              ? `<strong>Tickets unavailable</strong><span>Open inverter tickets could not be loaded.</span>`
+              : inverterHealth.loading
+                ? `<strong>Loading open inverter tickets…</strong>`
+                : `<strong>✓ All inverters running</strong><span>No open inverter tickets in this scope.</span>`}</div></td></tr>`}</tbody></table></div>
+        </section>
+        ${inverterHealth.unitsRestricted || inverterHealth.unitsError ? "" : `<details class="ep-panel ep-ih__settings" ${host.querySelector(".ep-ih__settings[open]") ? "open" : ""}><summary>Inverter unit configuration</summary>
+          <div class="ep-table-wrap"><table class="ep-table"><thead><tr><th>Plant</th><th>Total units</th><th>Units/day</th><th></th></tr></thead><tbody>${settingsRows}</tbody></table></div>
+          ${!inverterHealth.canEdit ? `<p class="ep-ih__reason">Unit configuration is read-only for your role.</p>` : ""}
+          <p class="ep-ih__save-status${inverterHealth.saveError ? " is-error" : ""}" data-ih-save-status aria-live="polite">${fmt.escape(inverterHealth.saveMessage)}</p>
+        </details>`}
+      </div>
+    </section>`;
+  }
+
+  function closeInverterHealth() {
+    const host = document.querySelector("[data-inverter-health]");
+    inverterHealth.open = false;
+    if (host) host.hidden = true;
+    const tile = document.querySelector('[data-overview-destination="inverters"]');
+    if (tile) tile.focus();
+  }
+
+  function openInverterHealth() {
+    if (!state) return;
+    inverterHealth.open = true;
+    inverterHealth.plantFilter = "";
+    inverterHealth.search = "";
+    inverterHealth.severity = "";
+    inverterHealth.status = "";
+    inverterHealth.navigationError = "";
+    const host = document.querySelector("[data-inverter-health]");
+    if (host) host.hidden = false;
+    loadInverterHealth();
+    const close = host && host.querySelector("[data-ih-close]");
+    if (close) close.focus({ preventScroll: true });
+  }
+
+  function exportInverterCsv() {
+    const rows = filteredInverterTickets();
+    const columns = ["Plant", "Site code", "Inverter", "Units", "Sub-problem", "Issue description",
+      "Severity", "Status", "Reported", "ETC", "Assignee", "Ticket"];
+    const values = rows.map((ticket) => {
+      const plant = inverterDetailsPlant(ticket);
+      return [plant ? (plant.displayName || plant.plantName) : "Plant unavailable", plant ? plant.siteCode : "",
+        ticket.serial_no || "Unit not recorded", ticket.unit_count == null ? 1 : ticket.unit_count,
+        ticket.subcategory || "", ticket.description || "", ticket.severity || "", ticket.status || "",
+        ticket.occurred_at || "", ticket.etc_at || "", ticket.assignee_text || "", ticket.ticket_no || ""];
+    });
+    const csvCell = (value) => {
+      let text = String(value == null ? "" : value);
+      if (/^[\t\r ]*[=+\-@]/.test(text)) text = "'" + text;
+      return '"' + text.replace(/"/g, '""') + '"';
     };
+    const csv = [columns].concat(values).map((row) => row.map(csvCell).join(",")).join("\r\n");
+    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "inverter-health.csv";
+    link.click();
+    global.setTimeout(() => URL.revokeObjectURL(url), 0);
+  }
+
+  function saveInverterConfig(siteCode, button) {
+    const host = document.querySelector("[data-inverter-health]");
+    const totalInput = Array.from(host.querySelectorAll("[data-ih-total]"))
+      .find((input) => input.dataset.ihTotal === siteCode);
+    const perDayInput = Array.from(host.querySelectorAll("[data-ih-units-day]"))
+      .find((input) => input.dataset.ihUnitsDay === siteCode);
+    const status = host.querySelector("[data-ih-save-status]");
+    const total = Number(totalInput && totalInput.value);
+    const perDay = Number(perDayInput && perDayInput.value);
+    if (!Number.isInteger(total) || total < 1 || total > 500 ||
+        !Number.isInteger(perDay) || perDay < 1 || perDay > 500) {
+      inverterHealth.saveMessage = "Total units and units/day must each be between 1 and 500.";
+      inverterHealth.saveError = true;
+      status.textContent = inverterHealth.saveMessage;
+      status.classList.add("is-error");
+      return;
+    }
+    button.disabled = true;
+    inverterHealth.saveMessage = "Saving…";
+    inverterHealth.saveError = false;
+    status.textContent = inverterHealth.saveMessage;
+    global.Solar91PortalAPI.request("/api/pm-plan/unit-config", {
+      method: "PUT",
+      body: { plant: siteCode, equipment_type: "Inverter", total_units: total, units_per_day: perDay }
+    }).then(() => {
+      inverterHealth.saveMessage = "Configuration saved.";
+      inverterHealth.saveError = false;
+      inverters.loaded = false;
+      loadInverters();
+      loadInverterHealth();
+    }).catch((error) => {
+      inverterHealth.saveMessage = "Could not save configuration: " + ((error && error.message) || "please retry.");
+      inverterHealth.saveError = true;
+      status.textContent = inverterHealth.saveMessage;
+      status.classList.add("is-error");
+      button.disabled = false;
+    });
+  }
+
+  function wireInverterHealth() {
+    const host = document.querySelector("[data-inverter-health]");
+    if (!host || host.dataset.wired) return;
+    host.dataset.wired = "true";
+    host.addEventListener("click", (event) => {
+      const close = event.target.closest("[data-ih-close]");
+      if (close) { closeInverterHealth(); return; }
+      const plant = event.target.closest("[data-ih-plant-row]");
+      if (plant) { inverterHealth.plantFilter = plant.dataset.ihPlantRow; renderInverterHealth(); return; }
+      if (event.target.closest("[data-ih-clear-plant]")) { inverterHealth.plantFilter = ""; renderInverterHealth(); return; }
+      if (event.target.closest("[data-ih-export]")) { exportInverterCsv(); return; }
+      const save = event.target.closest("[data-ih-save]");
+      if (save) { saveInverterConfig(save.dataset.ihSave, save); return; }
+      const ticket = event.target.closest("[data-ih-ticket]");
+      if (ticket) {
+        const code = ticket.dataset.ihSite;
+        const row = state && state.allRows.find(({ plant }) => plant.siteCode === code);
+        const dateRange = state && { startDate: state.rangeStart, endDate: state.rangeEnd };
+        const openTicketInHealth = () => {
+          if (!global.Solar91PortalIssues) throw new Error("The Health issue register is unavailable.");
+          closeInverterHealth();
+          if (row) global.Solar91PortalNav.selectPlantPage(code, "health", dateRange, row.plant);
+          else global.Solar91PortalNav.selectView("health", dateRange);
+          global.Solar91PortalIssues.openTicket(ticket.dataset.ihTicket, code);
+        };
+        const reportNavigationError = (error) => {
+          inverterHealth.navigationError = "Could not open the Health issue register: " +
+            ((error && error.message) || "please retry.");
+          renderInverterHealth();
+        };
+        if (global.Solar91Modules) {
+          global.Solar91Modules.load("site-issues").then(openTicketInHealth).catch(reportNavigationError);
+        } else {
+          try { openTicketInHealth(); } catch (error) { reportNavigationError(error); }
+        }
+      }
+    });
+    host.addEventListener("input", (event) => {
+      if (event.target.matches("[data-ih-search]")) {
+        inverterHealth.search = event.target.value;
+        renderInverterHealth();
+        const input = host.querySelector("[data-ih-search]");
+        if (input) { input.focus(); input.setSelectionRange(input.value.length, input.value.length); }
+      }
+    });
+    host.addEventListener("change", (event) => {
+      if (event.target.matches("[data-ih-severity]")) inverterHealth.severity = event.target.value;
+      else if (event.target.matches("[data-ih-status]")) inverterHealth.status = event.target.value;
+      else return;
+      renderInverterHealth();
+    });
+    host.addEventListener("keydown", (event) => {
+      if (event.target.matches("[data-ih-plant-row]") && (event.key === "Enter" || event.key === " ")) {
+        event.preventDefault();
+        inverterHealth.plantFilter = event.target.dataset.ihPlantRow;
+        renderInverterHealth();
+      }
+    });
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && inverterHealth.open) closeInverterHealth();
+    });
   }
 
   /** One request each, both optional: the tile degrades to what the role may read. */
@@ -489,15 +956,16 @@
         destination: "inverters",
         icon: ICON_INVERTER,
         value: inv.total
-          ? fmt.formatNumber(inv.running) + " / " + fmt.formatNumber(inv.total)
+          ? inv.runningPercent + "%"
           : (inv.tickets ? fmt.formatNumber(inv.tickets) : "—"),
         pill: inverterPill,
         hints: inv.total
           ? [
             { strong: true, dot: inv.down > 0 ? "red" : "green",
-              text: fmt.formatNumber(inv.running) + " running · " + fmt.formatNumber(inv.down) + " not running" },
+              text: fmt.formatNumber(inv.running) + " of " + fmt.formatNumber(inv.total) + " inverters running" },
             { strong: false,
-              text: fmt.formatNumber(inv.tickets) + " open inverter issues · " +
+              text: fmt.formatNumber(inv.down) + " not running · " +
+                fmt.formatNumber(inv.tickets) + " open inverter issues · " +
                 fmt.formatNumber(inv.plants) + " plants affected" }
           ]
           : [
@@ -754,22 +1222,8 @@
       if (!state || !state.rangeStart || !state.rangeEnd) return;
       const destination = card.getAttribute("data-overview-destination");
       const dateRange = { startDate: state.rangeStart, endDate: state.rangeEnd };
-      // The inverter tile opens the same site-issues page, showing inverter tickets only.
       if (destination === "inverters") {
-        // The register's script is fetched on first use, so the preset is set once it is there.
-        const openRegister = () => {
-          if (global.Solar91PortalIssues) global.Solar91PortalIssues.presetEquipment("Inverter");
-          if (filters.plant !== "__all") {
-            const inverterRow = state.allRows.find(({ plant }) => plant.siteCode === filters.plant);
-            if (inverterRow) {
-              global.Solar91PortalNav.selectPlantPage(filters.plant, "health", dateRange, inverterRow.plant);
-            }
-          } else {
-            global.Solar91PortalNav.selectView("health", dateRange);
-          }
-        };
-        if (global.Solar91Modules) global.Solar91Modules.load("site-issues").then(openRegister).catch(openRegister);
-        else openRegister();
+        openInverterHealth();
         return;
       }
       if (filters.plant !== "__all") {
@@ -935,6 +1389,7 @@
 
   function init() {
     wireInteractions();
+    wireInverterHealth();
     wireVisibilityRefresh();
     loadPortfolio(false);
     loadInverters();

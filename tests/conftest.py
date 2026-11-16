@@ -110,6 +110,16 @@ def seed_work_categories(db, *names, sub_problems=None) -> list[str]:
     return wanted
 
 
+def tiny_png_bytes(size: tuple[int, int] = (40, 30), color: str = "#2a7d4f") -> bytes:
+    """A genuinely decodable PNG for tests: the photo pipeline decodes and re-encodes every
+    upload, so a bare magic-byte header is no longer accepted as a photo."""
+    import io
+    from PIL import Image
+    out = io.BytesIO()
+    Image.new("RGB", size, color).save(out, format="PNG")
+    return out.getvalue()
+
+
 def login_user(client: TestClient, db, *, role='O&M Head', name='Test User', email='test@example.com') -> User:
     global _CURRENT_USER
     user = User(auth_provider='supabase', external_subject=f'test:{role}:{email}', email=email, display_name=name, role=role, is_active=True)

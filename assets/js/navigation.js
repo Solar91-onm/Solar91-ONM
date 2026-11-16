@@ -15,8 +15,7 @@
   var data = global.Solar91PortalData;
 
   var PLANT_SUB_PAGES = [
-    { id: "details",         label: "Details" },
-    { id: "health",          label: "Health" },
+    { id: "details",         label: "Info & Health" },
     { id: "pm",              label: "Preventive Maintenance" },
     { id: "washing",         label: "Module Cleaning" },
     { id: "movable-assets",  label: "Movable Assets" }
@@ -53,14 +52,27 @@
     return Array.isArray(rule) ? rule : null;
   }
 
+  function normalizePlantPage(pageId) {
+    return pageId === "health" ? "details" : pageId;
+  }
+
+  function canShowPlantDetailSections() {
+    var allowed = restrictedPages();
+    return !allowed || allowed.indexOf("details") !== -1;
+  }
+
   function plantPages() {
     var allowed = restrictedPages();
-    return allowed ? PLANT_SUB_PAGES.filter(function (p) { return allowed.indexOf(p.id) !== -1; }) : PLANT_SUB_PAGES;
+    return allowed ? PLANT_SUB_PAGES.filter(function (p) {
+      return allowed.indexOf(p.id) !== -1 || (p.id === "details" && allowed.indexOf("health") !== -1);
+    }) : PLANT_SUB_PAGES;
   }
 
   function isPlantPageAllowed(pageId) {
     var allowed = restrictedPages();
-    return !allowed || allowed.indexOf(pageId) !== -1;
+    pageId = normalizePlantPage(pageId);
+    return !allowed || allowed.indexOf(pageId) !== -1 ||
+      (pageId === "details" && allowed.indexOf("health") !== -1);
   }
 
   function defaultPlantPage() {
@@ -140,14 +152,15 @@
           : null
       };
     }
+    var plantSubPage = normalizePlantPage(snapshot.selectedSubPage);
     if (snapshot.activeView === "plant-sub" && typeof snapshot.selectedPlant === "string" &&
-        snapshot.selectedPlant && PLANT_SUB_PAGES.some(function (item) { return item.id === snapshot.selectedSubPage; })) {
+        snapshot.selectedPlant && PLANT_SUB_PAGES.some(function (item) { return item.id === plantSubPage; })) {
       return {
         activeView: "plant-sub",
         selectedPlant: snapshot.selectedPlant,
-        selectedSubPage: snapshot.selectedSubPage,
+        selectedSubPage: plantSubPage,
         selectedViewPage: null,
-        selectedDetailSection: snapshot.selectedSubPage === "details" ? details : "details",
+        selectedDetailSection: plantSubPage === "details" ? details : "details",
         selectedRange: snapshot.selectedRange &&
           typeof snapshot.selectedRange.startDate === "string" &&
           typeof snapshot.selectedRange.endDate === "string"
@@ -290,7 +303,7 @@
         var item = '<button class="ep-nav-item ep-nav-item--sub' + (isActive ? ' is-active' : '') + '" type="button" data-nav="' + navId + '">' +
           '<span class="ep-nav-item__label">' + page.label + '</span>' +
         '</button>';
-        if (page.id === "details") {
+        if (page.id === "details" && canShowPlantDetailSections()) {
           item = '<div class="ep-nav-details-row">' + item + detailsToggleHTML("plant", siteCode) + '</div>';
           item += '<div class="ep-nav-detail-sub' + (isDetailsOpen('plant', siteCode) ? ' is-open' : '') + '">' + DETAIL_SECTIONS.map(function (section) {
             var sectionActive = navState.activeView === "plant-sub" &&
@@ -302,6 +315,8 @@
               navId + ":" + section.id + '">' +
               '<span class="ep-nav-item__label">' + section.label + '</span></button>';
           }).join("") + '</div>';
+        } else if (page.id === "details") {
+          item = '<div class="ep-nav-details-row">' + item + '</div>';
         }
         return item;
       }).join("") +
@@ -355,6 +370,7 @@
 
   /** Open a plant's sub-page (details, health, pm, washing) programmatically. */
   function selectPlantPage(siteCode, pageId, dateRange, plantRecord) {
+    pageId = normalizePlantPage(pageId);
     var plant = allPlants.find(function (p) { return p.siteCode === siteCode; }) ||
       (plantRecord && plantRecord.siteCode === siteCode ? plantRecord : null);
     if (!plant) return;
@@ -407,6 +423,9 @@
     if (navState.activeView === "security") return ["security"];
     if (navState.activeView === "settings") return ["settings"];
 
+    if (navState.activeView === "plant-sub") {
+      navState.selectedSubPage = normalizePlantPage(navState.selectedSubPage);
+    }
     var plantCode = navState.activeView === "plant-sub" ? navState.selectedPlant : null;
     var pageId = navState.activeView === "plant-sub" ? navState.selectedSubPage
       : navState.activeView === "view-sub" ? navState.selectedViewPage : null;
@@ -422,7 +441,7 @@
       if (section === "design-mdl") return ["plants-table", "design"];
       if (section === "liasoning") return ["plants-table", "liasoning"];
       if (section === "bom") return ["plants-table", "bom"];
-      return ["plants-table"];
+      return plantCode ? ["plants-table", "site-issues"] : ["plants-table"];
     }
     return [];
   }
@@ -470,6 +489,7 @@
    * so and offers a retry rather than staying blank.
    */
   function updateContentArea() {
+    enforceRolePages();
     var needed = modulesForState();
     if (!global.Solar91Modules || !needed.length || needed.every(global.Solar91Modules.isLoaded)) {
       return timedRender();
@@ -502,6 +522,9 @@
         currentRole !== "O&M Head" && currentRole !== "Administration") {
       navState.activeView = "overview";
     }
+    if (navState.activeView === "plant-sub") {
+      navState.selectedSubPage = normalizePlantPage(navState.selectedSubPage);
+    }
     if (!restrictedPages()) return;
     if (navState.activeView === "view-sub" || navState.activeView === "settings" ||
         navState.activeView === "security") {
@@ -511,6 +534,11 @@
     if (navState.activeView === "plant-sub" && !isPlantPageAllowed(navState.selectedSubPage)) {
       navState.selectedSubPage = defaultPlantPage();
       navState.selectedDetailSection = "details";
+    }
+    if (navState.activeView === "plant-sub") {
+      if (navState.selectedSubPage === "details" && !canShowPlantDetailSections()) {
+        navState.selectedDetailSection = "details";
+      }
     }
   }
 
@@ -628,17 +656,34 @@
           endDate: navState.selectedRange && navState.selectedRange.endDate
         }
       );
-    } else if (isDetails && global.Solar91PortalPlantsTable) {
+    } else if (isDetails) {
       // Details is one table of stored plant fields: this plant's single row
       // when a plant is selected, every plant's row portfolio-wide.
       showOnly(plantCode ? detailsEl : tableEl);
-      global.Solar91PortalPlantsTable.show(
-        document.querySelector(plantCode ? "[data-plant-details-host]" : "[data-plants-table-host]"),
-        {
-          siteCode: plantCode,
-          section: navState.selectedDetailSection
-        }
-      );
+      if (global.Solar91PortalPlantsTable) {
+        global.Solar91PortalPlantsTable.show(
+          document.querySelector(plantCode ? "[data-plant-details-host]" : "[data-plants-table-host]"),
+          {
+            siteCode: plantCode,
+            section: navState.selectedDetailSection,
+            merged: !!plantCode && navState.selectedDetailSection === "details"
+          }
+        );
+      }
+      if (plantCode && navState.selectedDetailSection === "details" && global.Solar91PortalIssues) {
+        global.Solar91PortalIssues.render(
+          document.querySelector("[data-plant-issues-host]"),
+          {
+            plantCode: plantCode,
+            startDate: navState.selectedRange && navState.selectedRange.startDate,
+            endDate: navState.selectedRange && navState.selectedRange.endDate,
+            plantDetailsMerged: true
+          }
+        );
+      } else if (plantCode) {
+        var plantIssuesHost = document.querySelector("[data-plant-issues-host]");
+        if (plantIssuesHost) plantIssuesHost.innerHTML = "";
+      }
     } else if (pageId === "health" && global.Solar91PortalIssues) {
       showOnly(healthEl);
       global.Solar91PortalIssues.render(
@@ -810,7 +855,7 @@
             navState.selectedRange = null;
             navState.selectedPlant = parts[1];
             navState.expandedPlants[parts[1]] = true;
-            navState.selectedSubPage = parts[2];
+            navState.selectedSubPage = normalizePlantPage(parts[2]);
             navState.selectedDetailSection = parts[2] === "details" && parts[3]
               ? parts[3] : "details";
             if (parts[2] === "details" && parts[3]) navState.detailsOpen.plant[parts[1]] = true;   // keep the chosen section visible

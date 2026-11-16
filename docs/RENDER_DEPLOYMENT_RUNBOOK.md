@@ -76,6 +76,35 @@ The service reached a PostgreSQL database that has no Solar91 tables. This usual
 
 The PM/washing reminder loop is disabled by default. If it is required, operate it on exactly one continuously running worker after confirming its schedule, idempotency, and alerting. Do not enable it on multiple web replicas. Render Free sleep/restarts can interrupt the loop.
 
+Photo-original retention uses the Supabase Storage API, not SQL or `pg_cron`. Set `PHOTO_RETENTION_DAILY_JOB=1` on exactly one continuously running worker to sweep daily at 02:15 UTC. The loop is disabled by default; Render Free sleep/restarts can delay it, so run `python scripts/purge_photo_originals.py --dry-run` before enabling and check the application logs for bytes reclaimed. Administrators can also trigger a sweep from the authenticated photo-storage endpoint.
+
+### Photo storage budget (Supabase Free plan)
+
+The private evidence bucket is sized against the Free plan's 1 GB. Two thresholds, both configurable:
+
+| Setting | Default | Effect |
+| --- | --- | --- |
+| `STORAGE_WARN_BYTES` | `800000000` (800 MB) | Uploads still succeed; the response carries `storage_warning` and the Login access screen shows the meter in its warning band. |
+| `STORAGE_BLOCK_BYTES` | `950000000` (950 MB) | A further photo upload is refused with **HTTP 507** and exactly `Photo storage is full — contact an administrator.` |
+
+The guard projects the usage of the photos being uploaded before storing them, so a batch cannot cross the block
+threshold part-way. **A refused photo never costs the record it belonged to**: the cleaning report or issue is saved
+first, and only the photo upload fails, so the field user keeps their work and can retry once space is freed.
+
+Bucket usage is read through the Storage API and cached in-process for 180 seconds. It is read on an upload and on the
+administrator screen only — never while a page renders. `GET /api/photos/storage-usage` (O&M Head or Administration)
+returns `used_bytes`, `capacity_bytes`, `warn_bytes` and `block_bytes`; `?refresh=true` bypasses the cache. Where
+Supabase Storage is not configured for the environment, it answers `configured: false` with a null `used_bytes`
+rather than failing, so the screen states the situation instead of showing an error.
+
+`POST /api/photos/retention/purge` (same roles, CSRF-protected) runs the retention sweep on demand. It deletes
+full-resolution originals older than `PHOTO_RETENTION_DAYS` through the Storage API, keeps every thumbnail and
+metadata row, stamps `original_purged_at`, and logs the bytes reclaimed. Re-running it is a no-op: rows already
+stamped are skipped. After a purge, requesting a photo's original serves its thumbnail with an
+`X-Photo-Original-Purged: true` header, and the viewer says the full-resolution copy was removed.
+
+Never point `scripts/purge_photo_originals.py` at production without `--dry-run` first.
+
 ## Rollback and recovery
 
 - Application rollback: use Render's prior known-good deployment/commit. Verify the previous image starts and passes `/health/ready`.

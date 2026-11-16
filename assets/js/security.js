@@ -15,6 +15,8 @@
   var notice = "";
   var noticeIsError = false;
   var registerSearch = "";
+  var registerSort = { column: 0, direction: "ascending" };
+  var sortableRegisterColumns = [0, 1, 3, 4, 6];
   var filterText = "";
   var filterSiteCode = "";
   var wiredContainer = null;
@@ -135,33 +137,59 @@
         fmt.escape(plant.siteCode) + '"' + (saving ? " disabled" : "") +
         ' aria-label="Add guard for ' + fmt.escape(plant.siteCode) + '">+ Guard</button></div>'
       : "";
+    var engineerNames = contacts.engineers.map(function (contact) { return contact.name; }).join(" ");
+    var engineerShifts = contacts.engineers.map(function (contact) {
+      return contact.shift === "night" ? "Night" : "Day";
+    }).join(" ");
+    var guardNames = contacts.guards.map(function (contact) { return contact.name; }).join(" ");
+    var guardShifts = contacts.guards.map(function (contact) {
+      return contact.shift === "night" ? "Night" : "Day";
+    }).join(" ");
     return '<tr data-security-row="' + fmt.escape(plant.siteCode) +
       '" data-security-filter-base="' + fmt.escape((plant.siteCode + " " +
         (plant.displayName || plant.plantName)).toLowerCase()) +
       '" data-security-filter-text="' + fmt.escape(filter) + '">' +
-      '<td class="ep-security__site-code" data-label="Site Code"><span class="ep-pt__code">' +
+      '<td class="ep-security__site-code" data-security-sort-value="' + fmt.escape(plant.siteCode) +
+        '" data-label="Site Code"><span class="ep-pt__code">' +
         fmt.escape(plant.siteCode) + "</span>" + siteControls + "</td>" +
-      '<td data-label="Site Engineer">' +
+      '<td data-security-sort-value="' + fmt.escape(engineerNames) + '" data-label="Site Engineer">' +
         contactCell(contacts.engineers, "engineer", "name", editingRow, plant.siteCode) + "</td>" +
       '<td data-label="Site Engineer No.">' +
         contactCell(contacts.engineers, "engineer", "mobile", editingRow, plant.siteCode) + "</td>" +
-      '<td data-label="Engineer Shift">' +
+      '<td data-security-sort-value="' + fmt.escape(engineerShifts) + '" data-label="Engineer Shift">' +
         contactCell(contacts.engineers, "engineer", "shift", editingRow, plant.siteCode) + "</td>" +
-      '<td data-label="Security Name">' +
+      '<td data-security-sort-value="' + fmt.escape(guardNames) + '" data-label="Security Name">' +
         contactCell(contacts.guards, "guard", "name", editingRow, plant.siteCode) + "</td>" +
       '<td data-label="Mobile No.">' +
         contactCell(contacts.guards, "guard", "mobile", editingRow, plant.siteCode) + "</td>" +
-      '<td data-label="Guard Shift">' +
+      '<td data-security-sort-value="' + fmt.escape(guardShifts) + '" data-label="Guard Shift">' +
         contactCell(contacts.guards, "guard", "shift", editingRow, plant.siteCode) + "</td>" +
       "</tr>";
   }
 
+  function headerHTML(label, column, editingRows) {
+    if (editingRows || sortableRegisterColumns.indexOf(column) === -1) return '<th scope="col">' + label + "</th>";
+    var active = registerSort.column === column;
+    var direction = active ? registerSort.direction : "none";
+    var nextDirection = active && registerSort.direction === "ascending" ? "descending" : "ascending";
+    return '<th scope="col" aria-sort="' + direction + '">' +
+      '<button type="button" class="ep-security__sort" data-security-sort="' + column +
+        '" aria-label="Sort by ' + label + " " + nextDirection + '">' +
+        "<span>" + label + '</span><span class="ep-security__sort-indicator" aria-hidden="true"></span>' +
+      "</button></th>";
+  }
+
   function tableHTML(editingRows) {
+    var headings = [
+      "Site Code", "Site Engineer", "Site Engineer No.", "Engineer Shift",
+      "Security Name", "Mobile No.", "Guard Shift"
+    ];
     return '<div class="ep-pt__table-wrap"><div class="ep-pt__scroll ep-security__scroll" data-security-table="' +
       (editingRows ? "editor" : "register") + '" tabindex="0" role="region" aria-label="Site security contact table">' +
       '<table class="ep-pt__table ep-security__table"><thead><tr>' +
-        "<th>Site Code</th><th>Site Engineer</th><th>Site Engineer No.</th><th>Engineer Shift</th>" +
-        "<th>Security Name</th><th>Mobile No.</th><th>Guard Shift</th>" +
+        headings.map(function (label, index) {
+          return headerHTML(label, index, editingRows);
+        }).join("") +
       "</tr></thead><tbody>" +
         (plants.length
           ? plants.map(function (plant) { return rowHTML(plant, editingRows); }).join("")
@@ -218,6 +246,21 @@
     );
   }
 
+  function applyRegisterSort(container) {
+    var body = container.querySelector('[data-security-table="register"] tbody');
+    if (!body) return;
+    var rows = Array.prototype.slice.call(body.querySelectorAll("[data-security-row]"));
+    rows.sort(function (a, b) {
+      var left = (a.cells[registerSort.column].getAttribute("data-security-sort-value") || "").trim();
+      var right = (b.cells[registerSort.column].getAttribute("data-security-sort-value") || "").trim();
+      if (!left && right) return 1;
+      if (left && !right) return -1;
+      var result = left.localeCompare(right, undefined, { numeric: true, sensitivity: "base" });
+      return registerSort.direction === "ascending" ? result : -result;
+    });
+    rows.forEach(function (row) { body.appendChild(row); });
+  }
+
   function updateRowFilterText(row) {
     var values = [row.getAttribute("data-security-filter-base") || ""];
     Array.prototype.forEach.call(row.querySelectorAll("[data-security-contact-name], [data-security-contact-mobile]"), function (input) {
@@ -252,6 +295,7 @@
         (editing ? editorHTML() : "") +
       "</div>";
     applyRegisterFilters(container);
+    applyRegisterSort(container);
     if (editing) applyEditorFilters(container);
     wire(container);
   }
@@ -458,6 +502,17 @@
       }
     });
     container.addEventListener("click", function (event) {
+      var sort = event.target.closest("[data-security-sort]");
+      if (sort) {
+        var column = Number(sort.getAttribute("data-security-sort"));
+        if (registerSort.column === column) {
+          registerSort.direction = registerSort.direction === "ascending" ? "descending" : "ascending";
+        } else {
+          registerSort = { column: column, direction: "ascending" };
+        }
+        render(container);
+        return;
+      }
       var open = event.target.closest("[data-security-open-edit]");
       if (open) {
         openEditor(container);

@@ -11,10 +11,10 @@ from app.core.models import (
     WashingTable,
 )
 from tests import conftest
-from tests.conftest import grant_assignee_plants, login_user
+from tests.conftest import grant_assignee_plants, login_user, tiny_png_bytes
 from tests.test_washing_cycles import BASE, _plant, _setup_cycle_users, _stub_washing_storage
 
-PNG = b"\x89PNG\r\n\x1a\n" + b"0" * 64
+PNG = tiny_png_bytes()
 ROOT = Path(__file__).resolve().parents[1]
 
 

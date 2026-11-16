@@ -480,6 +480,8 @@ def upload_evidence(
         raise HTTPException(422, "Image is empty or invalid")
     ext = {"image/jpeg":"jpg", "image/png":"png", "image/webp":"webp"}[content_type]
     object_path = f"scheduled/{task.id}/{kind}-{uuid.uuid4().hex}.{ext}"
+    # Checks are done: hand the pooled connection back before the slow Storage upload.
+    release_connection(db)
     storage = SupabaseStorage()
     storage.upload(object_path, data, content_type)
     old_paths = [str(e.get("storage_path")) for e in (task.evidence or []) if e.get("kind") == kind and e.get("storage_path")]
@@ -754,57 +756,43 @@ def upload_washing_evidence(
     kind = (kind or "other").strip().lower()
     if kind not in {"before", "after", "other"}:
         raise HTTPException(422, "Photo kind must be before, after or other")
-    existing = [dict(entry) for entry in (report.evidence or []) if isinstance(entry, dict)]
-    if len(existing) + len(files) > 10:
-        raise HTTPException(422, "A module cleaning report can have no more than 10 evidence photos")
-    accepted = {"image/jpeg": "jpg", "image/png": "png", "image/webp": "webp"}
-    max_bytes = settings.max_upload_mb * 1024 * 1024
-    prepared = []
-    for file in files:
-        content_type = (file.content_type or "").lower()
-        if content_type not in accepted:
-            raise HTTPException(415, "Only JPEG, PNG and WebP photos are supported")
-        data = file.file.read(max_bytes + 1)
-        if len(data) > max_bytes:
-            raise HTTPException(413, f"Each photo must be no larger than {settings.max_upload_mb} MB")
-        if len(data) < 32:
-            raise HTTPException(422, "A selected photo is empty or invalid")
-        prepared.append((file, data, content_type, accepted[content_type]))
+    from app.core.models import SitePhoto
+    from app.photos.router import create_photos
 
-    storage = SupabaseStorage()
-    uploaded = []
-    try:
-        for file, data, content_type, ext in prepared:
-            evidence_id = "WASHEV-" + uuid.uuid4().hex[:12].upper()
-            path = f"washing/{report.id}/{uuid.uuid4().hex}.{ext}"
-            storage.upload(path, data, content_type)
-            uploaded.append({
-                "id": evidence_id, "at": datetime.now(timezone.utc).isoformat(),
-                "by": user.display_name, "name": file.filename or f"photo.{ext}",
-                "size": len(data), "content_type": content_type, "storage_path": path, "kind": kind,
-            })
-        report.evidence = existing + uploaded
-        db.add(AuditLog(
-            user_id=user.id, actor_name=user.display_name, action="Uploaded washing photo evidence",
-            module="Washing", entity_type="washing_daily_report", entity_id=str(report.id),
-            metadata_json={"evidence_ids": [entry["id"] for entry in uploaded]},
-        ))
-        db.commit()
-        return [
-            {**{key: value for key, value in entry.items() if key != "storage_path"},
-             "url": f"/api/scheduled/washing/daily-reports/{report.id}/evidence/{entry['id']}"}
-            for entry in uploaded
-        ]
-    except Exception:
-        db.rollback()
-        storage.remove([entry["storage_path"] for entry in uploaded])
-        raise
-
+    phase = kind if kind in {"before", "after"} else None
+    slot = None
+    if phase:
+        occupied = set(db.scalars(select(SitePhoto.slot).where(
+            SitePhoto.link_type == "washing", SitePhoto.link_id == str(report.id),
+            SitePhoto.phase == phase, SitePhoto.slot.is_not(None)
+        )))
+        slot = next((candidate for candidate in (1, 2) if candidate not in occupied), None)
+        if slot is None:
+            raise HTTPException(409, f"Both {phase} photo slots are in use; choose a slot to replace")
+    result = create_photos(
+        db, user, plant_id=report.plant_id,
+        category="washing" if phase else "other", description="",
+        tags="[]", link_type="washing", link_id=str(report.id),
+        submission_id=None, phase=phase, slot=slot, files=files,
+    )
+    return [{
+        "id": item["id"],
+        "at": item["uploadedAt"],
+        "by": user.display_name,
+        "name": item["fileName"],
+        "size": item["fileSize"],
+        "kind": item["phase"] or kind,
+        "phase": item["phase"],
+        "slot": item["slot"],
+        "url": f"/api/scheduled/washing/daily-reports/{report.id}/evidence/{item['id']}?size=thumb",
+        "original_url": f"/api/scheduled/washing/daily-reports/{report.id}/evidence/{item['id']}?size=original",
+    } for item in result["records"]]
 
 @router.get("/washing/daily-reports/{report_id}/evidence/{evidence_id}")
 def get_washing_evidence(
     report_id: UUID, evidence_id: str,
     db: Annotated[Session, Depends(get_db)], user: Annotated[User, Depends(get_current_user)],
+    size: str = "thumb",
 ):
     from app.core.models import WashingDailyReport
     from app.scheduled.washing_cycles import _can_access_plant
@@ -816,11 +804,28 @@ def get_washing_evidence(
     if not config or not _can_access_plant(db, user, report.plant_id, config):
         raise HTTPException(403, "This module cleaning report is outside your plant scope")
     entry = next((item for item in (report.evidence or []) if item.get("id") == evidence_id), None)
-    if not entry or not entry.get("storage_path"):
+    if not entry:
+        raise HTTPException(404, "Module Cleaning photo evidence not found")
+    if size not in {"thumb", "original"}:
+        raise HTTPException(422, "Invalid image size")
+    if entry.get("photo_id"):
+        from app.core.models import SitePhoto
+        photo = db.get(SitePhoto, uuid.UUID(str(entry["photo_id"])))
+        if photo is None or photo.link_type != "washing" or photo.link_id != str(report.id):
+            raise HTTPException(404, "Module Cleaning photo evidence not found")
+        purged = size == "original" and photo.original_purged_at is not None
+        path = photo.thumbnail_path if (size == "thumb" or purged) and photo.thumbnail_path else photo.storage_path
+        release_connection(db)
+        data, content_type = SupabaseStorage().download(str(path))
+        headers = {"Cache-Control": "private, max-age=31536000, immutable"}
+        if purged:
+            headers["X-Photo-Original-Purged"] = "true"
+        return Response(content=data, media_type=content_type, headers=headers)
+    if not entry.get("storage_path"):
         raise HTTPException(404, "Module Cleaning photo evidence not found")
     release_connection(db)  # the Storage download can be slow; do not hold a pooled connection through it
     data, content_type = SupabaseStorage().download(str(entry["storage_path"]))
-    return Response(content=data, media_type=content_type, headers={"Cache-Control": "private, max-age=60"})
+    return Response(content=data, media_type=content_type, headers={"Cache-Control": "private, max-age=31536000, immutable"})
 
 
 @router.patch("/washing/daily-reports/{report_id}", dependencies=[Depends(require_csrf)])

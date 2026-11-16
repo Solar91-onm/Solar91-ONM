@@ -18,6 +18,10 @@
   var activeHost = null;
   var wiredHost = null;
   var loading = false;
+  var storageUsage = null;
+  var storageLoading = false;
+  var storageError = "";
+  var storageMessage = "";
 
   function escape(value) {
     return global.Solar91PortalFormat.escape(value);
@@ -108,6 +112,50 @@
     "</article>";
   }
 
+  function formatBytes(value) {
+    var bytes = Math.max(0, Number(value) || 0);
+    if (bytes >= 1000000000) return (bytes / 1000000000).toFixed(2) + " GB";
+    if (bytes >= 1000000) return (bytes / 1000000).toFixed(1) + " MB";
+    return bytes.toLocaleString("en-IN") + " B";
+  }
+
+  function renderStorageCard(canManage) {
+    if (!canManage) return "";
+    var usage = storageUsage;
+    var capacity = usage ? Number(usage.capacity_bytes) : 1000000000;
+    var used = usage ? Number(usage.used_bytes) : 0;
+    var warn = usage ? Number(usage.warn_bytes) : 800000000;
+    var block = usage ? Number(usage.block_bytes) : 950000000;
+    var usedPercent = Math.min(100, Math.max(0, used / capacity * 100));
+    var warnPercent = Math.min(100, Math.max(0, warn / capacity * 100));
+    var blockPercent = Math.min(100, Math.max(0, block / capacity * 100));
+    return '<section class="ep-settings__storage" aria-labelledby="settings-photo-storage-title">' +
+      '<header><div><h2 id="settings-photo-storage-title">Photo storage</h2>' +
+        '<p>Private Supabase Storage usage. Thumbnails and photo records are retained after originals are purged.</p></div>' +
+        '<div><button type="button" class="ep-settings__button" data-settings-action="refresh-storage"' +
+          (storageLoading ? " disabled" : "") + '>Refresh</button>' +
+          '<button type="button" class="ep-settings__button" data-settings-action="purge-originals"' +
+          (storageLoading ? " disabled" : "") + '>Run retention sweep</button></div></header>' +
+      (storageLoading && !usage
+        ? '<p class="ep-settings__storage-status" role="status">Reading bucket usage…</p>'
+        : storageError
+          ? '<p class="ep-settings__storage-error" role="alert">' + escape(storageError) + '</p>'
+          : usage && usage.configured === false
+            ? '<p class="ep-settings__storage-status" role="status">Supabase Storage is not configured on this environment.</p>'
+          : usage
+            ? '<div class="ep-settings__storage-meter" role="meter" aria-label="Photo storage used" aria-valuemin="0" aria-valuemax="' +
+              capacity + '" aria-valuenow="' + used + '">' +
+                '<span class="ep-settings__storage-fill" style="width:' + usedPercent + '%"></span>' +
+                '<i class="is-warn" style="left:' + warnPercent + '%" aria-hidden="true"></i>' +
+                '<i class="is-block" style="left:' + blockPercent + '%" aria-hidden="true"></i>' +
+              '</div><div class="ep-settings__storage-legend"><strong>' + formatBytes(used) +
+                ' / 1 GB used</strong><span>Warn ' + formatBytes(warn) + '</span><span>Block ' +
+                formatBytes(block) + '</span></div>'
+            : '<p class="ep-settings__storage-status" role="status">Storage usage is not available yet.</p>') +
+      (storageMessage ? '<p class="ep-settings__storage-status" role="status">' + escape(storageMessage) + '</p>' : "") +
+      '</section>';
+  }
+
   function render() {
     if (!activeHost) return;
     var canManage = api().can("users.manage");
@@ -116,6 +164,7 @@
       '<header class="ep-settings__page-head"><div><h1>Login access</h1>' +
         '<p>Manage Clerk sign-in invitations, account status, roles and plant assignments.</p></div>' +
         '<span class="ep-settings__access-badge"><i></i>Clerk sign-in</span></header>' +
+      renderStorageCard(canManage) +
       '<section class="ep-settings__panel" aria-labelledby="settings-team-title">' +
         '<div class="ep-settings__panel-intro"><h2 id="settings-team-title">Team &amp; access</h2>' +
           '<p>Names and login details are loaded from the authenticated Solar91 user directory. Role and plant changes are saved to the database. Assignees need one or more plants; Site Engineers need exactly one.</p></div>' +
@@ -153,6 +202,23 @@
       loading = false;
       render();
       return Promise.resolve();
+    }
+
+    function loadStorageUsage(refresh) {
+      if (!api().can("users.manage")) return Promise.resolve();
+      storageLoading = true;
+      storageError = "";
+      render();
+      return api().request("/api/photos/storage-usage" + (refresh ? "?refresh=true" : "")).then(function (result) {
+        storageUsage = result;
+        storageLoading = false;
+        storageError = "";
+        render();
+      }).catch(function (error) {
+        storageLoading = false;
+        storageError = error.message || "Photo storage usage could not be loaded.";
+        render();
+      });
     }
     loading = true;
     render();
@@ -315,6 +381,24 @@
       if (action === "refresh") {
         statusMessage = "";
         loadUsers();
+      } else if (action === "refresh-storage") {
+        storageMessage = "";
+        loadStorageUsage(true);
+      } else if (action === "purge-originals") {
+        if (!global.confirm("Delete only full-size originals older than the configured retention window? Thumbnails and photo records will remain.")) return;
+        storageLoading = true;
+        storageError = "";
+        storageMessage = "";
+        render();
+        api().request("/api/photos/retention/purge", { method: "POST" }).then(function (result) {
+          storageMessage = "Purged " + Number(result.photos || 0) + " original(s); " +
+            formatBytes(result.bytes_reclaimed) + " reclaimed.";
+          return loadStorageUsage(true);
+        }).catch(function (error) {
+          storageLoading = false;
+          storageError = error.message || "The retention sweep failed.";
+          render();
+        });
       } else if (action === "invite") {
         openModal("invite");
       } else if (action === "edit-access" && person) {
@@ -449,6 +533,7 @@
     wire(host);
     statusMessage = "";
     loadUsers();
+    loadStorageUsage(false);
   }
 
   global.Solar91PortalSettings = { render: renderPage };

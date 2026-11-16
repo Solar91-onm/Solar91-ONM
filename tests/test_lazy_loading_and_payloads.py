@@ -35,7 +35,7 @@ SHELL_SCRIPTS = ["format.js", "portal-api.js", "data-adapter.js", "modules.js",
 # Pages, fetched when first opened. The calendar alone is a quarter of the old payload.
 LAZY_MODULES = ["table-sort", "register-io", "plant-details", "plants-table", "site-issues",
                 "movable-assets", "bom", "design", "liasoning", "operations-calendar",
-                "washing-board", "categories", "security", "settings"]
+                "washing-board", "categories", "security", "settings", "photo-evidence"]
 
 
 def _script_tags(page: str) -> list[str]:
@@ -87,7 +87,7 @@ def test_a_module_is_fetched_once_with_whatever_it_needs():
       global.document = {
         getElementById: () => ({ textContent: JSON.stringify({
           'table-sort': '/t.js', 'plant-details': '/pd.js', 'plants-table': '/pt.js',
-          'register-io': '/rio.js', 'site-issues': '/si.js' }) }),
+          'register-io': '/rio.js', 'photo-evidence': '/pe.js', 'site-issues': '/si.js' }) }),
         createElement: () => ({ set src(value) { loaded.push(value); this._src = value;
           setTimeout(() => (value === '/si.js' && loaded.filter(u => u === '/si.js').length === 1
             ? this.onerror() : this.onload()), 0); } }),
@@ -110,7 +110,8 @@ def test_a_module_is_fetched_once_with_whatever_it_needs():
         });
       }).then(() => {
         if (!M.isLoaded('site-issues')) fail('the retry should load it');
-        if (M.known().length !== 5) fail('known: ' + M.known());
+        if (!M.isLoaded('register-io') || !M.isLoaded('photo-evidence')) fail('site-issues deps should load alongside it');
+        if (M.known().length !== 6) fail('known: ' + M.known());
       }).catch((error) => { console.error(error.message); process.exit(1); });
     """
     run = subprocess.run(["node", "-e", script], cwd=ROOT, capture_output=True, text=True, timeout=30)
@@ -286,6 +287,25 @@ def test_equipment_summary_respects_the_callers_plant_scope(db, client):
     assert [row["site_code"] for row in body["plants"]] == ["EQ10"]
 
 
+def test_issues_status_open_returns_the_equipment_summary_open_states(db, client):
+    login_user(client, db, role="O&M Head")
+    plant = Plant(site_code="OP01", plant_name="Open States")
+    db.add(plant)
+    db.flush()
+    open_states = ("Open", "Assigned", "Acknowledged", "In Progress", "Pending Vendor", "Pending Parts/Vendor")
+    for index, status in enumerate(open_states):
+        db.add(Issue(ticket_no=f"OPEN-{index}", plant_id=plant.id, vertical="Inverter",
+                     description="x", severity="Medium", status=status))
+    db.add(Issue(ticket_no="CLOSED", plant_id=plant.id, vertical="Inverter",
+                 description="x", severity="Medium", status="Closed"))
+    db.commit()
+
+    response = client.get("/api/issues?vertical=Inverter&status=open&limit=200")
+    assert response.status_code == 200
+    assert {row["status"] for row in response.json()} == set(open_states)
+    assert len(response.json()) == len(open_states)
+
+
 def test_the_inverter_tile_reads_counts_rather_than_the_ticket_list():
     overview = (PORTAL_ASSETS / "js" / "overview.js").read_text(encoding="utf-8")
     assert '"/api/issues/equipment-summary?vertical=Inverter"' in overview
@@ -364,3 +384,373 @@ def test_sign_in_reads_only_what_the_first_screen_needs(db, client):
     overview = (PORTAL_ASSETS / "js" / "overview.js").read_text(encoding="utf-8")
     assert '"/api/portal/overview"' not in overview
     assert total > 0
+
+
+# ---------------------------------------------------------------------------
+# Photos were added to two list-heavy views (the module-cleaning month view and
+# the issues register). The classic failure is one query per row. These pin the
+# statement count against the row count, so an N+1 shows up here as a number.
+# ---------------------------------------------------------------------------
+
+class _StatementCounter:
+    """Counts SQL statements issued while it is active (the bench_portal approach)."""
+
+    def __init__(self):
+        self.n = 0
+
+    def __call__(self, *_args):
+        self.n += 1
+
+
+def _count_statements(fn):
+    from sqlalchemy import event
+    from app.core.database import engine
+    counter = _StatementCounter()
+    event.listen(engine, "before_cursor_execute", counter)
+    try:
+        result = fn()
+    finally:
+        event.remove(engine, "before_cursor_execute", counter)
+    return result, counter.n
+
+
+def _washing_month_with_photos(db, days):
+    """One configured plant with `days` confirmed daily reports, each carrying photo evidence."""
+    import uuid as _uuid
+    plant = Plant(site_code="PHOT01", plant_name="Photo Month Plant")
+    db.add(plant)
+    db.flush()
+    db.add(WashingConfig(plant_id=plant.id, tables_per_cycle=12, team=["Washer"]))
+    for index in range(12):
+        db.add(WashingTable(plant_id=plant.id, table_code=f"T{index + 1:03d}",
+                            legacy_id=f"{plant.site_code}-T{index + 1}"))
+    today = business_today()
+    for offset in range(days):
+        day = today - timedelta(days=offset)
+        db.add(WashingDailyReport(
+            plant_id=plant.id, report_date=day, cycle_month=day.strftime("%Y-%m"),
+            cycle_no=1, tables_cleaned=2, job_status="Done", review_status="Confirmed",
+            reported_by="Washer",
+            evidence=[{
+                "id": str(_uuid.uuid4()), "photo_id": str(_uuid.uuid4()),
+                "phase": phase, "kind": phase, "slot": slot,
+                "at": "2026-01-01T00:00:00+00:00", "by": "Washer",
+                "name": f"{phase}-{slot}.webp", "size": 1234,
+            } for phase in ("before", "after") for slot in (1, 2)],
+        ))
+    db.commit()
+    return plant
+
+
+def test_the_module_cleaning_month_view_reads_every_days_photos_without_a_query_per_day(db, client):
+    """Evidence lives on the daily report row (a JSON column), so the month view's photos ride
+    along with the reports it already reads. The statement count must not follow the day count."""
+    login_user(client, db, role="O&M Head")
+    plant = _washing_month_with_photos(db, days=24)
+    month = business_today().strftime("%Y-%m")
+    url = f"/api/scheduled/washing/overview?month={month}&include_reports=true"
+
+    response, statements = _count_statements(lambda: client.get(url))
+    assert response.status_code == 200, response.text
+    body = response.json()
+    reports = [row for row in body["reports"] if row["plant_id"] == str(plant.id)]
+    assert len(reports) >= 20, "the month view must return the days themselves"
+    # Every returned day carries its four photo slots, read with the row and not per row.
+    assert all(len(row["evidence"]) == 4 for row in reports)
+    assert all(entry["url"].endswith("?size=thumb") for row in reports for entry in row["evidence"])
+    # A per-day query would put this in the hundreds; the whole month is a fixed handful.
+    assert statements <= 40, f"module-cleaning month view issued {statements} statements for {len(reports)} days"
+
+
+def test_the_issues_register_photo_indicator_is_a_column_not_a_query_per_row(db, client):
+    """``Issue.photo_count`` is stored on the ticket, so the register's photo indicator costs
+    nothing per row. A lookup per ticket would scale with the page size."""
+    login_user(client, db, role="O&M Head")
+    plant = Plant(site_code="PHOT02", plant_name="Photo Issues Plant")
+    db.add(plant)
+    db.flush()
+    for index in range(60):
+        db.add(Issue(ticket_no=f"PHI-{index:04d}", plant_id=plant.id, vertical="Inverter",
+                     description="Benchmark ticket", severity="Medium", status="Open",
+                     photo_count=index % 5))
+    db.commit()
+
+    response, statements = _count_statements(lambda: client.get("/api/issues?limit=200"))
+    assert response.status_code == 200, response.text
+    rows = response.json()
+    assert len(rows) >= 60
+    assert any(row.get("photo_count") for row in rows), "the indicator must reach the register"
+    assert statements <= 20, f"issues register issued {statements} statements for {len(rows)} tickets"
+
+
+def test_bom_lines_for_one_plant_and_across_plants_stay_within_a_bounded_statement_count(db, client):
+    """~164 lines for one plant, read in BOQ order off (plant_id, section_order, sort_order)
+    -- migration 041's index -- not sorted per row and not re-read per section."""
+    from app.core.models import BomItem
+    login_user(client, db, role="O&M Head")
+    sections = ["PV Section", "MMS Hardware Quantity", "PROTECTION", "CABLES"]
+    plants = []
+    for p in range(2):
+        plant = Plant(site_code=f"BOM{p:02d}", plant_name=f"BOM Plant {p}")
+        db.add(plant)
+        db.flush()
+        plants.append(plant)
+        for line in range(164):
+            db.add(BomItem(plant_id=plant.id, item_name=f"Item {line}",
+                           maker="Maker A", supplier="Supplier B",
+                           section=sections[line % len(sections)],
+                           section_order=line % len(sections),
+                           sort_order=line, unit="Nos."))
+    db.commit()
+
+    single, single_statements = _count_statements(
+        lambda: client.get(f"/api/bom?site_code={plants[0].site_code}&limit=200"))
+    assert single.status_code == 200, single.text
+    assert single.json()["total"] == 164
+    assert len(single.json()["items"]) == 164
+    assert single_statements <= 20, f"one plant's BOM issued {single_statements} statements for 164 lines"
+
+    every, every_statements = _count_statements(lambda: client.get("/api/bom?limit=200"))
+    assert every.status_code == 200, every.text
+    assert every.json()["total"] == 328
+    assert every_statements <= 20, f"all-plants BOM issued {every_statements} statements"
+    # Sections come back in BOQ order, never alphabetically.
+    assert every.json()["sections"][:2] == ["PV Section", "MMS Hardware Quantity"]
+
+
+def test_no_list_or_month_view_ever_requests_a_full_size_original():
+    """Originals are fetched only by the full-screen viewer, on an explicit click. A list,
+    grid or month view that asked for one would undo the whole thumbnail budget."""
+    viewer = (PORTAL_ASSETS / "js" / "photo-evidence.js").read_text(encoding="utf-8")
+    assert "fetchBlob(photo.originalUrl)" in viewer, "the viewer is the one place that reads an original"
+
+    for name in ("operations-calendar", "site-issues", "plants-table", "overview", "washing-board"):
+        source = PORTAL_ASSETS / "js" / f"{name}.js"
+        if not source.exists():
+            continue
+        text = source.read_text(encoding="utf-8")
+        assert "size=original" not in text, f"{name}.js requests a full-size original"
+        assert "originalUrl" not in text, f"{name}.js reads an original URL outside the viewer"
+
+
+def test_every_thumbnail_in_a_list_is_lazy_and_has_explicit_dimensions():
+    """loading=lazy plus width/height: the month view's photos load as they are scrolled to,
+    and reserve their space first so lazy loading causes no layout shift."""
+    calendar = (PORTAL_ASSETS / "js" / "operations-calendar.js").read_text(encoding="utf-8")
+    start = calendar.index("<img data-photo-src=")
+    thumbnail = calendar[start:calendar.index("/>", start)]
+    assert 'loading="lazy"' in thumbnail
+    assert "width=" in thumbnail and "height=" in thumbnail
+    assert "thumbnailUrl" in thumbnail, "a list thumbnail must read the thumbnail, never the original"
+
+    # The observer that actually defers the fetch (an authenticated image cannot use a plain src).
+    viewer = (PORTAL_ASSETS / "js" / "photo-evidence.js").read_text(encoding="utf-8")
+    assert "IntersectionObserver" in viewer
+    assert "img[data-photo-src]:not([data-photo-observed])" in viewer
+
+
+# ---------------------------------------------------------------------------
+# Connection holding during uploads.
+#
+# A pooled DB connection held through a Storage upload is what makes the portal
+# feel hung for everyone else while one field user uploads a photo on a weak
+# connection. Every upload path must hand the connection back after its cheap
+# checks and before it decodes or sends any bytes.
+# ---------------------------------------------------------------------------
+
+UPLOAD_PATHS = [
+    ("app/photos/router.py", "def create_photos("),
+    ("app/scheduled/router.py", "def upload_washing_evidence("),
+    ("app/scheduled/router.py", "def upload_evidence("),
+    ("app/issues/router.py", "def upload_issue_evidence("),
+]
+
+
+def _function_source(path, marker):
+    text = (ROOT / path).read_text(encoding="utf-8")
+    start = text.index(marker)
+    nxt = text.find("\n@router.", start)
+    return text[start:nxt if nxt != -1 else len(text)]
+
+
+def test_every_upload_path_releases_its_connection_before_storage_io():
+    """Each upload hands the pooled connection back before the first Storage call."""
+    for path, marker in UPLOAD_PATHS:
+        body = _function_source(path, marker)
+        if marker == "def upload_washing_evidence(":
+            # Delegates the whole upload to create_photos, which releases before decoding.
+            assert "create_photos(" in body, path
+            continue
+        assert "release_connection(db)" in body, f"{path}:{marker} never releases its connection"
+        release = body.index("release_connection(db)")
+        for call in (".upload(", "optimize_photo("):
+            at = body.find(call)
+            if at != -1:
+                assert release < at, (
+                    f"{path}:{marker} holds a pooled connection through {call.strip('(')}"
+                )
+
+
+def test_release_connection_is_a_no_op_while_a_write_is_pending():
+    """It ends a read transaction; it must never commit half-finished work early."""
+    source = (ROOT / "app/core/database.py").read_text(encoding="utf-8")
+    body = source[source.index("def release_connection("):]
+    body = body[:body.index("\ndef ", 1)] if "\ndef " in body[1:] else body
+    assert "if not (db.new or db.dirty or db.deleted):" in body
+    assert "db.commit()" in body
+
+
+def test_every_outbound_storage_call_has_a_timeout():
+    """A hung HTTP call with no timeout stalls a worker. The shared client carries the
+    default; any call that overrides it must still pass one."""
+    service = (ROOT / "app/storage/service.py").read_text(encoding="utf-8")
+    assert "httpx.Client(timeout=" in service, "the shared Storage client must carry a default timeout"
+    # No bare client construction anywhere that would skip the default.
+    assert service.count("httpx.Client(") == 1
+    for call in re.finditer(r"get_storage_http_client\(\)\.(get|post|request)\(", service):
+        assert call.group(1) in {"get", "post", "request"}
+
+
+def test_the_storage_usage_helper_is_cached_and_never_read_during_a_page_render():
+    """The free-tier guard reads bucket usage on upload and on the admin screen only."""
+    usage = (ROOT / "app/storage/usage.py").read_text(encoding="utf-8")
+    assert "_CACHE_SECONDS" in usage and "monotonic()" in usage
+
+    callers = []
+    for path in ROOT.joinpath("app").rglob("*.py"):
+        text = path.read_text(encoding="utf-8")
+        if "bucket_usage_bytes(" in text and path.name != "usage.py":
+            callers.append(path.relative_to(ROOT).as_posix())
+    assert callers == ["app/photos/router.py"], callers
+
+    router = (ROOT / "app/photos/router.py").read_text(encoding="utf-8")
+    # Exactly two call sites: the admin storage-usage endpoint, and the upload guard.
+    assert router.count("bucket_usage_bytes(") == 2
+    usage_endpoint = router[router.index("def storage_usage("):]
+    assert "_admin(user)" in usage_endpoint[:400], "the usage screen is administrators only"
+
+
+def test_raise_issue_photos_go_through_the_shared_pipeline_not_raw_bytes():
+    """Ticket evidence used to be posted as raw camera bytes to /api/issues/{id}/evidence,
+    up to ten per ticket, with no downscale and no thumbnail. It now goes through the shared
+    /api/photos pipeline: at most four, downscaled in the browser, stored as WebP with a
+    480px thumbnail and an original that the retention sweep later reclaims."""
+    issues = (PORTAL_ASSETS / "js" / "site-issues.js").read_text(encoding="utf-8")
+
+    assert "var MAX_ISSUE_PHOTOS = 4;" in issues
+    assert "Select no more than \" + MAX_ISSUE_PHOTOS + \" photos." in issues
+    assert "Evidence photos (up to ' + MAX_ISSUE_PHOTOS + ')" in issues
+
+    # The ticket is created first; photos follow, linked by its number.
+    assert 'api.request("/api/issues", { method: "POST", body: payload })' in issues
+    assert "return uploadIssuePhotos(saved, draft.evidenceFiles, submissionIdFor());" in issues
+    assert 'linkType: "issue"' in issues and "linkId: issue.id" in issues
+
+    # The legacy raw-bytes upload is no longer how a raised ticket stores its photos.
+    assert '/evidence", {\n        method: "POST",\n        body: files' not in issues
+
+    # A failed upload keeps the ticket and offers a retry under the SAME submission id,
+    # so a repeat is the same submission and never stores a second copy.
+    assert "state.pendingPhotos = {" in issues
+    assert "submissionId: submissionId" in issues
+    assert 'data-issue-action="retry-photos"' in issues
+    assert "function retryIssuePhotos()" in issues
+    assert "uploadIssuePhotos(issue, pending.files, pending.submissionId)" in issues
+
+
+def test_the_browser_prepares_a_ticket_photo_before_it_leaves_the_phone():
+    """2048px, WebP at 0.8, falling back to the original file when the browser cannot
+    encode one. This is what keeps a 5 MB camera original off the Free-plan bucket."""
+    evidence = (PORTAL_ASSETS / "js" / "photo-evidence.js").read_text(encoding="utf-8")
+    assert "2048 / Math.max(width, height)" in evidence
+    assert '"image/webp", 0.8' in evidence
+    # Every failure path hands back the untouched file rather than losing the photo.
+    assert evidence.count("{ blob: file, name: file.name }") >= 4
+    assert "global.crypto.randomUUID" in evidence, "the submission id is browser-generated"
+
+
+def test_a_tickets_photos_are_read_as_thumbnails_and_only_for_the_open_ticket():
+    """The register lists tickets; it must not pull a photo for every row. Thumbnails are
+    loaded for the one ticket that is open, and the original only on an explicit click."""
+    issues = (PORTAL_ASSETS / "js" / "site-issues.js").read_text(encoding="utf-8")
+
+    assert "function loadIssuePhotos(ticket)" in issues
+    assert '"/api/photos?link=issue&link_id=" + encodeURIComponent(ticket)' in issues
+    assert "meta=false" in issues, "a ticket's photos need rows, not gallery facets"
+    assert "loadIssuePhotos(state.modalId);" in issues
+
+    # The thumbnail markup: lazy, with its own dimensions so nothing jumps as it loads.
+    start = issues.index('<img data-photo-src="')
+    thumbnail = issues[start:issues.index("/>", start)]
+    assert 'loading="lazy"' in thumbnail
+    assert "width=" in thumbnail and "height=" in thumbnail
+    assert "photo.thumbnailUrl" in thumbnail
+
+    # Exactly one place reads an original, and it is the viewer, on a click.
+    assert "originalUrl" not in issues
+    assert "photoEvidence().open(wanted);" in issues
+    assert 'data-issue-photo-open=' in issues
+
+
+def test_the_ticket_photo_count_comes_from_the_server_not_a_local_tally():
+    """photo_count is kept by the API across both the linked photos and any legacy
+    evidence, so the register must take its number rather than counting what it uploaded."""
+    issues = (PORTAL_ASSETS / "js" / "site-issues.js").read_text(encoding="utf-8")
+    assert 'typeof result.issue_photo_count === "number"' in issues
+    assert "issue.photoCount = result.issue_photo_count;" in issues
+    assert "function removeIssuePhoto(ticket, photoId)" in issues
+    assert '"/api/photos/" + encodeURIComponent(photoId), { method: "DELETE" }' in issues
+
+
+def test_a_storage_warning_from_a_ticket_upload_reaches_administrators_only():
+    """A field user cannot act on 'the bucket is nearly full'; the O&M Head can."""
+    for name in ("site-issues", "operations-calendar"):
+        source = (PORTAL_ASSETS / "js" / f"{name}.js").read_text(encoding="utf-8")
+        assert "storage_warning" in source, name
+        assert "isStorageAdministrator()" in source, name
+        block = source[source.index("function isStorageAdministrator()"):]
+        block = block[:block.index("\n  }") + 4]
+        assert '"O&M Head", "Administration"' in block, name
+
+
+def test_resolution_fix_photos_are_downscaled_even_though_they_still_post_as_files():
+    """The resolve call needs the ids the legacy evidence endpoint returns, so those photos
+    keep that endpoint. They are still prepared in the browser first, so a fix photo costs
+    the bucket the same 2048px WebP as every other photo."""
+    issues = (PORTAL_ASSETS / "js" / "site-issues.js").read_text(encoding="utf-8")
+    evidence = (PORTAL_ASSETS / "js" / "photo-evidence.js").read_text(encoding="utf-8")
+
+    assert "prepare: prepare" in evidence, "the downscaler is shared, not copied"
+    assert "function prepare(files)" in evidence
+    assert "evidence.prepare(photos)" in issues
+    assert 'files.append("files", item.blob, item.name);' in issues
+    # And it still degrades to the untouched files if the module has not loaded.
+    assert "Promise.resolve(photos.map(function (file) { return { blob: file, name: file.name }; }))" in issues
+    # The resolve contract is unchanged: it still takes the ids the upload returned.
+    assert "evidence_ids: uploaded.map(function (entry) { return entry.id; })" in issues
+
+
+def test_the_inverter_drill_down_reuses_the_tiles_figures_rather_than_refetching():
+    """The drill-down is opened from the tile, which already holds the unit configuration
+    and the per-plant ticket counts. Asking for the same two answers again costs two
+    requests and could only make the two screens disagree."""
+    overview = (PORTAL_ASSETS / "js" / "overview.js").read_text(encoding="utf-8")
+
+    loader = overview[overview.index("function loadInverterHealth()"):]
+    loader = loader[:loader.index("\n  function ", 1)]
+    assert "inverters.loaded && (inverters.units.length || inverters.unitsRestricted)" in loader
+    assert "inverters.loaded && inverters.issues.length" in loader
+    assert "inverterHealth.summary = { plants: inverters.issues };" in loader
+    # The ticket list is the one genuinely new read.
+    assert "api.request(inverterHealthUrl())" in loader
+    # A cold open still works: the fetch is the fallback, and it fills the tile's cache too.
+    assert 'api.request("/api/pm-plan/unit-config")' in loader
+    assert "inverters.loaded = true;" in loader
+
+
+def test_the_portfolio_is_fetched_once_and_shared_through_the_data_adapter():
+    """Tab-to-tab navigation must not re-read the portfolio each time."""
+    adapter = (PORTAL_ASSETS / "js" / "data-adapter.js").read_text(encoding="utf-8")
+    assert "/api/portal/plants" in adapter
+    # One in-flight request is shared rather than started again per caller.
+    assert "pending" in adapter or "cache" in adapter

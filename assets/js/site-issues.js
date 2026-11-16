@@ -77,6 +77,7 @@
     categoryError: "",
     modalId: "",
     modalMode: "",
+    editDraft: null,
     wizardStep: 1,
     draft: null,
     requestId: 0,
@@ -97,10 +98,28 @@
     assignees: [],
     submitError: "",
     submitNotice: "",
-    submitting: false
+    submitting: false,
+    // Photos for the ticket on screen, read from /api/photos (thumbnails only; the original
+    // is fetched by the viewer on an explicit click). Keyed by ticket number.
+    issuePhotos: {},
+    photoBusy: {},
+    photoError: "",
+    // A ticket whose photos failed to upload. The ticket itself is already saved, so the retry
+    // re-sends the same files under the SAME submission id: the server treats a repeat as the
+    // one submission it is, and never stores a second copy.
+    pendingPhotos: null
   };
   var active = null;
   var wiredHost = null;
+
+  // Raise issue takes at most four photos. Each is downscaled in the browser (2048 px, WebP)
+  // before it leaves the phone, so a field upload costs a fraction of a camera original and the
+  // bucket is not filled by full-resolution JPEGs.
+  var MAX_ISSUE_PHOTOS = 4;
+
+  function photoEvidence() {
+    return global.Solar91PhotoEvidence || null;
+  }
 
   function escape(value) {
     return format.escape(value);
@@ -308,7 +327,7 @@
           '<span aria-hidden="true">⌕</span><input type="search" data-issue-filter="search" value="' +
           escape(state.search) + '" placeholder="Search issues, plants, equipment…" /></label>' +
         (isPlant
-          ? '<span class="ep-issues__scope">' + escape(context.plantCode) + '</span>'
+          ? (context.plantDetailsMerged ? "" : '<span class="ep-issues__scope">' + escape(context.plantCode) + '</span>')
           : '<label class="ep-issues__select"><span class="ep-issues__sr-only">Filter by plant</span><select data-issue-filter="plant">' +
             plantOptions() + '</select></label>') +
         '<label class="ep-issues__select"><span class="ep-issues__sr-only">Sort issues</span><select data-issue-filter="sort">' +
@@ -509,10 +528,9 @@
   // Offering anything else just earns a 409, so the dropdown lists exactly what
   // the current status allows.
   //
-  // Resolved and Closed are deliberately absent: resolving demands a root cause,
-  // a corrective action and at least one evidence photo, which belongs in the
-  // ticket's own workflow rather than a quick correction here. "Assigned" is not
-  // listed either — that happens by choosing an assignee.
+  // Resolved is offered only through its resolution form; Closed is handled by
+  // the explicit logged close action below. "Assigned" is not a transition —
+  // that happens by choosing an assignee.
   var STATUS_FLOW = {
     "Open": ["Acknowledged"],
     "Assigned": ["Acknowledged"],
@@ -543,6 +561,41 @@
     return choices.filter(function (value, index) { return choices.indexOf(value) === index; });
   }
 
+  function canCloseIssue(issue) {
+    var api = global.Solar91PortalAPI;
+    var user = api && api.currentUser ? api.currentUser() : null;
+    if (!user || (user.role !== "O&M Head" && user.role !== "Assignee") || issue.status === "Closed") return false;
+    if (user.role === "O&M Head") return true;
+    if (issue.assignedTo && String(issue.assignedTo) === String(user.id)) return true;
+    if (issue.assignedTo || !issue.assignee) return false;
+    var identities = [user.display_name, user.displayName, user.name, user.email].filter(Boolean).map(function (value) {
+      return String(value).trim().toLowerCase();
+    });
+    var entries = String(issue.assignee).toLowerCase().split(/[,;\/&|]+/).map(function (value) {
+      return value.trim();
+    });
+    return identities.some(function (identity) {
+      return identity && (entries.indexOf(identity) !== -1 || identity.indexOf("@") !== -1 && issue.assignee.toLowerCase().indexOf(identity) !== -1);
+    });
+  }
+
+  function renderCloseAction(issue, closeNote) {
+    if (!state.canEdit || !canCloseIssue(issue)) return "";
+    var resolved = issue.status === "Resolved";
+    return '<fieldset class="ep-issues__wizard-field ep-issues__close-action">' +
+      '<legend>' + (resolved ? "Verify and close" : "Close directly") + '</legend>' +
+      '<label class="ep-issues__wizard-field">Closure note' +
+        '<textarea name="closeNote" rows="2" maxlength="4000"' +
+          (resolved ? "" : " required") + '>' + escape(closeNote || "") + '</textarea>' +
+        '<small>' + (resolved
+          ? "Confirm that the resolved ticket can be closed."
+          : "A reason is required. This closes the ticket without the resolution workflow; unsaved form edits are not included.") + '</small></label>' +
+      '<button type="button" class="ep-issues__button ep-issues__button--primary" data-issue-action="close-ticket" data-direct-close="' +
+        (resolved ? "false" : "true") + '"' + (state.submitting ? " disabled" : "") + '>' +
+        (resolved ? "Verify & close ticket" : "Close ticket") + '</button>' +
+    '</fieldset>';
+  }
+
   /** Today as YYYY-MM-DD, so a fix cannot be dated in the future. */
   function todayISO() {
     var now = new Date();
@@ -553,21 +606,36 @@
   /** The edit form: the stored details of one ticket, corrected in place. */
   function renderEditForm(issue) {
     if (!issue) return '<p class="ep-issues__empty">This ticket is no longer in the list.</p>';
+    var draft = state.editDraft && state.editDraft.id === issue.dbId ? state.editDraft : {};
+    var value = function (name, fallback) {
+      return draft[name] === undefined ? (fallback || "") : draft[name];
+    };
     var field = function (name, label, value, attrs) {
       return '<label class="ep-issues__wizard-field">' + escape(label) +
         '<input name="' + name + '" value="' + escape(value || "") + '" ' + (attrs || "") + ' /></label>';
     };
+    var equipment = value("equipment", issue.equipment);
+    var subpart = value("subpart", issue.subpart);
+    var status = value("status", issue.status);
     return '<form class="ep-issues__wizard" data-issue-form data-issue-edit-form="' + escape(issue.dbId) + '">' +
       '<p class="ep-issues__wizard-info"><strong>' + escape(issue.id) + '</strong> · ' +
         escape(issue.plantCode) + ' ' + escape(issue.plantName) + '</p>' +
       '<label class="ep-issues__wizard-field">Equipment / category' +
-        '<select name="equipment" required>' + renderEquipmentOptions(issue.equipment) + '</select></label>' +
+        '<select name="equipment">' + renderEquipmentOptions(equipment) + '</select></label>' +
+      (state.categoryLoading
+        ? '<p class="ep-issues__category-note" role="status">Loading configured categories…</p>'
+        : state.categoryError
+          ? '<p class="ep-issues__category-note ep-issues__category-error" role="alert">Could not load configured categories. The ticket’s existing category is preserved. ' +
+            '<button type="button" class="ep-issues__button ep-issues__button--small" data-issue-action="retry-edit-categories">Retry</button></p>'
+          : !CATEGORIES.length
+            ? '<p class="ep-issues__category-note">No categories were returned by Settings → Categories. The ticket’s existing category is preserved.</p>'
+            : "") +
       '<label class="ep-issues__wizard-field">Sub-problem' +
-        '<select name="subpart">' + renderSubpartOptions(issue.subpart, issue.equipment) + '</select>' +
+        '<select name="subpart">' + renderSubpartOptions(subpart, equipment) + '</select>' +
         '<small>The fault for this category, the same list the Raise issue form offers.</small></label>' +
-      field("supplierMaker", "Maker / Supplier", issue.supplierMaker, 'maxlength="160"') +
-      field("serialNo", "Serial number", issue.serialNo, 'maxlength="120"') +
-      field("unitCount", "Units", issue.unitCount, 'type="number" min="1" max="100000"') +
+      field("supplierMaker", "Maker / Supplier", value("supplierMaker", issue.supplierMaker), 'maxlength="160"') +
+      field("serialNo", "Serial number", value("serialNo", issue.serialNo), 'maxlength="120"') +
+      field("unitCount", "Units", value("unitCount", issue.unitCount), 'type="number" min="1" max="100000"') +
       // No severity field. Raise issue does not ask for one either (every ticket is
       // filed as Medium), so the register does not offer a way to diverge from that.
       // Where a ticket stands is its Status, not its severity.
@@ -579,7 +647,7 @@
               '<option value="">Unassigned</option>' +
               state.assignees.map(function (person) {
                 return '<option value="' + escape(person.id) + '"' +
-                  (issue.assignedTo === String(person.id) ? " selected" : "") + ">" +
+                  (value("assignedTo", issue.assignedTo) === String(person.id) ? " selected" : "") + ">" +
                   escape(person.name) + "</option>";
               }).join("") +
             '</select></label>'
@@ -587,10 +655,10 @@
             escape(issue.assignee || "nobody") + '</strong> · only the O&amp;M Head can change this.</p>') +
       '<label class="ep-issues__wizard-field">Status' +
         '<select name="status">' +
-          statusChoicesFor(issue.status).map(function (value) {
-            return '<option value="' + escape(value) + '"' +
-              (issue.status === value ? " selected" : "") + ">" + escape(value) +
-              (value === issue.status ? " (no change)" : "") + "</option>";
+          statusChoicesFor(issue.status).map(function (choice) {
+            return '<option value="' + escape(choice) + '"' +
+              (status === choice ? " selected" : "") + ">" + escape(choice) +
+              (choice === issue.status ? " (no change)" : "") + "</option>";
           }).join("") +
         '</select>' +
         '<small>A ticket moves one step at a time; choosing Resolved walks it ' +
@@ -598,25 +666,27 @@
       // Shown only when Resolved is chosen. These are what the API stores as the
       // resolution, and it will not accept the transition without them.
       '<fieldset class="ep-issues__wizard-field" data-issue-resolution' +
-        (issue.status === "Resolved" ? "" : " hidden") + '>' +
+        (status === "Resolved" ? "" : " hidden") + '>' +
         '<legend>Resolution</legend>' +
         '<label class="ep-issues__wizard-field">Root cause' +
-          '<textarea name="rootCause" rows="2" maxlength="4000"></textarea></label>' +
+          '<textarea name="rootCause" rows="2" maxlength="4000">' + escape(value("rootCause", "")) + '</textarea></label>' +
         '<label class="ep-issues__wizard-field">Corrective action' +
-          '<textarea name="correctiveAction" rows="2" maxlength="4000"></textarea></label>' +
+          '<textarea name="correctiveAction" rows="2" maxlength="4000">' + escape(value("correctiveAction", "")) + '</textarea></label>' +
         '<label class="ep-issues__wizard-field">Fixed on' +
-          '<input name="fixedOn" type="date" max="' + escape(todayISO()) + '" /></label>' +
+          '<input name="fixedOn" type="date" value="' + escape(value("fixedOn", "")) + '" max="' + escape(todayISO()) + '" /></label>' +
         '<label class="ep-issues__wizard-field">Closing remark' +
-          '<input name="resolutionRemark" maxlength="4000" /></label>' +
+          '<input name="resolutionRemark" value="' + escape(value("resolutionRemark", "")) + '" maxlength="4000" /></label>' +
         '<label class="ep-issues__wizard-field">Fix photos' +
           '<input name="resolutionEvidence" type="file" accept="image/jpeg,image/png,image/webp" multiple />' +
           '<small>At least one photo of the completed fix is required, up to 10.</small></label>' +
       '</fieldset>' +
       '<label class="ep-issues__wizard-field">Issue details' +
-        '<textarea name="problem" required rows="4" maxlength="4000">' + escape(issue.problem || "") + '</textarea></label>' +
+        '<textarea name="problem" required rows="4" maxlength="4000">' + escape(value("problem", issue.problem)) + '</textarea></label>' +
       '<label class="ep-issues__wizard-field">Reason for the change' +
-        '<input name="changeReason" maxlength="500" placeholder="Why the ticket is being corrected (optional)" /></label>' +
-      '<p class="ep-issues__wizard-error" data-issue-edit-error hidden></p>' +
+        '<input name="changeReason" value="' + escape(value("changeReason", "")) + '" maxlength="500" placeholder="Why the ticket is being corrected (optional)" /></label>' +
+      renderCloseAction(issue, value("closeNote", "")) +
+      '<p class="ep-issues__wizard-error" data-issue-edit-error' +
+        (state.submitError ? '' : ' hidden') + '>' + escape(state.submitError) + '</p>' +
       '<div class="ep-issues__wizard-actions">' +
         '<button type="button" class="ep-issues__button" data-issue-action="close">Cancel</button>' +
         '<button type="submit" class="ep-issues__button ep-issues__button--primary"' +
@@ -655,13 +725,8 @@
         // information. Status is what says where a ticket stands.
         field("Status", issue.status) +
         field("Issue details", issue.problem) +
-        field("Evidence photos", issue.evidenceFiles && issue.evidenceFiles.length
-          ? issue.evidenceFiles.length + " selected: " + issue.evidenceFiles.map(function (file) {
-            return typeof file === "string" ? file : file.name;
-          }).join(", ")
-          : (issue.photoCount ? issue.photoCount + " uploaded" : "")) +
         field("Notes", issue.notes) +
-      '</dl><p class="ep-issues__demo-note">' +
+      '</dl>' + renderIssuePhotos(issue) + '<p class="ep-issues__demo-note">' +
         "Saved to Solar91 O&M. Use the main O&M app for ticket updates and workflow actions." +
         (state.submitNotice ? " " + escape(state.submitNotice) : "") + '</p>' +
       '</div><footer class="ep-issues__drawer-footer">' +
@@ -722,9 +787,17 @@
 
   function renderEquipmentOptions(selected) {
     if (!CATEGORIES.length) {
-      return '<option value="">No categories configured yet</option>';
+      if (selected) {
+        return '<option value="' + escape(selected) + '" selected>' + escape(selected) + ' (existing category)</option>';
+      }
+      return '<option value="">' + (state.categoryLoading ? "Loading categories…" :
+        state.categoryError ? "Could not load categories" : "No categories configured yet") + '</option>';
     }
-    return '<option value="">Select category</option>' + categoryNames().map(function (name) {
+    var configured = categoryNames();
+    var existing = selected && configured.indexOf(selected) === -1
+      ? '<option value="' + escape(selected) + '" selected>Existing: ' + escape(selected) + '</option>'
+      : "";
+    return '<option value="">Select category</option>' + existing + categoryNames().map(function (name) {
       return '<option value="' + escape(name) + '"' +
         (selected === name ? " selected" : "") + ">" + escape(name) + "</option>";
     }).join("");
@@ -733,10 +806,13 @@
   function renderSubpartOptions(selected, category) {
     // The sub-problems configured for the chosen category.
     var options = subProblemsFor(category);
+    var existing = selected && options.indexOf(selected) === -1
+      ? '<option value="' + escape(selected) + '" selected>Existing: ' + escape(selected) + '</option>'
+      : "";
     if (!options.length) {
-      return '<option value="">(none recorded for this category)</option>';
+      return (existing || "") + '<option value="">(none recorded for this category)</option>';
     }
-    return '<option value="">(none)</option>' + options.map(function (item) {
+    return '<option value="">(none)</option>' + existing + options.map(function (item) {
       return '<option value="' + escape(item) + '"' +
         ((selected || "") === item ? " selected" : "") + ">" + escape(item) + "</option>";
     }).join("");
@@ -799,8 +875,8 @@
         '<small>Include what happened and relevant symptoms; the subpart / fault area is selected separately.</small>' +
       '</label>' +
       '<div class="ep-issues__wizard-fields ep-issues__wizard-fields--evidence">' +
-        '<label class="ep-issues__wizard-field">Evidence photos (up to 10)' +
-          '<input name="evidence" type="file" accept="image/jpeg,image/png,image/webp" multiple />' +
+        '<label class="ep-issues__wizard-field">Evidence photos (up to ' + MAX_ISSUE_PHOTOS + ')' +
+          '<input name="evidence" type="file" accept="image/jpeg,image/png,image/webp" capture="environment" multiple />' +
           '<small>' + (draft.evidenceFiles.length
             ? draft.evidenceFiles.length + " photo" + (draft.evidenceFiles.length === 1 ? "" : "s") + " selected"
             : "No photos selected") + '</small></label>' +
@@ -905,11 +981,15 @@
       state.modalId = "";
       state.modalMode = "";
       state.draft = null;
+      state.editDraft = null;
       state.wizardStep = 1;
       state.plantFilter = "";
       state.search = "";
       state.columnFilters = {};
       state.statusFilter = "All";
+      state.issuePhotos = {};
+      state.photoBusy = {};
+      state.photoError = "";
     }
     // Opened from the Overview's Inverters tile: that preset survives this render and
     // is shown as a removable chip, then cleared.
@@ -941,6 +1021,10 @@
     if (!active) return;
     var host = active.host;
     var context = active.context;
+    var openCount = state.rows.filter(function (issue) {
+      return (!context.plantCode || issue.plantCode === context.plantCode) &&
+        statusGroup(issue.status) !== "Solved";
+    }).length;
     var rows = rowsFor(context);
     var unfilteredRows = rowsFor(context, true);
     var content = "";
@@ -972,7 +1056,7 @@
             : "") +
           '</section>';
     }
-    host.innerHTML = '<div class="ep-issues">' +
+    var issuesMarkup = '<div class="ep-issues">' +
       renderHeader(context) +
       '<div class="ep-issues__body">' +
         renderFilters(context, unfilteredRows) +
@@ -980,7 +1064,14 @@
       '</div>' +
       renderDrawer(context) +
     '</div>';
+    host.innerHTML = context.plantDetailsMerged
+    ? '<section class="ep-pd__health-card"><header class="ep-pd__health-head">' +
+        '<h2>Health</h2><span class="ep-pd__open-count">' + openCount + ' open</span>' +
+      '</header>' + issuesMarkup + '</section>'
+    : issuesMarkup;
     wireColumnFilterMenus(host);
+    // Thumbnails load as they come into view, never all at once with the page.
+    if (photoEvidence()) photoEvidence().watch(host);
     var sort = host.querySelector('[data-issue-filter="sort"]');
     if (sort) sort.value = state.sort || "recent";
   }
@@ -1011,6 +1102,23 @@
       if (!active || active.host !== host || state.modalMode !== "create") return;
       state.categoryLoading = false;
       state.categoryError = error.message || "Please try again.";
+      renderView();
+    });
+  }
+
+  function loadCategoriesForEdit(host, issueId) {
+    if (state.categoryLoading) return;
+    state.categoryLoading = true;
+    state.categoryError = "";
+    renderView();
+    loadCategories().then(function () {
+      if (!active || active.host !== host || state.modalMode !== "edit" || state.modalId !== issueId) return;
+      state.categoryLoading = false;
+      renderView();
+    }).catch(function (error) {
+      if (!active || active.host !== host || state.modalMode !== "edit" || state.modalId !== issueId) return;
+      state.categoryLoading = false;
+      state.categoryError = error.message || "Configured categories could not be loaded.";
       renderView();
     });
   }
@@ -1098,6 +1206,15 @@
     wiredHost = host;
     host.addEventListener("input", function (event) {
       if (!active || active.host !== host) return;
+      var editForm = event.target.closest("[data-issue-edit-form]");
+      if (editForm) {
+        syncIssueEditDraft(editForm);
+        if (state.submitError) {
+          state.submitError = "";
+          var editError = editForm.querySelector("[data-issue-edit-error]");
+          if (editError) editError.hidden = true;
+        }
+      }
       if (event.target.matches("[data-issue-column-filter-search]")) {
         filterColumnOptions(event.target.closest("[data-issue-column-filter-menu]"), event.target.value);
         return;
@@ -1130,6 +1247,15 @@
     });
     host.addEventListener("change", function (event) {
       if (!active || active.host !== host) return;
+      if (event.target.matches("[data-issue-photo-file]")) {
+        var picked = Array.prototype.slice.call(event.target.files || []);
+        var ticket = event.target.dataset.issuePhotoFile;
+        event.target.value = "";
+        addIssuePhotos(ticket, picked);
+        return;
+      }
+      var issueEditForm = event.target.closest("[data-issue-edit-form]");
+      if (issueEditForm) syncIssueEditDraft(issueEditForm);
       if (event.target.matches("[data-issue-date-mode]")) {
         state.issueDateRangeMode = event.target.checked;
         state.issueDateError = "";
@@ -1208,7 +1334,10 @@
       if (event.target.name === "equipment" && state.modalMode === "edit") {
         var editForm = event.target.closest("[data-issue-edit-form]");
         var subpartSelect = editForm && editForm.querySelector('[name="subpart"]');
-        if (subpartSelect) subpartSelect.innerHTML = renderSubpartOptions("", event.target.value);
+        if (subpartSelect) {
+          subpartSelect.innerHTML = renderSubpartOptions("", event.target.value);
+          if (state.editDraft) state.editDraft.subpart = "";
+        }
         return;
       }
       if (event.target.name === "equipment" && state.modalMode === "create" && state.draft) {
@@ -1223,10 +1352,10 @@
         var files = Array.prototype.slice.call(event.target.files || []);
         var error = host.querySelector("[data-wizard-error]");
         var supportedTypes = ["image/jpeg", "image/png", "image/webp"];
-        if (files.length > 10 || files.some(function (file) { return supportedTypes.indexOf(file.type) === -1; })) {
+        if (files.length > MAX_ISSUE_PHOTOS || files.some(function (file) { return supportedTypes.indexOf(file.type) === -1; })) {
           if (error) {
-            error.textContent = files.length > 10
-              ? "Select no more than 10 photos."
+            error.textContent = files.length > MAX_ISSUE_PHOTOS
+              ? "Select no more than " + MAX_ISSUE_PHOTOS + " photos."
               : "Evidence photos must be JPEG, PNG or WebP.";
             error.hidden = false;
           }
@@ -1323,7 +1452,12 @@
       if (edit) {
         state.modalId = edit.dataset.issueEdit;
         state.modalMode = "edit";
+        state.editDraft = null;
+        state.submitError = "";
+        state.categoryError = "";
+        state.categoryLoading = false;
         renderView();
+        loadCategoriesForEdit(host, state.modalId);
         return;
       }
       var open = event.target.closest("[data-issue-open]");
@@ -1331,7 +1465,24 @@
         state.submitNotice = "";
         state.modalId = open.dataset.issueOpen;
         state.modalMode = "details";
+        state.editDraft = null;
+        state.photoError = "";
         renderView();
+        loadIssuePhotos(state.modalId);   // thumbnails for this ticket only, never for the list
+        return;
+      }
+      var photoOpen = event.target.closest("[data-issue-photo-open]");
+      if (photoOpen) {
+        // The one place an original is fetched, and only because someone asked for it.
+        var wanted = (state.issuePhotos[state.modalId] || []).find(function (photo) {
+          return photo.id === photoOpen.dataset.issuePhotoOpen;
+        });
+        if (wanted && photoEvidence()) photoEvidence().open(wanted);
+        return;
+      }
+      var photoRemove = event.target.closest("[data-issue-photo-remove]");
+      if (photoRemove) {
+        removeIssuePhoto(state.modalId, photoRemove.dataset.issuePhotoRemove);
         return;
       }
       // The shared Import / Export control handles its own clicks.
@@ -1370,6 +1521,18 @@
       var actionButton = event.target.closest("[data-issue-action]");
       if (!actionButton) return;
       var action = actionButton.dataset.issueAction;
+      if (action === "close-ticket") {
+        closeIssueFromEdit(actionButton);
+        return;
+      }
+      if (action === "retry-photos") {
+        retryIssuePhotos();
+        return;
+      }
+      if (action === "retry-edit-categories") {
+        if (state.modalMode === "edit") loadCategoriesForEdit(host, state.modalId);
+        return;
+      }
       if (action === "more") {
         loadMoreIssues();
         return;
@@ -1417,6 +1580,7 @@
         state.modalMode = "";
         state.submitNotice = "";
         state.draft = null;
+        state.editDraft = null;
         state.wizardStep = 1;
         state.categoryLoading = false;
         state.categoryError = "";
@@ -1426,6 +1590,7 @@
         return;
       } else if (action === "edit-current") {
         state.modalMode = "edit";
+        state.editDraft = null;
       } else if (action === "progress" || action === "solve") {
         var current = state.rows.find(function (row) { return row.id === state.modalId; });
         if (current) current.status = action === "progress" ? "In Progress" : "Solved";
@@ -1489,6 +1654,7 @@
         state.modalMode = "";
         state.modalId = "";
         state.draft = null;
+        state.editDraft = null;
         state.wizardStep = 1;
         renderView();
       }
@@ -1502,6 +1668,248 @@
       "occurredAt", "dueAt", "problem", "assignee"].forEach(function (name) {
       if (values.has(name)) state.draft[name] = String(values.get(name) || "");
     });
+  }
+
+  function closeIssueFromEdit(button) {
+    var form = button.closest("[data-issue-edit-form]");
+    if (!form) return;
+    syncIssueEditDraft(form);
+    var issue = state.rows.find(function (row) { return row.dbId === form.dataset.issueEditForm; });
+    var direct = button.dataset.directClose === "true";
+    var note = form && form.elements.closeNote ? form.elements.closeNote.value.trim() : "";
+    if (!issue) {
+      state.submitError = "This ticket is no longer in the list. Close and reopen the register.";
+      renderView();
+      return;
+    }
+    if (direct && !note) {
+      state.submitError = "Add a reason before closing this ticket directly.";
+      renderView();
+      return;
+    }
+    if (!global.confirm("Close " + issue.id + (direct
+      ? " directly? The reason will be recorded in ticket history."
+      : " as verified?"))) return;
+
+    state.submitting = true;
+    state.submitError = "";
+    renderView();
+    global.Solar91PortalAPI.request("/api/issues/" + encodeURIComponent(issue.dbId) + "/close", {
+      method: "POST",
+      body: { note: note || null, direct: direct, closure: {} }
+    }).then(function (updated) {
+      var plantsById = {};
+      state.plants.forEach(function (plant) { plantsById[plant.dbId] = plant; });
+      var saved = mapApiIssue(updated, plantsById);
+      var index = state.rows.findIndex(function (row) { return row.dbId === saved.dbId; });
+      if (index !== -1) state.rows.splice(index, 1, saved);
+      state.submitting = false;
+      state.editDraft = null;
+      state.modalMode = "details";
+      state.modalId = saved.id;
+      state.submitNotice = saved.id + " closed.";
+      renderView();
+    }).catch(function (error) {
+      state.submitting = false;
+      state.submitError = error.message || "Could not close this ticket.";
+      renderView();
+    });
+  }
+
+  function syncIssueEditDraft(form) {
+    if (!form) return;
+    var draft = { id: form.dataset.issueEditForm };
+    ["equipment", "subpart", "supplierMaker", "serialNo", "unitCount", "assignedTo", "status",
+      "rootCause", "correctiveAction", "fixedOn", "resolutionRemark", "problem", "changeReason", "closeNote"]
+      .forEach(function (name) {
+        var control = form.elements[name];
+        if (control) draft[name] = control.value;
+      });
+    state.editDraft = draft;
+  }
+
+
+  // ── Ticket photos ────────────────────────────────────────────────────────
+  //
+  // Evidence goes through the shared /api/photos pipeline rather than raw bytes:
+  // each photo is downscaled in the browser (2048 px, WebP) before it is sent, stored
+  // as WebP with a 480 px thumbnail, and its full-resolution original is purged after
+  // the retention window while the thumbnail and the record remain. A list only ever
+  // loads thumbnails, and only as they are scrolled to.
+
+  function submissionIdFor() {
+    var evidence = photoEvidence();
+    return evidence ? evidence.submissionId() : String(Date.now()) + "-" + Math.random().toString(16).slice(2);
+  }
+
+  /**
+   * Send a ticket's photos. The submission id makes this safe to repeat: the server
+   * answers a repeat with the photos already saved instead of storing them twice, so a
+   * retry after a dropped connection cannot double the storage bill.
+   */
+  function uploadIssuePhotos(issue, files, submissionId) {
+    var evidence = photoEvidence();
+    if (!evidence) {
+      state.submitNotice = "Ticket saved. The photo uploader is still loading — open the ticket to add photos.";
+      return Promise.resolve(null);
+    }
+    state.pendingPhotos = null;
+    state.photoBusy[issue.id] = true;
+    return evidence.upload({
+      plantId: issue.plantId,
+      category: "issue",
+      linkType: "issue",
+      linkId: issue.id,
+      submissionId: submissionId,
+      files: files
+    }).then(function (result) {
+      state.photoBusy[issue.id] = false;
+      state.issuePhotos[issue.id] = (result && result.records) || [];
+      // photo_count is kept by the server across linked photos and legacy evidence alike.
+      // Take its number, and never guess one from this submission: a retry answers with the
+      // photos of that submission only, which is not the ticket's total.
+      if (result && typeof result.issue_photo_count === "number") {
+        issue.photoCount = result.issue_photo_count;
+      }
+      if (result && result.storage_warning && isStorageAdministrator()) {
+        state.submitNotice = result.storage_warning;
+      }
+      return result;
+    }).catch(function (error) {
+      state.photoBusy[issue.id] = false;
+      // The ticket stays. Keep the same submission id so the retry is the same submission.
+      state.pendingPhotos = {
+        ticket: issue.id, plantId: issue.plantId,
+        files: files, submissionId: submissionId
+      };
+      state.submitNotice = "Ticket " + issue.id + " was saved, but its photos did not upload: " +
+        (error.message || "the upload failed") + " You can retry the photos.";
+      return null;
+    });
+  }
+
+  function retryIssuePhotos() {
+    var pending = state.pendingPhotos;
+    if (!pending) return;
+    var issue = state.rows.find(function (row) { return row.id === pending.ticket; });
+    if (!issue) {
+      state.pendingPhotos = null;
+      state.submitNotice = "That ticket is no longer in the list. Reopen the register and add its photos there.";
+      renderView();
+      return;
+    }
+    state.submitNotice = "Retrying the photo upload…";
+    renderView();
+    uploadIssuePhotos(issue, pending.files, pending.submissionId).then(function (result) {
+      if (result) state.submitNotice = "Photos uploaded for " + issue.id + ".";
+      renderView();
+    });
+  }
+
+  function isStorageAdministrator() {
+    var user = global.Solar91PortalAPI && global.Solar91PortalAPI.currentUser
+      ? global.Solar91PortalAPI.currentUser() : null;
+    return !!user && ["O&M Head", "Administration"].indexOf(user.role) !== -1;
+  }
+
+  /** The ticket's photos, thumbnails only. Loaded once per ticket opened. */
+  function loadIssuePhotos(ticket) {
+    if (!ticket || state.issuePhotos[ticket] || state.photoBusy[ticket]) return;
+    if (!state.liveMode) return;
+    state.photoBusy[ticket] = true;
+    global.Solar91PortalAPI.request(
+      "/api/photos?link=issue&link_id=" + encodeURIComponent(ticket) + "&window=all&meta=false&limit=" + MAX_ISSUE_PHOTOS
+    ).then(function (result) {
+      state.photoBusy[ticket] = false;
+      state.issuePhotos[ticket] = (result && result.items) || [];
+      renderView();
+    }).catch(function (error) {
+      state.photoBusy[ticket] = false;
+      state.issuePhotos[ticket] = [];
+      state.photoError = error.message || "The ticket's photos could not be loaded.";
+      renderView();
+    });
+  }
+
+  function addIssuePhotos(ticket, files) {
+    var issue = state.rows.find(function (row) { return row.id === ticket; });
+    if (!issue || !files.length) return;
+    var already = (state.issuePhotos[ticket] || []).length;
+    if (already + files.length > MAX_ISSUE_PHOTOS) {
+      state.photoError = "A ticket carries at most " + MAX_ISSUE_PHOTOS + " photos; " +
+        already + " are already attached.";
+      renderView();
+      return;
+    }
+    state.photoError = "";
+    renderView();
+    uploadIssuePhotos(issue, files, submissionIdFor()).then(function () {
+      delete state.issuePhotos[ticket];
+      loadIssuePhotos(ticket);
+      renderView();
+    });
+  }
+
+  function removeIssuePhoto(ticket, photoId) {
+    if (!global.confirm("Remove this photo from " + ticket + "?")) return;
+    state.photoBusy[ticket] = true;
+    renderView();
+    global.Solar91PortalAPI.request("/api/photos/" + encodeURIComponent(photoId), { method: "DELETE" })
+      .then(function (result) {
+        state.photoBusy[ticket] = false;
+        state.issuePhotos[ticket] = (state.issuePhotos[ticket] || []).filter(function (photo) {
+          return photo.id !== photoId;
+        });
+        var issue = state.rows.find(function (row) { return row.id === ticket; });
+        if (issue && result && typeof result.issue_photo_count === "number") {
+          issue.photoCount = result.issue_photo_count;
+        }
+        renderView();
+      }).catch(function (error) {
+        state.photoBusy[ticket] = false;
+        state.photoError = error.message || "The photo could not be removed.";
+        renderView();
+      });
+  }
+
+  /** Thumbnails for the open ticket: lazy, with their own width/height so nothing shifts. */
+  function renderIssuePhotos(issue) {
+    var photos = state.issuePhotos[issue.id];
+    var busy = state.photoBusy[issue.id];
+    var canChange = state.canEdit && state.liveMode;
+    var body;
+    if (busy && !photos) {
+      body = '<p class="ep-issues__photo-status" role="status">Loading photos…</p>';
+    } else if (photos && photos.length) {
+      body = '<div class="ep-issues__photo-grid">' + photos.map(function (photo) {
+        return '<figure class="ep-issues__photo">' +
+          '<button type="button" class="ep-issues__photo-open" data-issue-photo-open="' +
+            escape(photo.id) + '" aria-label="Open photo ' + escape(photo.fileName || "") + '">' +
+            '<img data-photo-src="' + escape(photo.thumbnailUrl) + '" loading="lazy" width="' +
+              Math.max(1, Number(photo.width) || 480) + '" height="' +
+              Math.max(1, Number(photo.height) || 360) + '" alt="Evidence photo" />' +
+          '</button>' +
+          (canChange
+            ? '<button type="button" class="ep-issues__photo-remove" data-issue-photo-remove="' +
+              escape(photo.id) + '" aria-label="Remove this photo">Remove</button>'
+            : "") +
+        '</figure>';
+      }).join("") + '</div>';
+    } else {
+      body = '<p class="ep-issues__photo-status">No photos attached.</p>';
+    }
+    var room = MAX_ISSUE_PHOTOS - ((photos || []).length);
+    return '<section class="ep-issues__photos"><h4>Evidence photos</h4>' + body +
+      (state.photoError ? '<p class="ep-issues__photo-error" role="alert">' + escape(state.photoError) + '</p>' : "") +
+      (canChange && room > 0
+        ? '<label class="ep-issues__photo-add">+ Add photo' +
+          '<input type="file" accept="image/jpeg,image/png,image/webp" capture="environment" multiple' +
+          ' data-issue-photo-file="' + escape(issue.id) + '" /></label>'
+        : "") +
+      (state.pendingPhotos && state.pendingPhotos.ticket === issue.id
+        ? '<button type="button" class="ep-issues__button" data-issue-action="retry-photos">Retry photo upload</button>'
+        : "") +
+    '</section>';
   }
 
   function toUtcTimestamp(value, defaultTime) {
@@ -1523,14 +1931,16 @@
   function saveIssueEdit(form) {
     var api = global.Solar91PortalAPI;
     var issue = state.rows.find(function (row) { return row.dbId === form.dataset.issueEditForm; });
-    var errorEl = form.querySelector("[data-issue-edit-error]");
 
     function fail(message) {
-      if (errorEl) { errorEl.textContent = message; errorEl.hidden = false; }
+      state.submitError = message;
+      renderView();
     }
     if (!issue) return fail("This ticket is no longer in the list. Close and reopen the register.");
     if (!state.liveMode) return fail("This preview cannot save changes. Open the signed-in Solar91 O&M app.");
 
+    syncIssueEditDraft(form);
+    state.submitError = "";
     var read = function (name) { return (form.elements[name] && form.elements[name].value || "").trim(); };
     var units = parseInt(read("unitCount"), 10);
     var next = {
@@ -1549,6 +1959,9 @@
       unit_count: issue.unitCount === "" ? null : parseInt(issue.unitCount, 10),
       description: issue.problem
     };
+    if (next.vertical !== before.vertical && !categoryNames().includes(next.vertical)) {
+      return fail("Choose a configured category before changing the ticket category.");
+    }
     var payload = {};
     Object.keys(next).forEach(function (key) {
       if (next[key] !== before[key]) payload[key] = next[key];
@@ -1594,9 +2007,17 @@
         });
       });
       steps.push(function () {
-        var files = new FormData();
-        photos.forEach(function (file) { files.append("files", file, file.name); });
-        return api.request(base + "/evidence", { method: "POST", body: files }).then(function (uploaded) {
+        // The resolve call needs the evidence ids this endpoint returns, so these photos still
+        // post as files. They are downscaled first all the same: a fix photo costs the bucket
+        // the same 2048px WebP as any other, not a 5 MB camera original.
+        var evidence = photoEvidence();
+        var ready = evidence ? evidence.prepare(photos)
+          : Promise.resolve(photos.map(function (file) { return { blob: file, name: file.name }; }));
+        return ready.then(function (prepared) {
+          var files = new FormData();
+          prepared.forEach(function (item) { files.append("files", item.blob, item.name); });
+          return api.request(base + "/evidence", { method: "POST", body: files });
+        }).then(function (uploaded) {
           return api.request(base + "/resolve", {
             method: "POST",
             body: {
@@ -1620,12 +2041,13 @@
     if (!steps.length) {
       state.modalMode = "details";
       state.modalId = issue.id;
+      state.editDraft = null;
+      state.submitError = "";
       renderView();
       return;
     }
 
     state.submitting = true;
-    if (errorEl) errorEl.hidden = true;
     renderView();
     steps.reduce(function (chain, step) {
       return chain.then(function (previous) {
@@ -1639,6 +2061,8 @@
         var index = state.rows.findIndex(function (row) { return row.dbId === saved.dbId; });
         if (index !== -1) state.rows.splice(index, 1, saved);
         state.submitting = false;
+        state.submitError = "";
+        state.editDraft = null;
         state.modalMode = "details";
         state.modalId = saved.id;
         state.submitNotice = saved.id + " updated.";
@@ -1690,16 +2114,10 @@
       if (existing) state.rows.splice(state.rows.indexOf(existing), 1);
       state.rows.unshift(saved);
       if (!draft.evidenceFiles.length) return null;
-      var files = new FormData();
-      draft.evidenceFiles.forEach(function (file) { files.append("files", file, file.name); });
-      return api.request("/api/issues/" + encodeURIComponent(issue.id) + "/evidence", {
-        method: "POST",
-        body: files
-      }).then(function (evidence) {
-        saved.photoCount = evidence.length;
-      }).catch(function (error) {
-        state.submitNotice = "Ticket saved, but photo upload failed: " + error.message;
-      });
+      // The ticket is already saved. Photos go up separately, through the shared /api/photos
+      // pipeline: downscaled in the browser, stored as WebP with a 480 px thumbnail, and
+      // linked to the ticket by its number. If this fails the ticket still stands.
+      return uploadIssuePhotos(saved, draft.evidenceFiles, submissionIdFor());
     }).then(function () {
       state.submitting = false;
       var saved = state.rows[0];
@@ -1724,5 +2142,36 @@
    */
   function presetEquipment(equipment) { pendingEquipment = equipment || ""; }
 
-  global.Solar91PortalIssues = { render: render, presetEquipment: presetEquipment };
+  function openTicket(ticketNo, siteCode) {
+    if (!active || !ticketNo) return;
+    state.submitNotice = "";
+    var url = "/api/issues?vertical=Inverter&status=open&limit=200";
+    var scopedCode = siteCode || (active.context && active.context.plantCode) || "";
+    if (scopedCode) url += "&site_code=" + encodeURIComponent(scopedCode);
+    Promise.all([
+      global.Solar91PortalAPI.request(url),
+      global.Solar91PortalAPI.plants()
+    ]).then(function (result) {
+      var issues = result[0];
+      state.plants = result[1];
+      var issue = issues.find(function (row) { return row.ticket_no === ticketNo; });
+      if (!issue) throw new Error("The ticket is not in the latest 200 open inverter issues for this plant.");
+      var plantsById = {};
+      state.plants.forEach(function (plant) { plantsById[plant.dbId] = plant; });
+      var mapped = mapApiIssue(issue, plantsById);
+      if (!state.rows.some(function (row) { return row.dbId === mapped.dbId; })) state.rows.unshift(mapped);
+      state.modalId = mapped.id;
+      state.modalMode = "details";
+      renderView();
+    }).catch(function (error) {
+      state.submitNotice = "Could not open ticket " + ticketNo + ": " + (error.message || "please retry.");
+      renderView();
+    });
+  }
+
+  global.Solar91PortalIssues = {
+    render: render,
+    presetEquipment: presetEquipment,
+    openTicket: openTicket
+  };
 }(window));

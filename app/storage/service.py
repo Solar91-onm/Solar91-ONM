@@ -84,15 +84,97 @@ class SupabaseStorage:
     def remove(self, paths: list[str]) -> None:
         if not paths:
             return
-        url = f"{self.base}/object/{quote(self.bucket, safe='')}"
         try:
-            response = get_storage_http_client().request(
-                "DELETE", url,
-                headers={**self.headers, "Content-Type": "application/json"},
-                json={"prefixes": paths},
-                timeout=20.0,
-            )
-            response.raise_for_status()
+            self._remove(paths)
         except httpx.HTTPError:
-            # Metadata removal still proceeds; a later maintenance job can clean orphaned objects.
+            # Existing workflows treat orphan cleanup as best effort.
             return
+
+    def remove_strict(self, paths: list[str]) -> None:
+        if not paths:
+            return
+        try:
+            self._remove(paths)
+        except httpx.HTTPError as exc:
+            raise HTTPException(502, "Could not remove photo evidence from Supabase Storage") from exc
+
+    def _remove(self, paths: list[str]) -> None:
+        url = f"{self.base}/object/{quote(self.bucket, safe='')}"
+        response = get_storage_http_client().request(
+            "DELETE", url,
+            headers={**self.headers, "Content-Type": "application/json"},
+            json={"prefixes": paths},
+            timeout=20.0,
+        )
+        response.raise_for_status()
+
+    def usage_bytes(self) -> int:
+        """Return the size of all objects in the configured private bucket."""
+        url = f"{self.base}/object/list/{quote(self.bucket, safe='')}"
+        pending = [""]
+        total = 0
+        try:
+            while pending:
+                prefix = pending.pop()
+                offset = 0
+                while True:
+                    response = get_storage_http_client().post(
+                        url,
+                        headers={**self.headers, "Content-Type": "application/json"},
+                        json={"prefix": prefix, "limit": 1000, "offset": offset},
+                    )
+                    response.raise_for_status()
+                    rows = response.json()
+                    if not isinstance(rows, list):
+                        raise ValueError("Unexpected Storage listing response")
+                    for row in rows:
+                        if not isinstance(row, dict) or not isinstance(row.get("name"), str):
+                            raise ValueError("Unexpected Storage object entry")
+                        metadata = row.get("metadata") or {}
+                        if row.get("id") is None and not metadata.get("size"):
+                            pending.append(prefix + row["name"].strip("/") + "/")
+                            continue
+                        size = metadata.get("size", row.get("size"))
+                        if size is None:
+                            raise ValueError("Storage object size is missing")
+                        total += int(size)
+                    if len(rows) < 1000:
+                        break
+                    offset += len(rows)
+        except (httpx.HTTPError, ValueError, TypeError) as exc:
+            raise HTTPException(502, "Could not verify photo storage usage") from exc
+        return total
+
+    def object_sizes(self, paths: list[str]) -> dict[str, int]:
+        """Return listed sizes for specific object paths without downloading their bytes."""
+        requested = set(paths)
+        sizes: dict[str, int] = {}
+        parents = {path.rpartition("/")[0] + "/" for path in requested if "/" in path}
+        url = f"{self.base}/object/list/{quote(self.bucket, safe='')}"
+        try:
+            for prefix in parents:
+                offset = 0
+                while True:
+                    response = get_storage_http_client().post(
+                        url,
+                        headers={**self.headers, "Content-Type": "application/json"},
+                        json={"prefix": prefix, "limit": 1000, "offset": offset},
+                    )
+                    response.raise_for_status()
+                    rows = response.json()
+                    if not isinstance(rows, list):
+                        raise ValueError("Unexpected Storage listing response")
+                    for row in rows:
+                        if not isinstance(row, dict) or not isinstance(row.get("name"), str):
+                            raise ValueError("Unexpected Storage object entry")
+                        path = prefix + row["name"]
+                        metadata = row.get("metadata") or {}
+                        size = metadata.get("size", row.get("size"))
+                        if path in requested and size is not None:
+                            sizes[path] = int(size)
+                    if len(rows) < 1000:
+                        break
+                    offset += len(rows)
+        except (httpx.HTTPError, ValueError, TypeError) as exc:
+            raise HTTPException(502, "Could not read photo object sizes from Storage") from exc
+        return sizes

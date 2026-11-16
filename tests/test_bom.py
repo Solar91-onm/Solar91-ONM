@@ -403,9 +403,9 @@ def test_migration_041_renames_maker_adds_supplier_and_backfills_section_order()
     assert "on bom_items (plant_id, section_order, sort_order)" in sql
     assert "(plant_id, section, sort_order)" not in sql
     assert "enable row level security" in sql and "from anon" in sql and "from authenticated" in sql
-    # 041 is the latest migration; nothing else claims that number.
+    # 041 claims its number uniquely; later migrations (e.g. photo retention) build on top of it.
     assert len([p for p in MIGRATIONS.glob("041*.sql")]) == 1
-    assert max(p.name for p in MIGRATIONS.glob("0*.sql")).startswith("041")
+    assert int(max(p.name.split("_")[0] for p in MIGRATIONS.glob("0*.sql"))) >= 41
 
     columns = BomItem.__table__.c
     assert "maker_supplier" not in columns

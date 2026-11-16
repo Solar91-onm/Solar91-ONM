@@ -23,8 +23,8 @@
     security: [],
     liasoning: ["table-sort"],
     bom: ["table-sort"],
-    "site-issues": ["table-sort", "register-io"],
-    "operations-calendar": ["register-io"],
+    "site-issues": ["table-sort", "register-io", "photo-evidence"],
+    "operations-calendar": ["register-io", "photo-evidence"],
     settings: ["categories"]
   };
 

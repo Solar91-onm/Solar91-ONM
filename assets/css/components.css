@@ -1270,6 +1270,99 @@
 .ep-overview-notice.is-error { border-color: #f1a7a1; background: #fdf1f0; color: #8a1c13; }
 .ep-overview-notice button { padding: 4px 10px; border: 1px solid currentColor; border-radius: 999px; background: transparent; color: inherit; font: inherit; font-weight: 600; cursor: pointer; }
 
+/* Standalone Dashboard drill-down; deliberately not a tab-view. */
+.ep-inverter-health[hidden] { display: none; }
+.ep-inverter-health {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  overflow: auto;
+  background: var(--ep-bg-page);
+  color: var(--ep-text);
+}
+.ep-ih { min-height: 100%; }
+.ep-ih__header {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ep-s-4);
+  padding: 16px clamp(16px, 3vw, 36px);
+  border-bottom: 1px solid var(--ep-border);
+  background: var(--ep-bg);
+  box-shadow: var(--ep-shadow-sm);
+}
+.ep-ih__header h1 { margin: 0; color: var(--ep-text-strong); font-size: 20px; font-weight: 650; }
+.ep-ih__header p { margin: 4px 0 0; color: var(--ep-text-muted); font-size: var(--ep-fs-sm); }
+.ep-ih__close {
+  width: 38px; height: 38px; flex: 0 0 38px;
+  border: 1px solid var(--ep-border); border-radius: var(--ep-radius-md);
+  background: var(--ep-bg); color: var(--ep-text-strong); font-size: 25px; line-height: 1; cursor: pointer;
+}
+.ep-ih__content { display: grid; gap: var(--ep-s-4); max-width: 1800px; margin: 0 auto; padding: 22px clamp(14px, 3vw, 36px) 36px; }
+.ep-ih__summary { display: grid; grid-template-columns: minmax(190px, 1.3fr) repeat(3, minmax(130px, .75fr)) minmax(280px, 1.5fr); gap: var(--ep-s-3); }
+.ep-ih__summary > .ep-panel { min-height: 112px; padding: 16px; }
+.ep-ih__ring-card { align-items: center; justify-content: center; gap: 8px; }
+.ep-ih__donut {
+  display: flex; width: 76px; height: 76px; flex-direction: column; align-items: center; justify-content: center;
+  border-radius: 50%; background: conic-gradient(var(--ep-accent) var(--ep-ih-running), var(--ep-red-soft) 0);
+  position: relative; color: var(--ep-text-strong);
+}
+.ep-ih__donut::before { content: ""; position: absolute; inset: 7px; border-radius: 50%; background: var(--ep-bg); }
+.ep-ih__donut strong, .ep-ih__donut span { position: relative; z-index: 1; }
+.ep-ih__donut strong { font-size: 20px; line-height: 1.1; }
+.ep-ih__donut span { color: var(--ep-text-muted); font-size: 10px; }
+.ep-ih__donut-caption { margin: 0; color: var(--ep-text-muted); font-size: var(--ep-fs-xs); text-align: center; }
+.ep-ih__stat { justify-content: center; gap: 8px; }
+.ep-ih__stat > span, .ep-ih__severity > span { color: var(--ep-text-muted); font-size: var(--ep-fs-sm); }
+.ep-ih__stat strong { color: var(--ep-text-strong); font-size: 26px; font-variant-numeric: tabular-nums; }
+.ep-ih__stat small { color: var(--ep-text-muted); font-size: var(--ep-fs-xs); }
+.ep-ih__green { color: var(--ep-accent-strong) !important; }
+.ep-ih__red { color: var(--ep-red) !important; }
+.ep-ih__severity { justify-content: center; gap: 12px; }
+.ep-ih__severity > div { display: flex; flex-wrap: wrap; gap: 8px; }
+.ep-ih__severity > div > span { display: inline-flex; align-items: center; gap: 5px; }
+.ep-ih__severity b { color: var(--ep-text-strong); font-size: var(--ep-fs-sm); }
+.ep-ih__reason, .ep-ih__notice { margin: 0; color: var(--ep-text-muted); font-size: var(--ep-fs-sm); }
+.ep-ih__notice { padding: 9px 12px; border: 1px solid var(--ep-border); border-radius: var(--ep-radius-md); background: var(--ep-bg); }
+.ep-ih__notice--error, .ep-ih__save-status.is-error { color: var(--ep-red); }
+.ep-ih__plant-table tbody tr[data-ih-plant-row] { cursor: pointer; }
+.ep-ih__plant-table .ep-bar { min-width: 110px; }
+.ep-ih__plant-table .ep-bar__value { min-width: 42px; }
+.ep-ih__tickets { min-width: 1420px; }
+.ep-ih__description { display: -webkit-box; max-width: 300px; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; white-space: normal; }
+.ep-ih__ticket { padding: 0; border: 0; background: transparent; color: var(--ep-accent-strong); font: inherit; font-weight: 650; text-decoration: underline; cursor: pointer; }
+.ep-ih__toolbar { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px 16px; }
+.ep-ih__toolbar input, .ep-ih__toolbar select, .ep-ih__settings input {
+  min-height: 34px; padding: 6px 9px; border: 1px solid var(--ep-border); border-radius: var(--ep-radius-md);
+  background: var(--ep-bg); color: var(--ep-text); font: inherit; font-size: var(--ep-fs-sm);
+}
+.ep-ih__toolbar input { width: min(320px, 100%); }
+.ep-ih__button {
+  padding: 6px 10px; border: 1px solid var(--ep-border); border-radius: var(--ep-radius-md);
+  background: var(--ep-bg); color: var(--ep-text-strong); font: inherit; font-size: var(--ep-fs-sm); cursor: pointer;
+}
+.ep-ih__button:disabled { opacity: .6; cursor: wait; }
+.ep-ih__empty { display: grid; justify-items: center; gap: 4px; padding: 25px; color: var(--ep-accent-strong); }
+.ep-ih__empty span { color: var(--ep-text-muted); font-size: var(--ep-fs-sm); }
+.ep-ih__settings summary { padding: 14px 18px; color: var(--ep-text-strong); font-weight: 600; cursor: pointer; }
+.ep-ih__settings[open] summary { border-bottom: 1px solid var(--ep-border-soft); }
+.ep-ih__settings input { width: 100px; }
+.ep-ih__save-status { min-height: 18px; margin: 10px 18px; color: var(--ep-accent-strong); font-size: var(--ep-fs-sm); }
+@media (max-width: 1100px) {
+  .ep-ih__summary { grid-template-columns: repeat(3, minmax(130px, 1fr)); }
+  .ep-ih__severity { grid-column: span 2; }
+}
+@media (max-width: 650px) {
+  .ep-ih__summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ep-ih__severity { grid-column: span 2; }
+  .ep-ih__header h1 { font-size: 18px; }
+  .ep-ih__content { padding-top: 14px; }
+  .ep-ih__toolbar input { width: 100%; }
+}
+
 /* ── Sortable column headings ──────────────────────────────────────────
    A heading is a button carrying the label and a pair of arrows. Both arrows
    are faint until the column is the one in use, when the arrow pointing the

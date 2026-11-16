@@ -5,7 +5,7 @@ from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Index, Integer, JSON, Numeric, String, Text, UniqueConstraint, func, text
+from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Index, Integer, JSON, Numeric, SmallInteger, String, Text, UniqueConstraint, func, text
 from sqlalchemy.orm import Mapped, mapped_column, validates
 
 from app.core.database import Base
@@ -82,14 +82,28 @@ class SitePhoto(Base):
     file_name: Mapped[str] = mapped_column(String(255), nullable=False)
     content_type: Mapped[str] = mapped_column(String(80), nullable=False)
     size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    thumbnail_size_bytes: Mapped[int | None] = mapped_column(Integer)
+    width: Mapped[int | None] = mapped_column(Integer)
+    height: Mapped[int | None] = mapped_column(Integer)
+    phase: Mapped[str | None] = mapped_column(String(10))
+    slot: Mapped[int | None] = mapped_column(SmallInteger)
+    original_purged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # Browser-generated id of one submission (and the photo's position in it): a retried or double-tapped
     # upload returns the photos already saved instead of storing them twice. Migration 031.
     submission_id: Mapped[uuid.UUID | None] = mapped_column()
     submission_index: Mapped[int | None] = mapped_column(Integer)
     # set in Python as well, so a new row has its time without a read-back query (and gallery cursors are exact)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), server_default=func.now(), nullable=False)
-    __table_args__ = (Index("ix_site_photos_plant_created", "plant_id", "created_at"),
-                      Index("ux_site_photos_submission", "uploaded_by", "submission_id", "submission_index", unique=True))
+    __table_args__ = (
+        Index("ix_site_photos_plant_created", "plant_id", "created_at"),
+        Index("ux_site_photos_submission", "uploaded_by", "submission_id", "submission_index", unique=True),
+        Index("ux_site_photos_washing_slot", "link_type", "link_id", "phase", "slot", unique=True,
+              postgresql_where=text("link_type = 'washing' AND phase IS NOT NULL"),
+              sqlite_where=text("link_type = 'washing' AND phase IS NOT NULL")),
+        Index("ix_site_photos_retention", "created_at",
+              postgresql_where=text("original_purged_at IS NULL AND thumbnail_path IS NOT NULL"),
+              sqlite_where=text("original_purged_at IS NULL AND thumbnail_path IS NOT NULL")),
+    )
 
 class UserPlantAssignment(Base):
     __tablename__ = "user_plant_assignments"

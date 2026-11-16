@@ -13,11 +13,11 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.core.database import get_db, release_connection
-from app.core.models import Issue, IssueHistory, OMTask, Plant, User, UserPlantAssignment
+from app.core.models import Issue, IssueHistory, OMTask, Plant, SitePhoto, User, UserPlantAssignment
 from app.core.security import ensure_plant_scope, has_portfolio_scope, get_current_user, is_head, require_csrf, require_permission, text_is_current_user, user_scoped_plant_ids
 from app.issues import importer as issue_importer
 from app.issues.deadlines import deadline_settings, save_deadline_hours
-from app.issues.repository import IssueRepository
+from app.issues.repository import OPEN_ISSUE_STATUSES, IssueRepository
 from app.issues.schemas import AssignmentRequest, BulkAssignRequest, CloseRequest, StepBackRequest, IssueCommentCreate, IssueCreate, IssueDatesUpdate, IssueDeadlinesUpdate, IssueETCUpdate, IssueOut, IssueStatusRequest, IssueStepCreate, IssueStepUpdate, IssueUpdate, IssueDeleteRequest, IssueRestoreRequest, ProgressRequest, ResolveRequest, ReopenRequest, normalize_issue_severity
 from app.issues.service import IssueService
 from app.storage.service import SupabaseStorage
@@ -120,11 +120,10 @@ def equipment_summary(db:Annotated[Session,Depends(get_db)],user:Annotated[User,
     Scope is the caller's: a role without portfolio scope sees only its assigned plants, and a plant with no open
     ticket in this category is simply absent.
     """
-    open_states=("Open","Assigned","Acknowledged","In Progress","Pending Vendor","Pending Parts/Vendor")
     units=func.sum(func.coalesce(Issue.unit_count,1))
     stmt=(select(Plant.site_code,func.count(Issue.id),units)
           .join(Plant,Plant.id==Issue.plant_id)
-          .where(Issue.deleted_at.is_(None),Issue.status.in_(open_states))
+          .where(Issue.deleted_at.is_(None),Issue.status.in_(OPEN_ISSUE_STATUSES))
           .group_by(Plant.site_code))
     if vertical:
         stmt=stmt.where(func.lower(Issue.vertical)==vertical.casefold())
@@ -281,6 +280,9 @@ def upload_issue_evidence(issue_id:UUID,db:Annotated[Session,Depends(get_db)],us
         if len(data)>max_bytes: raise HTTPException(413,f"Each photo must be no larger than {get_settings().max_upload_mb} MB")
         if len(data)<32: raise HTTPException(422,"A selected photo is empty or invalid")
         prepared.append((file,data,content_type,accepted[content_type]))
+    # Checks are done: hand the pooled connection back before the Storage uploads, which are slow
+    # on a field connection. Holding it here is what makes the portal feel hung for other users.
+    release_connection(db)
     storage=SupabaseStorage()
     uploaded=[]
     try:
@@ -294,7 +296,10 @@ def upload_issue_evidence(issue_id:UUID,db:Annotated[Session,Depends(get_db)],us
                 "storage_path":path,"url":f"/api/issues/{row.id}/evidence/{evidence_id}",
             })
         row.legacy_payload={**(row.legacy_payload or {}),"evidence":existing+uploaded}
-        row.photo_count=len(existing)+len(uploaded)
+        linked_count = db.scalar(select(func.count(SitePhoto.id)).where(
+            SitePhoto.link_type == "issue", SitePhoto.link_id == row.ticket_no
+        )) or 0
+        row.photo_count=int(linked_count)+len(existing)+len(uploaded)
         row.updated_at=datetime.now(timezone.utc)
         db.add(IssueHistory(issue_id=row.id,action="issue.evidence_uploaded",note=f"Uploaded {len(uploaded)} evidence photo(s)",actor_id=user.id,actor_name=user.display_name,metadata_json={"evidence_ids":[entry["id"] for entry in uploaded]}))
         db.commit()

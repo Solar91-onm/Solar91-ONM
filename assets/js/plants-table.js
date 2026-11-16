@@ -22,7 +22,7 @@
   var loadPromise = null;
   var loaded = false;
   var searchTimer = null;
-  var mode = { kind: "all", siteCode: null };
+  var mode = { kind: "all", siteCode: null, merged: false };
   var detailSection = "details";
   var ui = { search: "", spv: "__all", district: "__all", sort: { key: "code", dir: "asc" }, columnFilters: {} };
   var DETAIL_SECTIONS = ["details", "design-mdl", "liasoning", "bom"];
@@ -150,6 +150,14 @@
   function canUseColumnFilters() {
     var user = global.Solar91PortalAPI && global.Solar91PortalAPI.currentUser();
     return !!(user && ["O&M Head", "Assignee"].indexOf(user.role) !== -1);
+  }
+
+  function editButton(siteCode) {
+    return canEdit()
+      ? '<button class="ep-pt__edit" type="button" data-edit-plant="' + fmt.escape(siteCode) + '">' +
+          '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"></path><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"></path></svg>' +
+          "Edit</button>"
+      : "";
   }
 
   function columnFilterOptions(key) {
@@ -304,6 +312,9 @@
         ? '<a class="ep-pt__loc" href="' + fmt.escape(cameraUrl) + '" target="_blank" rel="noopener" aria-label="Open CCTV feed for ' +
             fmt.escape(p.displayName || p.plantName) + '" title="Open CCTV feed">View</a>'
         : '<span class="ep-pt__cctv-placeholder">Add link</span>') + "</td>";
+    var editCell = mode.merged
+      ? dash("Plant editing is available above the table")
+      : (canEdit() ? editButton(p.siteCode) : dash("Your role cannot edit plant records"));
     return "" +
       "<tr>" +
         codeCell +
@@ -322,13 +333,7 @@
         locationCell +
         cctvCell +
         '<td class="mono">' + fmt.escape(lastActivity(entry.profile)) + "</td>" +
-        '<td class="num">' +
-          (canEdit()
-            ? '<button class="ep-pt__edit" type="button" data-edit-plant="' + p.siteCode + '">' +
-                '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"></path><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"></path></svg>' +
-                "Edit</button>"
-            : dash("Your role cannot edit plant records")) +
-        "</td>" +
+        '<td class="num">' + editCell + "</td>" +
       "</tr>";
   }
 
@@ -388,10 +393,24 @@
     renderTable(container);
   }
 
+  function detailsCollapseKey(siteCode) {
+    var user = global.Solar91PortalAPI && global.Solar91PortalAPI.currentUser();
+    var userKey = user && (user.id || user.email) || "unknown";
+    return "solar91.plantDetailsCollapsed.v1." + encodeURIComponent(userKey) + "." +
+      encodeURIComponent(siteCode);
+  }
+
+  function plantDetailsCollapsed(siteCode) {
+    try { return global.localStorage.getItem(detailsCollapseKey(siteCode)) === "true"; }
+    catch (error) { return false; }
+  }
+
   function renderTable(container) {
     var rows = visibleRows();
     var single = mode.kind === "single";
     var plant = single && rows[0] ? rows[0].plant : null;
+    var merged = single && mode.merged && detailSection === "details";
+    var collapsed = merged && plant ? plantDetailsCollapsed(plant.siteCode) : false;
 
     var title = single
       ? (plant ? fmt.escape(plant.displayName || plant.plantName) + " · " +
@@ -408,57 +427,77 @@
           ? "All " + allRows.length + " plants"
           : rows.length + " of " + allRows.length + " plants");
 
-    container.innerHTML = "" +
-      '<div class="ep-pt">' +
-        '<div class="ep-pt__head">' +
+    var pageHeader = merged
+      ? '<div class="ep-pt__head"><h1 class="ep-pt__title">' +
+          (plant ? fmt.escape(plant.displayName || plant.plantName) : "Plant Details") +
+          '</h1><p class="ep-pt__sub">' +
+          (plant ? fmt.escape(plant.siteCode) + " · " + fmt.escape(plant.district || "—") +
+            " · " + fmt.escape(plant.discom || "—") : "") +
+          "</p></div>"
+      : '<div class="ep-pt__head">' +
           '<h1 class="ep-pt__title">' + title + "</h1>" +
           '<p class="ep-pt__sub">' + subtitle + "</p>" +
-        "</div>" +
+        "</div>";
 
-        (detailSection === "details"
-          ? '<div class="ep-pt__card">' +
-          // One plant has nothing to search, filter or sort.
-          (single ? "" : toolbarHTML()) +
-          (single ? "" :
-            '<div class="ep-pt__meta">' +
-              '<span class="ep-pt__count">' + countLine + "</span>" +
-              '<span class="ep-pt__spacer"></span>' +
-              '<button class="ep-pt__export" type="button" data-pt-export="csv">' +
-                '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><path d="m7 10 5 5 5-5"></path><path d="M12 15V3"></path></svg>CSV' +
-              "</button>" +
-              '<button class="ep-pt__export" type="button" data-pt-export="excel">' +
-                '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><path d="m7 10 5 5 5-5"></path><path d="M12 15V3"></path></svg>Excel' +
-              "</button>" +
-            "</div>") +
-
-          '<div class="ep-pt__table-wrap">' +
-            '<div class="ep-pt__scroll" data-pt-scroll tabindex="0" role="region" aria-label="' +
-              (single ? "Plant details" : "Plant details table; scroll vertically to see more plants") + '">' +
-              '<table class="ep-pt__table">' +
-              "<thead><tr>" +
-                // One plant has nothing to order, so its headings stay plain.
+    var table = '<div class="ep-pt__table-wrap">' +
+      '<div class="ep-pt__scroll" data-pt-scroll tabindex="0" role="region" aria-label="' +
+        (single ? "Plant details" : "Plant details table; scroll vertically to see more plants") + '">' +
+        '<table class="ep-pt__table">' +
+        "<thead><tr>" +
+          (single
+            ? COLUMNS.map(function (c) {
+                return "<th" + (c.align === "num" ? ' class="num"' : "") + ">" + c.label + "</th>";
+              }).join("")
+            : COLUMNS.map(columnHeaderHTML).join("")) +
+        "</tr></thead>" +
+        "<tbody>" +
+          (rows.length
+            ? rows.map(rowHTML).join("")
+            : '<tr><td colspan="' + COLUMNS.length + '" class="ep-pt__empty">' +
                 (single
-                  ? COLUMNS.map(function (c) {
-                      return "<th" + (c.align === "num" ? ' class="num"' : "") + ">" + c.label + "</th>";
-                    }).join("")
-                  : COLUMNS.map(columnHeaderHTML).join("")) +
-              "</tr></thead>" +
-              "<tbody>" +
-                (rows.length
-                  ? rows.map(rowHTML).join("")
-                  : '<tr><td colspan="' + COLUMNS.length + '" class="ep-pt__empty">' +
-                      (single
-                        ? "This plant was not found, or it is outside your assigned scope."
-                        : "No plants match these filters.") +
-                    "</td></tr>") +
-              "</tbody>" +
-              "</table>" +
-            "</div>" +
-          "</div>" +
-        "</div>"
-          : '<section class="ep-pt__detail-empty" data-detail-section="' +
-            detailSection + '" aria-label="' + fmt.escape(DETAIL_SECTION_LABELS[detailSection]) + '"></section>') +
+                  ? "This plant was not found, or it is outside your assigned scope."
+                  : "No plants match these filters.") +
+              "</td></tr>") +
+        "</tbody>" +
+        "</table>" +
+      "</div>" +
+    "</div>";
+
+    var card;
+    if (detailSection === "details" && merged) {
+      card = '<section class="ep-pt__card ep-pd__details-card">' +
+        '<header class="ep-pd__details-head">' +
+          '<button type="button" class="ep-pd__details-toggle" data-plant-details-toggle aria-expanded="' +
+            !collapsed + '"><span>Plant details</span>' +
+            '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg></button>' +
+          '<span class="ep-pd__record-count">1 record</span><span class="ep-pt__spacer"></span>' +
+          (plant ? editButton(plant.siteCode) : "") +
+        '</header><div class="ep-pd__details-body"' + (collapsed ? " hidden" : "") + ">" +
+          table +
+        "</div></section>";
+    } else if (detailSection === "details") {
+      card = '<div class="ep-pt__card">' +
+        (single ? "" : toolbarHTML()) +
+        (single ? "" :
+          '<div class="ep-pt__meta">' +
+            '<span class="ep-pt__count">' + countLine + "</span>" +
+            '<span class="ep-pt__spacer"></span>' +
+            '<button class="ep-pt__export" type="button" data-pt-export="csv">' +
+              '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><path d="m7 10 5 5 5-5"></path><path d="M12 15V3"></path></svg>CSV' +
+            "</button>" +
+            '<button class="ep-pt__export" type="button" data-pt-export="excel">' +
+              '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><path d="m7 10 5 5 5-5"></path><path d="M12 15V3"></path></svg>Excel' +
+            "</button>" +
+          "</div>") +
+        table +
       "</div>";
+    } else {
+      card = '<section class="ep-pt__detail-empty" data-detail-section="' +
+        detailSection + '" aria-label="' + fmt.escape(DETAIL_SECTION_LABELS[detailSection]) + '"></section>';
+    }
+
+    container.innerHTML = '<div class="ep-pt' + (merged ? " ep-pt--merged" : "") + '">' +
+      pageHeader + card + "</div>";
 
     wire(container);
   }
@@ -472,7 +511,8 @@
       loaded = false;
       show(container, {
         siteCode: mode.kind === "single" ? mode.siteCode : null,
-        section: detailSection
+        section: detailSection,
+        merged: mode.merged
       });
     });
   }
@@ -541,6 +581,20 @@
   function wire(container) {
     wireColumnFilterMenus(container);
 
+    container.querySelectorAll("[data-plant-details-toggle]").forEach(function (button) {
+      button.addEventListener("click", function () {
+        var body = container.querySelector(".ep-pd__details-body");
+        if (!body) return;
+        var expanded = body.hidden;
+        body.hidden = !expanded;
+        button.setAttribute("aria-expanded", String(expanded));
+        var plant = mode.siteCode;
+        try {
+          global.localStorage.setItem(detailsCollapseKey(plant), String(!expanded));
+        } catch (error) {}
+      });
+    });
+
     var search = container.querySelector("[data-pt-search]");
     if (search) {
       search.addEventListener("input", function () {
@@ -604,7 +658,8 @@
       ? opts.section : "details";
     mode = {
       kind: (opts && opts.siteCode) ? "single" : "all",
-      siteCode: opts ? opts.siteCode : null
+      siteCode: opts ? opts.siteCode : null,
+      merged: !!(opts && opts.merged)
     };
     // BOM is its own page (parts inventory); it reads /api/bom, not the plant catalogue.
     if (detailSection === "bom" && global.Solar91PortalBom) {

@@ -22,18 +22,20 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.core.database import get_db, release_connection
 from app.core.fastjson import json_response
-from app.core.models import InventoryItem, Issue, OMTask, Plant, SitePhoto, User, WashingDailyReport, WashingTable
+from app.core.models import AuditLog, InventoryItem, Issue, IssueHistory, OMTask, Plant, SitePhoto, User, WashingConfig, WashingDailyReport, WashingTable
 from app.core.security import get_current_user, require_csrf, user_scoped_plant_ids, ensure_plant_scope
 from app.photos.imaging import PhotoSettings, header_matches, optimize_photo
 from app.storage.service import SupabaseStorage
+from app.storage.usage import adjust_bucket_usage, bucket_usage_bytes
 
 router = APIRouter(prefix="/api/photos", tags=["Photo Intelligence"])
 CATEGORIES = {"issue", "pm", "washing", "inventory", "safety", "other"}
 LINK_TYPES = {"issue", "pm", "washing", "inventory"}
 EXTENSIONS = {"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp"}
 MAX_FILES = 10
+MAX_ISSUE_PHOTOS = 4   # one ticket's evidence; the Raise issue form offers the same four
 MAX_SIZE = 15 * 1024 * 1024
-PHOTO_WINDOW = timedelta(days=30)
+PHOTO_STORAGE_FULL = "Photo storage is full — contact an administrator."
 
 
 def _role(user: User, write=False):
@@ -87,7 +89,13 @@ def _row(photo: SitePhoto, plant: Plant) -> dict:
             "expiresAt": None, "status": "processed", "issue": issue,
             "linkType": photo.link_type, "linkId": photo.link_id,
             "inventoryId": photo.link_id if photo.link_type == "inventory" else "",
-            "fileName": photo.file_name, "fileSize": photo.size_bytes, "previewUrl": None}
+            "fileName": photo.file_name, "fileSize": photo.size_bytes, "previewUrl": None,
+            "thumbnailUrl": f"/api/photos/{photo.id}/image?size=thumb",
+            "originalUrl": f"/api/photos/{photo.id}/image?size=original",
+            "thumbnailSizeBytes": photo.thumbnail_size_bytes,
+            "width": photo.width, "height": photo.height,
+            "originalPurgedAt": photo.original_purged_at.isoformat() if photo.original_purged_at else None,
+            "phase": photo.phase, "slot": photo.slot}
 
 
 @router.get("/plants")
@@ -129,7 +137,8 @@ def links(db: Annotated[Session, Depends(get_db)], user: Annotated[User, Depends
 @router.get("")
 def list_photos(db: Annotated[Session, Depends(get_db)], user: Annotated[User, Depends(get_current_user)],
                 plant: str = "all", q: str = "", category: str = "all", uploader: str = "all", issue: str = "all",
-                link: str = "all", window: str = "30d", sort: str = "newest", offset: int = Query(0, ge=0, le=5000), limit: int = Query(60, ge=1, le=120),
+                link: str = "all", link_id: str | None = Query(None, max_length=120),
+                window: str = "30d", sort: str = "newest", offset: int = Query(0, ge=0, le=5000), limit: int = Query(60, ge=1, le=120),
                 meta: bool = True, cursor: str | None = Query(None, max_length=200)):
     _role(user)
     allowed = user_scoped_plant_ids(db, user)
@@ -149,6 +158,8 @@ def list_photos(db: Annotated[Session, Depends(get_db)], user: Annotated[User, D
     elif issue == "unlinked": stmt = stmt.where(SitePhoto.link_type.is_(None))
     elif issue != "all": stmt = stmt.where(SitePhoto.link_type == "issue", SitePhoto.link_id == issue)
     if link != "all": stmt = stmt.where(SitePhoto.link_type == link)
+    if link_id is not None:
+        stmt = stmt.where(SitePhoto.link_id == link_id.strip())
     if q.strip():
         words = q.strip().split()[:8]
         for word in words:
@@ -214,6 +225,92 @@ def _valid_uuid(s):
     except (ValueError, AttributeError): return False
 
 
+def _admin(user: User) -> None:
+    if not user.is_active or user.role not in {"O&M Head", "Administration"}:
+        raise HTTPException(403, "Administrator access is required")
+
+
+@router.get("/storage-usage")
+def storage_usage(db: Annotated[Session, Depends(get_db)], user: Annotated[User, Depends(get_current_user)],
+                  refresh: bool = False):
+    _admin(user)
+    release_connection(db)
+    settings = get_settings()
+    if not settings.storage_configured:
+        # Not a failure: show the admin screen a clear configured=false state rather than an error.
+        return {
+            "configured": False, "used_bytes": None,
+            "capacity_bytes": 1_000_000_000,
+            "warn_bytes": settings.storage_warn_bytes,
+            "block_bytes": settings.storage_block_bytes,
+        }
+    used = bucket_usage_bytes(SupabaseStorage(), force_refresh=refresh)
+    return {
+        "configured": True, "used_bytes": used,
+        "capacity_bytes": 1_000_000_000,
+        "warn_bytes": settings.storage_warn_bytes,
+        "block_bytes": settings.storage_block_bytes,
+    }
+
+
+@router.post("/retention/purge", dependencies=[Depends(require_csrf)])
+def manual_retention_purge(db: Annotated[Session, Depends(get_db)], user: Annotated[User, Depends(get_current_user)]):
+    _admin(user)
+    from app.photos.retention import purge_photo_originals
+
+    return purge_photo_originals(db, dry_run=False)
+
+
+@router.delete("/{photo_id}", dependencies=[Depends(require_csrf)])
+def delete_photo(photo_id: uuid.UUID, db: Annotated[Session, Depends(get_db)],
+                 user: Annotated[User, Depends(get_current_user)]):
+    _role(user, write=True)
+    photo = db.get(SitePhoto, photo_id)
+    if photo is None:
+        raise HTTPException(404, "Photo not found")
+    plant = _plant(db, user, photo.plant_id)
+    link_type, link_id = photo.link_type, photo.link_id
+    if photo.link_type == "washing":
+        report = _check_washing_photo_write(db, user, link_id)
+        report.evidence = [
+            entry for entry in (report.evidence or [])
+            if not isinstance(entry, dict) or entry.get("photo_id") != str(photo.id)
+        ]
+    elif photo.link_type == "issue":
+        issue = db.scalar(select(Issue).where(Issue.ticket_no == link_id, Issue.deleted_at.is_(None)))
+        if issue is None or issue.plant_id != plant.id:
+            raise HTTPException(404, "Linked issue was not found")
+        db.add(IssueHistory(
+            issue_id=issue.id, action="issue.photo_removed",
+            note="Removed linked evidence photo", actor_id=user.id,
+            actor_name=user.display_name, metadata_json={"photo_id": str(photo_id)},
+        ))
+    elif photo.link_type == "washing":
+        db.add(AuditLog(
+            user_id=user.id, actor_name=user.display_name,
+            action="Removed washing photo evidence", module="Washing",
+            entity_type="washing_daily_report", entity_id=str(link_id),
+            metadata_json={"photo_id": str(photo_id)},
+        ))
+    release_connection(db)
+    paths = [path for path in (photo.storage_path, photo.thumbnail_path) if path]
+    db.delete(photo)
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    storage = SupabaseStorage()
+    warning = None
+    try:
+        storage.remove_strict(paths)
+        adjust_bucket_usage(storage, -photo.size_bytes - int(photo.thumbnail_size_bytes or 0))
+    except HTTPException as exc:
+        warning = exc.detail
+    issue_photo_count = _sync_issue_photo_count(db, link_id) if link_type == "issue" else None
+    return {"deleted": True, "cleanup_warning": warning, "issue_photo_count": issue_photo_count}
+
+
 @router.get("/{photo_id}")
 def detail(photo_id: uuid.UUID, db: Annotated[Session, Depends(get_db)], user: Annotated[User, Depends(get_current_user)]):
     _role(user)
@@ -230,17 +327,59 @@ def image(photo_id: uuid.UUID, db: Annotated[Session, Depends(get_db)], user: An
     obj = db.get(SitePhoto, photo_id)
     if not obj: raise HTTPException(404, "Photo not found")
     _plant(db, user, obj.plant_id)
-    path = obj.thumbnail_path if size == "thumb" and obj.thumbnail_path else obj.storage_path
+    original_purged = size == "original" and obj.original_purged_at is not None
+    path = obj.thumbnail_path if (size == "thumb" or original_purged) and obj.thumbnail_path else obj.storage_path
     release_connection(db)  # a gallery fetches several thumbnails at once; none of them may hold a pooled connection
     contents, mime = SupabaseStorage().download(path)
-    return Response(content=contents, media_type=mime, headers={"Cache-Control":"private, no-store", "X-Content-Type-Options":"nosniff"})
+    headers = {"Cache-Control": "private, max-age=31536000, immutable", "X-Content-Type-Options": "nosniff"}
+    if original_purged:
+        headers["X-Photo-Original-Purged"] = "true"
+    return Response(content=contents, media_type=mime, headers=headers)
 
 
-def _photo_settings() -> PhotoSettings:
+def _photo_settings(category: str = "") -> PhotoSettings:
     s = get_settings()
+    field_evidence = category.casefold() in {"washing", "issue"}
     return PhotoSettings(max_side=max(256, s.photo_max_side), quality=min(95, max(40, s.photo_webp_quality)),
-                         thumb_side=max(160, min(s.photo_thumb_side, s.photo_max_side)),
-                         thumb_quality=min(90, max(30, s.photo_thumb_quality)), method=min(6, max(0, s.photo_webp_method)))
+                         thumb_side=480 if field_evidence else max(160, min(s.photo_thumb_side, s.photo_max_side)),
+                         thumb_quality=65 if field_evidence else min(90, max(30, s.photo_thumb_quality)),
+                         method=min(6, max(0, s.photo_webp_method)))
+
+
+def _check_washing_photo_write(db: Session, user: User, link_id: str | None) -> WashingDailyReport:
+    try:
+        report_id = uuid.UUID(link_id or "")
+    except ValueError:
+        raise HTTPException(422, "Choose a valid module cleaning report") from None
+    report = db.get(WashingDailyReport, report_id)
+    if report is None:
+        raise HTTPException(404, "Daily module cleaning report not found")
+    config = db.get(WashingConfig, report.plant_id)
+    from app.scheduled.washing_cycles import _can_access_plant, _can_add_washing_evidence
+
+    if not config or not _can_access_plant(db, user, report.plant_id, config):
+        raise HTTPException(403, "This module cleaning report is outside your plant scope")
+    if not _can_add_washing_evidence(user, report, config):
+        raise HTTPException(403, "Only the report submitter, the O&M Head or this plant's module cleaning Assignee can add evidence before review")
+    return report
+
+
+def _sync_issue_photo_count(db: Session, ticket_no: str | None) -> int | None:
+    if not ticket_no:
+        return None
+    issue = db.scalar(select(Issue).where(Issue.ticket_no == ticket_no).with_for_update())
+    if issue is None:
+        return None
+    linked_count = db.scalar(select(func.count(SitePhoto.id)).where(
+        SitePhoto.link_type == "issue", SitePhoto.link_id == ticket_no
+    )) or 0
+    legacy_count = len([
+        entry for entry in (issue.legacy_payload or {}).get("evidence", [])
+        if isinstance(entry, dict)
+    ])
+    issue.photo_count = int(linked_count) + legacy_count
+    db.commit()
+    return issue.photo_count
 
 
 def _upload_size(file: UploadFile) -> int:
@@ -263,7 +402,8 @@ def _existing_submission(db: Session, user: User, submission: uuid.UUID, plant: 
 def create_photos(db: Annotated[Session, Depends(get_db)], user: Annotated[User, Depends(get_current_user)],
                   plant_id: uuid.UUID = Form(...), category: str = Form(...), description: str = Form(""),
                   tags: str = Form("[]"), link_type: str = Form(""), link_id: str = Form(""),
-                  submission_id: uuid.UUID | None = Form(None),
+                  submission_id: uuid.UUID | None = Form(None), phase: str | None = Form(None),
+                  slot: int | None = Form(None),
                   files: list[UploadFile] = File(...)):
     _role(user, write=True)
     plant = _plant(db, user, plant_id)
@@ -277,6 +417,43 @@ def create_photos(db: Annotated[Session, Depends(get_db)], user: Annotated[User,
     if submission_id and (saved := _existing_submission(db, user, submission_id, plant)) is not None:
         return JSONResponse({"records": saved, "persisted": True, "duplicate": True}, status_code=200)
     kind, ref = _resolve_link(db, plant.id, link_type, link_id)
+    phase = (phase or "").strip().lower() or None
+    washing_report = None
+    if kind == "washing":
+        if phase is not None or slot is not None:
+            if category != "washing" or phase not in {"before", "after"} or slot is None:
+                raise HTTPException(422, "Module cleaning photos require category, phase and slot")
+            if slot not in {1, 2}:
+                occupied = sorted(db.scalars(select(SitePhoto.slot).where(
+                    SitePhoto.link_type == "washing", SitePhoto.link_id == ref,
+                    SitePhoto.phase == phase, SitePhoto.slot.is_not(None)
+                )))
+                used = ", ".join(str(value) for value in occupied) or "none"
+                raise HTTPException(409, f"Only slots 1 and 2 are available for {phase}; occupied slots: {used}")
+            if len(files) != 1:
+                raise HTTPException(409, f"Upload one photo at a time to {phase} slot {slot}")
+            washing_report = _check_washing_photo_write(db, user, ref)
+        elif category == "other":
+            # A generic evidence attachment (no slot) through the daily-report evidence endpoint:
+            # the stricter submitter/O&M-Head/Assignee-before-review rule still applies.
+            washing_report = _check_washing_photo_write(db, user, ref)
+        # category == "washing" with no phase/slot: a direct link from Photo Intelligence,
+        # not a slotted evidence upload — the plant scope check above is enough.
+    elif phase is not None or slot is not None:
+        raise HTTPException(422, "Photo phase and slot are only valid for module cleaning")
+    if kind == "issue":
+        # A ticket carries at most four photos. The form caps it too, but a cap only the
+        # browser applies is not a cap: this is what keeps the bucket's per-ticket cost fixed.
+        attached = db.scalar(select(func.count(SitePhoto.id)).where(
+            SitePhoto.link_type == "issue", SitePhoto.link_id == ref
+        )) or 0
+        if attached + len(files) > MAX_ISSUE_PHOTOS:
+            raise HTTPException(
+                409,
+                f"A ticket can carry {MAX_ISSUE_PHOTOS} photos; {attached} are already attached",
+            )
+    if category == "washing" and kind != "washing":
+        raise HTTPException(422, "Module cleaning photos must be linked to a daily report")
     # Cheap checks of every file (type, size, magic bytes) before anything is decoded or stored.
     for file in files:
         mime = (file.content_type or "").lower()
@@ -287,11 +464,29 @@ def create_photos(db: Annotated[Session, Depends(get_db)], user: Annotated[User,
         head = file.file.read(16); file.file.seek(0)
         if not header_matches(mime, head): raise HTTPException(415, "The selected file is not a valid JPEG, PNG, or WebP photo")
     # Checks are done: hand the pooled connection back while photos are decoded and sent to Storage.
+    replacing = None
+    if kind == "washing":
+        if phase is not None:
+            replacing = db.scalar(select(SitePhoto).where(
+                SitePhoto.link_type == "washing", SitePhoto.link_id == ref,
+                SitePhoto.phase == phase, SitePhoto.slot == slot
+            ))
     release_connection(db)
-    settings = _photo_settings()
+    settings = _photo_settings(category)
     storage = SupabaseStorage()
+    usage = bucket_usage_bytes(storage)
     uploaded: list[str] = []
     records: list[SitePhoto] = []
+    old_paths = [path for path in (
+        replacing.storage_path if replacing else None,
+        replacing.thumbnail_path if replacing else None,
+    ) if path]
+    replaced_bytes = 0
+    if replacing:
+        replaced_bytes = (0 if replacing.original_purged_at else replacing.size_bytes) + int(replacing.thumbnail_size_bytes or 0)
+    projected_usage = usage
+    if replacing:
+        projected_usage = max(0, projected_usage - replaced_bytes)
     try:
         # One photo at a time: only one original and its WebP copies are in memory, never the whole batch.
         for index, file in enumerate(files):
@@ -300,6 +495,10 @@ def create_photos(db: Annotated[Session, Depends(get_db)], user: Annotated[User,
             file.file.close()
             photo = optimize_photo(data, mime, settings)
             del data
+            projected_usage += len(photo.data) + len(photo.thumbnail)
+            app_settings = get_settings()
+            if projected_usage > app_settings.storage_block_bytes:
+                raise HTTPException(507, PHOTO_STORAGE_FULL)
             photo_id = uuid.uuid4()
             path = f"site-photos/{plant.id}/{photo_id}.webp"
             storage.upload(path, photo.data, photo.content_type)
@@ -307,17 +506,73 @@ def create_photos(db: Annotated[Session, Depends(get_db)], user: Annotated[User,
             thumb_path = f"site-photo-thumbnails/{plant.id}/{photo_id}.webp"
             storage.upload(thumb_path, photo.thumbnail, "image/webp")
             uploaded.append(thumb_path)
+            if replacing is not None:
+                db.delete(replacing)
+                db.flush()
+                replacing = None
             records.append(SitePhoto(id=photo_id, plant_id=plant.id, uploaded_by=user.id,
                             uploader_name=user.display_name, category=category, description=description.strip(),
                             tags=parsed_tags, link_type=kind, link_id=ref, storage_path=path, thumbnail_path=thumb_path,
                             file_name=(file.filename or "photo")[:255], content_type=photo.content_type, size_bytes=len(photo.data),
+                            thumbnail_size_bytes=len(photo.thumbnail), width=photo.width, height=photo.height,
+                            phase=phase if kind == "washing" else None, slot=slot if kind == "washing" else None,
                             submission_id=submission_id, submission_index=index if submission_id else None))
             del photo
         db.add_all(records)
         db.flush()
+        issue_photo_count = None
+        if kind == "washing" and washing_report:
+            retained = list(washing_report.evidence or [])
+            if phase is not None:
+                retained = [
+                    entry for entry in retained
+                    if not isinstance(entry, dict) or not (
+                        entry.get("phase") == phase and entry.get("slot") == slot
+                    )
+                ]
+            washing_report.evidence = retained + [{
+                "id": str(photo.id),
+                "photo_id": str(photo.id),
+                "phase": photo.phase,
+                "kind": photo.phase or "other",
+                "slot": photo.slot,
+                "at": photo.created_at.isoformat(),
+                "by": user.display_name,
+                "name": photo.file_name,
+                "size": photo.size_bytes,
+            } for photo in records]
+            db.add(AuditLog(
+                user_id=user.id, actor_name=user.display_name,
+                action="Uploaded washing photo evidence", module="Washing",
+                entity_type="washing_daily_report", entity_id=str(ref),
+                metadata_json={"photo_ids": [str(photo.id) for photo in records]},
+            ))
+        if kind == "issue":
+            issue = db.scalar(select(Issue).where(Issue.ticket_no == ref))
+            if issue:
+                db.add(IssueHistory(
+                    issue_id=issue.id, action="issue.evidence_uploaded",
+                    note=f"Uploaded {len(records)} evidence photo(s)",
+                    actor_id=user.id, actor_name=user.display_name,
+                    metadata_json={"photo_ids": [str(photo.id) for photo in records]},
+                ))
+            issue_photo_count = _sync_issue_photo_count(db, ref)
         result = [_row(x, plant) for x in records]
         db.commit()
-        return {"records": result, "persisted": True}
+        added_bytes = sum(record.size_bytes + int(record.thumbnail_size_bytes or 0) for record in records)
+        adjust_bucket_usage(storage, added_bytes)
+        cleanup_warning = None
+        if old_paths:
+            try:
+                storage.remove_strict(old_paths)
+                adjust_bucket_usage(storage, -replaced_bytes)
+            except HTTPException as exc:
+                cleanup_warning = exc.detail
+        warning = "Photo storage is nearing its limit. Contact an administrator." if projected_usage > get_settings().storage_warn_bytes else None
+        return {
+            "records": result, "persisted": True, "storage_warning": warning,
+            "cleanup_warning": cleanup_warning, "issue_photo_count": issue_photo_count,
+        }
     except IntegrityError:
         # the same submission finished first in a parallel request: keep that one, discard this copy
         db.rollback()

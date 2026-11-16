@@ -7,6 +7,11 @@ from app.core.models import Issue, Plant, User
 from app.issues.schemas import SEVERITY_STORED_AS
 from app.plants.codes import normalize_site_code
 
+OPEN_ISSUE_STATUSES = (
+    "Open", "Assigned", "Acknowledged", "In Progress", "Pending Vendor",
+    "Pending Parts/Vendor",
+)
+
 
 class IssueRepository:
     def __init__(self, db: Session):
@@ -35,7 +40,10 @@ class IssueRepository:
             text_conditions = [func.lower(func.coalesce(Issue.assignee_text, "")).like(f"%{x.lower()}%") for x in identities if x]
             stmt = stmt.where(or_(Issue.assigned_to == assigned_user.id, *text_conditions))
         if plant_id: stmt = stmt.where(Issue.plant_id == plant_id)
-        if status: stmt = stmt.where(Issue.status == status)
+        if status == "open":
+            stmt = stmt.where(Issue.status.in_(OPEN_ISSUE_STATUSES))
+        elif status:
+            stmt = stmt.where(Issue.status == status)
         if severity: stmt = stmt.where(Issue.severity.in_(SEVERITY_STORED_AS.get(severity, (severity,))))
         if assignee: stmt = stmt.where(Issue.assignee_text == assignee)
         if vertical: stmt = stmt.where(Issue.vertical == vertical)

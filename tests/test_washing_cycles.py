@@ -13,7 +13,7 @@ from app.core.models import (
     WashingTable,
 )
 from app.scheduled.washing_cycles import check_cycle_compliance_alerts, check_missed_monthly_targets
-from tests.conftest import grant_assignee_plants, login_user
+from tests.conftest import grant_assignee_plants, login_user, tiny_png_bytes
 from tests import conftest
 
 
@@ -298,14 +298,14 @@ def test_photo_kind_is_stored_for_before_and_after(client, db, monkeypatch):
     _setup_cycle_users(client, db, plant)
     _engineer(client, db, plant)
     report = client.post(f"{BASE}/daily-reports", json={"plant_id": str(plant.id), "job_status": "Done", "tables_cleaned": 2}).json()
-    png = b"\x89PNG\r\n\x1a\n" + b"0" * 64
+    png = tiny_png_bytes()
     before = client.post(f"{BASE}/daily-reports/{report['id']}/evidence", files=[("files", ("b.png", png, "image/png"))], data={"kind": "before"})
     after = client.post(f"{BASE}/daily-reports/{report['id']}/evidence", files=[("files", ("a.png", png, "image/png"))], data={"kind": "after"})
     assert before.status_code == 200 and before.json()[0]["kind"] == "before"
     assert after.status_code == 200 and after.json()[0]["kind"] == "after"
     saved_photo = client.get(f"{BASE}/daily-reports/{report['id']}/evidence/{before.json()[0]['id']}")
-    assert saved_photo.status_code == 200 and saved_photo.content.startswith(b"\x89PNG")
-    assert len(storage.objects) == 2
+    assert saved_photo.status_code == 200 and saved_photo.content[:4] == b"RIFF" and saved_photo.content[8:12] == b"WEBP"
+    assert len(storage.objects) == 4  # original + thumbnail for each of the two photos
     bad = client.post(f"{BASE}/daily-reports/{report['id']}/evidence", files=[("files", ("x.png", png, "image/png"))], data={"kind": "selfie"})
     assert bad.status_code == 422
     overview = client.get(f"{BASE}/overview").json()
@@ -315,9 +315,12 @@ def test_photo_kind_is_stored_for_before_and_after(client, db, monkeypatch):
 
 def _stub_washing_storage(monkeypatch):
     import app.scheduled.router as scheduled_router
+    import app.photos.router as photos_router
 
     class FakeStorage:
         objects = {}
+        base = "https://storage.test"
+        bucket = "photos"
 
         def upload(self, path, data, content_type):
             self.objects[path] = (data, content_type)
@@ -325,16 +328,25 @@ def _stub_washing_storage(monkeypatch):
         def download(self, path):
             return self.objects[path]
 
+        def usage_bytes(self):
+            return sum(len(data) for data, _content_type in self.objects.values())
+
         def remove(self, paths):
             for path in paths:
                 self.objects.pop(path, None)
 
+        def remove_strict(self, paths):
+            self.remove(paths)
+
     monkeypatch.setattr(scheduled_router, "SupabaseStorage", FakeStorage)
+    monkeypatch.setattr(photos_router, "SupabaseStorage", FakeStorage)
+    from app.storage.usage import clear_bucket_usage_cache
+    clear_bucket_usage_cache()
     return FakeStorage()
 
 
 def _upload_washing_photos(client, report_id):
-    png = b"\x89PNG\r\n\x1a\n" + b"0" * 64
+    png = tiny_png_bytes()
     before = client.post(
         f"{BASE}/daily-reports/{report_id}/evidence",
         files=[("files", ("before.png", png, "image/png"))],

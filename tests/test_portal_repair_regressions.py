@@ -19,7 +19,7 @@ from sqlalchemy import select
 from app.core.models import Issue, OMTask, Plant, UserPlantAssignment
 from app.core.timeutil import business_today
 from tests import conftest
-from tests.conftest import grant_assignee_plants, login_user
+from tests.conftest import grant_assignee_plants, login_user, tiny_png_bytes
 
 ROOT = Path(__file__).resolve().parents[1]
 WASH = "/api/scheduled/washing"
@@ -57,9 +57,12 @@ def test_identical_resubmission_returns_the_same_ticket(client, db):
 
 def _stub_storage(monkeypatch):
     import app.scheduled.router as scheduled_router
+    import app.photos.router as photos_router
 
     class FakeStorage:
         objects = {}
+        base = "https://storage.test"
+        bucket = "photos"
 
         def upload(self, path, data, content_type):
             self.objects[path] = (data, content_type)
@@ -67,15 +70,24 @@ def _stub_storage(monkeypatch):
         def download(self, path):
             return self.objects[path]
 
+        def usage_bytes(self):
+            return sum(len(data) for data, _content_type in self.objects.values())
+
         def remove(self, paths):
             for path in paths:
                 self.objects.pop(path, None)
 
+        def remove_strict(self, paths):
+            self.remove(paths)
+
     monkeypatch.setattr(scheduled_router, "SupabaseStorage", FakeStorage)
+    monkeypatch.setattr(photos_router, "SupabaseStorage", FakeStorage)
+    from app.storage.usage import clear_bucket_usage_cache
+    clear_bucket_usage_cache()
 
 
 def _photo(client, report_id, kind):
-    png = b"\x89PNG\r\n\x1a\n" + b"0" * 64
+    png = tiny_png_bytes()
     return client.post(f"{WASH}/daily-reports/{report_id}/evidence",
                        files=[("files", (f"{kind}.png", png, "image/png"))], data={"kind": kind})
 
