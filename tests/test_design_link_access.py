@@ -27,8 +27,8 @@ def test_allowed_roles_receive_the_link(role):
     assert can_view_design_link(_user(role))
     fields = visible_custom_fields(FIELDS, _user(role))
     assert fields["design_link"] == FIELDS["design_link"]
-    assert ("security_guard" in fields) == (role in {"O&M Head", "Administration"})
-    assert ("security_contacts" in fields) == (role in {"O&M Head", "Administration"})
+    assert ("security_guard" in fields) == (role in {"O&M Head", "Assignee", "Administration"})
+    assert ("security_contacts" in fields) == (role in {"O&M Head", "Assignee", "Administration"})
 
 
 @pytest.mark.parametrize("role", ["Site Engineer", "Viewer", "Unknown"])
@@ -68,6 +68,6 @@ def test_portal_plant_payload_is_redacted_per_role():
 
 
 @pytest.mark.parametrize("role", ["O&M Head", "Administration"])
-def test_security_guard_details_are_visible_only_to_authorized_portfolio_roles(role):
+def test_security_guard_details_are_visible_only_to_authorized_operational_roles(role):
     assert visible_custom_fields(FIELDS, _user(role))["security_guard"] == FIELDS["security_guard"]
     assert visible_custom_fields(FIELDS, _user(role))["security_contacts"] == FIELDS["security_contacts"]

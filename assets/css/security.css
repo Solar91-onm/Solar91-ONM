@@ -164,6 +164,84 @@
   font-size: var(--ep-fs-sm);
 }
 .ep-security__notice.is-error { color: var(--ep-red); }
+.ep-security__notice[hidden] { display: none; }
+
+/* Moving a person to another plant: selection first, then a plant and a confirm naming both
+   codes. Deliberately not drag and drop -- a drag across a long register mis-drops. */
+.ep-security__move-open {
+  flex: 0 0 auto;
+  min-height: 24px;
+  padding: 0 8px;
+  border: 1px solid var(--ep-border);
+  border-radius: 999px;
+  background: var(--ep-bg-elev);
+  color: var(--ep-text-muted);
+  font: inherit;
+  font-size: 10px;
+  font-weight: 650;
+  cursor: pointer;
+}
+.ep-security__move-open:hover { background: var(--ep-bg-muted); color: var(--ep-text-strong); }
+.ep-security__move-open:disabled { opacity: .55; cursor: not-allowed; }
+.ep-security__move-blocked {
+  flex: 0 0 auto;
+  color: var(--ep-text-muted);
+  font-size: 10px;
+  white-space: nowrap;
+}
+.ep-security__move {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid var(--ep-border);
+  border-radius: var(--ep-radius-sm);
+  background: var(--ep-bg-subtle);
+}
+.ep-security__move label { display: grid; gap: 3px; min-width: 0; }
+.ep-security__move-label { color: var(--ep-text-muted); font-size: 10px; font-weight: 650; }
+.ep-security__move select {
+  width: 100%;
+  min-width: 0;
+  min-height: 30px;
+  padding: 4px 6px;
+  border: 1px solid var(--ep-border);
+  border-radius: var(--ep-radius-sm);
+  background: var(--ep-bg);
+  color: var(--ep-text);
+  font: inherit;
+  font-size: var(--ep-fs-xs);
+}
+.ep-security__move-confirm {
+  margin: 0;
+  color: var(--ep-text);
+  font-size: var(--ep-fs-xs);
+  overflow-wrap: anywhere;
+}
+.ep-security__move-actions { display: flex; gap: 6px; }
+.ep-security__move-confirm-btn, .ep-security__move-cancel {
+  min-height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--ep-border-strong);
+  border-radius: var(--ep-radius-sm);
+  background: var(--ep-bg-elev);
+  color: var(--ep-text);
+  font: inherit;
+  font-size: var(--ep-fs-xs);
+  font-weight: 650;
+  cursor: pointer;
+}
+.ep-security__move-confirm-btn {
+  border-color: var(--ep-accent);
+  background: var(--ep-accent);
+  color: var(--ep-text-inverse);
+}
+.ep-security__move-confirm-btn:hover { background: var(--ep-accent-strong); }
+.ep-security__move-cancel:hover { background: var(--ep-bg-muted); }
+.ep-security__move-confirm-btn:disabled, .ep-security__move-cancel:disabled {
+  opacity: .55;
+  cursor: not-allowed;
+}
 .ep-security__overlay {
   position: fixed;
   inset: 0;

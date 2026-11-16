@@ -376,6 +376,7 @@
     { key: "plant", label: "Plant", sort: (row) => row.plant.siteCode },
     { key: "inverter", label: "Inverter", sort: (row) => (row.config && row.config.maker) || "" },
     { key: "running", label: "Running", align: "num", sort: (row) => row.running },
+    { key: "issuedesc", label: "Issue description", sort: (row) => row.issueDesc || "" },
     { key: "percent", label: "Health", align: "num", sort: (row) => row.percent },
     { key: "tickets", label: "Tickets", align: "num", sort: (row) => row.tickets }
   ];
@@ -383,7 +384,7 @@
   const ICON_INVERTER_LARGE = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"></rect><path d="M13 7l-4 6h3l-1 4 4-6h-3l1-4z"></path></svg>`;
   const INVERTER_HISTORY_KEY = "solar91InverterHealthOpen";
   const OPEN_INVERTER_STATUSES = [
-    "Open", "Assigned", "Acknowledged", "In Progress", "Pending Vendor", "Pending Parts/Vendor"
+    "Open", "Assigned", "Acknowledged", "In Progress", "Pending Vendor", "Pending Parts/Vendor", "Pending Closure"
   ];
 
   function inverterPlantScope() {
@@ -438,7 +439,11 @@
       if (!code || !codes.has(code)) return;
       const count = ticketCounts.get(code) || { open: 0, units: 0 };
       count.open += 1;
-      count.units += ticket.unit_count == null ? 1 : Number(ticket.unit_count) || 0;
+      // Only count units toward "down" when equipment_running is explicitly false (Breakdown).
+      // Running (true) or unset (null) tickets are open but do NOT reduce the running count.
+      if (ticket.equipment_running === false) {
+        count.units += ticket.unit_count == null ? 1 : Number(ticket.unit_count) || 0;
+      }
       ticketCounts.set(code, count);
     });
 
@@ -553,6 +558,7 @@
   function inverterTicketsByPlant() {
     const byPlant = new Map();
     scopedInverterTickets().forEach((ticket) => {
+      if (ticket.equipment_running !== false) return;
       const plant = inverterDetailsPlant(ticket);
       if (!plant) return;
       const list = byPlant.get(plant.siteCode);
@@ -569,6 +575,17 @@
   }
 
   function inverterPlantRows(totals) {
+    // Build a lookup from site code → breakdown ticket descriptions for the Issue description column.
+    const descByPlant = new Map();
+    inverterHealth.tickets.forEach((ticket) => {
+      if (ticket.equipment_running !== false) return;  // only Breakdown tickets
+      const plant = inverterDetailsPlant(ticket);
+      const code = plant ? plant.siteCode : "";
+      if (!code) return;
+      const list = descByPlant.get(code) || [];
+      if (ticket.description) list.push(ticket.description);
+      descByPlant.set(code, list);
+    });
     return inverterPlantScope().map((plant) => {
       const config = totals.configs.get(plant.siteCode);
       const count = totals.plantCounts.get(plant.siteCode) || totals.ticketCounts.get(plant.siteCode) || { open: 0, units: 0 };
@@ -576,7 +593,8 @@
       const down = total === null ? null : Math.min(Number(count.units) || 0, total);
       const running = total === null ? null : total - down;
       const percent = total ? Math.round(running / total * 100) : null;
-      return { plant, config, total, down, running, percent, tickets: Number(count.open) || 0 };
+      const descList = descByPlant.get(plant.siteCode) || [];
+      return { plant, config, total, down, running, percent, tickets: Number(count.open) || 0, issueDesc: descList };
     }).sort((a, b) => {
       if (a.percent === null && b.percent !== null) return 1;
       if (b.percent === null && a.percent !== null) return -1;
@@ -694,16 +712,27 @@
             aria-expanded="${isOpen}" title="${isOpen ? "Hide" : "Show"} the open inverter tickets for this plant"
             >${fmt.formatNumber(row.tickets)}<span aria-hidden="true">${isOpen ? "▾" : "▸"}</span></button>`
         : fmt.formatNumber(row.tickets);
+      // Issue description column: most recent breakdown ticket description + "+N more" overflow.
+      const descList = row.issueDesc || [];
+      const issueDescCell = descList.length === 0
+        ? `<td><span class="ep-text-faint ep-ih__issuedesc">No issues</span></td>`
+        : (() => {
+            const first = descList[0];
+            const more = descList.length > 1 ? ` <span class="ep-ih__issuedesc-more">+${descList.length - 1} more</span>` : "";
+            const full = descList.join("\n");
+            return `<td><span class="ep-ih__issuedesc" title="${fmt.escape(full)}">${fmt.escape(first)}${more}</span></td>`;
+          })();
       // A plant with no unit configuration says so once, across the three cells that would
       // otherwise repeat it.
       const configuredCells = `
         <td><span class="ep-ih__stack"><span class="ep-ih__stack-main">${inverterFactCell(row.config && row.config.maker)}</span>
           <span class="ep-ih__stack-sub">${fmt.escape(fmt.decimalText(row.config && row.config.capacity_kw) || "—")} kW</span></span></td>
         <td class="num"><span class="ep-ih__ratio">${row.down ? `<span class="ep-hint-light ep-hint-light--red" aria-hidden="true"></span>` : ""}<b>${fmt.formatNumber(row.running)}</b><span>/ ${fmt.formatNumber(row.total)}</span></span></td>
+        ${issueDescCell}
         <td class="num">${inverterPercentCell(row.percent)}</td>`;
       const main = `<tr data-ih-plant-row="${fmt.escape(code)}" tabindex="0" role="button" aria-label="Filter tickets to ${fmt.escape(row.plant.displayName || row.plant.plantName)}">
         <td><div class="ep-plant-cell"><span class="ep-plant-cell__name">${fmt.escape(row.plant.displayName || row.plant.plantName)}</span><span class="ep-plant-cell__code">${fmt.escape(row.plant.displayCode || row.plant.siteCode)}</span></div></td>
-        ${isConfigured ? configuredCells : `<td class="ep-ih__unset" colspan="3">Not configured</td>`}
+        ${isConfigured ? configuredCells : `<td class="ep-ih__unset" colspan="4">Not configured</td>`}
         <td class="num${row.tickets > 0 ? " ep-ih__tickets-open" : ""}">${ticketCell}</td>
       </tr>`;
       return main + (isOpen && open.length ? inverterDownRows(code, open) : "");
@@ -910,16 +939,21 @@
   // The per-plant health table, exported with the same columns in the same order as on screen.
   function exportInverterPlantCsv() {
     const columns = ["Plant", "Site code", "Total inverters", "Maker", "Capacity (kW)",
-      "Running", "Not running", "Running %", "Open tickets"];
-    const values = sortedInverterPlantRows().map((row) => [
-      row.plant.displayName || row.plant.plantName, row.plant.siteCode,
-      row.config ? row.total : "Not configured",
-      (row.config && row.config.maker) || "",
-      fmt.decimalText(row.config && row.config.capacity_kw),
-      row.config ? row.running : "Not configured",
-      row.config ? row.down : "Not configured",
-      row.percent === null ? "" : row.percent + "%",
-      row.tickets]);
+      "Running", "Not running", "Issue description", "Running %", "Open tickets"];
+    const values = sortedInverterPlantRows().map((row) => {
+      const descList = row.issueDesc || [];
+      const descText = descList.length ? descList.join("; ") : "";
+      return [
+        row.plant.displayName || row.plant.plantName, row.plant.siteCode,
+        row.config ? row.total : "Not configured",
+        (row.config && row.config.maker) || "",
+        fmt.decimalText(row.config && row.config.capacity_kw),
+        row.config ? row.running : "Not configured",
+        row.config ? row.down : "Not configured",
+        descText,
+        row.percent === null ? "" : row.percent + "%",
+        row.tickets];
+    });
     downloadCsv("inverter-health-plants.csv", columns, values);
   }
 
@@ -1094,24 +1128,25 @@
   }
 
   /** One request each, both optional: the tile degrades to what the role may read. */
-  function loadInverters() {
+  function loadInverters(force) {
     const api = global.Solar91PortalAPI;
-    if (!api || inverters.loaded) return;
+    if (!api || (inverters.loaded && !force)) return Promise.resolve();
+    if (force) {
+      inverters.units = [];
+      inverters.issues = [];
+      inverters.unitsRestricted = false;
+    }
     inverters.loaded = true;
-    // The unit configuration is open to the O&M Head and Assignees only; other roles still
-    // get the open-ticket half of the tile.
-    api.request("/api/pm-plan/unit-config").then((body) => {
+    const unitsRequest = api.request("/api/pm-plan/unit-config").then((body) => {
       inverters.units = (body && body.configs) || [];
-      render();
     }).catch(() => {
       inverters.unitsRestricted = true;
-      render();
     });
     // Counts per plant, not the tickets themselves: the tile needs how many units are affected.
-    api.request("/api/issues/equipment-summary?vertical=Inverter").then((body) => {
+    const summaryRequest = api.request("/api/issues/equipment-summary?vertical=Inverter").then((body) => {
       inverters.issues = (body && body.plants) || [];
-      render();
     }).catch(() => {});
+    return Promise.all([unitsRequest, summaryRequest]).then(() => { render(); });
   }
 
   // ─── Rendering helpers ───────────────────────────────────────────────
@@ -1719,6 +1754,14 @@
   global.Solar91PortalOverview = {
     init,
     rerender: render,
-    get isRendered() { return rendered; }
+    get isRendered() { return rendered; },
+    // Called by site-issues.js after a Breakdown ticket is saved, so the inverter tile and
+    // drill-down reflect the new ticket without a full page reload.
+    refreshInverterHealth() {
+      inverters.loaded = false;
+      return loadInverters(true).then(() => {
+        if (inverterHealth.open) loadInverterHealth();
+      });
+    }
   };
 }(window));

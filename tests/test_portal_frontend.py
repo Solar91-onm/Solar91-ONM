@@ -90,6 +90,57 @@ def test_security_register_supports_multiple_contacts_and_edit_overlay():
     assert ".ep-security__modal .ep-security__scroll {" in styles
 
 
+def test_security_tab_label_and_header_count_people():
+    navigation = (PORTAL_ASSETS / "js" / "navigation.js").read_text(encoding="utf-8")
+    security = (PORTAL_ASSETS / "js" / "security.js").read_text(encoding="utf-8")
+    page = TEMPLATE.read_text(encoding="utf-8")
+
+    assert 'data-nav="security"' in page
+    assert "Site Engineer and Security" in page
+    assert 'navState.activeView === "security"' in navigation
+    assert 'titleEl.textContent = "Site Engineer and Security"' in navigation
+    assert '<h1 class="ep-pt__title">Site Engineer and Security</h1>' in security
+    assert "function countLabel(count, singular)" in security
+    assert '(count === 1 ? "" : "s")' in security
+    assert "engineers += contacts.engineers.length;" in security
+    assert "guards += contacts.guards.length;" in security
+    assert 'row.parentNode.replaceChild(fresh, row)' in security
+    assert 'api.request("/api/plants/security/move"' in security
+    assert "other portal views could not refresh" in security
+
+
+def test_inverter_issue_description_and_refresh_are_wired():
+    overview = (PORTAL_ASSETS / "js" / "overview.js").read_text(encoding="utf-8")
+    issues = (PORTAL_ASSETS / "js" / "site-issues.js").read_text(encoding="utf-8")
+    styles = (PORTAL_ASSETS / "css" / "plant-details.css").read_text(encoding="utf-8")
+
+    assert '{ key: "issuedesc", label: "Issue description"' in overview
+    assert '"Issue description", "Running %", "Open tickets"' in overview
+    assert 'if (ticket.equipment_running !== false) return;' in overview
+    assert 'title="${fmt.escape(full)}"' in overview
+    assert ">No issues</span>" in overview
+    assert "refreshInverterHealth()" in overview
+    assert "overview.refreshInverterHealth()" in issues
+
+
+def test_merged_health_controls_and_compact_close_drawer():
+    issues = (PORTAL_ASSETS / "js" / "site-issues.js").read_text(encoding="utf-8")
+    styles = (PORTAL_ASSETS / "css" / "plant-details.css").read_text(encoding="utf-8")
+
+    assert '(context.plantDetailsMerged ? "" : headerControls)' in issues
+    assert "'<h2>Health</h2><span class=\"ep-pd__open-count\">' + openCount + ' open</span>'" in issues
+    assert 'headerControls +' in issues
+    assert 'data-issue-full-details' in issues
+    assert 'var showLegacySerial = !isBreakdown;' in issues
+    assert 'global.localStorage.getItem(issueDetailsPreferenceKey())' in issues
+    assert 'global.localStorage.setItem(issueDetailsPreferenceKey()' in issues
+    assert 'data-issue-close-form' in issues
+    assert '<textarea name="remark" rows="3" maxlength="2000" required>' in issues
+    assert '<select name="resolved" required>' in issues
+    assert 'Confirm closure' in issues and 'Send back to In Progress' in issues
+    assert '.ep-pd__health-head' in styles and 'flex-wrap: wrap' in styles
+
+
 def test_portal_route_redirects_to_the_app(client):
     moved = client.get("/portal", follow_redirects=False)
     assert moved.status_code == 308
@@ -1566,7 +1617,7 @@ def test_issue_edit_loads_configured_categories_and_can_close_without_changing_t
     assert '<select name="equipment">' in edit_form
     assert "existing category" in issues
     assert "Existing: ' + escape(selected)" in issues
-    assert 'data-issue-action="close-ticket"' in issues
+    assert 'data-issue-action="start-close"' in issues
     assert '"/api/issues/" + encodeURIComponent(issue.dbId) + "/close"' in issues
     script = r"""
       const fs=require('fs'),vm=require('vm'),assert=require('assert');
@@ -2337,7 +2388,7 @@ def test_dashboard_tiles_are_buttons_with_state_coloured_figures_and_meters():
 
 
 def test_inverter_health_hero_band_fleet_composition_and_fitted_ticket_table():
-    """The drill-down's own presentation: one hero card, fleet composition, five plant columns."""
+    """The drill-down's own presentation: one hero card, fleet composition, fitted plant columns."""
     overview = (PORTAL_ASSETS / "js" / "overview.js").read_text(encoding="utf-8")
     styles = (PORTAL_ASSETS / "css" / "components.css").read_text(encoding="utf-8")
 
@@ -2369,15 +2420,15 @@ def test_inverter_health_hero_band_fleet_composition_and_fitted_ticket_table():
     assert "function filteredInverterPlantRows(rows)" in overview
     assert "inverterHealth.onlyIssues && !(row.tickets > 0 || (row.down || 0) > 0)" in overview
 
-    # An unconfigured plant says so once, across the three cells that would repeat it.
-    assert '<td class="ep-ih__unset" colspan="3">Not configured</td>' in overview
+    # An unconfigured plant says so once, across the four cells that would repeat it.
+    assert '<td class="ep-ih__unset" colspan="4">Not configured</td>' in overview
     assert overview.count("Not configured</td>") == 1
 
     # The CSV still carries every field separately, whatever the screen merges.
     csv = overview[overview.index("function exportInverterPlantCsv()"):]
     csv = csv[:csv.index("downloadCsv(")]
     for column in ('"Total inverters"', '"Maker"', '"Capacity (kW)"', '"Running"',
-                   '"Not running"', '"Running %"', '"Open tickets"', '"Site code"'):
+                   '"Not running"', '"Issue description"', '"Running %"', '"Open tickets"', '"Site code"'):
         assert column in csv, column
 
     # The ticket table fits the frame instead of scrolling sideways.
@@ -2399,8 +2450,8 @@ def test_inverter_health_plant_table_is_sortable_and_aligned_like_the_register()
     # Plant code, Running and Not running are sorted by value; every column carries a reader.
     assert 'sort: (row) => row.plant.siteCode' in block
     assert 'sort: (row) => row.running' in block and 'sort: (row) => row.percent' in block
-    # Five columns on screen: maker and capacity share Inverter, running and total share Running.
-    assert block.count("sort: (row)") == 5
+    # Six columns on screen: maker and capacity share Inverter, running and total share Running.
+    assert block.count("sort: (row)") == 6
     # The short/numeric columns are centred, which is the register's own alignment.
     assert block.count('align: "num"') == 3
     assert ".ep-ih__plant-table th.num,\n.ep-ih__plant-table td.num { text-align: center; }" in styles
@@ -2415,7 +2466,7 @@ def test_inverter_health_plant_table_is_sortable_and_aligned_like_the_register()
 
     # One ordering feeds both the table and its export.
     assert "const plants = sortedInverterPlantRows();" in overview
-    assert "const values = sortedInverterPlantRows().map((row) => [" in overview
+    assert "const values = sortedInverterPlantRows().map((row) => {" in overview
     assert 'inverterHealth.plantSort = { key: "", dir: "" };' in overview   # reset on reopen
 
 

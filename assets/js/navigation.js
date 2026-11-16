@@ -615,7 +615,7 @@
     }
     if (navState.activeView === "security") {
       showOnly(securityEl);
-      if (titleEl) titleEl.textContent = "Security";
+      if (titleEl) titleEl.textContent = "Site Engineer and Security";
       if (global.Solar91PortalSecurity) {
         global.Solar91PortalSecurity.show(document.querySelector("[data-security-host]"));
       }
@@ -816,7 +816,7 @@
     var settings = document.querySelector(".ep-sidebar__settings");
     if (settings) settings.hidden = restricted;
     var security = document.querySelector('[data-nav="security"]');
-    if (security) security.hidden = role !== "O&M Head" && role !== "Administration";
+    if (security) security.hidden = role !== "O&M Head" && role !== "Assignee" && role !== "Administration";
     if (navState.activeView === "security" && security && security.hidden) {
       setOverviewState();
     }

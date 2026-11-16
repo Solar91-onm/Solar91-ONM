@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
@@ -13,11 +13,18 @@ from app.core.security import (
     get_current_user, require_csrf, require_permission, user_scoped_plant_ids, visible_custom_fields,
 )
 from app.plants.repository import PlantRepository
-from app.plants.schemas import PlantCreate, PlantOut, PlantUpdate
+from app.plants.schemas import (
+    PlantCreate, PlantOut, PlantUpdate, SecurityContactMove, SecurityContactMoveOut,
+)
 from app.plants.service import PlantService
 
 router=APIRouter(prefix="/api", tags=["Plants"])
 settings=get_settings()
+
+# Who may move a site engineer or guard from one plant's register to another's. The same pair the
+# Inverter Health unit-config save allows (app/pmplan/router.py); every other role reads the
+# register only.
+SECURITY_MOVE_ROLES={"O&M Head","Assignee"}
 
 
 @router.get("/plants", response_model=list[PlantOut])
@@ -28,6 +35,33 @@ def list_plants(db:Annotated[Session,Depends(get_db)], user:Annotated[User,Depen
     for plant in out:
         plant.custom_fields=visible_custom_fields(plant.custom_fields,user)
     return out
+
+
+@router.post("/plants/security/move", response_model=SecurityContactMoveOut, dependencies=[Depends(require_csrf)])
+def move_security_contact(data:SecurityContactMove,db:Annotated[Session,Depends(get_db)],user:Annotated[User,Depends(get_current_user)]):
+    """Move one site engineer or guard to another plant, as a single two-plant write.
+
+    One endpoint rather than two PATCHes, because a half-finished move either loses a person or
+    lists them twice. Both plants are returned as they now stand, redacted for the caller, so the
+    register can update the two rows in place.
+    """
+    if user.role not in SECURITY_MOVE_ROLES:
+        raise HTTPException(403,"Only the O&M Head or an Assignee can move a person between plants")
+    # An Assignee is scoped to assigned plants, so BOTH ends of the move must be inside that scope
+    # -- the same check the unit-config save makes before it writes.
+    scope=user_scoped_plant_ids(db,user)
+    if scope is not None:
+        for code in (data.from_site_code,data.to_site_code):
+            plant=PlantRepository(db).by_site_code(code)
+            if plant is not None and plant.id not in scope:
+                raise HTTPException(403,f"{code} is outside your assigned plants")
+    source,destination,person=PlantService(db).move_security_contact(data)
+    out=[]
+    for plant in (source,destination):
+        validated=PlantOut.model_validate(plant)
+        validated.custom_fields=visible_custom_fields(validated.custom_fields,user)
+        out.append(validated)
+    return SecurityContactMoveOut(kind=data.kind,person=person,from_plant=out[0],to_plant=out[1])
 
 
 @router.post("/plants", response_model=PlantOut, status_code=201, dependencies=[Depends(require_csrf)])

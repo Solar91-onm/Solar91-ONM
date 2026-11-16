@@ -71,7 +71,7 @@ DESIGN_LINK_KEY = "design_link"
 LIASONING_KEY = "liasoning"
 RESTRICTED_CUSTOM_FIELDS = (DESIGN_LINK_KEY, LIASONING_KEY)
 SECURITY_CONTACT_KEYS = ("security_guard", "security_contacts")
-SECURITY_CONTACT_ROLES = {"O&M Head", "Administration"}
+SECURITY_CONTACT_ROLES = {"O&M Head", "Assignee", "Administration"}
 
 
 def can_view_design_link(user: User | None) -> bool:

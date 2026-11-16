@@ -48,6 +48,7 @@ from app.core.timeutil import BUSINESS_TZ, business_today
 # app/issues/service.py — every state that is not Resolved/Closed is open work.
 ISSUE_OPEN_STATES = (
     "Open", "Assigned", "Acknowledged", "In Progress", "Pending Vendor", "Pending Parts/Vendor",
+    "Pending Closure",
 )
 ISSUE_CLOSED_STATES = ("Resolved", "Closed")
 # The same three groups the Site Issues screen shows: Unsolved, In Progress, Solved.

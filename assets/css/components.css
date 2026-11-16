@@ -1510,6 +1510,7 @@
 .ep-ih__down .ep-ih__ticket-actions { margin-left: auto; }
 .ep-ih__ticket-actions { display: inline-flex; align-items: center; gap: 10px; white-space: nowrap; }
 .ep-ih__description { display: -webkit-box; max-width: 300px; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; white-space: normal; }
+.ep-ih__issuedesc { display: -webkit-box; max-width: 260px; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; white-space: normal; overflow-wrap: anywhere; }
 .ep-ih__ticket { padding: 0; border: 0; background: transparent; color: var(--ep-accent-strong); font: inherit; font-weight: 650; text-decoration: underline; cursor: pointer; }
 .ep-ih__toolbar { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px 16px; }
 .ep-ih__toolbar input, .ep-ih__toolbar select, .ep-ih__settings input {

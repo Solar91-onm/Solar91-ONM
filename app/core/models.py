@@ -132,6 +132,12 @@ class Issue(Base):
     serial_no: Mapped[str | None] = mapped_column(String(120))
     supplier_maker: Mapped[str | None] = mapped_column(String(160))
     unit_count: Mapped[int | None] = mapped_column(Integer)
+    # Was the equipment still running when the ticket was raised? (migration 045)
+    #   False -> breakdown: its `unit_count` units are down, and ONLY these tickets count
+    #            towards the Inverter Health "not running" figure.
+    #   True  -> a fault on equipment that is still running; it contributes zero units down.
+    #   None  -> not asked (every ticket raised before the question existed). Also zero.
+    equipment_running: Mapped[bool | None] = mapped_column(Boolean)
     description: Mapped[str] = mapped_column(Text, nullable=False)
     severity: Mapped[str] = mapped_column(String(40), nullable=False)
     status: Mapped[str] = mapped_column(String(60), default="Open")

@@ -8,7 +8,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, Query, HTTPException, UploadFile
 from fastapi.responses import Response
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
@@ -114,13 +114,19 @@ def equipment_summary(db:Annotated[Session,Depends(get_db)],user:Annotated[User,
     """Open tickets per plant for one equipment category, as counts only (one grouped query).
 
     The Overview's Inverters tile needs how many units are affected, not the tickets themselves; reading the ticket
-    list for that was ~126 KB on every sign-in. ``units`` sums each ticket's own unit count (a ticket that records
-    none counts as one unit), which is the same rule the tile applied to the full list.
+    list for that was ~126 KB on every sign-in.
+
+    ``open`` counts EVERY open ticket in the category. ``units`` counts only the units of tickets whose equipment is
+    recorded as NOT running (``equipment_running IS FALSE``) -- a ticket that records no unit count counts as one
+    unit. A ticket raised while the inverter was still running, and every ticket raised before the form asked
+    (``equipment_running IS NULL``), contributes ZERO units: it is an open ticket, not a unit down. Counting those as
+    down marked units out of service that were turning, and dropped the fleet below 100% for no reason.
 
     Scope is the caller's: a role without portfolio scope sees only its assigned plants, and a plant with no open
     ticket in this category is simply absent.
     """
-    units=func.sum(func.coalesce(Issue.unit_count,1))
+    # CASE, not a WHERE: the open count must still include tickets whose equipment is running.
+    units=func.sum(case((Issue.equipment_running.is_(False),func.coalesce(Issue.unit_count,1)),else_=0))
     stmt=(select(Plant.site_code,func.count(Issue.id),units)
           .join(Plant,Plant.id==Issue.plant_id)
           .where(Issue.deleted_at.is_(None),Issue.status.in_(OPEN_ISSUE_STATUSES))
@@ -406,7 +412,7 @@ def transition_issue_status(issue_id:UUID, data:IssueStatusRequest, db:Annotated
     status = data.status.strip()
     if status=="Pending Parts/Vendor":
         status="Pending Vendor"
-    allowed_statuses = {"Acknowledged","In Progress","Pending Vendor","Pending Parts/Vendor"}
+    allowed_statuses = {"Acknowledged","In Progress","Pending Vendor","Pending Parts/Vendor","Closed"}
     if status not in allowed_statuses:
         raise HTTPException(422, "Unsupported issue status")
     _require_issue_workflow_scope(db,user,issue_id)

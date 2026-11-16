@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -145,3 +145,27 @@ class PlantOut(PlantBase):
     source: str
     created_at: datetime
     updated_at: datetime
+
+
+class SecurityContactMove(BaseModel):
+    """Move one site engineer or guard from the plant they are listed on to another plant.
+
+    `index` is the person's position in the SOURCE plant's
+    ``custom_fields.security_contacts.site_engineers`` / ``.guards`` array, which is the order the
+    register renders. The person keeps their name, mobile number and shift; only which plant they
+    are listed under changes.
+    """
+
+    from_site_code: str = Field(min_length=1, max_length=80)
+    to_site_code: str = Field(min_length=1, max_length=80)
+    kind: Literal["engineer", "guard"]
+    index: int = Field(ge=0)
+
+
+class SecurityContactMoveOut(BaseModel):
+    """Both plants as they now stand, so the register can update the two rows without a reload."""
+
+    kind: Literal["engineer", "guard"]
+    person: dict[str, Any]
+    from_plant: PlantOut
+    to_plant: PlantOut

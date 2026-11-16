@@ -67,12 +67,10 @@ def test_the_page_loads_the_shell_and_names_the_rest_as_modules():
     shell_bytes = sum((PORTAL_ASSETS / "js" / name).stat().st_size for name in SHELL_SCRIPTS)
     lazy_bytes = sum((ROOT / url.lstrip("/").split("?")[0]).stat().st_size for url in modules.values())
     assert shell_bytes < lazy_bytes, (shell_bytes, lazy_bytes)
-    # 176 KB, raised from 168 KB when the Dashboard tiles gained their meters and legends and the
-    # Inverter Health drill-down gained its hero band and fleet composition. It is still a
-    # tripwire: the headroom left is about the same as before. The real fix is to stop shipping
-    # that drill-down in the shell at all -- it is ~40 KB of overview.js and only runs when
-    # someone clicks the Inverter Health tile, so it belongs in a lazy module like site-issues.
-    assert shell_bytes < 176_000, shell_bytes
+    # 180 KB leaves a tight ceiling after the Inverter Health drill-down gained breakdown-only
+    # counts, issue descriptions, CSV export and immediate refresh behavior. The longer-term fix
+    # is to lazy-load that ~40 KB drill-down from overview.js when its tile is opened.
+    assert shell_bytes < 180_000, shell_bytes
 
 
 def test_module_urls_are_content_hashed_when_the_page_is_served(client):
@@ -254,25 +252,28 @@ def test_equipment_summary_counts_open_tickets_per_plant(db, client):
     db.add_all([first, second])
     db.flush()
     rows = [
-        (first, "Inverter", "Open", 2),            # counted, two units
-        (first, "Inverter", "In Progress", None),  # counted, no unit count ⇒ one unit
-        (first, "Inverter", "Closed", 5),          # closed: not counted
-        (first, "Transformer", "Open", 4),         # another category: not counted
-        (second, "inverter", "Pending Vendor", 3),  # the category match ignores case
+        (first, "Inverter", "Open", 2, False),            # breakdown, two units down
+        (first, "Inverter", "In Progress", None, False),   # no unit count ⇒ one unit down
+        (first, "Inverter", "Open", 4, True),              # still running: open, no units down
+        (first, "Inverter", "Open", 5, None),              # not asked: open, no units down
+        (first, "Inverter", "Closed", 5, False),           # closed: not counted
+        (first, "Transformer", "Open", 4, False),          # another category: not counted
+        (second, "inverter", "Pending Vendor", 3, False),   # category match ignores case
     ]
-    for index, (plant, vertical, status, units) in enumerate(rows):
+    for index, (plant, vertical, status, units, running) in enumerate(rows):
         db.add(Issue(ticket_no=f"EQ-{index}", plant_id=plant.id, vertical=vertical,
-                     description="x", severity="Medium", status=status, unit_count=units))
+                     description="x", severity="Medium", status=status, unit_count=units,
+                     equipment_running=running))
     db.commit()
 
     body = client.get("/api/issues/equipment-summary?vertical=Inverter").json()
-    assert body["plants"] == [{"site_code": "EQ01", "open": 2, "units": 3},
+    assert body["plants"] == [{"site_code": "EQ01", "open": 4, "units": 3},
                               {"site_code": "EQ02", "open": 1, "units": 3}]
-    assert body["open"] == 3 and body["units"] == 6 and body["plants_affected"] == 2
+    assert body["open"] == 5 and body["units"] == 6 and body["plants_affected"] == 2
 
     # Without a category it counts every open ticket.
     everything = client.get("/api/issues/equipment-summary").json()
-    assert everything["open"] == 4
+    assert everything["open"] == 6
 
 
 def test_equipment_summary_respects_the_callers_plant_scope(db, client):
@@ -297,7 +298,7 @@ def test_issues_status_open_returns_the_equipment_summary_open_states(db, client
     plant = Plant(site_code="OP01", plant_name="Open States")
     db.add(plant)
     db.flush()
-    open_states = ("Open", "Assigned", "Acknowledged", "In Progress", "Pending Vendor", "Pending Parts/Vendor")
+    open_states = ("Open", "Assigned", "Acknowledged", "In Progress", "Pending Vendor", "Pending Parts/Vendor", "Pending Closure")
     for index, status in enumerate(open_states):
         db.add(Issue(ticket_no=f"OPEN-{index}", plant_id=plant.id, vertical="Inverter",
                      description="x", severity="Medium", status=status))

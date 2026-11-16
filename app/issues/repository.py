@@ -9,7 +9,7 @@ from app.plants.codes import normalize_site_code
 
 OPEN_ISSUE_STATUSES = (
     "Open", "Assigned", "Acknowledged", "In Progress", "Pending Vendor",
-    "Pending Parts/Vendor",
+    "Pending Parts/Vendor", "Pending Closure",
 )
 
 

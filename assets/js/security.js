@@ -20,9 +20,21 @@
   var filterText = "";
   var filterSiteCode = "";
   var wiredContainer = null;
+  // The person currently being moved: which plant they sit on, whether they are an engineer or a
+  // guard, and their index in that plant's array. Null when no move is being set up.
+  var moving = null;
+  var movePending = false;
 
   function canEdit() {
     return !!(api && api.can("plants.manage"));
+  }
+
+  // Moving a person between plants is a two-plant write, gated the same way the Inverter Health
+  // unit-config save is: the O&M Head and Assignees. Every other role reads the register.
+  function canMove() {
+    var user = api && api.currentUser ? api.currentUser() : null;
+    var role = user && user.role;
+    return role === "O&M Head" || role === "Assignee";
   }
 
   function blankContact() {
@@ -74,10 +86,87 @@
     };
   }
 
+  /**
+   * The person's position in the register as it is STORED, which is what the move endpoint indexes.
+   * Returns null when this plant has no stored array of that kind -- a plant still carrying only the
+   * legacy single `security_guard` entry, for instance. Such a person has no stored index to move,
+   * so the control is not offered rather than sending an index the server would reject.
+   */
+  function storedContacts(siteCode, kind) {
+    var plant = plants.find(function (item) { return item.siteCode === siteCode; });
+    var fields = (plant && plant.customFields) || {};
+    var contacts = fields.security_contacts;
+    if (!contacts || typeof contacts !== "object") return null;
+    var rows = kind === "engineer" ? contacts.site_engineers : contacts.guards;
+    return Array.isArray(rows) ? rows : null;
+  }
+
+  function isMoving(siteCode, kind, index) {
+    return !!moving && moving.siteCode === siteCode && moving.kind === kind && moving.index === index;
+  }
+
+  /**
+   * The move control for one person: a "Move" button, and once chosen, the destination plant, a
+   * confirm naming the person and both site codes, and a Cancel. No drag and drop: a drag over a
+   * 42-row table is a mis-drop waiting to happen, and the confirm is what makes a mis-click obvious.
+   */
+  function canMovePerson(siteCode, kind, index) {
+    if (!canMove()) return false;
+    var stored = storedContacts(siteCode, kind);
+    return !!stored && index < stored.length;
+  }
+
+  /** The "Move" control itself, beside the person's name. */
+  function moveButton(contact, kind, index, siteCode) {
+    if (!canMovePerson(siteCode, kind, index) || isMoving(siteCode, kind, index)) return "";
+    var label = kind === "engineer" ? "site engineer" : "guard";
+    // An unsaved edit on this plant would make the stored index and the row on screen disagree,
+    // so the move waits until the edits are saved rather than moving the wrong person.
+    if (dirty[siteCode]) {
+      return '<span class="ep-security__move-blocked" title="Save this plant’s edits first">Save first</span>';
+    }
+    return '<button type="button" class="ep-security__move-open" data-security-move-start="' + kind +
+      '" data-security-index="' + index + '" data-security-site="' + fmt.escape(siteCode) +
+      '"' + (saving || movePending ? " disabled" : "") + ' aria-label="Move ' +
+      (fmt.escape(contact.name) || label) + " to another plant" + '">Move</button>';
+  }
+
+  function movePanel(contact, kind, index, siteCode) {
+    if (!canMovePerson(siteCode, kind, index) || !isMoving(siteCode, kind, index)) return "";
+    var label = kind === "engineer" ? "site engineer" : "guard";
+    var targetHasDrafts = !!(moving.target && dirty[moving.target]);
+    var options = plants.filter(function (plant) {
+      return plant.siteCode !== siteCode;
+    }).map(function (plant) {
+      return '<option value="' + fmt.escape(plant.siteCode) + '"' +
+        (moving.target === plant.siteCode ? " selected" : "") + ">" +
+        fmt.escape(plant.siteCode + " · " + (plant.displayName || plant.plantName)) + "</option>";
+    }).join("");
+    var target = moving.target || "";
+    return '<div class="ep-security__move" data-security-move-panel>' +
+      '<label><span class="ep-security__move-label">Move ' + (fmt.escape(contact.name) || label) +
+        ' from ' + fmt.escape(siteCode) + ' to</span>' +
+        '<select data-security-move-target' + (movePending ? " disabled" : "") + '>' +
+        '<option value="">Select plant</option>' + options + "</select></label>" +
+      '<p class="ep-security__move-confirm">' + (target
+        ? targetHasDrafts
+          ? "Save changes for " + fmt.escape(target) + " before moving a person there."
+          : "Move <strong>" + (fmt.escape(contact.name) || label) + "</strong> from <strong>" +
+            fmt.escape(siteCode) + "</strong> to <strong>" + fmt.escape(target) + "</strong>?"
+        : "Choose the plant this " + label + " now works at.") + "</p>" +
+      '<div class="ep-security__move-actions">' +
+        '<button type="button" class="ep-security__move-confirm-btn" data-security-move-confirm' +
+          (movePending || !target || targetHasDrafts ? " disabled" : "") + ">" +
+          (movePending ? "Moving…" : "Move") + "</button>" +
+        '<button type="button" class="ep-security__move-cancel" data-security-move-cancel' +
+          (movePending ? " disabled" : "") + ">Cancel</button>" +
+      "</div></div>";
+  }
+
   function contactCell(contacts, kind, field, editingRow, siteCode) {
     if (!contacts.length) return '<span class="ep-pt__dash">—</span>';
     return '<div class="ep-security__stack">' + contacts.map(function (contact, index) {
-      if (editingRow && field === "name") {
+      if (editingRow && canEdit() && field === "name") {
         return '<div class="ep-security__name-entry">' +
           '<input class="ep-security__input" type="text" maxlength="160" autocomplete="off" data-security-contact-name="' +
           kind + '" data-security-index="' + index + '" value="' + fmt.escape(contact.name) +
@@ -87,16 +176,18 @@
           kind + '" data-security-index="' + index + '" data-security-site="' + fmt.escape(siteCode) +
           '" aria-label="Remove ' + (kind === "engineer" ? "site engineer " : "guard ") +
           (index + 1) + " for " + fmt.escape(siteCode) + '"' +
-          (saving ? " disabled" : "") + '>×</button></div>';
+          (saving ? " disabled" : "") + '>×</button>' +
+          moveButton(contact, kind, index, siteCode) + '</div>' +
+          movePanel(contact, kind, index, siteCode);
       }
-      if (editingRow && field === "mobile") {
+      if (editingRow && canEdit() && field === "mobile") {
         return '<input class="ep-security__input ep-security__input--mobile" type="tel" inputmode="numeric" maxlength="10" autocomplete="off" data-security-contact-mobile="' +
           kind + '" data-security-index="' + index + '" value="' + fmt.escape(contact.mobile) +
           '" aria-label="' + (kind === "engineer" ? "Site engineer" : "Guard") + " mobile number " +
           (index + 1) + " for " + fmt.escape(siteCode) + '"' +
           (saving ? " disabled" : "") + ">";
       }
-      if (editingRow && field === "shift") {
+      if (editingRow && canEdit() && field === "shift") {
         return '<select class="ep-security__shift" data-security-contact-shift="' + kind +
           '" data-security-index="' + index + '" aria-label="' +
           (kind === "engineer" ? "Site engineer" : "Guard") + " duty shift " +
@@ -111,6 +202,9 @@
       }
       return '<div class="ep-security__entry">' +
         (contact[field] ? fmt.escape(contact[field]) : '<span class="ep-pt__dash">—</span>') +
+        (editingRow && field === "name"
+          ? moveButton(contact, kind, index, siteCode) + movePanel(contact, kind, index, siteCode)
+          : "") +
         "</div>";
     }).join("") + "</div>";
   }
@@ -128,7 +222,7 @@
       ? drafts[plant.siteCode]
       : contactsFor(plant);
     var filter = siteFilterText(plant, contacts);
-    var siteControls = editingRow
+    var siteControls = editingRow && canEdit()
       ? '<div class="ep-security__site-actions">' +
         '<button type="button" data-security-add="engineer" data-security-site="' +
         fmt.escape(plant.siteCode) + '"' + (saving ? " disabled" : "") +
@@ -201,12 +295,16 @@
       }).join("");
     return '<div class="ep-security__overlay" data-security-overlay>' +
       '<section class="ep-security__modal" role="dialog" aria-modal="true" aria-labelledby="ep-security-editor-title">' +
-        '<header class="ep-security__modal-head"><div><h2 id="ep-security-editor-title">Edit Security Register</h2>' +
-          '<p>Manage multiple site engineers and guards, including each guard’s duty shift.</p></div>' +
+        '<header class="ep-security__modal-head"><div><h2 id="ep-security-editor-title">' +
+          (canEdit() ? "Edit Security Register" : "Move Security Contacts") + '</h2>' +
+          '<p>' + (canEdit()
+            ? "Manage multiple site engineers and guards, including each guard’s duty shift."
+            : "Move a site engineer or guard to another plant in your assigned scope.") + '</p></div>' +
           '<button type="button" class="ep-security__close" data-security-close aria-label="Close editor"' +
           (saving ? " disabled" : "") + '>×</button></header>' +
-        (notice ? '<div class="ep-security__notice' + (noticeIsError ? " is-error" : "") +
-          '" role="' + (noticeIsError ? "alert" : "status") + '">' + fmt.escape(notice) + "</div>" : "") +
+        '<div class="ep-security__notice' + (noticeIsError ? " is-error" : "") +
+          '" role="' + (noticeIsError ? "alert" : "status") + '"' + (notice ? "" : " hidden") + ">" +
+          fmt.escape(notice) + "</div>" +
         '<div class="ep-security__filters"><label><span>Search contacts or site code</span>' +
           '<input type="search" data-security-search value="' + fmt.escape(filterText) +
           '" placeholder="Search..."' + (saving ? " disabled" : "") + '></label>' +
@@ -216,9 +314,9 @@
         '<footer class="ep-security__modal-foot">' +
           '<button type="button" class="ep-security__cancel" data-security-close' +
           (saving ? " disabled" : "") + '>Cancel</button>' +
-          '<button type="button" class="ep-pt__edit ep-security__save" data-security-save' +
+          (canEdit() ? '<button type="button" class="ep-pt__edit ep-security__save" data-security-save' +
           (saving || !Object.keys(dirty).length ? " disabled" : "") + '>' +
-          (saving ? "Saving..." : "Save changes") + "</button></footer>" +
+          (saving ? "Saving..." : "Save changes") + "</button>" : "") + "</footer>" +
       "</section></div>";
   }
 
@@ -269,22 +367,46 @@
     if (button) button.disabled = saving || !Object.keys(dirty).length;
   }
 
+  function countLabel(count, singular) {
+    return count + " " + singular + (count === 1 ? "" : "s");
+  }
+
+  /**
+   * How many PEOPLE are on the register, not how many plants have someone. A person listed at two
+   * plants counts twice, which is the honest reading of a register kept per plant. Counted from the
+   * same lists the table renders (`contactsFor`), so the sub-line and the rows can never disagree.
+   */
+  function registerCounts() {
+    var engineers = 0;
+    var guards = 0;
+    plants.forEach(function (plant) {
+      var contacts = contactsFor(plant);
+      engineers += contacts.engineers.length;
+      guards += contacts.guards.length;
+    });
+    return { engineers: engineers, guards: guards };
+  }
+
   function render(container) {
     if (!container) return;
     var editable = canEdit();
+    var counts = registerCounts();
     container.innerHTML = "" +
       '<div class="ep-pt">' +
-        '<div class="ep-pt__head"><div><h1 class="ep-pt__title">Security</h1>' +
-          '<p class="ep-pt__sub">' + plants.length + " plant" + (plants.length === 1 ? "" : "s") + "</p></div>" +
-          (editable ? '<button type="button" class="ep-pt__edit ep-security__open" data-security-open-edit' +
+        '<div class="ep-pt__head"><div><h1 class="ep-pt__title">Site Engineer and Security</h1>' +
+          '<p class="ep-pt__sub">' + countLabel(plants.length, "plant") + " · " +
+          countLabel(counts.engineers, "site engineer") + " · " +
+          countLabel(counts.guards, "security guard") + "</p></div>" +
+          (editable || canMove() ? '<button type="button" class="ep-pt__edit ep-security__open" data-security-open-edit' +
             '>Edit register</button>' : "") +
         "</div>" +
         '<div class="ep-security__register-filter"><label><span>Search by plant code, site engineer, or security name</span>' +
           '<input type="search" data-security-register-search value="' + fmt.escape(registerSearch) +
           '" placeholder="Plant code, site engineer, security name..." autocomplete="off"></label></div>' +
         '<div class="ep-pt__card">' +
-          (!editing && notice ? '<div class="ep-security__notice' + (noticeIsError ? " is-error" : "") +
-            '" role="' + (noticeIsError ? "alert" : "status") + '">' + fmt.escape(notice) + "</div>" : "") +
+          '<div class="ep-security__notice' + (noticeIsError ? " is-error" : "") +
+            '" role="' + (noticeIsError ? "alert" : "status") + '"' +
+            (!editing && notice ? "" : " hidden") + ">" + fmt.escape(notice) + "</div>" +
           tableHTML(false) +
         "</div>" +
         (editing ? editorHTML() : "") +
@@ -428,6 +550,105 @@
     });
   }
 
+  /**
+   * Replace one plant's row in both tables, in place: no re-render of the page, so the editor keeps
+   * its scroll position and the register behind it stays where it was.
+   */
+  function refreshRow(container, siteCode) {
+    var plant = plants.find(function (item) { return item.siteCode === siteCode; });
+    if (!plant) return;
+    Array.prototype.forEach.call(
+      container.querySelectorAll("[data-security-row]"),
+      function (row) {
+        if (row.getAttribute("data-security-row") !== siteCode) return;
+        var isEditor = !!row.closest('[data-security-table="editor"]');
+        var replacement = document.createElement("tbody");
+        replacement.innerHTML = rowHTML(plant, isEditor);
+        var fresh = replacement.firstElementChild;
+        if (fresh) row.parentNode.replaceChild(fresh, row);
+      }
+    );
+    applyRegisterFilters(container);
+    if (editing) applyEditorFilters(container);
+  }
+
+  function updateHeaderCounts(container) {
+    var sub = container.querySelector(".ep-pt__sub");
+    if (!sub) return;
+    var counts = registerCounts();
+    sub.textContent = countLabel(plants.length, "plant") + " · " +
+      countLabel(counts.engineers, "site engineer") + " · " +
+      countLabel(counts.guards, "security guard");
+  }
+
+  function showNotice(container, message, isError) {
+    notice = message;
+    noticeIsError = !!isError;
+    // The editor's own strip when it is open, the register's otherwise: the last one in the DOM is
+    // the editor's, because the overlay is appended after the card.
+    var strips = container.querySelectorAll(".ep-security__notice");
+    var strip = strips.length ? strips[strips.length - 1] : null;
+    if (!strip) {
+      render(container);
+      return;
+    }
+    strip.textContent = message;
+    strip.classList.toggle("is-error", !!isError);
+    strip.setAttribute("role", isError ? "alert" : "status");
+    strip.hidden = !message;
+  }
+
+  /** Apply one plant's custom_fields as the API returned them. */
+  function applyPlantFields(siteCode, fields) {
+    var plant = plants.find(function (item) { return item.siteCode === siteCode; });
+    if (!plant) return;
+    plant.customFields = fields && typeof fields === "object" ? fields : {};
+    if (drafts) drafts[siteCode] = copyContacts(contactsFor(plant));
+  }
+
+  /**
+   * One two-plant write. The endpoint moves the person inside a single transaction, so there is no
+   * state in which they are on neither plant; on failure the table is left exactly as it was and
+   * the reason goes to the notice strip.
+   */
+  function confirmMove(container) {
+    if (!moving || !moving.target || movePending) return;
+    var request = {
+      from_site_code: moving.siteCode,
+      to_site_code: moving.target,
+      kind: moving.kind,
+      index: moving.index
+    };
+    movePending = true;
+    refreshRow(container, request.from_site_code);
+    showNotice(container, "Moving…", false);
+    api.request("/api/plants/security/move", { method: "POST", body: request }).then(function (result) {
+      var from = (result && result.from_plant) || {};
+      var to = (result && result.to_plant) || {};
+      applyPlantFields(request.from_site_code, from.custom_fields);
+      applyPlantFields(request.to_site_code, to.custom_fields);
+      var person = (result && result.person) || {};
+      moving = null;
+      movePending = false;
+      // The source row loses the person and the destination row gains them; nothing else moves.
+      refreshRow(container, request.from_site_code);
+      refreshRow(container, request.to_site_code);
+      updateHeaderCounts(container);
+      showNotice(container, (person.name || "The person") + " moved from " + request.from_site_code +
+        " to " + request.to_site_code + ".", false);
+      // The move is stored; the cached plant list the rest of the portal reads must not stay stale.
+      api.plants(true).catch(function (error) {
+        showNotice(container, (person.name || "The person") + " moved, but other portal views could not refresh: " +
+          ((error && error.message) || "please reload the page."), true);
+      });
+    }).catch(function (error) {
+      movePending = false;
+      refreshRow(container, request.from_site_code);
+      showNotice(container, "Could not move this person from " + request.from_site_code + " to " +
+        request.to_site_code + ": " + ((error && error.message) || "please try again."), true);
+    });
+  }
+
   function openEditor(container) {
     editing = true;
     drafts = Object.create(null);
@@ -435,6 +656,8 @@
       drafts[plant.siteCode] = copyContacts(contactsFor(plant));
     });
     dirty = Object.create(null);
+    moving = null;
+    movePending = false;
     filterText = "";
     filterSiteCode = "";
     notice = "";
@@ -445,10 +668,11 @@
   }
 
   function closeEditor(container) {
-    if (saving) return;
+    if (saving || movePending) return;
     editing = false;
     drafts = null;
     dirty = Object.create(null);
+    moving = null;
     filterText = "";
     filterSiteCode = "";
     notice = "";
@@ -489,6 +713,14 @@
         applyEditorFilters(container);
         return;
       }
+      if (event.target.matches("[data-security-move-target]")) {
+        if (moving) moving.target = event.target.value;
+        var panelRow = event.target.closest("[data-security-row]");
+        if (panelRow) refreshRow(container, panelRow.getAttribute("data-security-row"));
+        var again = container.querySelector("[data-security-move-target]");
+        if (again) again.focus();
+        return;
+      }
       var shift = event.target.closest("[data-security-contact-shift]");
       if (shift) {
         var row = shift.closest("[data-security-row]");
@@ -520,6 +752,33 @@
       }
       if (event.target.matches("[data-security-overlay]")) {
         closeEditor(container);
+        return;
+      }
+      var moveStart = event.target.closest("[data-security-move-start]");
+      if (moveStart) {
+        var startSite = moveStart.getAttribute("data-security-site");
+        var previous = moving ? moving.siteCode : "";
+        moving = {
+          siteCode: startSite,
+          kind: moveStart.getAttribute("data-security-move-start"),
+          index: Number(moveStart.getAttribute("data-security-index")),
+          target: ""
+        };
+        if (previous && previous !== startSite) refreshRow(container, previous);
+        refreshRow(container, startSite);
+        var select = container.querySelector("[data-security-move-target]");
+        if (select) select.focus();
+        return;
+      }
+      if (event.target.closest("[data-security-move-cancel]")) {
+        if (movePending || !moving) return;
+        var cancelled = moving.siteCode;
+        moving = null;
+        refreshRow(container, cancelled);
+        return;
+      }
+      if (event.target.closest("[data-security-move-confirm]")) {
+        confirmMove(container);
         return;
       }
       var add = event.target.closest("[data-security-add]");

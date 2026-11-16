@@ -408,12 +408,19 @@ class IssueService:
             "Open": {"Assigned", "Acknowledged"},
             "Assigned": {"Acknowledged"},
             "Acknowledged": {"In Progress"},
-            "In Progress": {"Pending Vendor", "Pending Parts/Vendor", "Resolved"},
-            "Pending Vendor": {"In Progress", "Resolved"},
-            "Pending Parts/Vendor": {"In Progress", "Resolved"},
+            "In Progress": {"Pending Vendor", "Pending Parts/Vendor", "Pending Closure", "Resolved"},
+            "Pending Vendor": {"In Progress", "Pending Closure", "Resolved"},
+            "Pending Parts/Vendor": {"In Progress", "Pending Closure", "Resolved"},
+            "Pending Closure": {"Closed", "In Progress"},
         }
+        if row.status == "Pending Closure" and user.role != "O&M Head":
+            raise HTTPException(403, "Only the O&M Head can confirm or reject a closure request")
+        if row.status == "Pending Closure" and next_status == "In Progress" and not (note or "").strip():
+            raise HTTPException(422, "Add a remark when sending this issue back to In Progress")
         if next_status not in transitions.get(row.status, set()):
             raise HTTPException(409, f"Cannot move an issue from {row.status} to {next_status}")
+        if next_status == "Closed" and (row.status != "Pending Closure" or user.role != "O&M Head"):
+            raise HTTPException(403, "Only the O&M Head can confirm a pending closure")
         before=row.status
         now=datetime.now(timezone.utc)
         if next_status == "Resolved":
@@ -476,11 +483,39 @@ class IssueService:
                 "closed_directly": False,
             }
         row.status=next_status
+        if next_status == "Closed":
+            closed_on = issue_local_date(now)
+            row.closed_on = closed_on
+            closure = dict(row.closure or {})
+            requested = closure.get("closure_request") or {}
+            closure.update({
+                "closed_on": closed_on.isoformat(),
+                "closed_at": now.isoformat(),
+                "closedAt": now.isoformat(),
+                "closed_by": user.display_name,
+                "verified_on": closed_on.isoformat(),
+                "verifiedOn": closed_on.isoformat(),
+                "verified_by_name": user.display_name,
+                "verifiedBy": user.display_name,
+                "verified_at": now.isoformat(),
+                "verifiedAt": now.isoformat(),
+                "note": requested.get("remark") or note,
+            })
+            row.closure = closure
         row.updated_at=now
+        if next_status == "Pending Closure":
+            action = "issue.closure_requested"
+        elif before == "Pending Closure" and next_status == "Closed":
+            action = "issue.closure_confirmed"
+        elif before == "Pending Closure" and next_status == "In Progress":
+            action = "issue.closure_rejected"
+        else:
+            action = "issue.status_changed"
         self._history(
-            row,"issue.status_changed",user,note=note or ((resolve.remark or resolve.note) if resolve else None),
+            row,action,user,note=note or ((resolve.remark or resolve.note) if resolve else None),
             status_from=before,status_to=next_status,
-            metadata={"closure":dict(row.closure or {})} if resolve else None,
+            metadata={"closure":dict(row.closure or {})}
+            if resolve or next_status in {"Pending Closure", "Closed"} else None,
         )
         self.db.commit()
         self._notify(
@@ -812,10 +847,55 @@ class IssueService:
     def close(self,issue_id,data:CloseRequest,user:User):
         row=self.repo.by_id(issue_id,for_update=True)
         if not row: raise HTTPException(404,"Issue not found")
+        if data.resolved is not None:
+            remark = (data.remark or "").strip()
+            if data.resolved:
+                if row.status == "Resolved":
+                    return self.close(issue_id, CloseRequest(note=remark), user)
+                return self.transition(
+                    issue_id, "Resolved", user,
+                    resolve=ResolveRequest(note=remark, remark=remark),
+                )
+            if user.role == "Assignee":
+                if row.status not in {"In Progress", "Pending Vendor", "Pending Parts/Vendor"}:
+                    raise HTTPException(409, "Only an in-progress issue can be sent for closure approval")
+                before = row.status
+                now = datetime.now(timezone.utc)
+                closure = dict(row.closure or {})
+                closure["closure_request"] = {
+                    "remark": remark,
+                    "requested_by": user.display_name,
+                    "requested_at": now.isoformat(),
+                }
+                row.closure = closure
+                row.status = "Pending Closure"
+                row.updated_at = now
+                self._history(
+                    row, "issue.closure_requested", user, note=remark,
+                    status_from=before, status_to="Pending Closure",
+                    metadata={"requested_by": user.display_name, "requested_by_id": str(user.id)},
+                )
+                self.db.commit()
+                plant = self.db.get(Plant, row.plant_id) if row.plant_id else None
+                self._notify(
+                    plant_id=row.plant_id,
+                    assigned_to=None,
+                    event_type="issue_closure_requested",
+                    title=f"Closure requested — {row.ticket_no}",
+                    message=f"{plant.site_code if plant else ''} · {remark}",
+                    target_id=row.ticket_no,
+                    dedupe_key=f"issue-closure-request:{row.id}:{now.isoformat()}",
+                )
+                self.db.refresh(row)
+                return row
+            if user.role == "O&M Head":
+                return self.close(issue_id, CloseRequest(note=remark, direct=True), user)
+            raise HTTPException(403, "Only the O&M Head or the ticket's Assignee can close a ticket")
+        if row.status == "Pending Closure" and user.role != "O&M Head":
+            raise HTTPException(403, "Only the O&M Head can confirm a pending closure")
         if data.direct:
-            # The router has already checked that an Assignee is the one this ticket is assigned to.
-            if user.role not in {"O&M Head","Assignee"}:
-                raise HTTPException(403,"Only the O&M Head or the ticket's Assignee can close a ticket directly")
+            if user.role != "O&M Head":
+                raise HTTPException(403,"Only the O&M Head can close a ticket directly")
             if row.status=="Closed":
                 raise HTTPException(409,"This ticket is already closed")
             if not (data.note or "").strip():

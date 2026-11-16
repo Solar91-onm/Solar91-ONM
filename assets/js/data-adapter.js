@@ -31,7 +31,7 @@
   const BUSINESS_RULES = {
     issue: {
       openStates: ["Open", "Assigned", "Acknowledged", "In Progress",
-                   "Pending Vendor", "Pending Parts/Vendor"],
+                   "Pending Vendor", "Pending Parts/Vendor", "Pending Closure"],
       closedStates: ["Resolved", "Closed"],
       severities: ["Critical", "Medium"],
       severityAliases: { High: "Critical", Low: "Medium" }

@@ -28,7 +28,7 @@ router = APIRouter(prefix="/api/field", tags=["Field Desk"])
 LIVE_ROLES = {"O&M Head", "Assignee", "Site Engineer", "Administration"}
 # Ask Solar91 (the chatbot: /ask and its /search refinements) is for the O&M Head, Assignees and Administration only.
 ASSISTANT_ROLES = {"O&M Head", "Assignee", "Administration"}
-ACTIVE_ISSUE_STATUSES = {"Open", "Assigned", "Acknowledged", "In Progress", "Pending Vendor", "Pending Parts/Vendor"}
+ACTIVE_ISSUE_STATUSES = {"Open", "Assigned", "Acknowledged", "In Progress", "Pending Vendor", "Pending Parts/Vendor", "Pending Closure"}
 ACTIVE_TASK_STATUSES = {"Scheduled", "In Progress"}
 
 

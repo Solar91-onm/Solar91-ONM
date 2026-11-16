@@ -10,7 +10,7 @@
 
   var data = global.Solar91PortalData;
   var format = global.Solar91PortalFormat;
-  var STATUSES = ["Unhealthy", "In Progress", "Solved"];
+  var STATUSES = ["Unhealthy", "In Progress", "Pending Closure", "Solved"];
   // Categories and their sub-problems come from /api/categories (Settings -> Categories).
   // Empty until that list is filled; nothing here is hard-coded any more.
   var CATEGORIES = [];
@@ -51,6 +51,35 @@
     });
     return out.slice(0, 8);
   }
+  // "inverter" check used in wizard step 2 (matches overview.js's own isInverter()).
+  function isDraftInverter(equipment) {
+    return String(equipment || "").trim().toLowerCase() === "inverter";
+  }
+
+  // Per-session cache of unit config keyed by site code, loaded lazily in the wizard.
+  var unitConfigCache = {};
+  var unitConfigLoading = null;
+
+  function loadUnitConfigFor(siteCode) {
+    if (unitConfigCache[siteCode] !== undefined) return Promise.resolve(unitConfigCache[siteCode]);
+    if (!unitConfigLoading) {
+      unitConfigLoading = global.Solar91PortalAPI.request("/api/pm-plan/unit-config")
+      .then(function (body) {
+        var configs = (body && body.configs) || [];
+        state.plants.forEach(function (plant) { unitConfigCache[plant.siteCode] = 0; });
+        configs.forEach(function (config) {
+          if (String(config.equipment_type || "").trim().toLowerCase() === "inverter") {
+            unitConfigCache[config.site_code] = Number(config.total_units) || 0;
+          }
+        });
+      }).catch(function (error) {
+        unitConfigLoading = null;
+        throw error;
+      });
+    }
+    return unitConfigLoading.then(function () { return unitConfigCache[siteCode] || 0; });
+  }
+
   var pendingEquipment = null;
   var state = {
     rows: [],
@@ -75,6 +104,7 @@
     columnFilters: {},
     categoryLoading: false,
     categoryError: "",
+    unitConfigError: "",
     modalId: "",
     modalMode: "",
     editDraft: null,
@@ -97,6 +127,9 @@
     isHead: false,
     assignees: [],
     submitError: "",
+    closeError: "",
+    closeDraft: null,
+    closureRejectRemark: "",
     submitNotice: "",
     submitting: false,
     // Photos for the ticket on screen, read from /api/photos (thumbnails only; the original
@@ -202,6 +235,7 @@
       photoCount: Number(issue.photo_count || 0),
       notes: "",
       severity: issue.severity,
+      closure: issue.closure || {},
       live: true
     };
   }
@@ -221,7 +255,10 @@
         if (!term) return false;
         return issueColumnValue(issue, key).toLowerCase().indexOf(term) === -1;
       })) return false;
-      if (!ignoreStatus && state.statusFilter !== "All" && statusGroup(issue.status) !== state.statusFilter) return false;
+      if (!ignoreStatus && state.statusFilter !== "All" &&
+          (state.statusFilter === "Pending Closure"
+            ? issue.status !== "Pending Closure"
+            : statusGroup(issue.status) !== state.statusFilter)) return false;
       var term = state.search.trim().toLowerCase();
       if (!term) return true;
       return [
@@ -242,18 +279,22 @@
   }
 
   function countByStatus(rows, status) {
-    return rows.filter(function (issue) { return statusGroup(issue.status) === status; }).length;
+    return rows.filter(function (issue) {
+      return status === "Pending Closure"
+        ? issue.status === status
+        : statusGroup(issue.status) === status;
+    }).length;
   }
 
   function statusGroup(status) {
     if (["Solved", "Resolved", "Closed"].indexOf(status) !== -1) return "Solved";
-    if (["In Progress", "Pending Vendor", "Pending Parts/Vendor"].indexOf(status) !== -1) return "In Progress";
+    if (["In Progress", "Pending Vendor", "Pending Parts/Vendor", "Pending Closure"].indexOf(status) !== -1) return "In Progress";
     return "Unhealthy";
   }
 
   function statusTone(status) {
     if (["Solved", "Resolved", "Closed"].indexOf(status) !== -1) return "solved";
-    if (["In Progress", "Pending Vendor", "Pending Parts/Vendor"].indexOf(status) !== -1) return "progress";
+    if (["In Progress", "Pending Vendor", "Pending Parts/Vendor", "Pending Closure"].indexOf(status) !== -1) return "progress";
     return "unhealthy";
   }
 
@@ -579,23 +620,6 @@
     });
   }
 
-  function renderCloseAction(issue, closeNote) {
-    if (!state.canEdit || !canCloseIssue(issue)) return "";
-    var resolved = issue.status === "Resolved";
-    return '<fieldset class="ep-issues__wizard-field ep-issues__close-action">' +
-      '<legend>' + (resolved ? "Verify and close" : "Close directly") + '</legend>' +
-      '<label class="ep-issues__wizard-field">Closure note' +
-        '<textarea name="closeNote" rows="2" maxlength="4000"' +
-          (resolved ? "" : " required") + '>' + escape(closeNote || "") + '</textarea>' +
-        '<small>' + (resolved
-          ? "Confirm that the resolved ticket can be closed."
-          : "A reason is required. This closes the ticket without the resolution workflow; unsaved form edits are not included.") + '</small></label>' +
-      '<button type="button" class="ep-issues__button ep-issues__button--primary" data-issue-action="close-ticket" data-direct-close="' +
-        (resolved ? "false" : "true") + '"' + (state.submitting ? " disabled" : "") + '>' +
-        (resolved ? "Verify & close ticket" : "Close ticket") + '</button>' +
-    '</fieldset>';
-  }
-
   /** Today as YYYY-MM-DD, so a fix cannot be dated in the future. */
   function todayISO() {
     var now = new Date();
@@ -684,7 +708,6 @@
         '<textarea name="problem" required rows="4" maxlength="4000">' + escape(value("problem", issue.problem)) + '</textarea></label>' +
       '<label class="ep-issues__wizard-field">Reason for the change' +
         '<input name="changeReason" value="' + escape(value("changeReason", "")) + '" maxlength="500" placeholder="Why the ticket is being corrected (optional)" /></label>' +
-      renderCloseAction(issue, value("closeNote", "")) +
       '<p class="ep-issues__wizard-error" data-issue-edit-error' +
         (state.submitError ? '' : ' hidden') + '>' + escape(state.submitError) + '</p>' +
       '<div class="ep-issues__wizard-actions">' +
@@ -701,36 +724,104 @@
     return parts.length === 3 ? parts[2] + "-" + parts[1] + "-" + parts[0].slice(2) : value;
   }
 
-  function renderDetails(issue) {
+  function issueDetailsPreferenceKey() {
+    var user = global.Solar91PortalAPI && global.Solar91PortalAPI.currentUser
+      ? global.Solar91PortalAPI.currentUser() : null;
+    return "solar91IssueDetailsExpanded:" + String(user && (user.id || user.email) || "anonymous");
+  }
+
+  function issueDetailsExpanded() {
+    try {
+      return global.localStorage.getItem(issueDetailsPreferenceKey()) === "true";
+    } catch (error) {
+      return false;
+    }
+  }
+
+  function canConfirmClosure() {
+    var user = global.Solar91PortalAPI && global.Solar91PortalAPI.currentUser
+      ? global.Solar91PortalAPI.currentUser() : null;
+    return !!user && user.role === "O&M Head";
+  }
+
+  function renderClosePanel() {
+    var draft = state.closeDraft || { remark: "", resolved: "" };
+    return '<form class="ep-issues__close-flow" data-issue-close-form>' +
+      '<label>Remark <span aria-hidden="true">*</span>' +
+        '<textarea name="remark" rows="3" maxlength="2000" required>' + escape(draft.remark) + '</textarea>' +
+        '<small>Required · up to 2,000 characters.</small></label>' +
+      '<label>Is the issue resolved? <span aria-hidden="true">*</span>' +
+        '<select name="resolved" required><option value="">Choose Yes or No</option>' +
+          '<option value="yes"' + (draft.resolved === "yes" ? " selected" : "") + '>Yes</option>' +
+          '<option value="no"' + (draft.resolved === "no" ? " selected" : "") + '>No</option></select></label>' +
+      '<p class="ep-issues__inline-error" data-issue-close-error role="alert"' +
+        (state.closeError ? '' : ' hidden') + '>' + escape(state.closeError) + '</p>' +
+      '<div class="ep-issues__drawer-actions">' +
+        '<button type="button" class="ep-issues__button" data-issue-action="cancel-close">Cancel</button>' +
+        '<button type="submit" class="ep-issues__button ep-issues__button--primary"' +
+          (state.submitting ? " disabled" : "") + '>' +
+          (state.submitting ? "Saving…" : "Continue") + '</button>' +
+      '</div></form>';
+  }
+
+  function renderDetails(issue, closeMode) {
+    var status = statusTone(issue.status);
+    var request = issue.closure && issue.closure.closure_request || {};
+    var pendingClosure = issue.status === "Pending Closure";
+    var actions = "";
+    if (pendingClosure && canConfirmClosure()) {
+      actions = '<div class="ep-issues__drawer-actions">' +
+        '<button type="button" class="ep-issues__button ep-issues__button--primary"' +
+          ' data-issue-action="confirm-closure"' + (state.submitting ? " disabled" : "") +
+          '>Confirm closure</button></div>' +
+        '<div class="ep-issues__reject-remark"><label>Remark for sending back' +
+          '<input type="text" maxlength="1000" data-closure-reject-remark value="' +
+            escape(state.closureRejectRemark) + '" /></label>' +
+          '<button type="button" class="ep-issues__button" data-issue-action="reject-closure"' +
+            (state.submitting ? " disabled" : "") + '>Send back to In Progress</button></div>';
+    } else if (pendingClosure) {
+      actions = '<p class="ep-issues__drawer-note">Awaiting O&amp;M Head confirmation.</p>';
+    } else if (canCloseIssue(issue)) {
+      actions = '<div class="ep-issues__drawer-actions"><button type="button" ' +
+        'class="ep-issues__button ep-issues__button--primary" data-issue-action="start-close"' +
+        '>Close issue</button></div>';
+    }
     return '<div class="ep-issues__drawer-content">' +
-      '<div class="ep-issues__drawer-status ep-issues__drawer-status--' + statusTone(issue.status) + '">' +
-        '<strong>' + escape(issue.equipment) + '</strong><span>' + escape(issue.id) + " · " +
-          escape(formatIssueDate(issue.reportedAt)) + '</span></div>' +
-      '<span class="ep-issues__status ep-issues__status--' + statusTone(issue.status) + '">' +
-        '<i></i>' + escape(issue.status) + '</span>' +
-      '<dl class="ep-issues__fields">' +
-        field("Plant", issue.plantName) +
-        field("Site code", issue.plantCode) +
-        field("Category", issue.equipment) +
-        field("Subpart / fault area", issue.subpart) +
-        field("Supplier / Maker", issue.supplierMaker) +
-        field("Serial number", issue.serialNo) +
-        field("Number of units", issue.unitCount) +
-        field("Occurrence date", issue.occurredAt ? formatIssueDate(issue.occurredAt) : "") +
-        field("Expected time to close", issue.dueAt ? issue.dueAt.replace("T", " ") : "") +
-        field("Reported", formatIssueDate(issue.reportedAt)) +
-        field("Reported by", issue.reportedBy) +
-        field("Assigned to", issue.assignee || "Unassigned") +
-        // Severity is not shown: every ticket is filed as Medium, so it carried no
-        // information. Status is what says where a ticket stands.
-        field("Status", issue.status) +
-        field("Issue details", issue.problem) +
-        field("Notes", issue.notes) +
-      '</dl>' + renderIssuePhotos(issue) + '<p class="ep-issues__demo-note">' +
-        "Saved to Solar91 O&M. Use the main O&M app for ticket updates and workflow actions." +
-        (state.submitNotice ? " " + escape(state.submitNotice) : "") + '</p>' +
-      '</div><footer class="ep-issues__drawer-footer">' +
-      '</footer>';
+      '<div class="ep-issues__drawer-summary">' +
+        '<div class="ep-issues__drawer-equipment">' + escape(issue.equipment) + '</div>' +
+        '<span class="ep-issues__status ep-issues__status--' + status + '">' +
+          '<i></i>' + escape(issue.status) + '</span>' +
+        '<p><strong>' + escape(issue.plantCode) + '</strong> · ' + escape(issue.plantName) + '</p>' +
+        '<p class="ep-issues__drawer-description">' + escape(issue.problem || "No description recorded.") + '</p>' +
+      '</div>' +
+      (pendingClosure
+        ? '<section class="ep-issues__closure-request"><h3>Closure requested by ' +
+          escape(request.requested_by || "Assignee") + '</h3><p>' + escape(request.remark || "No remark recorded.") + '</p></section>'
+        : "") +
+      (pendingClosure && state.closeError
+        ? '<p class="ep-issues__inline-error" role="alert">' + escape(state.closeError) + '</p>' : "") +
+      (closeMode ? renderClosePanel() : actions) +
+      (!closeMode && !pendingClosure
+        ? '<details class="ep-issues__full-details" data-issue-full-details' +
+          (issueDetailsExpanded() ? " open" : "") + '><summary>Edit full details</summary>' +
+          '<dl class="ep-issues__fields">' +
+            field("Category", issue.equipment) +
+            field("Sub-problem", issue.subpart) +
+            field("Serial number", issue.serialNo) +
+            field("Maker / Supplier", issue.supplierMaker) +
+            field("Number of units", issue.unitCount) +
+            field("Occurrence date", issue.occurredAt ? formatIssueDate(issue.occurredAt) : "") +
+            field("Expected time to close", issue.dueAt ? issue.dueAt.replace("T", " ") : "") +
+            field("Reported", formatIssueDate(issue.reportedAt)) +
+            field("Assigned to", issue.assignee || "Unassigned") +
+            field("Severity", issue.severity) +
+            field("Issue details", issue.problem) +
+            field("Notes", issue.notes) +
+          '</dl>' + renderIssuePhotos(issue) +
+          (state.canEdit ? '<button type="button" class="ep-issues__button" data-issue-action="edit-current">Edit full details</button>' : "") +
+        '</details>' : "") +
+      (state.submitNotice ? '<p class="ep-issues__demo-note" role="status">' + escape(state.submitNotice) + '</p>' : "") +
+      '</div>';
   }
 
   function field(label, value) {
@@ -745,6 +836,10 @@
       serialNo: "",
       supplierMaker: "",
       unitCount: "",
+      // Inverter-specific: null = not asked, true = Running, false = Breakdown.
+      equipmentRunning: null,
+      // Chosen unit numbers when Breakdown (array of 1-based integers); empty = not yet chosen.
+      selectedUnits: [],
       occurredAt: localDate(new Date()),
       dueAt: "",
       problem: "",
@@ -829,7 +924,65 @@
       '</div></div>';
   }
 
+  function renderInverterRunningBlock(draft) {
+    // Only shown when the chosen category is "Inverter".
+    if (!isDraftInverter(draft.equipment)) return "";
+    var isRunning = draft.equipmentRunning === true;
+    var isBreakdown = draft.equipmentRunning === false;
+    // Unit select for Breakdown: show numbered unit options if total_units is known for this plant.
+    var totalUnits = unitConfigCache[draft.plantCode] || 0;
+    var configPending = unitConfigCache[draft.plantCode] === undefined && !!unitConfigLoading;
+    var unitSelectHtml = "";
+    if (isBreakdown) {
+      if (state.unitConfigError) {
+        unitSelectHtml = '<p class="ep-issues__inline-error" role="alert">' +
+          'Inverter unit configuration could not be loaded: ' + escape(state.unitConfigError) +
+          ' <button type="button" class="ep-issues__button ep-issues__button--small" ' +
+            'data-issue-action="retry-unit-config">Retry</button></p>';
+      } else if (configPending) {
+        unitSelectHtml = '<p class="ep-issues__category-note" role="status">Loading inverter unit configuration…</p>';
+      } else if (totalUnits > 0) {
+        var options = "";
+        for (var i = 1; i <= totalUnits; i++) {
+          var sel = draft.selectedUnits.indexOf(i) !== -1 ? " selected" : "";
+          options += '<option value="' + i + '"' + sel + '>Unit ' + i + '</option>';
+        }
+        unitSelectHtml =
+          '<label class="ep-issues__wizard-field ep-issues__wizard-field--required">' +
+          'Which unit(s) are down? (select one or more)' +
+          '<select name="breakdownUnits" multiple required size="' + Math.min(totalUnits, 6) + '">' +
+          options + '</select>' +
+          '<small>Hold Ctrl / ⌘ to select multiple. ' + totalUnits + ' units configured for this plant.</small>' +
+          '<small class="ep-issues__inline-error" data-breakdown-unit-error role="alert" hidden></small></label>';
+      } else {
+        // No unit config — require free-text serial number.
+        unitSelectHtml =
+          '<label class="ep-issues__wizard-field ep-issues__wizard-field--required">' +
+          'Serial number of broken unit (required for Breakdown)' +
+          '<input name="serialNo" type="text" maxlength="120" required value="' + escape(draft.serialNo || "") +
+          '" placeholder="e.g. INV-2023-004517" />' +
+          '<small>No unit count is configured for this plant; enter the serial number instead.</small>' +
+          '<small class="ep-issues__inline-error" data-breakdown-serial-error role="alert" hidden></small></label>';
+      }
+    }
+    return '<fieldset class="ep-issues__wizard-fieldset">' +
+      '<legend class="ep-issues__wizard-field-label">Is the inverter running? <span class="ep-issues__required" aria-hidden="true">*</span></legend>' +
+      '<div class="ep-issues__wizard-radio-row">' +
+        '<label><input type="radio" name="equipmentRunning" value="running"' + (isRunning ? " checked" : "") + ' required /> Running</label>' +
+        '<label><input type="radio" name="equipmentRunning" value="breakdown"' + (isBreakdown ? " checked" : "") + ' required /> Breakdown</label>' +
+      '</div>' +
+      '<small class="ep-issues__inline-error" data-breakdown-running-error role="alert" hidden></small>' +
+      (isBreakdown ? unitSelectHtml : "") +
+      '</fieldset>';
+  }
+
   function renderWizardStepTwo(draft) {
+    var isInverter = isDraftInverter(draft.equipment);
+    var isBreakdown = isInverter && draft.equipmentRunning === false;
+    // For non-inverter categories the serial/unitCount fields remain optional as before.
+    // For Breakdown with unit config, serial is hidden (units are chosen via multi-select).
+    // For Breakdown without unit config, serial is rendered inside renderInverterRunningBlock.
+    var showLegacySerial = !isBreakdown;
     return '<div class="ep-issues__wizard-step"><label class="ep-issues__wizard-field">Issue vertical / category' +
       '<select name="equipment" required>' + renderEquipmentOptions(draft.equipment) + '</select>' +
       (CATEGORIES.length ? '' : '<small>Add them in Settings → Categories first.</small>') + '</label>' +
@@ -837,25 +990,30 @@
         '<select name="subpart">' + renderSubpartOptions(draft.subpart, draft.equipment) + '</select>' +
         '<small>The fault for this category; describe the full problem separately in Issue details.</small>' +
       '</label>' +
+      renderInverterRunningBlock(draft) +
       '<div class="ep-issues__wizard-fields ep-issues__wizard-fields--two">' +
-        '<label class="ep-issues__wizard-field">Serial number of equipment (optional)' +
-          '<input name="serialNo" type="text" maxlength="120" value="' + escape(draft.serialNo || "") +
-          '" placeholder="e.g. INV-2023-004517" /></label>' +
+        (showLegacySerial
+          ? '<label class="ep-issues__wizard-field">Serial number of equipment' + (isBreakdown ? ' <span class="ep-issues__required" aria-hidden="true">*</span>(required)' : ' (optional)') +
+            '<input name="serialNo" type="text" maxlength="120"' + (isBreakdown ? ' required' : '') + ' value="' + escape(draft.serialNo || "") +
+            '" placeholder="e.g. INV-2023-004517" /></label>'
+          : '<span></span>') +
         '<label class="ep-issues__wizard-field">Supplier / Maker (optional)' +
           '<input name="supplierMaker" type="text" maxlength="160" value="' + escape(draft.supplierMaker || "") +
           '" placeholder="Who made or supplied it" /></label>' +
       '</div>' +
-      '<label class="ep-issues__wizard-field">Number of units (optional)' +
-        '<input name="unitCount" type="number" min="1" max="100000" step="1" value="' +
-        escape(draft.unitCount || "") + '" placeholder="How many units are affected" />' +
-        '<small>How many units of this equipment the fault covers. Leave blank if it is not counted.</small>' +
-      '</label>' +
+      (isBreakdown ? '' :
+        '<label class="ep-issues__wizard-field">Number of units (optional)' +
+          '<input name="unitCount" type="number" min="1" max="100000" step="1" value="' +
+          escape(draft.unitCount || "") + '" placeholder="How many units are affected" />' +
+          '<small>How many units of this equipment the fault covers. Leave blank if it is not counted.</small>' +
+        '</label>') +
       (templates().length
         ? '<div class="ep-issues__template-area"><strong>Quick templates — 1 click fills category, sub-problem and description</strong>' +
           '<div>' + templates().map(function (template, index) {
             return '<button type="button" data-issue-template="' + index + '">' + escape(template.label) + '</button>';
           }).join("") + '</div></div>'
         : "") +
+      '<p class="ep-issues__wizard-error" data-wizard-step2-error role="alert" hidden></p>' +
       '<div class="ep-issues__wizard-actions"><button type="button" class="ep-issues__button" data-wizard-action="back">Back</button>' +
         '<button type="button" class="ep-issues__button ep-issues__button--primary" data-wizard-action="next">Next</button></div>' +
       '</div>';
@@ -870,9 +1028,10 @@
         '<label class="ep-issues__wizard-field">Occurrence date<input name="occurredAt" type="date" required value="' +
           escape(draft.occurredAt) + '" /></label>' +
       '</div>' +
-      '<label class="ep-issues__wizard-field">Issue details<textarea name="problem" required rows="4" placeholder="Describe the full problem observed">' +
+      '<label class="ep-issues__wizard-field">Issue details<textarea name="problem" required rows="4" maxlength="4000" placeholder="Describe the full problem observed">' +
         escape(draft.problem) + '</textarea>' +
         '<small>Include what happened and relevant symptoms; the subpart / fault area is selected separately.</small>' +
+        '<small class="ep-issues__inline-error" data-breakdown-remark-error role="alert" hidden></small>' +
       '</label>' +
       '<div class="ep-issues__wizard-fields ep-issues__wizard-fields--evidence">' +
         '<label class="ep-issues__wizard-field">Evidence photos (up to ' + MAX_ISSUE_PHOTOS + ')' +
@@ -928,15 +1087,19 @@
     var isForm = state.modalMode === "create" || state.modalMode === "edit";
     var isWizard = state.modalMode === "create";
     var title = isWizard ? "Raise issue ticket" :
-      state.modalMode === "edit" ? "Edit issue" : "Issue details";
+      state.modalMode === "edit" ? "Edit issue" :
+        state.modalMode === "close" ? "Close issue" : (issue && issue.id) || "Issue details";
+    var ticketSubtitle = issue
+      ? escape(issue.plantCode + (issue.plantName ? " · " + issue.plantName : ""))
+      : "Saved Solar91 O&M ticket";
     return '<div class="ep-issues__overlay" data-issue-overlay>' +
       '<button type="button" class="ep-issues__backdrop" data-issue-action="close" aria-label="Close issue details"></button>' +
       '<aside class="ep-issues__drawer" role="dialog" aria-modal="true" aria-labelledby="issue-drawer-title">' +
         '<header class="ep-issues__drawer-head"><div><p>' +
           (isWizard ? "Step-by-step issue capture · Ticket ID and timestamp are generated only when you submit" :
-            "Saved Solar91 O&M ticket") +
+            ticketSubtitle) +
           '</p>' +
-          '<h2 id="issue-drawer-title">' + title + '</h2></div>' +
+          '<h2 id="issue-drawer-title">' + escape(title) + '</h2></div>' +
           '<button type="button" class="ep-issues__drawer-x" data-issue-action="close" aria-label="Close">×</button></header>' +
         (isWizard
           ? '<div class="ep-issues__drawer-content">' + renderRaiseWizard(context) + '</div>'
@@ -945,7 +1108,7 @@
           : renderDetails(issue || {
           id: "Issue unavailable", plantCode: "", plantName: "", equipment: "", status: "Unhealthy",
           problem: "", reportedAt: "", reportedBy: "", assignee: "", notes: ""
-        })) +
+        }, state.modalMode === "close")) +
       (isWizard ? '<footer class="ep-issues__drawer-footer"><button type="button" class="ep-issues__button" data-issue-action="close">Cancel</button></footer>' : "") +
       '</aside></div>';
   }
@@ -1056,8 +1219,12 @@
             : "") +
           '</section>';
     }
+    // On the merged plant page the range toggle, month picker, Raise issue, Export and Import sit
+    // IN the "Health · N open" header rather than on a line of their own below it. The Views tab's
+    // standalone Health page keeps the controls above its own body, as before.
+    var headerControls = renderHeader(context);
     var issuesMarkup = '<div class="ep-issues">' +
-      renderHeader(context) +
+      (context.plantDetailsMerged ? "" : headerControls) +
       '<div class="ep-issues__body">' +
         renderFilters(context, unfilteredRows) +
         content +
@@ -1067,9 +1234,20 @@
     host.innerHTML = context.plantDetailsMerged
     ? '<section class="ep-pd__health-card"><header class="ep-pd__health-head">' +
         '<h2>Health</h2><span class="ep-pd__open-count">' + openCount + ' open</span>' +
+        headerControls +
       '</header>' + issuesMarkup + '</section>'
     : issuesMarkup;
     wireColumnFilterMenus(host);
+    var fullDetails = host.querySelector("[data-issue-full-details]");
+    if (fullDetails) {
+      fullDetails.addEventListener("toggle", function () {
+        try {
+          global.localStorage.setItem(issueDetailsPreferenceKey(), fullDetails.open ? "true" : "false");
+        } catch (error) {}
+        if (fullDetails.open) loadIssuePhotos(state.modalId);
+      });
+      if (fullDetails.open) loadIssuePhotos(state.modalId);
+    }
     // Thumbnails load as they come into view, never all at once with the page.
     if (photoEvidence()) photoEvidence().watch(host);
     var sort = host.querySelector('[data-issue-filter="sort"]');
@@ -1205,6 +1383,14 @@
     if (wiredHost === host) return;
     wiredHost = host;
     host.addEventListener("input", function (event) {
+      if (event.target.matches('[data-issue-close-form] [name="remark"]')) {
+        state.closeDraft = state.closeDraft || { remark: "", resolved: "" };
+        state.closeDraft.remark = event.target.value;
+      }
+      if (event.target.matches("[data-closure-reject-remark]")) {
+        state.closureRejectRemark = event.target.value;
+        state.closeError = "";
+      }
       if (!active || active.host !== host) return;
       var editForm = event.target.closest("[data-issue-edit-form]");
       if (editForm) {
@@ -1217,6 +1403,17 @@
       }
       if (event.target.matches("[data-issue-column-filter-search]")) {
         filterColumnOptions(event.target.closest("[data-issue-column-filter-menu]"), event.target.value);
+        return;
+      }
+      if (action === "retry-unit-config" && state.modalMode === "create" && state.draft) {
+        state.unitConfigError = "";
+        renderView();
+        loadUnitConfigFor(state.draft.plantCode).then(function () {
+          renderView();
+        }).catch(function (error) {
+          state.unitConfigError = (error && error.message) || "Please retry.";
+          renderView();
+        });
         return;
       }
       if (event.target.matches("[data-issue-date-start]")) {
@@ -1246,6 +1443,10 @@
       }
     });
     host.addEventListener("change", function (event) {
+      if (event.target.matches('[data-issue-close-form] [name="resolved"]')) {
+        state.closeDraft = state.closeDraft || { remark: "", resolved: "" };
+        state.closeDraft.resolved = event.target.value;
+      }
       if (!active || active.host !== host) return;
       if (event.target.matches("[data-issue-photo-file]")) {
         var picked = Array.prototype.slice.call(event.target.files || []);
@@ -1345,6 +1546,25 @@
         if (currentWizard) syncWizardDraft(currentWizard);
         state.draft.equipment = event.target.value;
         state.draft.subpart = "";
+        state.draft.equipmentRunning = null;
+        state.draft.selectedUnits = [];
+        state.unitConfigError = "";
+        // Pre-load unit config for this plant if the category is now Inverter.
+        if (isDraftInverter(state.draft.equipment) && state.draft.plantCode) {
+          loadUnitConfigFor(state.draft.plantCode).then(function () {
+            state.unitConfigError = "";
+            renderView();
+          }).catch(function (error) {
+            state.unitConfigError = (error && error.message) || "Please retry.";
+            renderView();
+          });
+        }
+        renderView();
+        return;
+      }
+      if (event.target.name === "equipmentRunning" && state.modalMode === "create" && state.draft) {
+        var runWizard = host.querySelector("[data-issue-wizard]");
+        if (runWizard) syncWizardDraft(runWizard);
         renderView();
         return;
       }
@@ -1415,6 +1635,38 @@
         if (direction === "back") {
           state.wizardStep = Math.max(1, state.wizardStep - 1);
         } else if (direction === "next") {
+          if (state.wizardStep === 2 && isDraftInverter(state.draft.equipment)) {
+            var runningError = host.querySelector("[data-breakdown-running-error]");
+            var unitError = host.querySelector("[data-breakdown-unit-error]");
+            var serialError = host.querySelector("[data-breakdown-serial-error]");
+            if (runningError) runningError.hidden = true;
+            if (unitError) unitError.hidden = true;
+            if (serialError) serialError.hidden = true;
+            if (state.draft.equipmentRunning === null) {
+              if (runningError) {
+                runningError.textContent = "Choose Running or Breakdown.";
+                runningError.hidden = false;
+              }
+              return;
+            }
+            if (state.draft.equipmentRunning === false) {
+              var configuredUnits = unitConfigCache[state.draft.plantCode] || 0;
+              if (configuredUnits && !state.draft.selectedUnits.length) {
+                if (unitError) {
+                  unitError.textContent = "Select at least one inverter unit.";
+                  unitError.hidden = false;
+                }
+                return;
+              }
+              if (!configuredUnits && !(state.draft.serialNo || "").trim()) {
+                if (serialError) {
+                  serialError.textContent = "Enter the serial number of the broken inverter.";
+                  serialError.hidden = false;
+                }
+                return;
+              }
+            }
+          }
           if (currentForm && !currentForm.reportValidity()) return;
           if (state.wizardStep === 1) {
             var selectedPlant = state.plants.some(function (plant) {
@@ -1430,12 +1682,41 @@
             }
           }
           if (state.wizardStep === 2 && !categoryNames().includes(state.draft.equipment)) {
-            var equipmentError = host.querySelector("[data-wizard-error]");
+            var equipmentError = host.querySelector("[data-wizard-step2-error]") || host.querySelector("[data-wizard-error]");
             if (equipmentError) {
               equipmentError.textContent = "Select an equipment category to continue.";
               equipmentError.hidden = false;
             }
             return;
+          }
+          if (state.wizardStep === 2 && isDraftInverter(state.draft.equipment)) {
+            // "Is the inverter running?" is required for Inverter tickets.
+            var step2Err = host.querySelector("[data-wizard-step2-error]") || host.querySelector("[data-wizard-error]");
+            if (state.draft.equipmentRunning === null) {
+              if (step2Err) { step2Err.textContent = "Select whether the inverter is Running or Breakdown."; step2Err.hidden = false; }
+              return;
+            }
+            if (state.draft.equipmentRunning === false) {
+              // Breakdown: need units chosen (or serial if no config).
+              var totalUnitsForPlant = unitConfigCache[state.draft.plantCode] || 0;
+              if (unitConfigCache[state.draft.plantCode] === undefined) {
+                if (step2Err) {
+                  step2Err.textContent = state.unitConfigError
+                    ? "Retry loading this plant's inverter unit configuration."
+                    : "Wait for this plant's inverter unit configuration to finish loading.";
+                  step2Err.hidden = false;
+                }
+                return;
+              }
+              if (totalUnitsForPlant > 0 && state.draft.selectedUnits.length === 0) {
+                if (step2Err) { step2Err.textContent = "Select the unit(s) that are down."; step2Err.hidden = false; }
+                return;
+              }
+              if (totalUnitsForPlant === 0 && !(state.draft.serialNo || "").trim()) {
+                if (step2Err) { step2Err.textContent = "Enter the serial number of the broken unit."; step2Err.hidden = false; }
+                return;
+              }
+            }
           }
           state.wizardStep = Math.min(3, state.wizardStep + 1);
         }
@@ -1463,12 +1744,14 @@
       var open = event.target.closest("[data-issue-open]");
       if (open) {
         state.submitNotice = "";
+        state.closeError = "";
+        state.closeDraft = null;
+        state.closureRejectRemark = "";
         state.modalId = open.dataset.issueOpen;
         state.modalMode = "details";
         state.editDraft = null;
         state.photoError = "";
         renderView();
-        loadIssuePhotos(state.modalId);   // thumbnails for this ticket only, never for the list
         return;
       }
       var photoOpen = event.target.closest("[data-issue-photo-open]");
@@ -1521,8 +1804,26 @@
       var actionButton = event.target.closest("[data-issue-action]");
       if (!actionButton) return;
       var action = actionButton.dataset.issueAction;
-      if (action === "close-ticket") {
-        closeIssueFromEdit(actionButton);
+      if (action === "start-close") {
+        state.modalMode = "close";
+        state.closeError = "";
+        state.closeDraft = { remark: "", resolved: "" };
+        renderView();
+        return;
+      }
+      if (action === "cancel-close") {
+        state.modalMode = "details";
+        state.closeError = "";
+        state.closeDraft = null;
+        renderView();
+        return;
+      }
+      if (action === "confirm-closure") {
+        transitionPendingClosure("Closed");
+        return;
+      }
+      if (action === "reject-closure") {
+        transitionPendingClosure("In Progress");
         return;
       }
       if (action === "retry-photos") {
@@ -1607,13 +1908,40 @@
       }
     });
     host.addEventListener("submit", function (event) {
-      if (!event.target.matches("[data-issue-form]") || !active) return;
+      if (!event.target.matches("[data-issue-form], [data-issue-close-form]") || !active) return;
       event.preventDefault();
       if (state.submitting) return;
       var form = event.target;
+      if (form.hasAttribute("data-issue-close-form")) {
+        if (!form.reportValidity()) return;
+        var closeRemark = (form.elements.remark.value || "").trim();
+        if (!closeRemark) {
+          var closeError = form.querySelector("[data-issue-close-error]");
+          if (closeError) {
+            closeError.textContent = "Add a remark before continuing.";
+            closeError.hidden = false;
+          }
+          form.elements.remark.focus();
+          return;
+        }
+        submitIssueCloseFlow(form);
+        return;
+      }
       if (form.hasAttribute("data-issue-wizard")) {
-        if (state.wizardStep !== 3 || !form.reportValidity()) return;
         syncWizardDraft(form);
+        if (state.wizardStep !== 3) return;
+        var breakdown = isDraftInverter(state.draft.equipment) && state.draft.equipmentRunning === false;
+        if (breakdown && !state.draft.problem.trim()) {
+          var remarkError = form.querySelector("[data-breakdown-remark-error]");
+          if (remarkError) {
+            remarkError.textContent = "Add a remark for this Breakdown.";
+            remarkError.hidden = false;
+          }
+          var problemField = form.elements.problem;
+          if (problemField) problemField.focus();
+          return;
+        }
+        if (!form.reportValidity()) return;
         if (!state.liveMode) {
           var previewError = form.querySelector("[data-wizard-error]");
           if (previewError) {
@@ -1668,53 +1996,99 @@
       "occurredAt", "dueAt", "problem", "assignee"].forEach(function (name) {
       if (values.has(name)) state.draft[name] = String(values.get(name) || "");
     });
+    // Inverter-specific fields.
+    if (values.has("equipmentRunning")) {
+      var runningVal = values.get("equipmentRunning");
+      state.draft.equipmentRunning = runningVal === "running" ? true : runningVal === "breakdown" ? false : null;
+    }
+    // Multi-select unit checkboxes — getAll returns all selected options.
+    if (form.elements.breakdownUnits) {
+      state.draft.selectedUnits = values.getAll("breakdownUnits").map(Number).filter(Boolean);
+    }
   }
 
-  function closeIssueFromEdit(button) {
-    var form = button.closest("[data-issue-edit-form]");
-    if (!form) return;
-    syncIssueEditDraft(form);
-    var issue = state.rows.find(function (row) { return row.dbId === form.dataset.issueEditForm; });
-    var direct = button.dataset.directClose === "true";
-    var note = form && form.elements.closeNote ? form.elements.closeNote.value.trim() : "";
-    if (!issue) {
-      state.submitError = "This ticket is no longer in the list. Close and reopen the register.";
-      renderView();
-      return;
-    }
-    if (direct && !note) {
-      state.submitError = "Add a reason before closing this ticket directly.";
-      renderView();
-      return;
-    }
-    if (!global.confirm("Close " + issue.id + (direct
-      ? " directly? The reason will be recorded in ticket history."
-      : " as verified?"))) return;
+  function applyCloseWorkflowResult(updated, successMessage) {
+    var plantsById = {};
+    state.plants.forEach(function (plant) { plantsById[plant.dbId] = plant; });
+    var saved = mapApiIssue(updated, plantsById);
+    var index = state.rows.findIndex(function (row) { return row.dbId === saved.dbId; });
+    if (index !== -1) state.rows.splice(index, 1, saved);
+    state.submitting = false;
+    state.closeError = "";
+    state.closeDraft = null;
+    state.closureRejectRemark = "";
+    state.modalMode = "details";
+    state.modalId = saved.id;
+    state.submitNotice = successMessage;
+    renderView();
+    var overview = global.Solar91PortalOverview;
+    if (overview && overview.refreshInverterHealth) overview.refreshInverterHealth();
+  }
 
+  function submitIssueCloseFlow(form) {
+    var issue = state.rows.find(function (row) { return row.id === state.modalId; });
+    if (!issue) {
+      state.closeError = "This ticket is no longer in the list. Close and reopen the register.";
+      renderView();
+      return;
+    }
+    if (!state.liveMode) {
+      state.closeError = "This preview cannot save changes. Open the signed-in Solar91 O&M app.";
+      renderView();
+      return;
+    }
+    var remark = String(form.elements.remark.value || "").trim();
+    var resolved = form.elements.resolved.value === "yes";
+    state.closeDraft = { remark: remark, resolved: resolved ? "yes" : "no" };
     state.submitting = true;
-    state.submitError = "";
+    state.closeError = "";
     renderView();
     global.Solar91PortalAPI.request("/api/issues/" + encodeURIComponent(issue.dbId) + "/close", {
       method: "POST",
-      body: { note: note || null, direct: direct, closure: {} }
+      body: { remark: remark, resolved: resolved }
     }).then(function (updated) {
-      var plantsById = {};
-      state.plants.forEach(function (plant) { plantsById[plant.dbId] = plant; });
-      var saved = mapApiIssue(updated, plantsById);
-      var index = state.rows.findIndex(function (row) { return row.dbId === saved.dbId; });
-      if (index !== -1) state.rows.splice(index, 1, saved);
-      state.submitting = false;
-      state.editDraft = null;
-      state.modalMode = "details";
-      state.modalId = saved.id;
-      state.submitNotice = saved.id + " closed.";
-      renderView();
+      var message = updated.status === "Pending Closure"
+        ? "Closure request sent to the O&M Head."
+        : updated.status === "Closed" ? "Issue closed." : "Issue marked Resolved.";
+      applyCloseWorkflowResult(updated, message);
     }).catch(function (error) {
       state.submitting = false;
-      state.submitError = error.message || "Could not close this ticket.";
+      state.closeError = error.message || "Could not close this issue.";
       renderView();
     });
   }
+
+  function transitionPendingClosure(nextStatus) {
+    var issue = state.rows.find(function (row) { return row.id === state.modalId; });
+    if (!issue) {
+      state.closeError = "This ticket is no longer in the list. Close and reopen the register.";
+      renderView();
+      return;
+    }
+    var note = nextStatus === "In Progress" ? state.closureRejectRemark.trim() : null;
+    if (nextStatus === "In Progress" && !note) {
+      state.closeError = "Add a remark before sending this issue back.";
+      renderView();
+      var remark = active.host.querySelector("[data-closure-reject-remark]");
+      if (remark) remark.focus();
+      return;
+    }
+    state.submitting = true;
+    state.closeError = "";
+    renderView();
+    global.Solar91PortalAPI.request("/api/issues/" + encodeURIComponent(issue.dbId) + "/status", {
+      method: "POST",
+      body: { status: nextStatus, note: note }
+    }).then(function (updated) {
+      applyCloseWorkflowResult(updated, nextStatus === "Closed"
+        ? "Closure confirmed." : "Issue sent back to In Progress.");
+    }).catch(function (error) {
+      state.submitting = false;
+      state.closeError = error.message || "Could not update the closure request.";
+      renderView();
+    });
+  }
+
 
   function syncIssueEditDraft(form) {
     if (!form) return;
@@ -2091,13 +2465,29 @@
     state.submitError = "";
     renderView();
     var units = parseInt(draft.unitCount, 10);
+    // Inverter running/breakdown mapping:
+    // equipment_running=false (Breakdown) → serial_no = chosen unit labels, unit_count = number of down units.
+    // equipment_running=true (Running) → no extra fields (serial_no/unit_count from form as-is).
+    // equipment_running=null (not an inverter ticket) → unchanged legacy behaviour.
+    var isBreakdown = isDraftInverter(draft.equipment) && draft.equipmentRunning === false;
+    var totalUnitsForPlant = unitConfigCache[draft.plantCode] || 0;
+    var serialForPayload = (draft.serialNo || "").trim() || null;
+    var unitCountForPayload = isNaN(units) ? null : units;
+    if (isBreakdown) {
+      if (totalUnitsForPlant > 0 && draft.selectedUnits.length > 0) {
+        serialForPayload = draft.selectedUnits.map(function (n) { return "Unit " + n; }).join(", ");
+        unitCountForPayload = draft.selectedUnits.length;
+      } else if (totalUnitsForPlant === 0) {
+        unitCountForPayload = 1;
+      }
+    }
     var payload = {
       plant_id: plant.dbId,
       vertical: draft.equipment,
       subcategory: draft.subpart || null,
-      serial_no: (draft.serialNo || "").trim() || null,
+      serial_no: serialForPayload,
       supplier_maker: (draft.supplierMaker || "").trim() || null,
-      unit_count: isNaN(units) ? null : units,
+      unit_count: unitCountForPayload,
       description: draft.problem.trim(),
       // Tickets raised here all carry the same priority, so the form no longer asks for one.
       // Medium is what the deadline defaults and notifications are keyed to.
@@ -2105,7 +2495,10 @@
       assigned_to: draft.assignee || null,
       occurred_at: toUtcTimestamp(draft.occurredAt, "09:00"),
       etc_at: draft.dueAt ? toUtcTimestamp(draft.dueAt) : null,
-      photo_count: 0
+      photo_count: 0,
+      // equipment_running: null = not an inverter ticket (not sent), true = running, false = breakdown.
+      equipment_running: isDraftInverter(draft.equipment) && draft.equipmentRunning !== null
+        ? draft.equipmentRunning : undefined
     };
 
     api.request("/api/issues", { method: "POST", body: payload }).then(function (issue) {
@@ -2115,6 +2508,10 @@
       var existing = state.rows.find(function (row) { return row.dbId === saved.dbId; });
       if (existing) state.rows.splice(state.rows.indexOf(existing), 1);
       state.rows.unshift(saved);
+      if (isBreakdown) {
+        var overview = global.Solar91PortalOverview;
+        if (overview && overview.refreshInverterHealth) overview.refreshInverterHealth();
+      }
       if (!draft.evidenceFiles.length) return null;
       // The ticket is already saved. Photos go up separately, through the shared /api/photos
       // pipeline: downscaled in the browser, stored as WebP with a 480 px thumbnail, and

@@ -4,7 +4,7 @@ from datetime import date, datetime
 from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 ISSUE_SEVERITIES = {"Critical", "Medium"}
 # Issues have two levels. Older rows, files and clients may still say High or Low: High reads as Critical and
@@ -35,6 +35,9 @@ class IssueCreate(BaseModel):
     serial_no: str | None = Field(default=None, max_length=120)
     supplier_maker: str | None = Field(default=None, max_length=160)
     unit_count: int | None = Field(default=None, ge=1, le=100000)
+    # Was the equipment still running? False = breakdown, True = running, None = not asked.
+    # Only False counts towards the Inverter Health "not running" figure.
+    equipment_running: bool | None = None
     description: str = Field(min_length=1)
     severity: str = "Medium"
     assigned_to: UUID | None = None
@@ -48,6 +51,15 @@ class IssueCreate(BaseModel):
     def normalize_severity(cls, value: Any) -> Any:
         return validate_issue_severity(value)
 
+    @model_validator(mode="after")
+    def require_breakdown_details(self) -> "IssueCreate":
+        if (self.vertical or "").strip().casefold() == "inverter" and self.equipment_running is False:
+            if not (self.serial_no or "").strip():
+                raise ValueError("Choose or enter at least one inverter for a Breakdown")
+            if not self.description.strip():
+                raise ValueError("Add a remark for the Breakdown")
+        return self
+
 
 class IssueUpdate(BaseModel):
     vertical: str | None = None
@@ -55,6 +67,7 @@ class IssueUpdate(BaseModel):
     serial_no: str | None = Field(default=None, max_length=120)
     supplier_maker: str | None = Field(default=None, max_length=160)
     unit_count: int | None = Field(default=None, ge=1, le=100000)
+    equipment_running: bool | None = None
     description: str | None = None
     severity: str | None = None
     occurred_at: datetime | None = None
@@ -194,7 +207,15 @@ class ReopenRequest(BaseModel):
 class CloseRequest(BaseModel):
     note: str | None = None
     closure: dict[str, Any] = Field(default_factory=dict)
-    direct: bool = False                      # O&M Head or the ticket's Assignee: close without the resolution step (a reason is required)
+    direct: bool = False                      # Legacy O&M Head-only close without the resolution step
+    remark: str | None = Field(default=None, max_length=2000)
+    resolved: bool | None = None
+
+    @model_validator(mode="after")
+    def require_close_flow_remark(self) -> "CloseRequest":
+        if self.resolved is not None and not (self.remark or "").strip():
+            raise ValueError("Add a remark before closing this issue")
+        return self
 
 
 class IssueOut(BaseModel):
@@ -207,6 +228,7 @@ class IssueOut(BaseModel):
     serial_no: str | None = None
     supplier_maker: str | None = None
     unit_count: int | None = None
+    equipment_running: bool | None = None
     description: str
     severity: str
     status: str

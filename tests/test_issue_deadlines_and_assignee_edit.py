@@ -94,18 +94,30 @@ def test_assigned_assignee_can_edit_details_and_deadline_with_a_logged_change(cl
     assert dates.status_code == 200, dates.text
 
 
-def test_assigned_assignee_can_close_their_ticket_and_closed_tickets_are_head_only(client, db):
+def test_assignee_requests_closure_and_closed_tickets_are_head_only(client, db):
     head, assignee, plant = _setup(client, db, "DL04")
     issue = client.post("/api/issues", json={"plant_id": plant["id"], "vertical": "Inverter",
                                              "description": "Duplicate report", "severity": "Medium"}).json()
     client.post(f"/api/issues/{issue['id']}/assign", json={"assigned_to": str(assignee.id)})
     conftest._CURRENT_USER = db.get(User, assignee.id)
-    assert client.post(f"/api/issues/{issue['id']}/close", json={"direct": True}).status_code == 422   # reason required
-    closed = client.post(f"/api/issues/{issue['id']}/close", json={"note": "Same fault as ISS-0001", "direct": True})
+    assert client.post(f"/api/issues/{issue['id']}/acknowledge").status_code == 200
+    assert client.post(f"/api/issues/{issue['id']}/start").status_code == 200
+    assert client.post(f"/api/issues/{issue['id']}/close", json={
+        "note": "Trying to bypass approval", "direct": True,
+    }).status_code == 403
+    pending = client.post(f"/api/issues/{issue['id']}/close", json={
+        "resolved": False, "remark": "Same fault as ISS-0001",
+    })
+    assert pending.status_code == 200 and pending.json()["status"] == "Pending Closure"
+    assert db.query(IssueHistory).filter_by(
+        issue_id=UUID(issue["id"]), action="issue.closure_requested",
+    ).one().note == "Same fault as ISS-0001"
+    conftest._CURRENT_USER = head
+    closed = client.post(f"/api/issues/{issue['id']}/status", json={"status": "Closed"})
     assert closed.status_code == 200, closed.text
-    assert closed.json()["status"] == "Closed" and closed.json()["closure"]["closed_by"] == "Deadline Assignee"
-    assert db.query(IssueHistory).filter_by(issue_id=UUID(issue["id"]), action="issue.closed_directly").count() == 1
+    assert closed.json()["status"] == "Closed" and closed.json()["closure"]["closed_by"] == head.display_name
     # once closed, only the O&M Head may correct it
+    conftest._CURRENT_USER = db.get(User, assignee.id)
     assert client.patch(f"/api/issues/{issue['id']}", json={"description": "late edit"}).status_code == 409
     conftest._CURRENT_USER = head
     assert client.patch(f"/api/issues/{issue['id']}", json={"description": "Duplicate report (merged)"}).status_code == 200
