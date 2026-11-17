@@ -187,7 +187,7 @@
 .ep-metric__stat { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
 .ep-metric__stat-label { font-size: var(--ep-fs-sm); color: var(--ep-text-muted); }
 .ep-metric__stat-value { font-size: var(--ep-fs-md); font-weight: 700; color: var(--ep-text-strong); font-variant-numeric: tabular-nums; }
-.ep-metric__stat-value.is-bad { color: var(--ep-red); }
+.ep-metric__stat-value.is-bad { color: var(--ep-text-strong); }
 .ep-metric__pill {
   display: inline-flex;
   align-items: center;
@@ -221,7 +221,7 @@
 /* The headline figure is coloured by the tile's state. */
 .ep-metric--accent .ep-metric__value, .ep-metric--accent .ep-metric__unit { color: var(--ep-accent); }
 .ep-metric--amber  .ep-metric__value, .ep-metric--amber  .ep-metric__unit { color: var(--ep-amber); }
-.ep-metric--red    .ep-metric__value, .ep-metric--red    .ep-metric__unit { color: var(--ep-red); }
+.ep-metric--red    .ep-metric__value, .ep-metric--red    .ep-metric__unit { color: var(--ep-text-strong); }
 .ep-metric--neutral .ep-metric__value, .ep-metric--neutral .ep-metric__unit { color: var(--ep-text-muted); }
 .ep-metric__hints { display: flex; flex-direction: column; gap: 4px; }
 .ep-metric__hint { font-size: var(--ep-fs-sm); color: var(--ep-text-muted); display: inline-flex; align-items: center; gap: 6px; }

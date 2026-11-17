@@ -118,6 +118,33 @@
         header.slice(openEnd, closeStart) + control + "</div>" + header.slice(closeStart);
     }
 
+    /** Put the menu under the chevron, nudged inside the viewport, flipping up if it would overflow. */
+    function positionIhFilter(toggle, menu) {
+      const toggleRect = toggle.getBoundingClientRect();
+      const menuRect = menu.getBoundingClientRect();
+      const left = Math.max(8, Math.min(toggleRect.left, global.innerWidth - menuRect.width - 8));
+      let top = toggleRect.bottom + 4;
+      if (top + menuRect.height > global.innerHeight - 8) {
+        top = Math.max(8, toggleRect.top - menuRect.height - 4);
+      }
+      menu.style.left = Math.round(left) + "px";
+      menu.style.top = Math.round(top) + "px";
+    }
+
+    /** Narrow the options inside an open menu to those matching `term`. */
+    function ihFilterSearch(menu, term) {
+      const needle = String(term || "").trim().toLowerCase();
+      let shown = 0;
+      Array.prototype.forEach.call(menu.querySelectorAll("[data-ih-filter-option]"), (option) => {
+        const value = option.getAttribute("data-ih-filter-value") || "";
+        const match = !needle || !value || option.textContent.toLowerCase().indexOf(needle) !== -1;
+        option.hidden = !match;
+        if (match && value) shown += 1;
+      });
+      const empty = menu.querySelector("[data-ih-filter-empty]");
+      if (empty) empty.hidden = !needle || shown > 0;
+    }
+
     /** The distinct values present in one column, so the menu only offers what is there. */
     function ihColumnOptions(scope, column) {
       const seen = [];
@@ -798,10 +825,19 @@
         if (filterToggle) {
           const menu = host.querySelector('[data-ih-filter-menu="' + filterToggle.getAttribute("data-ih-filter-toggle") +
             '"][data-ih-filter-scope="' + filterToggle.getAttribute("data-ih-filter-scope") + '"]');
-          if (menu && typeof menu.togglePopover === "function") {
-            menu.togglePopover();
-            const search = menu.querySelector("[data-ih-filter-search]");
-            if (search) search.focus();
+          if (menu && typeof menu.showPopover === "function") {
+            if (menu.matches(":popover-open")) {
+              menu.hidePopover();
+              filterToggle.setAttribute("aria-expanded", "false");
+            } else {
+              menu.showPopover();
+              // A popover is positioned against the viewport, so it opens in the top-left corner
+              // until it is placed under the chevron that opened it.
+              positionIhFilter(filterToggle, menu);
+              filterToggle.setAttribute("aria-expanded", "true");
+              const search = menu.querySelector("[data-ih-filter-search]");
+              if (search) { search.value = ""; ihFilterSearch(menu, ""); search.focus(); }
+            }
           }
           return;
         }
@@ -817,6 +853,9 @@
           if (menu && typeof menu.hidePopover === "function") {
             try { menu.hidePopover(); } catch (error) { /* already closed */ }
           }
+          const owner = host.querySelector('[data-ih-filter-toggle="' + key +
+            '"][data-ih-filter-scope="' + scope + '"]');
+          if (owner) owner.setAttribute("aria-expanded", "false");
           renderInverterHealth();
           return;
         }
@@ -878,17 +917,7 @@
       host.addEventListener("input", (event) => {
         // Narrow the options inside an open filter menu without redrawing the table.
         if (event.target.matches("[data-ih-filter-search]")) {
-          const menu = event.target.closest("[data-ih-filter-menu]");
-          const term = event.target.value.trim().toLowerCase();
-          let shown = 0;
-          Array.prototype.forEach.call(menu.querySelectorAll("[data-ih-filter-option]"), (option) => {
-            const value = option.getAttribute("data-ih-filter-value") || "";
-            const match = !term || !value || option.textContent.toLowerCase().indexOf(term) !== -1;
-            option.hidden = !match;
-            if (match && value) shown += 1;
-          });
-          const empty = menu.querySelector("[data-ih-filter-empty]");
-          if (empty) empty.hidden = !term || shown > 0;
+          ihFilterSearch(event.target.closest("[data-ih-filter-menu]"), event.target.value);
           return;
         }
         // Both search boxes re-render the panel, so the caret has to be put back where it was.
