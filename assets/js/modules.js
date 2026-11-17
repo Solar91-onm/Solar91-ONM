@@ -9,6 +9,7 @@
     liasoning: ["table-sort"],
     bom: ["table-sort"],
     "site-issues": ["table-sort", "register-io", "photo-evidence"],
+    "inverter-health": ["table-sort"],
     "operations-calendar": ["register-io", "photo-evidence"],
     settings: ["categories"]
   };
@@ -66,9 +67,45 @@
     return Promise.all(all.map(script));
   }
 
+  /**
+   * Warm the browser cache with every page module once the first screen is usable, so opening
+   * another page does not wait for its script to download. <link rel="prefetch"> only downloads
+   * (at idle priority); nothing runs until load() asks for it. The URLs are content-hashed and
+   * served as immutable, so each one is fetched once per release. Skipped on Data Saver / 2G.
+   */
+  var prefetched = false;
+  function prefetchAll() {
+    if (prefetched) return;
+    prefetched = true;
+    var connection = global.navigator && global.navigator.connection;
+    if (connection && (connection.saveData || /(^|-)2g$/.test(String(connection.effectiveType || "")))) return;
+    Object.keys(urls).forEach(function (name) {
+      if (pending[name]) return;
+      var link = document.createElement("link");
+      link.rel = "prefetch";
+      link.as = "script";
+      link.href = urls[name];
+      document.head.appendChild(link);
+    });
+  }
+
+  // A best-effort optimisation: where the browser APIs it needs are missing it simply does not
+  // run, and it can never stop load() from working.
+  function prefetchWhenIdle() {
+    if (typeof global.addEventListener !== "function" || typeof global.setTimeout !== "function") return;
+    var start = function () {
+      if (typeof global.requestIdleCallback === "function") global.requestIdleCallback(prefetchAll, { timeout: 4000 });
+      else global.setTimeout(prefetchAll, 1500);
+    };
+    if (document.readyState === "complete") start();
+    else global.addEventListener("load", start, { once: true });
+  }
+  prefetchWhenIdle();
+
   global.Solar91Modules = {
     load: load,
     isLoaded: isLoaded,
+    prefetchAll: prefetchAll,
     known: function () { return Object.keys(urls); },
     failedOnce: function (name) { return !!failed[name]; }
   };

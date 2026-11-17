@@ -36,6 +36,16 @@
 
   var currentRole = null;
 
+  // Who may open the Site Engineer and Security page. One list, used by the nav button's
+  // visibility, its click handler and the route guard, so the three can never disagree again
+  // (Assignee was shown the button but bounced back to the Dashboard by the guard).
+  // The server enforces the same roles (SECURITY_CONTACT_ROLES / SECURITY_MOVE_ROLES).
+  var SECURITY_PAGE_ROLES = ["O&M Head", "Assignee", "Administration"];
+
+  function canOpenSecurity(role) {
+    return SECURITY_PAGE_ROLES.indexOf(role) !== -1;
+  }
+
   function restrictedPages() {
     var rule = ROLE_TAB_VISIBILITY[currentRole];
     return Array.isArray(rule) ? rule : null;
@@ -525,8 +535,7 @@
 
   // Last guard for restricted roles, whatever path changed navState.
   function enforceRolePages() {
-    if (navState.activeView === "security" &&
-        currentRole !== "O&M Head" && currentRole !== "Administration") {
+    if (navState.activeView === "security" && !canOpenSecurity(currentRole)) {
       navState.activeView = "overview";
     }
     if (navState.activeView === "plant-sub") {
@@ -807,7 +816,7 @@
     var settings = document.querySelector(".ep-sidebar__settings");
     if (settings) settings.hidden = restricted;
     var security = document.querySelector('[data-nav="security"]');
-    if (security) security.hidden = role !== "O&M Head" && role !== "Assignee" && role !== "Administration";
+    if (security) security.hidden = !canOpenSecurity(role);
     if (navState.activeView === "security" && security && security.hidden) {
       setOverviewState();
     }
@@ -836,9 +845,7 @@
     });
     var securityBtn = document.querySelector('[data-nav="security"]');
     if (securityBtn) securityBtn.addEventListener("click", function () {
-      // Must match the button's visibility rule above (O&M Head, Assignee, Administration);
-      // Assignee was wrongly excluded here, so the button showed but clicking it did nothing.
-      if (currentRole !== "O&M Head" && currentRole !== "Assignee" && currentRole !== "Administration") return;
+      if (!canOpenSecurity(currentRole)) return;
       navState.activeView = "security";
       navState.selectedPlant = null;
       navState.selectedSubPage = null;

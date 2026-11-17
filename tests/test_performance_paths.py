@@ -88,7 +88,7 @@ def test_summary_matches_full_for_a_past_month_and_reads_fewer_reports(client, d
     assert get_overview(db, head, include_reports=False)["plants"] == get_overview(db, head)["plants"]
 
 
-def test_summary_overview_never_reads_the_json_columns(client, db):
+def test_summary_overview_avoids_evidence_and_selects_only_required_json_data(client, db):
     head = login_user(client, db, role="O&M Head", name="Perf Head", email="perf-head@example.com")
     _washing_portfolio(db, plants=1, days=5)
     statements = []
@@ -102,7 +102,8 @@ def test_summary_overview_never_reads_the_json_columns(client, db):
     report_reads = [s for s in statements if "FROM washing_daily_reports" in s and "report_date >=" in s]
     assert report_reads, "the windowed report read must have run"
     for statement in report_reads:
-        assert "evidence" not in statement and "cleaned_table_codes" not in statement
+        assert "washing_daily_reports.evidence" not in statement
+        assert "washing_daily_reports.cleaned_table_codes" in statement
 
 
 def test_single_plant_filter_returns_exactly_that_plants_row(client, db):

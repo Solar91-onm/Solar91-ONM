@@ -15,7 +15,7 @@ from app.core.models import (
 from app.scheduled.washing_cycles import (
     _cycle_grade,
     _cycle_grade_summary,
-    _monthly_table_compliance,
+    _cycle_work_scores,
     check_cycle_compliance_alerts,
     check_missed_monthly_targets,
 )
@@ -356,42 +356,103 @@ def test_cycle_grades_use_threshold_timing_and_exclude_running_cycles():
     assert on_time["grade"] == "on_time" and on_time["days_to_target"] == 9
     assert overdue["grade"] == "overdue" and overdue["coverage_percent"] == 90
     assert running["grade"] == "running" and running["coverage_count"] == 0
-
-    summary = _cycle_grade_summary([on_target, on_time, overdue, running])
-    assert summary["compliance_percent"] == 67
-    assert summary["due"] == 3 and summary["running"] == 1
-
-
-def test_monthly_table_compliance_uses_started_cycles_and_uncapped_tables():
-    starts = [date(2026, 11, 1), date(2026, 11, 11), date(2026, 11, 21)]
-    earlier = _monthly_table_compliance(10, 5, starts, date(2026, 11, 10))
-    later = _monthly_table_compliance(10, 5, starts, date(2026, 11, 17))
-    past_month = _monthly_table_compliance(10, 35, starts, date(2026, 11, 30))
-    moved_start = _monthly_table_compliance(
-        10, 5, [date(2026, 11, 1), date(2026, 11, 15), date(2026, 11, 25)], date(2026, 11, 12)
+    upcoming = _cycle_grade(
+        3, [], 10, 85, 7, date(2026, 11, 21), date(2026, 11, 30), date(2026, 11, 17),
     )
+    assert upcoming["grade"] == "upcoming" and upcoming["compliance_percent"] is None
 
-    assert earlier == {"cycles_due": 1, "tables_due": 10, "percent": 50}
-    assert later == {"cycles_due": 2, "tables_due": 20, "percent": 25}
-    assert past_month == {"cycles_due": 3, "tables_due": 30, "percent": 117}
-    assert moved_start == {"cycles_due": 1, "tables_due": 10, "percent": 50}
+    summary = _cycle_grade_summary([on_target, on_time, overdue, running, upcoming])
+    assert summary["compliance_percent"] == 67
+    assert summary["due"] == 3 and summary["running"] == 1 and summary["upcoming"] == 1
 
 
-def test_portfolio_table_compliance_caps_multi_plant_average_but_not_one_plant():
+def _work(day, tables, status="Confirmed", month=11):
+    from types import SimpleNamespace
+    return SimpleNamespace(report_date=date(2026, month, day), tables_cleaned=tables, review_status=status)
+
+
+def test_cycle_work_scores_follow_the_owners_worked_example():
+    """A 100-table plant: Cycle 1 and 2 fully cleaned on time, Cycle 3 only half.
+    Month = (100 + 100 + 50) / 300 = 83%; each cycle scores its own work."""
+    reports = [_work(5, 100), _work(15, 100), _work(25, 50)]
+    result = _cycle_work_scores(reports, 100, date(2026, 11, 30), None, set())
+
+    assert [result["cycles"][n]["score"] for n in (1, 2, 3)] == [100, 100, 50]
+    assert result["month"] == {"tables_done": 250, "tables_due": 300, "percent": 83}
+
+
+def test_catch_up_work_counts_in_the_cycle_it_is_done_and_can_exceed_100():
+    """Next month: last month's 50 missing tables plus this cycle's 100, all in days 1-10 -> 150%.
+    The catch-up days may still be tagged to the previous month; they count by their date."""
+    reports = [_work(3, 50, month=12), _work(8, 100, month=12)]
+    result = _cycle_work_scores(reports, 100, date(2026, 12, 10), None, set())
+
+    assert result["cycles"][1]["score"] == 150
+    assert result["month"]["percent"] == 150
+
+
+def test_extra_washing_after_all_three_cycles_raises_the_month_above_100():
+    reports = [_work(5, 100), _work(15, 100), _work(25, 100), _work(30, 40)]
+    result = _cycle_work_scores(reports, 100, date(2026, 11, 30), None, set())
+
+    assert result["cycles"][3]["score"] == 140
+    assert result["month"]["percent"] == 113   # 340 / 300
+
+
+def test_open_cycle_is_scored_on_pace_and_upcoming_cycles_are_not_scored():
+    """17 Nov: Cycle 1 closed, Cycle 2 on day 7 of 10 (70 of 100 tables due so far), Cycle 3 not started."""
+    reports = [_work(4, 45), _work(14, 35), _work(16, 0)]
+    result = _cycle_work_scores(reports, 100, date(2026, 11, 17), None, set())
+
+    assert result["cycles"][1] == {"tables_done": 45, "tables_due": 100, "score": 45}   # partial work counts
+    assert result["cycles"][2] == {"tables_done": 35, "tables_due": 70, "score": 50}
+    assert result["cycles"][3]["score"] is None
+    assert result["month"] == {"tables_done": 80, "tables_due": 170, "percent": 47}
+
+
+def test_unconfirmed_and_future_work_is_not_counted():
+    reports = [_work(5, 100, status="Pending"), _work(6, 100, status="Rejected"), _work(9, 30), _work(20, 99)]
+    result = _cycle_work_scores(reports, 100, date(2026, 11, 10), None, set())
+
+    assert result["cycles"][1]["tables_done"] == 30   # only confirmed, and nothing after today
+    assert result["cycles"][2]["score"] is None
+
+
+def test_portfolio_compliance_is_tables_cleaned_over_tables_due():
+    """The tile's % is exactly cleaned / due so far. One plant is uncapped; across plants each
+    plant counts up to its own due, so extra washing at one cannot hide a shortfall at another."""
     from app.portal.service import aggregate
 
-    def row(score):
+    def row(done, due, cycles=()):
         return {
             "plant": {"dc_capacity_kw": None, "ac_capacity_kw": None, "commissioned_on": None},
             "profile": {
                 "derivedCondition": "unknown",
-                "washing": {"completed": 0, "pending": 0, "overdue": 0, "compliancePercent": score},
+                "washing": {
+                    "completed": 0, "pending": 0, "overdue": 0,
+                    "compliancePercent": round(100 * done / due) if due else 100,
+                    "monthlyTablesConfirmed": done, "monthlyTablesDue": due,
+                    "cycleGrades": [
+                        {"cycleNo": n, "compliancePercent": None if d is None else 0,
+                         "tablesDone": c, "tablesDue": d}
+                        for n, (c, d) in enumerate(cycles, 1)
+                    ],
+                },
             },
         }
 
-    assert aggregate([row(150)])["washingCompliancePercent"] == 150
-    assert aggregate([row(150), row(40)])["washingCompliancePercent"] == 70
-    assert aggregate([row(None)])["washingCompliancePercent"] is None
+    one = aggregate([row(150, 100)])
+    assert one["washingCompliancePercent"] == 150
+    assert one["washingWork"] == {"done": 150, "due": 100, "plants": 1}
+
+    both = aggregate([row(150, 100), row(40, 100)])
+    assert both["washingCompliancePercent"] == 70          # (100 + 40) / 200
+    assert both["washingWork"] == {"done": 140, "due": 200, "plants": 2}
+
+    by_cycle = aggregate([row(0, 0, cycles=[(45, 100), (35, 70), (0, None)])])
+    assert by_cycle["washingCycleCompliancePercentByCycle"] == {"1": 45, "2": 50, "3": None}
+    assert aggregate([{"plant": row(0, 0)["plant"], "profile": {"derivedCondition": "unknown"}}])[
+        "washingCompliancePercent"] is None
 
 
 def test_portal_overview_uses_table_progress_before_any_cycle_is_completed(client, db):
@@ -575,6 +636,11 @@ def test_site_engineer_report_counts_can_vary_by_day_without_daily_target(client
     overview = client.get(f"{BASE}/overview").json()
     plant_row = next(row for row in overview["plants"] if row["plant_id"] == str(plant.id))
     assert "cycle_compliance_percent" not in plant_row and "cycle_compliance" not in plant_row
+    # The per-cycle work scores are compliance figures too: a Site Engineer keeps the grades only.
+    assert plant_row.get("cycle_grades"), "the grades themselves stay visible"
+    for grade in plant_row["cycle_grades"]:
+        assert "grade" in grade
+        assert not {"compliance_percent", "tables_done", "tables_due"} & set(grade)
     assert all("target" not in day for day in plant_row["daily_status"])
     assert "cycle_compliance" not in overview["portfolio"]
 

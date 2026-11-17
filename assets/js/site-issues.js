@@ -653,11 +653,17 @@
     var equipment = value("equipment", issue.equipment);
     var subpart = value("subpart", issue.subpart);
     var status = value("status", issue.status);
-    return '<form class="ep-issues__wizard" data-issue-form data-issue-edit-form="' + escape(issue.dbId) + '">' +
-      '<p class="ep-issues__wizard-info"><strong>' + escape(issue.id) + '</strong> · ' +
-        escape(issue.plantCode) + ' ' + escape(issue.plantName) + '</p>' +
-      '<label class="ep-issues__wizard-field">Equipment / category' +
-        '<select name="equipment">' + renderEquipmentOptions(equipment) + '</select></label>' +
+    // Compact layout: short fields share rows, help text only where it changes what the user
+    // does, and Save / Cancel stay pinned at the bottom so the form is never scrolled to save.
+    // The ticket ID is in the drawer title and the plant in its subtitle, so no info box repeats them.
+    return '<form class="ep-issues__wizard ep-issues__edit" data-issue-form data-issue-edit-form="' + escape(issue.dbId) + '">' +
+      '<div class="ep-issues__wizard-fields ep-issues__wizard-fields--two">' +
+        '<label class="ep-issues__wizard-field">Equipment / category' +
+          '<select name="equipment">' + renderEquipmentOptions(equipment) + '</select></label>' +
+        '<label class="ep-issues__wizard-field">Sub-problem' +
+          '<select name="subpart" title="The fault for this category, the same list the Raise issue form offers">' +
+          renderSubpartOptions(subpart, equipment) + '</select></label>' +
+      '</div>' +
       (state.categoryLoading
         ? '<p class="ep-issues__category-note" role="status">Loading configured categories…</p>'
         : state.categoryError
@@ -666,17 +672,17 @@
           : !CATEGORIES.length
             ? '<p class="ep-issues__category-note">No categories were returned by Settings → Categories. The ticket’s existing category is preserved.</p>'
             : "") +
-      '<label class="ep-issues__wizard-field">Sub-problem' +
-        '<select name="subpart">' + renderSubpartOptions(subpart, equipment) + '</select>' +
-        '<small>The fault for this category, the same list the Raise issue form offers.</small></label>' +
-      field("supplierMaker", "Maker / Supplier", value("supplierMaker", issue.supplierMaker), 'maxlength="160"') +
-      field("serialNo", "Serial number", value("serialNo", issue.serialNo), 'maxlength="120"') +
-      field("unitCount", "Units", value("unitCount", issue.unitCount), 'type="number" min="1" max="100000"') +
+      '<div class="ep-issues__wizard-fields ep-issues__wizard-fields--three">' +
+        field("supplierMaker", "Maker / Supplier", value("supplierMaker", issue.supplierMaker), 'maxlength="160"') +
+        field("serialNo", "Serial number", value("serialNo", issue.serialNo), 'maxlength="120"') +
+        field("unitCount", "Units", value("unitCount", issue.unitCount), 'type="number" min="1" max="100000"') +
+      '</div>' +
       // No severity field. Raise issue does not ask for one either (every ticket is
       // filed as Medium), so the register does not offer a way to diverge from that.
       // Where a ticket stands is its Status, not its severity.
       // Assigning is the O&M Head's call: /assign and /reassign both require
       // issues.manage, so an Assignee sees who holds the ticket but cannot move it.
+      '<div class="ep-issues__wizard-fields ep-issues__wizard-fields--two">' +
       (state.isHead
         ? '<label class="ep-issues__wizard-field">Assigned to' +
             '<select name="assignedTo">' +
@@ -687,8 +693,9 @@
                   escape(person.name) + "</option>";
               }).join("") +
             '</select></label>'
-        : '<p class="ep-issues__wizard-info">Assigned to <strong>' +
-            escape(issue.assignee || "nobody") + '</strong> · only the O&amp;M Head can change this.</p>') +
+        : '<div class="ep-issues__wizard-field">Assigned to' +
+            '<span class="ep-issues__readonly" title="Only the O&amp;M Head can change this">' +
+            escape(issue.assignee || "Unassigned") + '</span></div>') +
       '<label class="ep-issues__wizard-field">Status' +
         '<select name="status">' +
           statusChoicesFor(issue.status).map(function (choice) {
@@ -696,33 +703,34 @@
               (status === choice ? " selected" : "") + ">" + escape(choice) +
               (choice === issue.status ? " (no change)" : "") + "</option>";
           }).join("") +
-        '</select>' +
-        '<small>A ticket moves one step at a time; choosing Resolved walks it ' +
-          'through the stages in between, so its history still reads correctly.</small></label>' +
+        '</select></label>' +
+      '</div>' +
+      '<label class="ep-issues__wizard-field">Issue details' +
+        '<textarea name="problem" required rows="3" maxlength="4000">' + escape(value("problem", issue.problem)) + '</textarea></label>' +
       // Shown only when Resolved is chosen. These are what the API stores as the
       // resolution, and it will not accept the transition without them.
-      '<fieldset class="ep-issues__wizard-field" data-issue-resolution' +
+      '<fieldset class="ep-issues__wizard-field ep-issues__edit-resolution" data-issue-resolution' +
         (status === "Resolved" ? "" : " hidden") + '>' +
         '<legend>Resolution</legend>' +
-        '<label class="ep-issues__wizard-field">Root cause' +
-          '<textarea name="rootCause" rows="2" maxlength="4000">' + escape(value("rootCause", "")) + '</textarea></label>' +
-        '<label class="ep-issues__wizard-field">Corrective action' +
-          '<textarea name="correctiveAction" rows="2" maxlength="4000">' + escape(value("correctiveAction", "")) + '</textarea></label>' +
-        '<label class="ep-issues__wizard-field">Fixed on' +
-          '<input name="fixedOn" type="date" value="' + escape(value("fixedOn", "")) + '" max="' + escape(todayISO()) + '" /></label>' +
-        '<label class="ep-issues__wizard-field">Closing remark' +
-          '<input name="resolutionRemark" value="' + escape(value("resolutionRemark", "")) + '" maxlength="4000" /></label>' +
-        '<label class="ep-issues__wizard-field">Fix photos' +
-          '<input name="resolutionEvidence" type="file" accept="image/jpeg,image/png,image/webp" multiple />' +
-          '<small>Optional: add up to 10 photos of the completed fix.</small></label>' +
+        '<small>Resolved walks the ticket through the stages in between, so its history still reads correctly.</small>' +
+        '<div class="ep-issues__wizard-fields ep-issues__wizard-fields--two">' +
+          '<label class="ep-issues__wizard-field">Root cause' +
+            '<textarea name="rootCause" rows="2" maxlength="4000">' + escape(value("rootCause", "")) + '</textarea></label>' +
+          '<label class="ep-issues__wizard-field">Corrective action' +
+            '<textarea name="correctiveAction" rows="2" maxlength="4000">' + escape(value("correctiveAction", "")) + '</textarea></label>' +
+          '<label class="ep-issues__wizard-field">Fixed on' +
+            '<input name="fixedOn" type="date" value="' + escape(value("fixedOn", "")) + '" max="' + escape(todayISO()) + '" /></label>' +
+          '<label class="ep-issues__wizard-field">Closing remark' +
+            '<input name="resolutionRemark" value="' + escape(value("resolutionRemark", "")) + '" maxlength="4000" /></label>' +
+        '</div>' +
+        '<label class="ep-issues__wizard-field">Fix photos (optional, up to 10)' +
+          '<input name="resolutionEvidence" type="file" accept="image/jpeg,image/png,image/webp" multiple /></label>' +
       '</fieldset>' +
-      '<label class="ep-issues__wizard-field">Issue details' +
-        '<textarea name="problem" required rows="4" maxlength="4000">' + escape(value("problem", issue.problem)) + '</textarea></label>' +
       '<label class="ep-issues__wizard-field">Reason for the change' +
         '<input name="changeReason" value="' + escape(value("changeReason", "")) + '" maxlength="500" placeholder="Why the ticket is being corrected (optional)" /></label>' +
       '<p class="ep-issues__wizard-error" data-issue-edit-error' +
         (state.submitError ? '' : ' hidden') + '>' + escape(state.submitError) + '</p>' +
-      '<div class="ep-issues__wizard-actions">' +
+      '<div class="ep-issues__wizard-actions ep-issues__edit-actions">' +
         '<button type="button" class="ep-issues__button" data-issue-action="close">Cancel</button>' +
         '<button type="submit" class="ep-issues__button ep-issues__button--primary"' +
           (state.submitting ? " disabled" : "") + '>' +
@@ -1099,7 +1107,7 @@
     var isForm = state.modalMode === "create" || state.modalMode === "edit";
     var isWizard = state.modalMode === "create";
     var title = isWizard ? "Raise issue ticket" :
-      state.modalMode === "edit" ? "Edit issue" :
+      state.modalMode === "edit" ? "Edit " + ((issue && issue.id) || "issue") :
         state.modalMode === "close" ? "Close issue" : (issue && issue.id) || "Issue details";
     var ticketSubtitle = issue
       ? escape(issue.plantCode + (issue.plantName ? " · " + issue.plantName : ""))
@@ -1419,17 +1427,9 @@
         filterColumnOptions(event.target.closest("[data-issue-column-filter-menu]"), event.target.value);
         return;
       }
-      if (action === "retry-unit-config" && state.modalMode === "create" && state.draft) {
-        state.unitConfigError = "";
-        renderView();
-        loadUnitConfigFor(state.draft.plantCode).then(function () {
-          renderView();
-        }).catch(function (error) {
-          state.unitConfigError = (error && error.message) || "Please retry.";
-          renderView();
-        });
-        return;
-      }
+      // (The unit-config Retry used to be handled here, in the *input* handler, where `action`
+      // does not exist: every keystroke in the register threw, so the search box and the custom
+      // date range below never ran. It is a button, so it now lives in the click handler.)
       if (event.target.matches("[data-issue-date-start]")) {
         state.issueDateDraftStart = event.target.value;
         state.issueDateError = "";
@@ -1846,6 +1846,18 @@
       }
       if (action === "retry-edit-categories") {
         if (state.modalMode === "edit") loadCategoriesForEdit(host, state.modalId);
+        return;
+      }
+      if (action === "retry-unit-config") {
+        if (state.modalMode !== "create" || !state.draft) return;
+        state.unitConfigError = "";
+        renderView();
+        loadUnitConfigFor(state.draft.plantCode).then(function () {
+          renderView();
+        }).catch(function (error) {
+          state.unitConfigError = (error && error.message) || "Please retry.";
+          renderView();
+        });
         return;
       }
       if (action === "more") {

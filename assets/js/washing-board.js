@@ -154,6 +154,76 @@
     }) || null;
   }
 
+  // ─── Work scores (the same figures the Dashboard tile reads) ─────────
+  // A cycle's score is the tables cleaned in its dates against the tables due so far; it is not
+  // capped, so catch-up work and extra washing read above 100%. Colours use the Dashboard's
+  // thresholds (85 / 70) so both pages colour a score alike.
+  var GRADE_LABEL = {
+    on_target: "On target", on_time: "On time", running: "In progress",
+    overdue: "Late", missed: "Missed", upcoming: "Not started"
+  };
+
+  function toneOf(score) {
+    if (typeof score !== "number" || !isFinite(score)) return "none";
+    return score >= 85 ? "good" : score >= 70 ? "warn" : "bad";
+  }
+
+  function scoreOf(grade) {
+    return grade && typeof grade.compliance_percent === "number" ? grade.compliance_percent : null;
+  }
+
+  // Score = tables cleaned / tables due so far, exactly as the Dashboard tile computes it
+  // (data-adapter.js aggregatePortfolio): one plant uncapped; several, each plant's cleaned tables
+  // counted up to its own due so one plant's extra washing cannot hide another's shortfall.
+  function workScore(parts) {
+    var single = parts.length === 1;
+    var done = 0;
+    var due = 0;
+    parts.forEach(function (part) {
+      var partDone = Math.max(0, Number(part.done) || 0);
+      var partDue = Math.max(0, Number(part.due) || 0);
+      done += single ? partDone : Math.min(partDone, partDue);
+      due += partDue;
+    });
+    return {
+      score: !parts.length ? null : due ? Math.round(100 * done / due) : 100,
+      done: done,
+      due: due
+    };
+  }
+
+  /** The visible plants' month so far. */
+  function monthScore(rows) {
+    return workScore(rows.filter(function (row) {
+      return typeof row.monthly_compliance_percent === "number" && typeof row.monthly_tables_due === "number";
+    }).map(function (row) {
+      return { done: row.monthly_tables_confirmed, due: row.monthly_tables_due };
+    }));
+  }
+
+  /** Cycle 1-3 across the visible plants; a cycle no plant has started is not scored. */
+  function cycleScores(rows) {
+    var out = [];
+    for (var n = 1; n <= 3; n += 1) {
+      var parts = [];
+      var started = false;
+      var start = "";
+      rows.forEach(function (row) {
+        var grade = gradeFor(row, String(n));
+        if (!grade) return;
+        start = start || grade.start_date || "";
+        if (grade.grade === "upcoming") return;
+        started = true;
+        if (scoreOf(grade) !== null && typeof grade.tables_due === "number") {
+          parts.push({ done: grade.tables_done, due: grade.tables_due });
+        }
+      });
+      var work = workScore(parts);
+      out.push({ n: n, started: started, start: start, score: work.score, done: work.done, due: work.due });
+    }
+    return out;
+  }
+
   // ─── Card ────────────────────────────────────────────────────────────
   var RING = 2 * Math.PI * 22;        // r=22 in the ring's viewBox
 
@@ -167,21 +237,67 @@
       '<span class="ep-wb__ring-text"><strong>' + cycle.percent + '%</strong><small>Cycle ' + cycle.number + "</small></span>";
   }
 
-  /** Cycle 1 · 2 · 3: done cycles filled, the one in hand outlined. */
-  function pipsHTML(cycle, target) {
-    var pips = [];
+  /** One small bar per cycle: its work score (or its grade, for roles that do not see scores). */
+  function barHTML(label, score, grade, focus, title) {
+    var upcoming = !grade || grade === "upcoming";
+    var tone = upcoming ? "none"
+      : score !== null ? toneOf(score)
+      : grade === "on_target" || grade === "on_time" ? "good"
+      : grade === "running" ? "warn" : "bad";
+    var width = upcoming ? 0 : score !== null ? Math.max(0, Math.min(100, score))
+      : grade === "running" ? 50 : 100;
+    var value = upcoming ? "—" : score !== null ? score + "%" : (GRADE_LABEL[grade] || "");
+    return '<span class="ep-wb__cbar ep-wb__cbar--' + tone + (focus ? " is-focus" : "") +
+      (score !== null && score > 100 ? " is-over" : "") + '" title="' + escape(title) + '">' +
+      '<span class="ep-wb__cbar-n">' + escape(label) + "</span>" +
+      '<span class="ep-wb__cbar-track"><i style="width:' + width + '%"></i></span>' +
+      '<span class="ep-wb__cbar-v">' + escape(value) + "</span></span>";
+  }
+
+  /** Cycle 1 · 2 · 3 for one plant: each cycle's score as a bar, the focused cycle outlined. */
+  function pipsHTML(row, target) {
+    var bars = [];
     for (var number = 1; number <= target; number += 1) {
-      var state = number <= cycle.done ? "is-done" : number === cycle.number ? "is-current" : "";
-      pips.push('<span class="ep-wb__pip ' + state + '">' + number + "</span>");
+      var grade = gradeFor(row, String(number));
+      var score = scoreOf(grade);
+      var name = grade ? grade.grade : "";
+      var title = "Cycle " + number + ": " + (GRADE_LABEL[name] || "No grade") +
+        (score !== null ? " · " + score + "%" : "") +
+        (grade && typeof grade.tables_due === "number" && name !== "upcoming"
+          ? " · " + (grade.tables_done || 0) + " of " + grade.tables_due + " tables due so far" : "");
+      bars.push(barHTML("C" + number, score, name, ui.complianceCycle === String(number), title));
     }
-    return '<span class="ep-wb__pips" aria-hidden="true">' + pips.join("") + "</span>";
+    return '<span class="ep-wb__pips" aria-label="Cycle scores">' + bars.join("") + "</span>";
+  }
+
+  /** The cycle the date is in (the latest one that has started), with its work score. Null for
+   *  roles that do not receive scores; the card then shows the cycle's tables as before. */
+  function currentWork(row) {
+    var grades = (row.cycle_grades || []).filter(function (item) {
+      return item.grade !== "upcoming" && scoreOf(item) !== null;
+    });
+    if (!grades.length) return null;
+    var grade = grades.reduce(function (latest, item) {
+      return Number(item.cycle_no) > Number(latest.cycle_no) ? item : latest;
+    });
+    return {
+      number: Number(grade.cycle_no),
+      percent: scoreOf(grade),
+      done: Number(grade.tables_done) || 0,
+      due: Number(grade.tables_due) || 0
+    };
   }
 
   function cardHTML(row) {
-    var cycle = cycleOf(row);
+    // The ring shows the current cycle's work score, the same number as that cycle's bar, so a
+    // card never shows two different percentages for one cycle.
+    var work = currentWork(row);
+    var cycle = work ? { number: work.number, percent: work.percent } : cycleOf(row);
+    var ringTone = work ? { good: "ontrack", warn: "behind", bad: "late", none: "unset" }[toneOf(work.percent)] : null;
     var status = statusOf(row);
     var target = Number(row.monthly_target) || 3;
     var name = row.plant || row.site_code;
+    var month = typeof row.monthly_compliance_percent === "number" ? row.monthly_compliance_percent : null;
     var lastUpdated = shortDate(row.last_report_date);
     var late = Number(row.overdue_days) || 0;
     var statusForDate = ui.date === "__all" ? "" : dayStatus(row);
@@ -199,26 +315,30 @@
       escape(name) + '">' +
       '<span class="ep-wb__head">' +
         '<span class="ep-wb__name">' + escape(name) + "</span>" +
+        (month !== null
+          ? '<span class="ep-wb__month-score ep-wb__month-score--' + toneOf(month) +
+            '" title="Month so far: ' + escape(row.monthly_tables_confirmed) + " of " +
+            escape(row.monthly_tables_due) + ' tables due">' + escape(month) + "%</span>"
+          : "") +
         '<span class="ep-wb__code">' + escape(row.site_code) + "</span>" +
       "</span>" +
-      '<span class="ep-wb__date">' +
-        (lastUpdated
-          ? '<span class="ep-wb__date-label">Last Updated :</span>' + escape(lastUpdated)
-          : "No records yet") + "</span>" +
       '<span class="ep-wb__body">' +
-        '<span class="ep-wb__gauge">' + ringHTML(cycle, status) + "</span>" +
+        '<span class="ep-wb__gauge">' + ringHTML(cycle, ringTone ? { key: ringTone } : status) + "</span>" +
         '<span class="ep-wb__facts">' +
-          pipsHTML(cycle, target) +
-          '<span class="ep-wb__tables">' + (cycle.total
-            ? cycle.confirmed + " of " + cycle.total + " tables"
-            : "No tables configured") + "</span>" +
-          '<span class="ep-wb__note">' + escape(cleanedLine(cycle)) + "</span>" +
+          '<span class="ep-wb__tables">' + escape(work
+            ? "Cycle " + work.number + ": " + work.done + " of " + work.due + " tables due so far"
+            : cleanedLine(cycleOf(row))) + "</span>" +
+          pipsHTML(row, target) +
         "</span>" +
       "</span>" +
       '<span class="ep-wb__foot">' +
         entryNote +
         '<span class="ep-wb__pill ep-wb__pill--' + status.key + '">' + escape(status.label) +
           (late > 0 ? " · " + late + "d" : "") + "</span>" +
+        '<span class="ep-wb__date">' +
+          (lastUpdated
+            ? '<span class="ep-wb__date-label">Last Updated :</span>' + escape(lastUpdated)
+            : "No records yet") + "</span>" +
         '<span class="ep-wb__assignee">' + escape(row.assignee_name || "Unassigned") + "</span>" +
       "</span>" +
       "</button>";
@@ -239,56 +359,67 @@
         .join(" ").toLowerCase().indexOf(term) !== -1;
     });
     if (ui.sort !== "plant") {
+      // By the focused scope's work score (the month, or the chosen cycle). Plants without a
+      // score (not set up, a cycle not started, a role that does not see scores) sort last.
+      var scoreFor = function (row) {
+        var value = ui.complianceCycle === "all" ? row.monthly_compliance_percent
+          : scoreOf(gradeFor(row, ui.complianceCycle));
+        return typeof value === "number" ? value : null;
+      };
       rows.sort(function (a, b) {
-        var left = gradeFor(a, ui.complianceCycle);
-        var right = gradeFor(b, ui.complianceCycle);
-        var rank = { on_target: 4, on_time: 3, running: 2, overdue: 1, missed: 0 };
-        var leftRank = left ? rank[left.grade] : -1;
-        var rightRank = right ? rank[right.grade] : -1;
+        var left = scoreFor(a);
+        var right = scoreFor(b);
+        if (left === null && right !== null) return 1;
+        if (right === null && left !== null) return -1;
         var direction = ui.sort === "compliance-low" ? 1 : -1;
-        if (leftRank !== rightRank) return (leftRank - rightRank) * direction;
-        var coverage = (Number(left && left.coverage_percent) || 0) -
-          (Number(right && right.coverage_percent) || 0);
-        if (coverage) return coverage * direction;
+        if (left !== right) return (left - right) * direction;
         return String(a.site_code).localeCompare(String(b.site_code), undefined, { numeric: true });
       });
     }
     return rows;
   }
 
+  /** The summary band: month donut · Cycle 1-3 bars · plant status chips, in one row. */
   function complianceHTML(rows) {
-    var score = null;
-    var confirmed = null;
-    var due = null;
-    if (rows.length === 1) {
-      score = rows[0].monthly_compliance_percent;
-      confirmed = rows[0].monthly_tables_confirmed;
-      due = rows[0].monthly_tables_due;
-    } else if (st.rows.length > 0 && rows.length === st.rows.length) {
-      score = st.summary.monthly_compliance_percent;
-      confirmed = st.summary.monthly_tables_confirmed;
-      due = st.summary.monthly_tables_due;
-    }
-    var hasScore = typeof score === "number" && Number.isFinite(score);
-    var fill = hasScore ? Math.max(0, Math.min(100, score)) : 0;
+    var month = monthScore(rows);
+    var hasScore = typeof month.score === "number" && isFinite(month.score);
+    var fill = hasScore ? Math.max(0, Math.min(100, month.score)) : 0;
+    var tone = hasScore ? toneOf(month.score) : "none";
+    var colour = tone === "good" ? "var(--ep-accent)" : tone === "warn" ? "var(--ep-amber)" : "var(--ep-red)";
     var style = hasScore
-      ? "background:conic-gradient(#15803d 0 " + fill + "%,var(--ep-border-soft) " + fill + "% 100%)"
+      ? "background:conic-gradient(" + colour + " 0 " + fill + "%,var(--ep-border-soft) " + fill + "% 100%)"
       : "background:conic-gradient(var(--ep-border-soft) 0 100%)";
     var help = !rows.length ? "No plants in this view."
-      : !hasScore ? "Select one plant to see its table progress."
-      : confirmed + " confirmed tables · " + due + " tables due";
-    return '<section class="ep-wb__compliance" aria-label="Module Cleaning compliance">' +
-      '<div class="ep-wb__compliance-head"><div><h2>Monthly table progress</h2>' +
-        '<p>Confirmed tables against tables due this month</p></div></div>' +
-      '<div class="ep-wb__compliance-body"><div class="ep-wb__donut" style="' + style + '">' +
-        '<span class="ep-wb__donut-label"><strong>' + (hasScore ? escape(score) + "%" : "N/A") +
-        '</strong><small>table progress</small></span></div>' +
-        '<div class="ep-wb__compliance-legend">' +
-          '<span><i class="ep-wb__key ep-wb__key--target"></i>Confirmed <b>' +
-            (confirmed === null || confirmed === undefined ? "—" : escape(confirmed)) + '</b></span>' +
-          '<span><i class="ep-wb__key ep-wb__key--ontime"></i>Due <b>' +
-            (due === null || due === undefined ? "—" : escape(due)) + '</b></span>' +
-        '</div></div><p class="ep-wb__compliance-note">' + escape(help) + '</p></section>';
+      : !hasScore ? "Scores are shown to the O&M team."
+      : rows.length === 1 ? "This plant, month so far"
+      : rows.length + " plants · each counted up to its own due";
+    var cycles = cycleScores(rows).map(function (cycle) {
+      var title = cycle.started
+        ? "Cycle " + cycle.n + ": " + cycle.done + " of " + cycle.due + " tables due so far"
+        : "Cycle " + cycle.n + " has not started" + (cycle.start ? " (starts " + shortDate(cycle.start) + ")" : "");
+      return '<button type="button" class="ep-wb__scope' +
+        (ui.complianceCycle === String(cycle.n) ? " is-on" : "") + '" data-wb-scope="' + cycle.n + '">' +
+        barHTML("Cycle " + cycle.n, cycle.started ? cycle.score : null,
+          cycle.started ? (cycle.score === null ? "running" : "scored") : "upcoming",
+          false, title) + "</button>";
+    }).join("");
+    // A compact card on the right: the donut, the figures it is made of on one line below it,
+    // then the three cycle bars (click one to focus it).
+    return '<aside class="ep-wb__compliance" aria-label="Module Cleaning compliance">' +
+      '<h2>Compliance <button type="button" class="ep-wb__scope-all' +
+        (ui.complianceCycle === "all" ? " is-on" : "") + '" data-wb-scope="all">Month</button></h2>' +
+      '<div class="ep-wb__donut" style="' + style + '">' +
+        '<span class="ep-wb__donut-label"><strong>' + (hasScore ? escape(month.score) + "%" : "N/A") +
+        "</strong><small>month so far</small></span></div>" +
+      '<div class="ep-wb__compliance-legend">' +
+        '<span><i class="ep-wb__key ep-wb__key--target"></i>Cleaned <b>' +
+          (hasScore ? escape(month.done) : "—") + "</b></span>" +
+        '<span><i class="ep-wb__key ep-wb__key--ontime"></i>Due so far <b>' +
+          (hasScore ? escape(month.due) : "—") + "</b></span>" +
+      "</div>" +
+      '<p class="ep-wb__compliance-note">' + escape(help) + "</p>" +
+      '<div class="ep-wb__sum-cycles">' + cycles + "</div>" +
+      "</aside>";
   }
 
   function countsHTML() {
@@ -310,26 +441,30 @@
   function render(container) {
     var rows = visibleRows();
     container.innerHTML = '<div class="ep-pt ep-wb">' +
-      '<div class="ep-pt__head"><h1 class="ep-pt__title">Module Cleaning</h1>' +
+      // Two columns above the cards: on the left the title, the status chips, month + search and
+      // the filters; on the right the compliance card. The cards start right below both.
+      '<div class="ep-wb__upper"><div class="ep-wb__lead">' +
+      '<div class="ep-wb__title"><h1 class="ep-pt__title">Module Cleaning</h1>' +
         '<p class="ep-pt__sub">' + st.rows.length + " plants · " + escape(st.month) +
         " · open a plant for its cleaning calendar</p></div>" +
       '<div class="ep-wb__tallies">' + countsHTML() + "</div>" +
-      complianceHTML(rows) +
-      '<div class="ep-pt__toolbar"><label class="ep-wb__month"><span>Month</span>' +
+      '<div class="ep-wb__tools"><label class="ep-wb__month"><span>Month</span>' +
         '<input type="month" data-wb-month value="' + escape(st.selectedMonth) +
         '" max="' + escape(monthKey(new Date())) + '" aria-label="Select Module Cleaning month" /></label>' +
-        '<div class="ep-pt__search">' +
+        '<div class="ep-pt__search ep-wb__search">' +
         '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.5-3.5"></path></svg>' +
         '<input type="text" placeholder="Search plant, code, district, assignee..." data-wb-search value="' +
         escape(ui.search) + '" autocomplete="off" /></div></div>' +
       '<div class="ep-wb__filters" aria-label="Filter Module Cleaning plants">' +
-        '<label><span>Plant</span><select data-wb-filter="plant" aria-label="Filter by plant">' +
+        // The first four options name themselves ("All plants", "All cycles", ...), so their labels
+        // are for screen readers only and the whole filter row fits on one line.
+        '<label><span class="ep-wb__sr-only">Plant</span><select data-wb-filter="plant" aria-label="Filter by plant">' +
           '<option value="__all">All plants</option>' + plantOptions() + '</select></label>' +
-        '<label><span>Cycle</span><select data-wb-filter="cycle" aria-label="Filter by cleaning cycle">' +
+        '<label><span class="ep-wb__sr-only">Cycle</span><select data-wb-filter="cycle" aria-label="Filter by cleaning cycle">' +
           '<option value="__all">All cycles</option>' + cycleOptions() + '</select></label>' +
-        '<label><span>Cleaning date</span><select data-wb-filter="date" aria-label="Filter by cleaning date">' +
+        '<label><span class="ep-wb__sr-only">Cleaning date</span><select data-wb-filter="date" aria-label="Filter by cleaning date" title="Cleaning date">' +
           '<option value="__all">All dates</option>' + dateOptions() + '</select></label>' +
-        '<label><span>Entry status</span><select data-wb-filter="entryStatus" aria-label="Filter by entry status"' +
+        '<label><span class="ep-wb__sr-only">Entry status</span><select data-wb-filter="entryStatus" aria-label="Filter by entry status" title="Entry status (choose a date first)"' +
           (ui.date === "__all" ? " disabled" : "") + '>' +
           '<option value="__all">All statuses</option>' +
           '<option value="recorded"' + (ui.entryStatus === "recorded" ? " selected" : "") +
@@ -341,7 +476,8 @@
           '<option value="compliance-high"' + (ui.sort === "compliance-high" ? " selected" : "") + '>Compliance: high to low</option>' +
           '<option value="compliance-low"' + (ui.sort === "compliance-low" ? " selected" : "") + '>Compliance: low to high</option>' +
         '</select></label>' +
-      '</div>' +
+      '</div></div>' +
+      complianceHTML(rows) + "</div>" +
       (st.loading
         ? '<div class="ep-pt__loading" role="status">Loading Module Cleaning…</div>'
         : st.error
@@ -403,6 +539,14 @@
           }
           clearDayActivity();
         }
+        render(container);
+      });
+    });
+    // Focus the month or one cycle: it sorts the plants and outlines that cycle on every card.
+    container.querySelectorAll("[data-wb-scope]").forEach(function (button) {
+      button.addEventListener("click", function () {
+        var scope = button.getAttribute("data-wb-scope");
+        ui.complianceCycle = ui.complianceCycle === scope ? "all" : scope;
         render(container);
       });
     });

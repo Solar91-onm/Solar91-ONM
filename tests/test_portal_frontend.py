@@ -94,6 +94,36 @@ def test_security_register_supports_multiple_contacts_and_edit_overlay():
     assert ".ep-security__modal .ep-security__scroll {" in styles
 
 
+def test_issue_register_input_handler_never_reads_an_undefined_action():
+    """The unit-config Retry once sat in the register's *input* handler, which has no `action`:
+    every keystroke threw a ReferenceError, so the search box and custom dates never ran."""
+    issues = (PORTAL_ASSETS / "js" / "site-issues.js").read_text(encoding="utf-8")
+    start = issues.index('host.addEventListener("input", function (event) {')
+    end = issues.index('host.addEventListener("change", function (event) {')
+    assert "action ===" not in issues[start:end]
+    assert 'if (action === "retry-unit-config") {' in issues   # handled where `action` exists (click)
+
+
+def test_page_modules_are_prefetched_when_the_browser_is_idle():
+    """Opening a page must not wait for its script: the modules are prefetched (downloaded, not
+    run) once the first screen is usable, and never on Data Saver or 2G connections."""
+    modules = (PORTAL_ASSETS / "js" / "modules.js").read_text(encoding="utf-8")
+    assert 'link.rel = "prefetch";' in modules
+    assert "requestIdleCallback(prefetchAll" in modules
+    assert "connection.saveData" in modules
+    assert "if (pending[name]) return;" in modules   # a module already loading is not fetched twice
+
+
+def test_issue_edit_form_fits_one_screen():
+    issues = (PORTAL_ASSETS / "js" / "site-issues.js").read_text(encoding="utf-8")
+    styles = (PORTAL_ASSETS / "css" / "site-issues.css").read_text(encoding="utf-8")
+    assert 'state.modalMode === "edit" ? "Edit " + ((issue && issue.id) || "issue") :' in issues
+    assert '<div class="ep-issues__wizard-fields ep-issues__wizard-fields--three">' in issues
+    assert '<div class="ep-issues__wizard-actions ep-issues__edit-actions">' in issues
+    # Save / Cancel stay pinned to the bottom of the drawer.
+    assert ".ep-issues__edit-actions {\n  position: sticky;" in styles
+
+
 def test_security_tab_label_and_header_count_people():
     navigation = (PORTAL_ASSETS / "js" / "navigation.js").read_text(encoding="utf-8")
     security = (PORTAL_ASSETS / "js" / "security.js").read_text(encoding="utf-8")
@@ -111,18 +141,26 @@ def test_security_tab_label_and_header_count_people():
     assert 'row.parentNode.replaceChild(fresh, row)' in security
     assert 'api.request("/api/plants/security/move"' in security
     assert "other portal views could not refresh" in security
+    # One role list gates the page everywhere: the button, its click handler and the route guard.
+    # Assignee was once shown the button but bounced to the Dashboard by a stricter guard.
+    assert 'var SECURITY_PAGE_ROLES = ["O&M Head", "Assignee", "Administration"];' in navigation
+    assert 'if (security) security.hidden = !canOpenSecurity(role);' in navigation
+    assert 'if (!canOpenSecurity(currentRole)) return;' in navigation
+    assert 'navState.activeView === "security" && !canOpenSecurity(currentRole)' in navigation
+    assert 'currentRole !== "Administration"' not in navigation
 
 
 def test_inverter_issue_description_and_refresh_are_wired():
     overview = (PORTAL_ASSETS / "js" / "overview.js").read_text(encoding="utf-8")
+    inverter_health = (PORTAL_ASSETS / "js" / "inverter-health.js").read_text(encoding="utf-8")
     issues = (PORTAL_ASSETS / "js" / "site-issues.js").read_text(encoding="utf-8")
     styles = (PORTAL_ASSETS / "css" / "plant-details.css").read_text(encoding="utf-8")
 
-    assert '{ key: "issuedesc", label: "Issue description"' in overview
-    assert '"Issue description", "Running %", "Open tickets"' in overview
-    assert 'if (ticket.equipment_running !== false) return;' in overview
-    assert 'title="${fmt.escape(full)}"' in overview
-    assert ">No issues</span>" in overview
+    assert '{ key: "issuedesc", label: "Issue description"' in inverter_health
+    assert '"Issue description", "Running %", "Open tickets"' in inverter_health
+    assert 'if (ticket.equipment_running !== false) return;' in inverter_health
+    assert 'title="${fmt.escape(full)}"' in inverter_health
+    assert ">No issues</span>" in inverter_health
     assert "refreshInverterHealth()" in overview
     assert "overview.refreshInverterHealth()" in issues
 
@@ -763,13 +801,31 @@ def test_module_cleaning_compliance_cycle_scope_and_board_breakdown():
     board = (PORTAL_ASSETS / "js" / "washing-board.js").read_text(encoding="utf-8")
     board_styles = (PORTAL_ASSETS / "css" / "washing-board.css").read_text(encoding="utf-8")
 
-    assert 'localStorage.setItem("solar91:overview:washing-cycle:" + userId, selection)' in overview
-    assert '<option value="all"${washingSelection === "all" ? " selected" : ""}>Current Month</option>' in overview
-    assert "stats.notStarted" in overview
-    assert 'cycle: currentWashingCycleSelection()' in overview
+    assert 'localStorage.setItem(WASHING_CYCLE_KEY + userId, selection)' in overview
+    assert 'const WASHING_CYCLE_KEY = "solar91:overview:washing-cycle:v2:";' in overview
+    # Default is "By date": the scored cycle follows the Range (days 1-10 / 11-20 / 21-end).
+    assert 'let washingCycleSelection = "auto";' in overview
+    assert '<option value="auto"${washingSelection === "auto" ? " selected" : ""}>By date</option>' in overview
+    assert '<option value="all"${washingSelection === "all" ? " selected" : ""}>Month so far</option>' in overview
+    assert "function cycleOfDay(day) { return day <= 10 ? 1 : day <= 20 ? 2 : 3; }" in overview
+    # The legend reads the same grades as the %, and upcoming cycles are skipped.
+    assert 'if (item.grade === "upcoming") { stats.upcoming += 1; return; }' in overview
+    assert 'else if (item.grade === "running") stats.pending += 1;' in overview
+    assert 'const wshP = pill("Module Cleaning", wshPct, washingStats.late);' in overview
+    # The tile shows only what its % is made of: tables cleaned / tables due so far, and what is still due.
+    assert 'label: "Tables cleaned", value: fmt.formatNumber(washingWork.done)' in overview
+    assert 'label: "Due so far", value: fmt.formatNumber(washingWork.due)' in overview
+    assert 'label: "Still due", value: fmt.formatNumber(washingStillDue)' in overview
+    # By date: the cycle containing the Range end, clipped to today (the 17th -> Cycle 2).
+    assert "return String(cycleOfDay(Number(last.slice(8, 10))));" in overview
+    assert 'cycle: resolveWashingCycle(currentWashingCycleSelection())' in overview
+    # One plant's cycle score is not capped (catch-up and extra washing read above 100%).
+    # Compliance = tables cleaned / tables due so far: one plant uncapped, several each up to its own due.
+    assert "target.done += single ? done : Math.min(done, due);" in adapter
+    assert "return work.due ? Math.round(100 * work.done / work.due) : 100;" in adapter
     assert "global.Solar91PortalNav.selectView(destination, dateRange)" in overview
-    assert "washingScoreSum += rows.length === 1" in adapter
-    assert "Math.min(100, profile.washing.compliancePercent)" in adapter
+    # The board uses the same rule, so the two pages cannot disagree.
+    assert "done += single ? partDone : Math.min(partDone, partDue);" in board
 
     assert "monthly_compliance_percent" in board
     assert "monthly_tables_confirmed" in board and "monthly_tables_due" in board
@@ -803,6 +859,7 @@ def test_a_plants_module_cleaning_calendar_opens_on_the_week():
 def test_overview_inverter_tile_counts_units_and_opens_standalone_health():
     """The fourth tile opens a standalone drill-down without registering another navigation view."""
     overview = (PORTAL_ASSETS / "js" / "overview.js").read_text(encoding="utf-8")
+    inverter_health = (PORTAL_ASSETS / "js" / "inverter-health.js").read_text(encoding="utf-8")
     issues = (PORTAL_ASSETS / "js" / "site-issues.js").read_text(encoding="utf-8")
 
     assert 'title: "Inverters"' in overview
@@ -829,8 +886,8 @@ def test_overview_inverter_tile_counts_units_and_opens_standalone_health():
     assert "openInverterHealth();" in overview
     assert 'data-inverter-health' in (TEMPLATE.read_text(encoding="utf-8"))
     assert "openTicket: openTicket" in issues
-    assert 'data-ih-edit="${fmt.escape(ticket.ticket_no || "")}"' in overview
-    assert 'global.Solar91PortalIssues.openTicket(ticket.dataset.ihTicket || ticket.dataset.ihEdit, code, mode)' in overview
+    assert 'data-ih-edit="${fmt.escape(ticket.ticket_no || "")}"' in inverter_health
+    assert 'global.Solar91PortalIssues.openTicket(ticket.dataset.ihTicket || ticket.dataset.ihEdit, code, mode)' in inverter_health
     assert "function openTicket(ticketNo, siteCode, mode)" in issues
     assert 'state.modalMode = mode === "edit" ? "edit" : "details";' in issues
     styles = (PORTAL_ASSETS / "css" / "components.css").read_text(encoding="utf-8")
@@ -844,15 +901,14 @@ def test_overview_inverter_tile_counts_units_and_opens_standalone_health():
     markup = TEMPLATE.read_text(encoding="utf-8")
     assert "inverter-health" not in navigation
     assert 'data-tab-view="inverter-health"' not in markup
-    assert 'event.key === "Escape" && inverterHealth.open' in overview
-    assert 'status=open&limit=200' in overview
+    assert 'event.key === "Escape" && inverterHealth.open' in inverter_health
+    assert 'status=open&limit=200' in inverter_health
     assert "calculateInverterTotals" in overview
     # The tile and the drill-down must read the same arithmetic, or the two screens disagree
     # about how many inverters are running for the very same data.
-    assert overview.count("calculateInverterTotals(") == 3, "one definition, used by both the tile and the drill-down"
-    tile = overview[overview.index("function inverterSummary"):] if "function inverterSummary" in overview else overview
+    assert overview.count("calculateInverterTotals(") == 2, "one definition and one use by the tile"
     assert "const totals = calculateInverterTotals(codes, inverters.units, inverters.issues);" in overview
-    assert "const counts = calculateInverterTotals(codes, inverterHealth.units, issueRows);" in overview
+    assert "const counts = calculateInverterTotals(codes, inverterHealth.units, issueRows);" in inverter_health
 
 
 def test_site_issue_register_places_id_before_action_and_labels_description():
@@ -2290,17 +2346,17 @@ def test_inverter_health_shows_maker_and_capacity_after_the_unit_count():
 
     They sit immediately after "Total inverters", a null reads as a muted dash, and the
     capacity prints with its trailing zeros trimmed (275, never 275.00)."""
-    overview = (PORTAL_ASSETS / "js" / "overview.js").read_text(encoding="utf-8")
+    inverter_health = (PORTAL_ASSETS / "js" / "inverter-health.js").read_text(encoding="utf-8")
     fmt = (PORTAL_ASSETS / "js" / "format.js").read_text(encoding="utf-8")
     bom = (PORTAL_ASSETS / "js" / "bom.js").read_text(encoding="utf-8")
 
-    block = overview[overview.index("INVERTER_PLANT_COLUMNS = ["):]
-    block = block[:block.index("\n  ];")]
+    block = inverter_health[inverter_health.index("INVERTER_PLANT_COLUMNS = ["):]
+    block = block[:block.index("\n    ];")]
     # Maker and capacity now share the Inverter column, which sorts by maker.
     assert '{ key: "inverter", label: "Inverter", sort: (row) => (row.config && row.config.maker)' in block
-    assert 'colspan="${INVERTER_PLANT_COLUMN_COUNT}"' in overview
+    assert 'colspan="${INVERTER_PLANT_COLUMN_COUNT}"' in inverter_health
 
-    cells = overview[overview.index("const configuredCells ="):]
+    cells = inverter_health[inverter_health.index("const configuredCells ="):]
     cells = cells[:cells.index("`;")]
     assert cells.index("row.config.maker") < cells.index("row.config.capacity_kw") \
         < cells.index("fmt.formatNumber(row.running)")
@@ -2308,24 +2364,24 @@ def test_inverter_health_shows_maker_and_capacity_after_the_unit_count():
     # One trailing-zero trimmer, shared with the BOM quantity cell -- not a second copy.
     assert "function decimalText(value)" in fmt and "decimalText: decimalText" in fmt
     assert "function qtyText(value) { return fmt.decimalText(value); }" in bom
-    assert "fmt.decimalText(row.config && row.config.capacity_kw)" in overview
+    assert "fmt.decimalText(row.config && row.config.capacity_kw)" in inverter_health
 
     # Absent values read as a muted dash, never "undefined", "null" or "NaN".
-    assert 'return value === null || value === undefined || value === ""' in overview
-    assert '<span class="ep-text-faint">—</span>' in overview
+    assert 'return value === null || value === undefined || value === ""' in inverter_health
+    assert '<span class="ep-text-faint">—</span>' in inverter_health
 
     # Editable in the settings panel, and saved in the same PUT as the two counts. All four
     # fields go through one cell helper, so they share the read-only-by-role behaviour.
-    assert 'data-ih-${attr}="${fmt.escape(plant.siteCode)}"' in overview
-    assert 'settingsCell(plant, config, "maker", `type="text" maxlength="120"' in overview
-    assert 'settingsCell(plant, config, "capacity", `type="number" step="0.01" min="0.01"' in overview
-    assert '${inverterHealth.canEdit ? "" : " readonly"}' in overview
-    assert "total_units: total, units_per_day: perDay,\n        maker: maker, capacity_kw: capacity" in overview
-    assert '<th>Units/day</th><th>Maker</th><th>Capacity (kW)</th>' in overview
+    assert 'data-ih-${attr}="${fmt.escape(plant.siteCode)}"' in inverter_health
+    assert 'settingsCell(plant, config, "maker", `type="text" maxlength="120"' in inverter_health
+    assert 'settingsCell(plant, config, "capacity", `type="number" step="0.01" min="0.01"' in inverter_health
+    assert '${inverterHealth.canEdit ? "" : " readonly"}' in inverter_health
+    assert "total_units: total, units_per_day: perDay,\n          maker: maker, capacity_kw: capacity" in inverter_health
+    assert '<th>Units/day</th><th>Maker</th><th>Capacity (kW)</th>' in inverter_health
 
     # And the per-plant CSV carries them in the same position as the table.
-    assert '"Total inverters", "Maker", "Capacity (kW)",\n      "Running"' in overview
-    assert "data-ih-export-plants" in overview
+    assert '"Total inverters", "Maker", "Capacity (kW)",\n        "Running"' in inverter_health
+    assert "data-ih-export-plants" in inverter_health
 
 
 def test_inverter_health_unfolds_the_down_inverters_of_a_plant():
@@ -2333,19 +2389,19 @@ def test_inverter_health_unfolds_the_down_inverters_of_a_plant():
 
     Only a plant that actually has one can be unfolded, Edit is offered to the roles that may
     edit, and it reuses the Health register path rather than a second edit surface."""
-    overview = (PORTAL_ASSETS / "js" / "overview.js").read_text(encoding="utf-8")
+    inverter_health = (PORTAL_ASSETS / "js" / "inverter-health.js").read_text(encoding="utf-8")
     styles = (PORTAL_ASSETS / "css" / "components.css").read_text(encoding="utf-8")
 
     # Grouped once per render, not re-scanned once per plant row.
-    assert "function inverterTicketsByPlant()" in overview
-    assert "const openByPlant = inverterTicketsByPlant();" in overview
-    assert "const open = openByPlant.get(code) || [];" in overview
-    assert "const isOpen = inverterHealth.expanded.indexOf(code) !== -1;" in overview
+    assert "function inverterTicketsByPlant()" in inverter_health
+    assert "const openByPlant = inverterTicketsByPlant();" in inverter_health
+    assert "const open = openByPlant.get(code) || [];" in inverter_health
+    assert "const isOpen = inverterHealth.expanded.indexOf(code) !== -1;" in inverter_health
     # No tickets, no unfold control -- the cell stays a plain count.
-    assert "const ticketCell = open.length" in overview
-    assert "return main + (isOpen && open.length ? inverterDownRows(code, open) : \"\");" in overview
+    assert "const ticketCell = open.length" in inverter_health
+    assert "return main + (isOpen && open.length ? inverterDownRows(code, open) : \"\");" in inverter_health
 
-    block = overview[overview.index("function inverterDownRows"):]
+    block = inverter_health[inverter_health.index("function inverterDownRows"):]
     block = block[:block.index("\n  }\n")]
     assert "ticket.serial_no" in block and "ticket.subcategory" in block and "ticket.description" in block
     # Edit only for the roles that may edit, and it is the existing Health-register button.
@@ -2353,21 +2409,21 @@ def test_inverter_health_unfolds_the_down_inverters_of_a_plant():
     assert 'colspan="${INVERTER_PLANT_COLUMN_COUNT}"' in block
 
     # The unfold button sits inside the plant row, so it must be read before the row's own click.
-    handler = overview[overview.index('const unfold = event.target.closest("[data-ih-unfold]");'):]
+    handler = inverter_health[inverter_health.index('const unfold = event.target.closest("[data-ih-unfold]");'):]
     assert handler.index("inverterHealth.expanded.push(code)") \
         < handler.index('const plant = event.target.closest("[data-ih-plant-row]");')
-    assert "inverterHealth.expanded = [];" in overview        # reset when the drill-down reopens
+    assert "inverterHealth.expanded = [];" in inverter_health # reset when the drill-down reopens
     assert ".ep-ih__down-list" in styles and ".ep-ih__unfold" in styles
 
 
 def test_inverter_counts_carry_traffic_lights_and_a_clean_plant_shows_no_red():
-    overview = (PORTAL_ASSETS / "js" / "overview.js").read_text(encoding="utf-8")
+    inverter_health = (PORTAL_ASSETS / "js" / "inverter-health.js").read_text(encoding="utf-8")
     styles = (PORTAL_ASSETS / "css" / "components.css").read_text(encoding="utf-8")
 
     # Running and total share one cell; the red light is emitted only when something IS down,
     # so a lit red dot in that column always means a real outage.
-    assert '<b>${fmt.formatNumber(row.running)}</b><span>/ ${fmt.formatNumber(row.total)}</span>' in overview
-    assert '${row.down ? `<span class="ep-hint-light ep-hint-light--red" aria-hidden="true"></span>` : ""}' in overview
+    assert '<b>${fmt.formatNumber(row.running)}</b><span>/ ${fmt.formatNumber(row.total)}</span>' in inverter_health
+    assert '${row.down ? `<span class="ep-hint-light ep-hint-light--red" aria-hidden="true"></span>` : ""}' in inverter_health
     # It reuses the portal's existing traffic-light primitive rather than a second one.
     assert ".ep-hint-light--green" in styles and ".ep-hint-light--red" in styles
     assert ".ep-light--green" not in styles
@@ -2430,43 +2486,43 @@ def test_dashboard_tiles_are_buttons_with_state_coloured_figures_and_meters():
 
 def test_inverter_health_hero_band_fleet_composition_and_fitted_ticket_table():
     """The drill-down's own presentation: one hero card, fleet composition, fitted plant columns."""
-    overview = (PORTAL_ASSETS / "js" / "overview.js").read_text(encoding="utf-8")
+    inverter_health = (PORTAL_ASSETS / "js" / "inverter-health.js").read_text(encoding="utf-8")
     styles = (PORTAL_ASSETS / "css" / "components.css").read_text(encoding="utf-8")
 
     # One hero card with the ring and three KPIs on hairline rules, not five ragged cards.
-    assert 'class="ep-panel ep-ih__hero"' in overview
+    assert 'class="ep-panel ep-ih__hero"' in inverter_health
     assert ".ep-ih__kpi { display: flex;" in styles and "border-left: 1px solid var(--ep-border-soft);" in styles
     assert "width: 104px; height: 104px; flex: 0 0 104px;" in styles
-    assert "ep-ih__ring-card" not in overview      # the five separate stat cards are gone
+    assert "ep-ih__ring-card" not in inverter_health # the five separate stat cards are gone
 
     # All-zero severities say so once instead of four chips reading 0.
-    assert 'const severityBlock = severityTotal' in overview
-    assert '<span class="ep-ih__all-clear">✓ All clear</span>' in overview
-    assert "filter((severity) => severityCounts[severity] > 0)" in overview
+    assert 'const severityBlock = severityTotal' in inverter_health
+    assert '<span class="ep-ih__all-clear">✓ All clear</span>' in inverter_health
+    assert "filter((severity) => severityCounts[severity] > 0)" in inverter_health
 
     # Fleet composition is derived from the unit configuration already loaded.
-    assert "function inverterFleetMakes(totals)" in overview
-    assert "totals.configs.forEach((config)" in overview
-    fleet_block = overview[overview.index("function inverterFleetMakes(totals)"):]
-    fleet_block = fleet_block[:fleet_block.index("\n  }")]
+    assert "function inverterFleetMakes(totals)" in inverter_health
+    assert "totals.configs.forEach((config)" in inverter_health
+    fleet_block = inverter_health[inverter_health.index("function inverterFleetMakes(totals)"):]
+    fleet_block = fleet_block[:fleet_block.index("\n    }")]
     assert "api.request" not in fleet_block and "/api/" not in fleet_block
-    assert "const fleetUnits = fleet.reduce((sum, item) => sum + item.units, 0);" in overview
-    assert "units · " in overview and "plants · " in overview and "kW" in overview
+    assert "const fleetUnits = fleet.reduce((sum, item) => sum + item.units, 0);" in inverter_health
+    assert "units · " in inverter_health and "plants · " in inverter_health and "kW" in inverter_health
     # Lightness steps of the brand green, never three different hues.
     assert ".ep-ih__fleet-seg--1 { background: var(--ep-accent-strong); }" in styles
     assert ".ep-ih__fleet-seg--3 { background: color-mix(in srgb, var(--ep-accent) 55%, #FFFFFF); }" in styles
 
     # The per-plant toolbar: search, the issues-only filter, and the export moved up into it.
-    assert "data-ih-plant-search" in overview and "data-ih-only-issues" in overview
-    assert "function filteredInverterPlantRows(rows)" in overview
-    assert "inverterHealth.onlyIssues && !(row.tickets > 0 || (row.down || 0) > 0)" in overview
+    assert "data-ih-plant-search" in inverter_health and "data-ih-only-issues" in inverter_health
+    assert "function filteredInverterPlantRows(rows)" in inverter_health
+    assert "inverterHealth.onlyIssues && !(row.tickets > 0 || (row.down || 0) > 0)" in inverter_health
 
     # An unconfigured plant says so once, across the four cells that would repeat it.
-    assert '<td class="ep-ih__unset" colspan="4">Not configured</td>' in overview
-    assert overview.count("Not configured</td>") == 1
+    assert '<td class="ep-ih__unset" colspan="4">Not configured</td>' in inverter_health
+    assert inverter_health.count("Not configured</td>") == 1
 
     # The CSV still carries every field separately, whatever the screen merges.
-    csv = overview[overview.index("function exportInverterPlantCsv()"):]
+    csv = inverter_health[inverter_health.index("function exportInverterPlantCsv()"):]
     csv = csv[:csv.index("downloadCsv(")]
     for column in ('"Total inverters"', '"Maker"', '"Capacity (kW)"', '"Running"',
                    '"Not running"', '"Issue description"', '"Running %"', '"Open tickets"', '"Site code"'):
@@ -2482,12 +2538,12 @@ def test_inverter_health_plant_table_is_sortable_and_aligned_like_the_register()
 
     Running, Not running and the plant code are ordered by their value, not by the rendered
     HTML, and the CSV follows whatever order is on screen."""
-    overview = (PORTAL_ASSETS / "js" / "overview.js").read_text(encoding="utf-8")
+    inverter_health = (PORTAL_ASSETS / "js" / "inverter-health.js").read_text(encoding="utf-8")
     page = TEMPLATE.read_text(encoding="utf-8")
     styles = (PORTAL_ASSETS / "css" / "components.css").read_text(encoding="utf-8")
 
-    block = overview[overview.index("INVERTER_PLANT_COLUMNS = ["):]
-    block = block[:block.index("\n  ];")]
+    block = inverter_health[inverter_health.index("INVERTER_PLANT_COLUMNS = ["):]
+    block = block[:block.index("\n    ];")]
     # Plant code, Running and Not running are sorted by value; every column carries a reader.
     assert 'sort: (row) => row.plant.siteCode' in block
     assert 'sort: (row) => row.running' in block and 'sort: (row) => row.percent' in block
@@ -2499,16 +2555,16 @@ def test_inverter_health_plant_table_is_sortable_and_aligned_like_the_register()
     assert ".ep-ih__plant-table th.num .ep-sort { justify-content: center; }" in styles
 
     # Sorting is the shared table-sort module, fetched on first open; plain headings until then.
-    assert 'return Sort.headerHTML(INVERTER_PLANT_COLUMNS, inverterHealth.plantSort, "data-ih-sort")' in overview
-    assert 'Sort.apply(rows, inverterHealth.plantSort, INVERTER_PLANT_COLUMNS)' in overview
-    assert 'Sort.next(inverterHealth.plantSort, sortBy.getAttribute("data-ih-sort"))' in overview
-    assert 'global.Solar91Modules.load("table-sort").then(renderInverterHealth)' in overview
+    assert 'return Sort.headerHTML(INVERTER_PLANT_COLUMNS, inverterHealth.plantSort, "data-ih-sort")' in inverter_health
+    assert 'Sort.apply(rows, inverterHealth.plantSort, INVERTER_PLANT_COLUMNS)' in inverter_health
+    assert 'Sort.next(inverterHealth.plantSort, sortBy.getAttribute("data-ih-sort"))' in inverter_health
+    assert 'global.Solar91Modules.load("table-sort").then(renderInverterHealth)' in inverter_health
     assert '"table-sort": "/assets/js/table-sort.js"' in page
 
     # One ordering feeds both the table and its export.
-    assert "const plants = sortedInverterPlantRows();" in overview
-    assert "const values = sortedInverterPlantRows().map((row) => {" in overview
-    assert 'inverterHealth.plantSort = { key: "", dir: "" };' in overview   # reset on reopen
+    assert "const plants = sortedInverterPlantRows();" in inverter_health
+    assert "const values = sortedInverterPlantRows().map((row) => {" in inverter_health
+    assert 'inverterHealth.plantSort = { key: "", dir: "" };' in inverter_health # reset on reopen
 
 
 def test_inverter_plant_sorting_and_capacity_formatting_behave():

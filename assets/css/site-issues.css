@@ -1093,6 +1093,38 @@
 .ep-issues__photo-error { margin: 0; color: #b42318; font-size: 10px; }
 .ep-issues__wizard-fields { display: grid; gap: 14px; }
 .ep-issues__wizard-fields--two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.ep-issues__wizard-fields--three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+
+/* Edit issue: everything on one screen. Short fields share rows, controls are a little
+   shorter, and Save / Cancel are pinned to the bottom of the drawer so they never scroll away. */
+.ep-issues__edit { gap: 12px; }
+.ep-issues__edit .ep-issues__wizard-fields { gap: 10px; }
+.ep-issues__edit .ep-issues__wizard-field { gap: 4px; }
+.ep-issues__edit .ep-issues__wizard-field input,
+.ep-issues__edit .ep-issues__wizard-field select,
+.ep-issues__edit .ep-issues__wizard-field .ep-issues__readonly { min-height: 34px; padding: 6px 9px; }
+.ep-issues__edit .ep-issues__wizard-field .ep-issues__readonly { background: #f6f8f6; color: #536359; }
+.ep-issues__edit-resolution {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 10px 12px 12px;
+  border: 1px solid #cfe3d5;
+  border-radius: 6px;
+  background: #f3f9f5;
+}
+.ep-issues__edit-resolution[hidden] { display: none; }
+.ep-issues__edit-resolution legend { padding: 0 4px; color: #17643f; font-size: 11px; font-weight: 700; }
+.ep-issues__edit-actions {
+  position: sticky;
+  bottom: -24px;
+  z-index: 1;
+  margin: 0 -22px -24px;
+  padding: 12px 22px;
+  border-top: 1px solid #e3e9e5;
+  background: #fff;
+  box-shadow: 0 -6px 14px rgba(16, 24, 20, 0.06);
+}
 .ep-issues__wizard-actions { display: flex; justify-content: space-between; gap: 8px; padding-top: 4px; }
 .ep-issues__wizard-actions .ep-issues__button--primary { border-color: #17643f; background: #17643f; color: #fff; }
 .ep-issues__wizard-demo-note { margin: 0; padding: 10px; border: 1px solid #e1ece4; border-radius: 5px; background: #f5f9f6; color: #607367; font-size: 10px; }
@@ -1157,7 +1189,9 @@
   .ep-issues__drawer-content { padding: 16px; }
   .ep-issues__drawer-footer { padding: 12px 16px; }
   .ep-issues__form-grid { grid-template-columns: 1fr; }
-  .ep-issues__wizard-fields--two { grid-template-columns: 1fr; }
+  .ep-issues__wizard-fields--two,
+  .ep-issues__wizard-fields--three { grid-template-columns: 1fr; }
+  .ep-issues__edit-actions { bottom: -16px; margin: 0 -16px -16px; padding: 12px 16px; }
   .ep-issues__fields { grid-template-columns: 1fr; }
   .ep-issues__fields > div:last-child { grid-column: auto; }
 }

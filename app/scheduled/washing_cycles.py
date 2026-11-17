@@ -310,7 +310,10 @@ def _cycle_grade(cycle_no: int, reports: list, table_count: int, threshold_perce
             break
 
     cycle_window_days = max(0, (due - start).days)
-    if days_to_target is not None:
+    if today < start:
+        # A cycle that has not started is never graded or scored (e.g. Cycle 3 on the 17th).
+        grade = "upcoming"
+    elif days_to_target is not None:
         grade = (
             "on_target" if days_to_target <= fast_window_days
             else "on_time" if days_to_target <= cycle_window_days
@@ -336,11 +339,14 @@ def _cycle_grade(cycle_no: int, reports: list, table_count: int, threshold_perce
 
 
 def _cycle_grade_summary(grades: list[dict]) -> dict:
-    """Summarize closed cycle grades, keeping running cycles out of the compliance denominator."""
+    """Summarize one plant's cycle grades. Upcoming cycles are left out entirely; the compliance
+    figure is the average of the started cycles' scores (see _cycle_work_scores)."""
     counts = {grade: sum(1 for item in grades if item["grade"] == grade)
-              for grade in ("on_target", "on_time", "overdue", "missed", "running")}
+              for grade in ("on_target", "on_time", "overdue", "missed", "running", "upcoming")}
     due = counts["on_target"] + counts["on_time"] + counts["overdue"] + counts["missed"]
     compliant = counts["on_target"] + counts["on_time"]
+    scores = [item["compliance_percent"] for item in grades
+              if item["grade"] != "upcoming" and isinstance(item.get("compliance_percent"), (int, float))]
     return {
         **counts,
         "due": due,
@@ -348,17 +354,66 @@ def _cycle_grade_summary(grades: list[dict]) -> dict:
         "not_started": sum(
             1 for item in grades if item["grade"] == "missed" and item["report_count"] == 0
         ),
-        "compliance_percent": round(100 * compliant / due) if due else None,
+        "compliance_percent": round(sum(scores) / len(scores)) if scores else None,
     }
 
 
-def _monthly_table_compliance(table_count: int, confirmed_tables: int, cycle_starts: list[date],
-                              as_of: date) -> dict[str, int]:
-    """Monthly table progress against every cycle whose start has arrived."""
-    cycles_due = sum(1 for start in cycle_starts if start <= as_of)
-    tables_due = table_count * cycles_due
-    percent = round(100 * confirmed_tables / tables_due) if tables_due else 100
-    return {"cycles_due": cycles_due, "tables_due": tables_due, "percent": percent}
+def _credited_cycle(report_day: date, start_dates: list[date]) -> int:
+    """The cycle a day's cleaning is credited to: the latest cycle that had started by that day.
+    Before the first start it is Cycle 1; after Cycle 3's deadline it is still Cycle 3 (extra washing)."""
+    started = [n for n, start in enumerate(start_dates, 1) if start <= report_day]
+    return started[-1] if started else 1
+
+
+def _cycle_work_scores(reports, table_count: int, today: date, overrides: dict | None,
+                       excused_dates: set[date]) -> dict:
+    """Score each cycle by the WORK done in it: confirmed tables cleaned during the cycle's dates,
+    against the tables due in the cycle so far. Uncapped, so all work is always noticed:
+
+    * a table counts in the cycle whose dates it was cleaned in, so catching up last month's
+      shortfall in days 1-10 raises this month's Cycle 1 (it can read 150%);
+    * cleaning after Cycle 3 (extra washing) raises Cycle 3 and the month above 100%;
+    * an open cycle is judged on pace -- against the tables due from its start up to today
+      (each day's share of the plant's tables, excused days left out) -- and a closed cycle
+      against its whole due;
+    * a cycle that has not started is not scored (score None).
+
+    The month is the same ratio over every started cycle: (done 1 + done 2 + ...) / (due 1 + due 2 + ...).
+    """
+    start_dates = _cycle_start_dates(today, overrides)
+    due_dates = _cycle_due_dates(today, overrides)
+    # A saved Cycle 1 start can fall in the previous month; its days belong to this month's Cycle 1.
+    first_day = min(today.replace(day=1), start_dates[0])
+    done = {n: 0 for n in range(1, MONTHLY_CYCLE_TARGET + 1)}
+    for report in reports:
+        if report.review_status != "Confirmed" or not report.tables_cleaned:
+            continue
+        if not first_day <= report.report_date <= today:
+            continue
+        done[_credited_cycle(report.report_date, start_dates)] += int(report.tables_cleaned)
+
+    cycles = {}
+    month_done = month_due = 0
+    for n in range(1, MONTHLY_CYCLE_TARGET + 1):
+        start, due_date = start_dates[n - 1], due_dates[n - 1]
+        if start > today:
+            cycles[n] = {"tables_done": 0, "tables_due": 0, "score": None}
+            continue
+        tables_due = _cycle_compliance(table_count, today, overrides, {}, excused_dates,
+                                       window=(n, start, due_date))["due"]
+        # Nothing due yet (every day so far excused) is not a failure.
+        score = round(100 * done[n] / tables_due) if tables_due else 100
+        cycles[n] = {"tables_done": done[n], "tables_due": tables_due, "score": score}
+        month_done += done[n]
+        month_due += tables_due
+    return {
+        "cycles": cycles,
+        "month": {
+            "tables_done": month_done,
+            "tables_due": month_due,
+            "percent": round(100 * month_done / month_due) if month_due else 100,
+        },
+    }
 
 
 def _overdue_info(completed_cycles: int, today: date, due_dates: list[date] | None = None) -> dict:
@@ -895,25 +950,32 @@ def _build_overview(db: Session, user: User, include_tables: bool = False, repor
         completed_due = sum(
             1 for cycle_no in completed_dates if start_dates[cycle_no - 1] <= today
         )
-        # Monthly compliance is counted in tables, not completed cycles, so cleaning done after all three
-        # cycles are complete still counts: confirmed tables this month against the tables due so far
-        # (tables per cycle × cycles due by today). Three full cycles is 100%; extra washing goes past it.
-        month_confirmed_tables = sum(
-            report.tables_cleaned for report in month_reports if report.review_status == "Confirmed"
-        )
-        monthly_progress = _monthly_table_compliance(table_count, month_confirmed_tables, start_dates, today)
-        monthly_tables_due = monthly_progress["tables_due"]
-        monthly_compliance = monthly_progress["percent"]
+        # Monthly compliance is the WORK done this month: confirmed tables cleaned on this month's
+        # dates (whichever month a catch-up day is tagged to) against the tables due so far -- each
+        # started cycle's due, the open one on pace up to today. Uncapped, so extra washing and
+        # catching up a shortfall both raise it (_cycle_work_scores).
+        work = _cycle_work_scores(reports, table_count, today, config.cycle_overrides, excused_dates)
+        month_confirmed_tables = work["month"]["tables_done"]
+        monthly_tables_due = work["month"]["tables_due"]
+        monthly_compliance = work["month"]["percent"]
         today_target = _daily_table_target(table_count, today, config.cycle_overrides)
         due_dates = _cycle_due_dates(today, config.cycle_overrides)
         compliance = _cycle_compliance(table_count, today, config.cycle_overrides, ledger, excused_dates)
-        cycle_grades = [
-            _cycle_grade(
+        cycle_grades = []
+        for cycle_no in range(1, MONTHLY_CYCLE_TARGET + 1):
+            grade = _cycle_grade(
                 cycle_no, month_reports, table_count, config.compliance_threshold_percent,
                 config.fast_window_days, start_dates[cycle_no - 1], due_dates[cycle_no - 1], today,
             )
-            for cycle_no in range(1, MONTHLY_CYCLE_TARGET + 1)
-        ]
+            # The grade (on target / on time / overdue / missed / running) names the timing against the
+            # threshold; the percentage is the work score, so partial and late work still count.
+            cycle_work = work["cycles"][cycle_no]
+            grade.update({
+                "compliance_percent": cycle_work["score"],
+                "tables_done": cycle_work["tables_done"],
+                "tables_due": cycle_work["tables_due"],
+            })
+            cycle_grades.append(grade)
         delays = [
             max(0, (completed_on - due_dates[min(cycle_no - 1, 2)]).days)
             for cycle_no, completed_on in completed_dates.items()
@@ -1140,6 +1202,12 @@ def _build_overview(db: Session, user: User, include_tables: bool = False, repor
                 row.pop(key, None)
             for cycle in row.get("cycles", []):
                 cycle.pop("late_days", None)
+            # The cycle work scores are the same compliance metric per cycle, so they follow the rule above.
+            for grade in row.get("cycle_grades", []):
+                for key in ("compliance_percent", "tables_done", "tables_due"):
+                    grade.pop(key, None)
+            if isinstance(row.get("cycle_grade_summary"), dict):
+                row["cycle_grade_summary"].pop("compliance_percent", None)
             for day in row.get("daily_status", []):
                 day.pop("target", None)
         result["overdue_matrix"] = {"on_track": 0, "1d": 0, "3d": 0, "7d": 0}

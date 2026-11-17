@@ -442,6 +442,8 @@ def build_profile(
                         "requiredTables": item.get("required_tables"),
                         "reportCount": item.get("report_count"),
                         "due": item.get("due"),
+                        "tablesDone": item.get("tables_done"),
+                        "tablesDue": item.get("tables_due"),
                     }
                     for item in washing.get("cycle_grades") or []
                 ],
@@ -1100,8 +1102,25 @@ def aggregate(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "dcCapacityMw": 0.0, "acCapacityMw": 0.0,
         "commissionedPlants": 0,
     }
-    washing_scores: list[float] = []
-    cycle_scores: dict[int, list[float]] = {1: [], 2: [], 3: []}
+    # Module cleaning compliance = tables cleaned / tables due so far (the same rule as
+    # data-adapter.js aggregatePortfolio). With several plants each plant's cleaned tables count up
+    # to its own due, so one plant's extra washing cannot hide another's shortfall; one plant is uncapped.
+    single = len(rows) == 1
+    washing_work = {"done": 0, "due": 0, "plants": 0}
+    cycle_work: dict[int, dict[str, int]] = {n: {"done": 0, "due": 0, "plants": 0} for n in (1, 2, 3)}
+
+    def add_work(target: dict[str, int], done: Any, due: Any) -> None:
+        done_n = max(0, int(done or 0))
+        due_n = max(0, int(due or 0))
+        target["done"] += done_n if single else min(done_n, due_n)
+        target["due"] += due_n
+        target["plants"] += 1
+
+    def work_percent(work: dict[str, int]) -> int | None:
+        if not work["plants"]:
+            return None
+        return round(100 * work["done"] / work["due"]) if work["due"] else 100
+
     for row in rows:
         plant, profile = row["plant"], row["profile"]
         condition = profile.get("derivedCondition") or "unknown"
@@ -1123,16 +1142,16 @@ def aggregate(rows: list[dict[str, Any]]) -> dict[str, Any]:
                 value = data.get(field)
                 if isinstance(value, int):
                     totals[prefix + suffix] += value
-        # A plant over 100% (extra washing after all three cycles) counts as 100 here, so one
-        # plant's extra work cannot hide another plant's shortfall in the portfolio figure.
-        washing_score = (profile.get("washing") or {}).get("compliancePercent")
-        if isinstance(washing_score, (int, float)):
-            washing_scores.append(washing_score if len(rows) == 1 else min(100, washing_score))
-        for grade in (profile.get("washing") or {}).get("cycleGrades") or []:
+        washing = profile.get("washing") or {}
+        if isinstance(washing.get("compliancePercent"), (int, float)) and \
+                isinstance(washing.get("monthlyTablesDue"), int):
+            add_work(washing_work, washing.get("monthlyTablesConfirmed"), washing.get("monthlyTablesDue"))
+        for grade in washing.get("cycleGrades") or []:
             cycle_no = grade.get("cycleNo")
-            score = grade.get("compliancePercent")
-            if cycle_no in cycle_scores and isinstance(score, (int, float)):
-                cycle_scores[cycle_no].append(min(100, score))
+            # Upcoming cycles carry no score and are never counted.
+            if cycle_no in cycle_work and isinstance(grade.get("compliancePercent"), (int, float)) and \
+                    isinstance(grade.get("tablesDue"), int):
+                add_work(cycle_work[cycle_no], grade.get("tablesDone"), grade.get("tablesDue"))
 
         if plant.get("dc_capacity_kw"):
             totals["dcCapacityMw"] += plant["dc_capacity_kw"] / 1000
@@ -1143,15 +1162,11 @@ def aggregate(rows: list[dict[str, Any]]) -> dict[str, Any]:
 
     pm_total = totals["pmCompleted"] + totals["pmPending"] + totals["pmOverdue"]
     totals["pmCompliancePercent"] = _percent(totals["pmCompleted"], pm_total)
-    # Module cleaning compliance is the average of the plants' monthly scores, which move with
-    # every confirmed day. Counting whole completed cycles left the tile unchanged between cycle
-    # completions, so a month of daily cleaning showed no movement at all.
-    totals["washingCompliancePercent"] = (
-        round(sum(washing_scores) / len(washing_scores)) if washing_scores else None
-    )
+    totals["washingCompliancePercent"] = work_percent(washing_work)
+    totals["washingWork"] = washing_work
+    totals["washingCycleWork"] = {str(n): work for n, work in cycle_work.items()}
     totals["washingCycleCompliancePercentByCycle"] = {
-        str(cycle_no): round(sum(scores) / len(scores)) if scores else None
-        for cycle_no, scores in cycle_scores.items()
+        str(cycle_no): work_percent(work) for cycle_no, work in cycle_work.items()
     }
     totals["dcCapacityMw"] = round(totals["dcCapacityMw"], 2)
     totals["acCapacityMw"] = round(totals["acCapacityMw"], 2)

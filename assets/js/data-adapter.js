@@ -329,11 +329,21 @@
       washingCycleCompliancePercentByCycle: { "1": null, "2": null, "3": null },
       dcCapacityMw: 0, acCapacityMw: 0
     };
-    let washingScoreSum = 0;
-    let washingScored = 0;
-    const cycleScoreSums = {
-      "1": { sum: 0, count: 0 }, "2": { sum: 0, count: 0 }, "3": { sum: 0, count: 0 }
+    // Module cleaning compliance = tables cleaned / tables due so far, and the tile shows exactly
+    // those two numbers. With several plants each plant's cleaned tables count up to its own due,
+    // so one plant's extra washing cannot hide another plant's shortfall; one plant is uncapped.
+    const single = rows.length === 1;
+    const washingWork = { done: 0, due: 0, plants: 0 };
+    const cycleWork = {
+      "1": { done: 0, due: 0, plants: 0 }, "2": { done: 0, due: 0, plants: 0 }, "3": { done: 0, due: 0, plants: 0 }
     };
+    function addWork(target, done, due) {
+      done = Math.max(0, Number(done) || 0);
+      due = Math.max(0, Number(due) || 0);
+      target.done += single ? done : Math.min(done, due);
+      target.due += due;
+      target.plants += 1;
+    }
     rows.forEach(function (row) {
       const plant = row.plant, profile = row.profile;
       const cond = profile.derivedCondition;
@@ -356,17 +366,15 @@
         totals.washingCompleted += profile.washing.completed || 0;
         totals.washingPending   += profile.washing.pending || 0;
         totals.washingOverdue   += profile.washing.overdue || 0;
-        if (typeof profile.washing.compliancePercent === "number") {
-          washingScoreSum += rows.length === 1
-            ? profile.washing.compliancePercent
-            : Math.min(100, profile.washing.compliancePercent);
-          washingScored += 1;
+        if (typeof profile.washing.compliancePercent === "number" &&
+            typeof profile.washing.monthlyTablesDue === "number") {
+          addWork(washingWork, profile.washing.monthlyTablesConfirmed, profile.washing.monthlyTablesDue);
         }
         (profile.washing.cycleGrades || []).forEach(function (grade) {
-          const cycle = cycleScoreSums[String(grade.cycleNo)];
-          if (!cycle || typeof grade.compliancePercent !== "number") return;
-          cycle.sum += Math.min(100, grade.compliancePercent);
-          cycle.count += 1;
+          const cycle = cycleWork[String(grade.cycleNo)];
+          // Upcoming cycles carry no score and are never counted.
+          if (!cycle || typeof grade.compliancePercent !== "number" || typeof grade.tablesDue !== "number") return;
+          addWork(cycle, grade.tablesDone, grade.tablesDue);
         });
       }
       if (plant.dcCapacityKw) totals.dcCapacityMw += plant.dcCapacityKw / 1000;
@@ -375,16 +383,16 @@
 
     const pmTotal = totals.pmCompleted + totals.pmPending + totals.pmOverdue;
     totals.pmCompliancePercent = pmTotal === 0 ? null : Math.round((totals.pmCompleted / pmTotal) * 100);
-    // Module cleaning compliance is the average of the plants' monthly scores, which move with
-    // every confirmed day. Counting whole completed cycles instead left the tile frozen between
-    // cycle completions, so a month of daily cleaning showed no change at all.
-    totals.washingCompliancePercent = washingScored
-      ? Math.round(washingScoreSum / washingScored)
-      : null;
-    Object.keys(cycleScoreSums).forEach(function (cycleNo) {
-      const score = cycleScoreSums[cycleNo];
-      totals.washingCycleCompliancePercentByCycle[cycleNo] = score.count
-        ? Math.round(score.sum / score.count) : null;
+    // Nothing due yet (every day so far excused) is not a failure: 100%. No plant scored: N/A.
+    function workPercent(work) {
+      if (!work.plants) return null;
+      return work.due ? Math.round(100 * work.done / work.due) : 100;
+    }
+    totals.washingCompliancePercent = workPercent(washingWork);
+    totals.washingWork = washingWork;
+    totals.washingCycleWork = cycleWork;
+    Object.keys(cycleWork).forEach(function (cycleNo) {
+      totals.washingCycleCompliancePercentByCycle[cycleNo] = workPercent(cycleWork[cycleNo]);
     });
     totals.dcCapacityMw = Math.round(totals.dcCapacityMw * 100) / 100;
     totals.acCapacityMw = Math.round(totals.acCapacityMw * 100) / 100;

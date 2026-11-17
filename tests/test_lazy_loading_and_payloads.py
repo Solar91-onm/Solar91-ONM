@@ -35,7 +35,8 @@ SHELL_SCRIPTS = ["format.js", "portal-api.js", "data-adapter.js", "modules.js",
 # Pages, fetched when first opened. The calendar alone is a quarter of the old payload.
 LAZY_MODULES = ["table-sort", "register-io", "plant-details", "plants-table", "site-issues",
                 "movable-assets", "bom", "design", "liasoning", "operations-calendar",
-                "washing-board", "categories", "security", "settings", "photo-evidence"]
+                "washing-board", "categories", "security", "settings", "photo-evidence",
+                "inverter-health"]
 
 
 def _script_tags(page: str) -> list[str]:
@@ -742,10 +743,10 @@ def test_the_inverter_drill_down_reuses_the_tiles_figures_rather_than_refetching
     """The drill-down is opened from the tile, which already holds the unit configuration
     and the per-plant ticket counts. Asking for the same two answers again costs two
     requests and could only make the two screens disagree."""
-    overview = (PORTAL_ASSETS / "js" / "overview.js").read_text(encoding="utf-8")
+    inverter_health = (PORTAL_ASSETS / "js" / "inverter-health.js").read_text(encoding="utf-8")
 
-    loader = overview[overview.index("function loadInverterHealth()"):]
-    loader = loader[:loader.index("\n  function ", 1)]
+    loader = inverter_health[inverter_health.index("function loadInverterHealth()"):]
+    loader = loader[:loader.index("\n    function ", 1)]
     assert "inverters.loaded && (inverters.units.length || inverters.unitsRestricted)" in loader
     assert "inverters.loaded && inverters.issues.length" in loader
     assert "inverterHealth.summary = { plants: inverters.issues };" in loader
