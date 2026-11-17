@@ -36,11 +36,12 @@ _OVERVIEW_VERSION = 0
 
 # The scalar report columns the overview's figures are computed from (cycles, compliance, excused days, daily status,
 # productivity, pending reviews). When the report list itself is not wanted (Overview, plant details, the plant tab),
-# reports are read as plain rows of just these columns: no ORM objects, and the JSON columns (photo evidence, cleaned
-# table codes) are never transferred or decoded. The figures are identical because they read only these attributes.
+# reports are read as plain rows of just these columns: no ORM objects and no photo evidence. Cleaned table codes are
+# required for cycle grading and are the only JSON report field selected in summary mode.
 _SUMMARY_REPORT_COLUMNS = (
     WashingDailyReport.id, WashingDailyReport.plant_id, WashingDailyReport.cycle_month, WashingDailyReport.cycle_no,
     WashingDailyReport.report_date, WashingDailyReport.job_status, WashingDailyReport.tables_cleaned,
+    WashingDailyReport.cleaned_table_codes,
     WashingDailyReport.remarks, WashingDailyReport.exception_reason, WashingDailyReport.reported_by,
     WashingDailyReport.review_status, WashingDailyReport.cycle_completed, WashingDailyReport.created_at,
 )
@@ -281,6 +282,83 @@ def _cycle_compliance(table_count: int, today: date, overrides: dict | None, led
     return {"cycle_no": n, "start": start.isoformat(), "end": end.isoformat(), "due": due, "done": done,
             "pending": ledger.get(n, {}).get("pending", 0),
             "percent": min(100, round(100 * done / due)) if due else 100}
+
+
+def _cycle_grade(cycle_no: int, reports: list, table_count: int, threshold_percent: int,
+                 fast_window_days: int, start: date, due: date, today: date) -> dict:
+    """Grade distinct cleaned tables against the configured cycle threshold and its due-date window."""
+    eligible = [
+        report for report in reports
+        if report.cycle_no == cycle_no and str(report.review_status or "").lower() != "rejected"
+    ]
+    codes_by_day: dict[date, set[str]] = {}
+    all_codes: set[str] = set()
+    for report in eligible:
+        for raw_code in report.cleaned_table_codes or []:
+            code = str(raw_code).strip()
+            if code:
+                codes_by_day.setdefault(report.report_date, set()).add(code)
+                all_codes.add(code)
+
+    required = max(1, (table_count * max(1, min(100, threshold_percent)) + 99) // 100)
+    accumulated: set[str] = set()
+    days_to_target = None
+    for report_day in sorted(codes_by_day):
+        accumulated.update(codes_by_day[report_day])
+        if len(accumulated) >= required:
+            days_to_target = max(0, (report_day - start).days)
+            break
+
+    cycle_window_days = max(0, (due - start).days)
+    if days_to_target is not None:
+        grade = (
+            "on_target" if days_to_target <= fast_window_days
+            else "on_time" if days_to_target <= cycle_window_days
+            else "overdue"
+        )
+    else:
+        grade = "missed" if today >= due else "running"
+
+    return {
+        "cycle_no": cycle_no,
+        "start_date": start.isoformat(),
+        "due_date": due.isoformat(),
+        "grade": grade,
+        "compliance_percent": 100 if grade in ("on_target", "on_time") else
+            0 if grade in ("overdue", "missed") else None,
+        "days_to_target": days_to_target,
+        "coverage_count": len(all_codes),
+        "coverage_percent": round(100 * len(all_codes) / table_count) if table_count else 0,
+        "required_tables": required,
+        "report_count": len(eligible),
+        "due": today >= due,
+    }
+
+
+def _cycle_grade_summary(grades: list[dict]) -> dict:
+    """Summarize closed cycle grades, keeping running cycles out of the compliance denominator."""
+    counts = {grade: sum(1 for item in grades if item["grade"] == grade)
+              for grade in ("on_target", "on_time", "overdue", "missed", "running")}
+    due = counts["on_target"] + counts["on_time"] + counts["overdue"] + counts["missed"]
+    compliant = counts["on_target"] + counts["on_time"]
+    return {
+        **counts,
+        "due": due,
+        "compliant": compliant,
+        "not_started": sum(
+            1 for item in grades if item["grade"] == "missed" and item["report_count"] == 0
+        ),
+        "compliance_percent": round(100 * compliant / due) if due else None,
+    }
+
+
+def _monthly_table_compliance(table_count: int, confirmed_tables: int, cycle_starts: list[date],
+                              as_of: date) -> dict[str, int]:
+    """Monthly table progress against every cycle whose start has arrived."""
+    cycles_due = sum(1 for start in cycle_starts if start <= as_of)
+    tables_due = table_count * cycles_due
+    percent = round(100 * confirmed_tables / tables_due) if tables_due else 100
+    return {"cycles_due": cycles_due, "tables_due": tables_due, "percent": percent}
 
 
 def _overdue_info(completed_cycles: int, today: date, due_dates: list[date] | None = None) -> dict:
@@ -812,20 +890,30 @@ def _build_overview(db: Session, user: User, include_tables: bool = False, repor
         for report in sorted(reports, key=lambda item: item.report_date):
             if report.cycle_month == month and report.cycle_completed and report.review_status == "Confirmed":
                 completed_dates.setdefault(report.cycle_no, report.report_date)
-        due_by_today = min(MONTHLY_CYCLE_TARGET, (today.day - 1) // 10 + 1)
-        completed_due = sum(1 for cycle_no in completed_dates if cycle_no <= due_by_today)
+        start_dates = _cycle_start_dates(today, config.cycle_overrides)
+        due_by_today = sum(1 for start in start_dates if start <= today)
+        completed_due = sum(
+            1 for cycle_no in completed_dates if start_dates[cycle_no - 1] <= today
+        )
         # Monthly compliance is counted in tables, not completed cycles, so cleaning done after all three
         # cycles are complete still counts: confirmed tables this month against the tables due so far
         # (tables per cycle × cycles due by today). Three full cycles is 100%; extra washing goes past it.
         month_confirmed_tables = sum(
             report.tables_cleaned for report in month_reports if report.review_status == "Confirmed"
         )
-        monthly_tables_due = table_count * due_by_today
-        monthly_compliance = round(100 * month_confirmed_tables / monthly_tables_due) if monthly_tables_due else 100
+        monthly_progress = _monthly_table_compliance(table_count, month_confirmed_tables, start_dates, today)
+        monthly_tables_due = monthly_progress["tables_due"]
+        monthly_compliance = monthly_progress["percent"]
         today_target = _daily_table_target(table_count, today, config.cycle_overrides)
-        compliance = _cycle_compliance(table_count, today, config.cycle_overrides, ledger, excused_dates)
         due_dates = _cycle_due_dates(today, config.cycle_overrides)
-        start_dates = _cycle_start_dates(today, config.cycle_overrides)
+        compliance = _cycle_compliance(table_count, today, config.cycle_overrides, ledger, excused_dates)
+        cycle_grades = [
+            _cycle_grade(
+                cycle_no, month_reports, table_count, config.compliance_threshold_percent,
+                config.fast_window_days, start_dates[cycle_no - 1], due_dates[cycle_no - 1], today,
+            )
+            for cycle_no in range(1, MONTHLY_CYCLE_TARGET + 1)
+        ]
         delays = [
             max(0, (completed_on - due_dates[min(cycle_no - 1, 2)]).days)
             for cycle_no, completed_on in completed_dates.items()
@@ -947,6 +1035,8 @@ def _build_overview(db: Session, user: User, include_tables: bool = False, repor
             "monthly_cycles_completed_due": completed_due,
             "cycle_compliance": compliance,
             "cycle_compliance_percent": compliance["percent"],
+            "cycle_grades": cycle_grades,
+            "cycle_grade_summary": _cycle_grade_summary(cycle_grades),
             "average_delay_days": round(sum(delays) / len(delays), 1) if delays else 0,
             "exceptions_this_month": sum(1 for report in reports if report.cycle_month == month and report.exception_reason),
             **({} if summary else {
@@ -954,6 +1044,7 @@ def _build_overview(db: Session, user: User, include_tables: bool = False, repor
                 "daily_productivity": sorted(daily_productivity, key=lambda row: (row["date"], row["person"])),
             }),
             "compliance_threshold_percent": config.compliance_threshold_percent,
+            "fast_window_days": config.fast_window_days,
             "excused_days_late_cycle": excused_in_late_cycle,
             "delay_excused": bool(late_cycle) and excused_in_late_cycle >= overdue["overdue_days"],
         })

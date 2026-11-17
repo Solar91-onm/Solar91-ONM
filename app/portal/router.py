@@ -47,8 +47,10 @@ def list_plants(db: DB, user: CurrentUser):
 
 
 @router.get("/overview")
-def overview(db: DB, user: OverviewUser):
+def overview(db: DB, user: OverviewUser, version_only: bool = Query(default=False)):
     """Portfolio rows, except Site Engineers receive only their assigned plant."""
+    if version_only:
+        return {"dataVersion": service.overview_version(db, user)}
     return service.portfolio(db, user)
 
 

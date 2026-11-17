@@ -69,7 +69,11 @@ def test_security_register_supports_multiple_contacts_and_edit_overlay():
     assert 'data-security-search' in security and 'data-security-site-filter' in security
     assert 'data-security-contact-shift="' in security
     assert 'data-security-add="engineer"' in security and 'data-security-add="guard"' in security
-    assert 'fields.security_contacts = payload.contacts;' in security
+    # The register saves through its own narrow write (O&M Head + Assignee, scoped server-side),
+    # not the whole-plant PATCH that needs plants.manage.
+    assert '"/security-contacts", {' in security
+    assert "body: payload.contacts" in security
+    assert 'return role === "O&M Head" || role === "Assignee";' in security
     assert 'var registerSort = { column: 0, direction: "ascending" };' in security
     assert 'var sortableRegisterColumns = [0, 1, 3, 5];' in security
     assert 'if (editingRows || sortableRegisterColumns.indexOf(column) === -1)' in security
@@ -753,6 +757,31 @@ def test_module_cleaning_board_shows_every_plant_and_opens_one_plants_calendar()
     assert "Solar91PortalWashingBoard.show(document.querySelector(\"[data-washing-board-host]\"))" in nav
 
 
+def test_module_cleaning_compliance_cycle_scope_and_board_breakdown():
+    overview = (PORTAL_ASSETS / "js" / "overview.js").read_text(encoding="utf-8")
+    adapter = (PORTAL_ASSETS / "js" / "data-adapter.js").read_text(encoding="utf-8")
+    board = (PORTAL_ASSETS / "js" / "washing-board.js").read_text(encoding="utf-8")
+    board_styles = (PORTAL_ASSETS / "css" / "washing-board.css").read_text(encoding="utf-8")
+
+    assert 'localStorage.setItem("solar91:overview:washing-cycle:" + userId, selection)' in overview
+    assert '<option value="all"${washingSelection === "all" ? " selected" : ""}>Current Month</option>' in overview
+    assert "stats.notStarted" in overview
+    assert 'cycle: currentWashingCycleSelection()' in overview
+    assert "global.Solar91PortalNav.selectView(destination, dateRange)" in overview
+    assert "washingScoreSum += rows.length === 1" in adapter
+    assert "Math.min(100, profile.washing.compliancePercent)" in adapter
+
+    assert "monthly_compliance_percent" in board
+    assert "monthly_tables_confirmed" in board and "monthly_tables_due" in board
+    assert "function cycleCompliance(rows)" not in board
+    assert "data-wb-compliance-cycle" not in board
+    assert 'data-wb-period="week"' not in board and 'data-wb-period="month"' not in board
+    assert 'value="compliance-high"' in board and 'value="compliance-low"' in board
+    assert "global.Solar91WashingBoardPrefill" in board
+    assert "cycle_grades" in board
+    assert ".ep-wb__donut {" in board_styles and ".ep-wb__compliance-legend" in board_styles
+
+
 def test_a_plants_module_cleaning_calendar_opens_on_the_week():
     """A plant's cleaning calendar opens on the current week (seven cells), with Month still one
     click away. PM and the portfolio calendar are untouched and still open on the month."""
@@ -978,8 +1007,10 @@ def test_plant_details_health_merge_preserves_site_engineer_scope_and_views_heal
     assert '<h2>Health</h2>' in issues
     assert 'data-plant-details-toggle' in table
     assert 'global.localStorage.setItem(detailsCollapseKey(plant)' in table
-    merged_header = table[table.index("var pageHeader = merged"):table.index("var table =", table.index("var pageHeader = merged"))]
-    assert merged_header.count("<h1") == 2  # mutually exclusive merged and portfolio headers
+    header_start = table.index('var pageHeader = !single && detailSection === "details"')
+    merged_header = table[header_start:table.index("var table =", header_start)]
+    assert merged_header.count("<h1") == 2  # the two single-plant heading variants; portfolio Info is blank
+    assert 'var pageHeader = !single && detailSection === "details"\n      ? ""' in merged_header
     assert "pageHeader + card" in table
     assert '<h2>Health</h2>' in issues
 
@@ -1418,7 +1449,8 @@ def test_health_issue_date_filter_is_local_and_supports_a_date_range():
     assert 'state.issueDateRangeMode = false;' in clear_action
     assert "issue.occurredAt < context.startDate" not in issues
     assert ".ep-issues__date-filter" in styles and ".ep-issues__date-separator" in styles
-    assert "min-height: 62px;" in styles and "border-radius: 15px;" in styles
+    assert "min-height: 44px;" in styles and "border-radius: var(--ep-radius-md);" in styles
+    assert "box-shadow: none;" in styles
     assert ".ep-issues__date-period" in styles
     assert "renderHeader(context)" in issues
 
@@ -2136,16 +2168,14 @@ def test_only_the_om_head_role_can_remove_a_bom_line():
         assert "plants.manage" not in ROLE_PERMISSIONS[role], role
 
 
-def test_the_merged_plant_page_renders_exactly_one_h1_on_either_branch():
-    """Details and Health are one stacked page now. Its heading and the portfolio heading
-    are mutually exclusive branches of one ternary, so the page must carry exactly one h1
-    whichever branch runs — two would be a document-outline bug, none a missing title."""
+def test_plant_page_keeps_its_heading_and_portfolio_info_hides_the_redundant_title():
+    """A plant page has a heading; the portfolio Info view omits the redundant Plants table banner."""
     script = r"""
       const fs = require('fs');
       const vm = require('vm');
       const source = fs.readFileSync('assets/js/plants-table.js', 'utf8');
 
-      const start = source.indexOf('var pageHeader = merged');
+      const start = source.indexOf('var pageHeader = !single && detailSection === "details"');
       if (start < 0) throw new Error('the merged page header is missing');
       const end = source.indexOf('var table =', start);
       const expression = source.slice(start, end);
@@ -2153,8 +2183,11 @@ def test_the_merged_plant_page_renders_exactly_one_h1_on_either_branch():
       const fmt = { escape: (v) => String(v == null ? '' : v) };
       const box = {
         fmt,
-        title: 'Plant Details',
-        subtitle: 'Every plant in the portfolio',
+        title: 'Abhaypur I · Details',
+        subtitle: 'ABH01 · Jaipur',
+        single: true,
+        detailSection: 'details',
+        merged: true,
         plant: { displayName: 'Abhaypur I', plantName: 'Abhaypur I',
                  siteCode: 'ABH01', district: 'Jaipur', discom: 'JVVNL' }
       };
@@ -2172,16 +2205,22 @@ def test_the_merged_plant_page_renders_exactly_one_h1_on_either_branch():
       if (mergedHtml.indexOf('Abhaypur I') === -1) throw new Error('the plant name is not the heading');
       if (mergedHtml.indexOf('ABH01') === -1) throw new Error('the site code is missing from the subtitle');
 
-      // b) the portfolio page it is mutually exclusive with
-      box.merged = false;
+      // b) the portfolio Info view intentionally has no redundant page banner
+      box.single = false;
+      box.detailSection = 'details';
       vm.runInContext(expression + ';this.out = pageHeader;', box);
       const portfolioHtml = box.out;
-      if (countH1(portfolioHtml) !== 1) {
-        throw new Error('portfolio page h1 count = ' + countH1(portfolioHtml) + ': ' + portfolioHtml);
-      }
-      if (portfolioHtml.indexOf('Plant Details') === -1) throw new Error('the portfolio title is missing');
+      if (portfolioHtml !== '') throw new Error('portfolio Info should not show a page banner: ' + portfolioHtml);
 
-      // c) a plant that has not loaded yet still gets a heading, never an empty one
+      // c) a non-merged single plant page retains its normal heading
+      box.single = true;
+      box.merged = false;
+      vm.runInContext(expression + ';this.out = pageHeader;', box);
+      const singleHtml = box.out;
+      if (countH1(singleHtml) !== 1) throw new Error('single plant page h1 count = ' + countH1(singleHtml));
+      if (singleHtml.indexOf('Abhaypur I · Details') === -1) throw new Error('the single plant title is missing');
+
+      // d) a plant that has not loaded yet still gets a heading, never an empty one
       box.merged = true;
       box.plant = null;
       vm.runInContext(expression + ';this.out = pageHeader;', box);
@@ -2374,9 +2413,11 @@ def test_dashboard_tiles_are_buttons_with_state_coloured_figures_and_meters():
     assert 'class="ep-metric__empty"' in overview
     assert 'meter: pmEmpty ? [] : [' in overview
 
-    # Open site issues stacks what is unsolved against what has been closed to date.
-    assert '{ width: clamp(100 * issueUnsolved / issueSpan), tone: "red" }' in overview
-    assert '{ width: clamp(100 * issueClosed / issueSpan), tone: "accent" }' in overview
+    # Open site issues shows only open + in-progress work: the meter stacks what is still
+    # unsolved against what is in progress, within the open count. Closed tickets are not shown.
+    assert '{ width: clamp(100 * issueUnsolved / openIss), tone: "red" }' in overview
+    assert '{ width: clamp(100 * totals.inProgressIssues / openIss), tone: "accent" }' in overview
+    assert "Closed to date" not in overview
 
     # The legend is pushed to the bottom of the tile so all four line up.
     assert ".ep-metric__legend {" in styles

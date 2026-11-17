@@ -12,7 +12,13 @@ from app.core.models import (
     WashingDailyReport,
     WashingTable,
 )
-from app.scheduled.washing_cycles import check_cycle_compliance_alerts, check_missed_monthly_targets
+from app.scheduled.washing_cycles import (
+    _cycle_grade,
+    _cycle_grade_summary,
+    _monthly_table_compliance,
+    check_cycle_compliance_alerts,
+    check_missed_monthly_targets,
+)
 from tests.conftest import grant_assignee_plants, login_user, tiny_png_bytes
 from tests import conftest
 
@@ -290,6 +296,136 @@ def test_overview_lists_unconfigured_plants_and_daily_status(client, db):
     assert set(overview["overdue_matrix"]) == {"on_track", "1d", "3d", "7d"}
     row = overview["plants"][0]
     assert len(row["daily_status"]) == business_today().day and row["daily_status"][-1]["status"] in {"Not reported yet", "Awaiting review", "Confirmed", "Exception"}
+
+
+def test_summary_overview_includes_cycle_grades_from_distinct_non_rejected_codes(client, db):
+    plant = _plant(db)
+    head, _assignee = _setup_cycle_users(client, db, plant)
+    today = business_today()
+    db.add(WashingDailyReport(
+        plant_id=plant.id, cycle_month=today.strftime("%Y-%m"), cycle_no=1, report_date=today,
+        job_status="Done", tables_cleaned=2, cleaned_table_codes=["Table 001", "Table 002"],
+        reported_by="Field", review_status="Confirmed",
+    ))
+    db.add(WashingDailyReport(
+        plant_id=plant.id, cycle_month=today.strftime("%Y-%m"), cycle_no=1, report_date=today,
+        job_status="Done", tables_cleaned=2, cleaned_table_codes=["Table 003"],
+        reported_by="Field", review_status="Rejected",
+    ))
+    db.commit()
+    _act_as(head)
+
+    response = client.get(f"{BASE}/overview?include_reports=false&summary=true")
+    assert response.status_code == 200, response.text
+    row = next(item for item in response.json()["plants"] if item["plant_id"] == str(plant.id))
+    grade = next(item for item in row["cycle_grades"] if item["cycle_no"] == 1)
+    assert grade["coverage_count"] == 2
+    assert grade["required_tables"] == 4
+    assert len(row["cycle_grades"]) == 3
+    assert row["cycle_grade_summary"]["running"] + row["cycle_grade_summary"]["due"] <= 3
+
+
+def test_cycle_grades_use_threshold_timing_and_exclude_running_cycles():
+    from types import SimpleNamespace
+
+    start = date(2026, 11, 1)
+
+    def report(day, codes, status="Confirmed"):
+        return SimpleNamespace(
+            cycle_no=1, report_date=date(2026, 11, day), review_status=status,
+            cleaned_table_codes=codes,
+        )
+
+    on_target = _cycle_grade(
+        1, [report(7, [f"T{i}" for i in range(1, 10)]), report(7, ["T1"])],
+        10, 85, 7, start, date(2026, 11, 10), date(2026, 11, 10),
+    )
+    on_time = _cycle_grade(
+        1, [report(10, [f"T{i}" for i in range(1, 10)])],
+        10, 85, 7, start, date(2026, 11, 10), date(2026, 11, 10),
+    )
+    overdue = _cycle_grade(
+        1, [report(13, [f"T{i}" for i in range(1, 10)])],
+        10, 85, 7, start, date(2026, 11, 10), date(2026, 11, 13),
+    )
+    running = _cycle_grade(
+        1, [report(9, [f"T{i}" for i in range(1, 10)], "Rejected")],
+        10, 85, 7, start, date(2026, 11, 10), date(2026, 11, 9),
+    )
+    assert on_target["grade"] == "on_target" and on_target["coverage_count"] == 9
+    assert on_time["grade"] == "on_time" and on_time["days_to_target"] == 9
+    assert overdue["grade"] == "overdue" and overdue["coverage_percent"] == 90
+    assert running["grade"] == "running" and running["coverage_count"] == 0
+
+    summary = _cycle_grade_summary([on_target, on_time, overdue, running])
+    assert summary["compliance_percent"] == 67
+    assert summary["due"] == 3 and summary["running"] == 1
+
+
+def test_monthly_table_compliance_uses_started_cycles_and_uncapped_tables():
+    starts = [date(2026, 11, 1), date(2026, 11, 11), date(2026, 11, 21)]
+    earlier = _monthly_table_compliance(10, 5, starts, date(2026, 11, 10))
+    later = _monthly_table_compliance(10, 5, starts, date(2026, 11, 17))
+    past_month = _monthly_table_compliance(10, 35, starts, date(2026, 11, 30))
+    moved_start = _monthly_table_compliance(
+        10, 5, [date(2026, 11, 1), date(2026, 11, 15), date(2026, 11, 25)], date(2026, 11, 12)
+    )
+
+    assert earlier == {"cycles_due": 1, "tables_due": 10, "percent": 50}
+    assert later == {"cycles_due": 2, "tables_due": 20, "percent": 25}
+    assert past_month == {"cycles_due": 3, "tables_due": 30, "percent": 117}
+    assert moved_start == {"cycles_due": 1, "tables_due": 10, "percent": 50}
+
+
+def test_portfolio_table_compliance_caps_multi_plant_average_but_not_one_plant():
+    from app.portal.service import aggregate
+
+    def row(score):
+        return {
+            "plant": {"dc_capacity_kw": None, "ac_capacity_kw": None, "commissioned_on": None},
+            "profile": {
+                "derivedCondition": "unknown",
+                "washing": {"completed": 0, "pending": 0, "overdue": 0, "compliancePercent": score},
+            },
+        }
+
+    assert aggregate([row(150)])["washingCompliancePercent"] == 150
+    assert aggregate([row(150), row(40)])["washingCompliancePercent"] == 70
+    assert aggregate([row(None)])["washingCompliancePercent"] is None
+
+
+def test_portal_overview_uses_table_progress_before_any_cycle_is_completed(client, db):
+    plant = _plant(db)
+    head, _assignee = _setup_cycle_users(client, db, plant)
+    today = business_today()
+    db.add(WashingDailyReport(
+        plant_id=plant.id, cycle_month=today.strftime("%Y-%m"), cycle_no=1, report_date=today,
+        job_status="Done", tables_cleaned=2, cleaned_table_codes=["Table 001", "Table 002"],
+        reported_by="Field", review_status="Confirmed", cycle_completed=False,
+    ))
+    db.commit()
+    _act_as(head)
+
+    dashboard = client.get("/api/portal/overview/range?period=month")
+    module = client.get(f"{BASE}/overview?include_reports=false&summary=true")
+    assert dashboard.status_code == module.status_code == 200
+    profile = next(row["profile"] for row in dashboard.json()["rows"] if row["plant"]["id"] == str(plant.id))
+    module_row = next(row for row in module.json()["plants"] if row["plant_id"] == str(plant.id))
+    assert profile["washing"]["completed"] == 0
+    assert profile["washing"]["compliancePercent"] > 0
+    assert profile["washing"]["compliancePercent"] == module_row["monthly_compliance_percent"]
+    assert dashboard.json()["totals"]["washingCompliancePercent"] == profile["washing"]["compliancePercent"]
+
+
+def test_overview_version_check_returns_only_a_scoped_token(client, db):
+    head, _assignee = _setup_cycle_users(client, db, _plant(db))
+    _act_as(head)
+
+    response = client.get("/api/portal/overview?version_only=true")
+
+    assert response.status_code == 200
+    assert set(response.json()) == {"dataVersion"}
+    assert isinstance(response.json()["dataVersion"], str)
 
 
 def test_photo_kind_is_stored_for_before_and_after(client, db, monkeypatch):

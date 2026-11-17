@@ -37,6 +37,21 @@ class PlantService:
         if not row: raise HTTPException(404,"Plant not found")
         self.repo.delete(row)
 
+    def set_security_contacts(self, plant_id, contacts: dict):
+        """Replace only one plant's ``custom_fields.security_contacts``, leaving every other key.
+
+        Merged server-side (not a whole-``custom_fields`` overwrite) so a stale client cannot drop
+        design links, liasoning, or anything else. The legacy single-guard key is retired here to
+        match the editor, which stores the register under ``security_contacts`` only.
+        """
+        row=self.repo.by_id(plant_id)
+        if not row: raise HTTPException(404,"Plant not found")
+        fields=dict(row.custom_fields or {})
+        fields["security_contacts"]=contacts
+        fields.pop("security_guard", None)
+        row.custom_fields=fields
+        return self.repo.save(row)
+
     def move_security_contact(self, data: SecurityContactMove):
         """Move one site engineer or guard from one plant's register to another's, atomically.
 

@@ -1838,6 +1838,11 @@
     var showRecordButton = state.liveWashing && state.washingPlant &&
       context.plantCode && canRecordWashing();
     var showPMSetupButton = context.type === "pm" && canManagePMSetup();
+    // The record modal body scrolls on its own. A full re-render (save, not-done change, an
+    // error, a cycle switch) rebuilds host.innerHTML and would reset that scroll to the top,
+    // throwing the user back up the day list after every entry. Keep the position across the swap.
+    var recordBodyBefore = host.querySelector(".ep-calendar__record-body");
+    var recordScrollTop = recordBodyBefore ? recordBodyBefore.scrollTop : null;
     host.innerHTML = '<div class="ep-calendar">' +
       '<header class="ep-calendar__head"><div><p class="ep-calendar__eyebrow">' +
         (context.plantCode ? "Plant view" : "Views") + '</p><h1>' + escape(typeLabel) +
@@ -1899,6 +1904,10 @@
       renderSetupModal(state) +
       renderRecordModal(state) +
     '</div>';
+    if (recordScrollTop !== null) {
+      var recordBodyAfter = host.querySelector(".ep-calendar__record-body");
+      if (recordBodyAfter) recordBodyAfter.scrollTop = recordScrollTop;
+    }
     if (global.Solar91PhotoEvidence) global.Solar91PhotoEvidence.watch(host);
   }
 
@@ -2362,6 +2371,7 @@
           body: built.body
         }).then(function () {
           if (!active || active.host !== host || active.state !== saveState) return;
+          if (data && data.invalidate) data.invalidate(true);
           saveState.recordEdit = null;
           saveState.recordNotice = "Day updated.";
           loadEvents(host, saveState, active.context, true);
@@ -2570,9 +2580,7 @@
           body: { plant_id: state.washingSetup.plantId, entries: entries }
         }).then(function (result) {
           if (!active || active.host !== host || active.state !== state) return;
-          // The Dashboard's module cleaning score reads the portfolio, which is cached for a
-          // minute: drop it so the new day is counted as soon as the Dashboard is opened.
-          if (data && data.invalidate) data.invalidate();
+          if (data && data.invalidate) data.invalidate(true);
           state.recordSaving = false;
           state.recordDrafts = {};
           var reports = Array.isArray(result.reports) ? result.reports : [];
@@ -2723,6 +2731,7 @@
         }
       }).then(function () {
         if (!active || active.host !== host || active.state !== state) return;
+        if (data && data.invalidate) data.invalidate(true);
         state.setupOpen = false;
         state.setupSaving = false;
         loadEvents(host, state, active.context);

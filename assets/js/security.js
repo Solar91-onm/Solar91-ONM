@@ -26,7 +26,12 @@
   var movePending = false;
 
   function canEdit() {
-    return !!(api && api.can("plants.manage"));
+    // Editing the register is gated the same as moving a person between plants: the O&M Head and
+    // Assignees. The server enforces it too (the security-contacts write, not plants.manage), and
+    // scopes an Assignee to their assigned plants.
+    var user = api && api.currentUser ? api.currentUser() : null;
+    var role = user && user.role;
+    return role === "O&M Head" || role === "Assignee";
   }
 
   // Moving a person between plants is a two-plant write, gated the same way the Inverter Health
@@ -501,12 +506,11 @@
             return item.siteCode === savingSiteCode;
           });
           if (!latest) throw new Error("This site is no longer available.");
-          var fields = Object.assign({}, latest.customFields || {});
-          fields.security_contacts = payload.contacts;
-          delete fields.security_guard;
-          return api.request("/api/plants/" + encodeURIComponent(latest.dbId), {
+          // A narrow write: only this plant's security register. The server merges it into the
+          // plant's custom_fields, so no other field is touched and it needs no plants.manage.
+          return api.request("/api/plants/" + encodeURIComponent(latest.dbId) + "/security-contacts", {
             method: "PATCH",
-            body: { custom_fields: fields }
+            body: payload.contacts
           }).then(function () {
             savedCodes.push(savingSiteCode);
             delete dirty[savingSiteCode];

@@ -15,6 +15,7 @@ from app.core.security import (
 from app.plants.repository import PlantRepository
 from app.plants.schemas import (
     PlantCreate, PlantOut, PlantUpdate, SecurityContactMove, SecurityContactMoveOut,
+    SecurityContactsUpdate,
 )
 from app.plants.service import PlantService
 
@@ -62,6 +63,26 @@ def move_security_contact(data:SecurityContactMove,db:Annotated[Session,Depends(
         validated.custom_fields=visible_custom_fields(validated.custom_fields,user)
         out.append(validated)
     return SecurityContactMoveOut(kind=data.kind,person=person,from_plant=out[0],to_plant=out[1])
+
+
+@router.patch("/plants/{plant_id}/security-contacts", response_model=PlantOut, dependencies=[Depends(require_csrf)])
+def update_security_contacts(plant_id:UUID,data:SecurityContactsUpdate,db:Annotated[Session,Depends(get_db)],user:Annotated[User,Depends(get_current_user)]):
+    """Edit a single plant's security register (site engineers and guards).
+
+    Gated the same way the move is: the O&M Head and Assignees only, and an Assignee only within
+    their assigned plants. This is deliberately narrower than ``plants.manage`` -- it writes nothing
+    but ``security_contacts`` -- so the O&M team can keep the register current without the ability
+    to rewrite every other plant field.
+    """
+    if user.role not in SECURITY_MOVE_ROLES:
+        raise HTTPException(403,"Only the O&M Head or an Assignee can edit security contacts")
+    scope=user_scoped_plant_ids(db,user)
+    if scope is not None and plant_id not in scope:
+        raise HTTPException(403,"This plant is outside your assigned plants")
+    plant=PlantService(db).set_security_contacts(plant_id,data.as_contacts())
+    out=PlantOut.model_validate(plant)
+    out.custom_fields=visible_custom_fields(out.custom_fields,user)
+    return out
 
 
 @router.post("/plants", response_model=PlantOut, status_code=201, dependencies=[Depends(require_csrf)])

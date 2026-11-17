@@ -21,12 +21,12 @@
   var fmt = global.Solar91PortalFormat;
   var token = 0;
   var st = {
-    rows: [], month: "", selectedMonth: "", today: "", loading: false, error: "",
+    rows: [], summary: {}, month: "", selectedMonth: "", today: "", loading: false, error: "",
     dayActivity: null, dayActivityDate: "", dayActivityLoading: false, dayActivityError: ""
   };
   var ui = {
     search: "", status: "__all", plant: "__all", cycle: "__all", date: "__all",
-    entryStatus: "__all"
+    entryStatus: "__all", sort: "plant", complianceCycle: "all", compliancePeriod: "week"
   };
   var dayActivityToken = 0;
 
@@ -147,6 +147,13 @@
     st.dayActivityError = "";
   }
 
+  function gradeFor(row, selection) {
+    var cycleNo = selection === "all" ? (Number(row.current_cycle) || 1) : Number(selection);
+    return (row.cycle_grades || []).find(function (item) {
+      return Number(item.cycle_no) === cycleNo;
+    }) || null;
+  }
+
   // ─── Card ────────────────────────────────────────────────────────────
   var RING = 2 * Math.PI * 22;        // r=22 in the ring's viewBox
 
@@ -220,7 +227,7 @@
   // ─── Page ────────────────────────────────────────────────────────────
   function visibleRows() {
     var term = ui.search.trim().toLowerCase();
-    return st.rows.filter(function (row) {
+    var rows = st.rows.filter(function (row) {
       if (ui.status !== "__all" && statusOf(row).key !== ui.status) return false;
       if (ui.plant !== "__all" && row.site_code !== ui.plant) return false;
       if (ui.cycle !== "__all" &&
@@ -231,6 +238,57 @@
       return [row.plant, row.site_code, row.district, row.assignee_name]
         .join(" ").toLowerCase().indexOf(term) !== -1;
     });
+    if (ui.sort !== "plant") {
+      rows.sort(function (a, b) {
+        var left = gradeFor(a, ui.complianceCycle);
+        var right = gradeFor(b, ui.complianceCycle);
+        var rank = { on_target: 4, on_time: 3, running: 2, overdue: 1, missed: 0 };
+        var leftRank = left ? rank[left.grade] : -1;
+        var rightRank = right ? rank[right.grade] : -1;
+        var direction = ui.sort === "compliance-low" ? 1 : -1;
+        if (leftRank !== rightRank) return (leftRank - rightRank) * direction;
+        var coverage = (Number(left && left.coverage_percent) || 0) -
+          (Number(right && right.coverage_percent) || 0);
+        if (coverage) return coverage * direction;
+        return String(a.site_code).localeCompare(String(b.site_code), undefined, { numeric: true });
+      });
+    }
+    return rows;
+  }
+
+  function complianceHTML(rows) {
+    var score = null;
+    var confirmed = null;
+    var due = null;
+    if (rows.length === 1) {
+      score = rows[0].monthly_compliance_percent;
+      confirmed = rows[0].monthly_tables_confirmed;
+      due = rows[0].monthly_tables_due;
+    } else if (st.rows.length > 0 && rows.length === st.rows.length) {
+      score = st.summary.monthly_compliance_percent;
+      confirmed = st.summary.monthly_tables_confirmed;
+      due = st.summary.monthly_tables_due;
+    }
+    var hasScore = typeof score === "number" && Number.isFinite(score);
+    var fill = hasScore ? Math.max(0, Math.min(100, score)) : 0;
+    var style = hasScore
+      ? "background:conic-gradient(#15803d 0 " + fill + "%,var(--ep-border-soft) " + fill + "% 100%)"
+      : "background:conic-gradient(var(--ep-border-soft) 0 100%)";
+    var help = !rows.length ? "No plants in this view."
+      : !hasScore ? "Select one plant to see its table progress."
+      : confirmed + " confirmed tables · " + due + " tables due";
+    return '<section class="ep-wb__compliance" aria-label="Module Cleaning compliance">' +
+      '<div class="ep-wb__compliance-head"><div><h2>Monthly table progress</h2>' +
+        '<p>Confirmed tables against tables due this month</p></div></div>' +
+      '<div class="ep-wb__compliance-body"><div class="ep-wb__donut" style="' + style + '">' +
+        '<span class="ep-wb__donut-label"><strong>' + (hasScore ? escape(score) + "%" : "N/A") +
+        '</strong><small>table progress</small></span></div>' +
+        '<div class="ep-wb__compliance-legend">' +
+          '<span><i class="ep-wb__key ep-wb__key--target"></i>Confirmed <b>' +
+            (confirmed === null || confirmed === undefined ? "—" : escape(confirmed)) + '</b></span>' +
+          '<span><i class="ep-wb__key ep-wb__key--ontime"></i>Due <b>' +
+            (due === null || due === undefined ? "—" : escape(due)) + '</b></span>' +
+        '</div></div><p class="ep-wb__compliance-note">' + escape(help) + '</p></section>';
   }
 
   function countsHTML() {
@@ -256,6 +314,7 @@
         '<p class="ep-pt__sub">' + st.rows.length + " plants · " + escape(st.month) +
         " · open a plant for its cleaning calendar</p></div>" +
       '<div class="ep-wb__tallies">' + countsHTML() + "</div>" +
+      complianceHTML(rows) +
       '<div class="ep-pt__toolbar"><label class="ep-wb__month"><span>Month</span>' +
         '<input type="month" data-wb-month value="' + escape(st.selectedMonth) +
         '" max="' + escape(monthKey(new Date())) + '" aria-label="Select Module Cleaning month" /></label>' +
@@ -277,6 +336,11 @@
             '>Entry submitted</option>' +
           '<option value="missing"' + (ui.entryStatus === "missing" ? " selected" : "") +
             '>No entry</option></select></label>' +
+        '<label><span>Sort</span><select data-wb-filter="sort" aria-label="Sort Module Cleaning plants">' +
+          '<option value="plant"' + (ui.sort === "plant" ? " selected" : "") + '>Plant name</option>' +
+          '<option value="compliance-high"' + (ui.sort === "compliance-high" ? " selected" : "") + '>Compliance: high to low</option>' +
+          '<option value="compliance-low"' + (ui.sort === "compliance-low" ? " selected" : "") + '>Compliance: low to high</option>' +
+        '</select></label>' +
       '</div>' +
       (st.loading
         ? '<div class="ep-pt__loading" role="status">Loading Module Cleaning…</div>'
@@ -410,6 +474,13 @@
   function show(container, selectedMonth) {
     if (!container) return;
     var mine = ++token;
+    var prefill = global.Solar91WashingBoardPrefill;
+    if (prefill) {
+      ui.plant = prefill.plant || "__all";
+      ui.complianceCycle = ["all", "1", "2", "3"].indexOf(String(prefill.cycle)) !== -1
+        ? String(prefill.cycle) : "all";
+      global.Solar91WashingBoardPrefill = null;
+    }
     clearDayActivity();
     var month = selectedMonth || st.selectedMonth || monthKey(new Date());
     st.selectedMonth = month;
@@ -425,6 +496,7 @@
       st.rows = (body.plants || []).slice().sort(function (a, b) {
         return String(a.site_code).localeCompare(String(b.site_code), undefined, { numeric: true });
       });
+      st.summary = body.summary || {};
       st.month = body.month || month;
       st.today = body.today || "";
       st.loading = false;

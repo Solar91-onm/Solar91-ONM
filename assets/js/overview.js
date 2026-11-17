@@ -14,6 +14,43 @@
   let state = null;      // { allRows, rows, totals, sort }
   let searchTerm = "";
   const filters = { plant: "__all", health: "__all", company: "__all", district: "__all" };
+  let washingPreferenceUserId;
+  let washingCycleSelection = "all";
+
+  function currentWashingCycleSelection() {
+    const user = global.Solar91PortalAPI.currentUser();
+    const userId = user && user.id ? String(user.id) : "";
+    if (userId === washingPreferenceUserId) return washingCycleSelection;
+    washingPreferenceUserId = userId;
+    washingCycleSelection = "all";
+    if (!userId) return washingCycleSelection;
+    try {
+      const saved = global.localStorage.getItem("solar91:overview:washing-cycle:" + userId);
+      if (saved === "1" || saved === "2" || saved === "3" || saved === "all") {
+        washingCycleSelection = saved;
+      }
+    } catch (error) {
+      if (global.console && global.console.warn) {
+        global.console.warn("Could not load the Module Cleaning cycle preference.", error);
+      }
+    }
+    return washingCycleSelection;
+  }
+
+  function saveWashingCycleSelection(selection) {
+    washingCycleSelection = selection;
+    const user = global.Solar91PortalAPI.currentUser();
+    const userId = user && user.id ? String(user.id) : "";
+    if (!userId) return;
+    washingPreferenceUserId = userId;
+    try {
+      global.localStorage.setItem("solar91:overview:washing-cycle:" + userId, selection);
+    } catch (error) {
+      if (global.console && global.console.warn) {
+        global.console.warn("Could not save the Module Cleaning cycle preference.", error);
+      }
+    }
+  }
 
   // The district dropdown merges values that differ only by case or spacing, so compare them the same way.
   function districtKey(value) { return String(value || "").trim().toLocaleLowerCase(); }
@@ -92,6 +129,8 @@
       const filtered = applyFilters(state.periodRows);
       state.rows = filtered;
       state.totals = data.aggregatePortfolio(filtered);
+      state.dataVersion = portfolio.dataVersion || state.dataVersion;
+      lastLoadedAt = Date.now();
       rangeStatus("Showing results from " + startDate + " to " + endDate + ".", false);
       render();
     }).catch((error) => {
@@ -1178,6 +1217,24 @@
   }
 
   // ─── Header strip + big metric cards + count strip ──────────────────
+  function washingGradeStats(rows, selection) {
+    const stats = { onTarget: 0, onTime: 0, overdue: 0, notStarted: 0, due: 0 };
+    (rows || []).forEach(({ profile }) => {
+      const grades = profile && profile.washing && profile.washing.cycleGrades;
+      if (!Array.isArray(grades)) return;
+      grades.forEach((item) => {
+        if (selection !== "all" && Number(selection) !== Number(item.cycleNo)) return;
+        if (item.grade === "running") return;
+        stats.due += 1;
+        if (item.grade === "on_target") stats.onTarget += 1;
+        else if (item.grade === "on_time") stats.onTime += 1;
+        else if (item.grade === "missed" && Number(item.reportCount) === 0) stats.notStarted += 1;
+        else stats.overdue += 1;
+      });
+    });
+    return stats;
+  }
+
   function renderTiles(totals) {
     // Header strip — title + capacity chips
     const headline = document.querySelector("[data-portfolio-headline]");
@@ -1190,7 +1247,10 @@
     // Three big neutral metric cards: PM, Washing, Issues. Status is signalled
     // only by a 6px dot in the pill — number stays in primary text colour.
     const pmPct   = totals.pmCompliancePercent;
-    const wshPct  = totals.washingCompliancePercent;
+    const washingSelection = currentWashingCycleSelection();
+    const washingStats = washingGradeStats(state && state.rows, washingSelection);
+    const wshPct  = washingSelection === "all" ? totals.washingCompliancePercent
+      : (totals.washingCycleCompliancePercentByCycle || {})[washingSelection];
     const openIss = totals.openIssues;
 
     function pill(label, pct, overdueCount) {
@@ -1214,7 +1274,8 @@
         : { dot: "green", tag: "All running" };
 
     const pmP  = pill("PM", pmPct, totals.pmOverdue);
-    const wshP = pill("Module Cleaning", wshPct, totals.washingOverdue);
+    const wshP = pill("Module Cleaning", wshPct, washingSelection === "all"
+      ? totals.washingOverdue : washingStats.overdue + washingStats.notStarted);
     const isP  = issuePill(totals.criticalIssues, openIss);
 
     const ICON_PM = `<svg class="ep-metric__icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"></rect><path d="M16 2v4M8 2v4M3 10h18"></path><path d="m9 16 2 2 4-4"></path></svg>`;
@@ -1229,9 +1290,7 @@
       : pill.dot === "green" ? "accent" : "neutral";
     const pmScheduled = totals.pmCompleted + totals.pmPending + totals.pmOverdue;
     const pmEmpty = pmPct === null || pmScheduled === 0;
-    const issueClosed = totals.closedIssues;
     const issueUnsolved = totals.unsolvedIssues;
-    const issueSpan = issueUnsolved + issueClosed;
     const clamp = (value) => Math.max(0, Math.min(100, Number(value) || 0));
 
     const cards = [
@@ -1258,8 +1317,16 @@
         destination: "washing",
         icon: ICON_WASH,
         tone: wshPct === null ? "neutral" : toneOfPill(wshP),
-        empty: wshPct === null ? "No cleaning scheduled" : "",
-        figure: wshPct === null ? null : { value: String(wshPct), unit: "%", caption: "of cycles complete" },
+        empty: wshPct === null
+          ? (washingSelection === "all" ? "No cleaning scheduled" : "No closed cycles in this selection")
+          : "",
+        figure: wshPct === null ? null : {
+          value: String(wshPct), unit: "%",
+          caption: washingSelection === "all" ? "of tables due this month" : "cycle compliance"
+        },
+        subline: washingStats.due
+          ? fmt.formatNumber(washingStats.onTarget) + " on target · " + fmt.formatNumber(washingStats.onTime) + " on time"
+          : "",
         meter: wshPct === null ? [] : [
           { width: clamp(wshPct), tone: "accent" },
           { width: 100 - clamp(wshPct), tone: "short" }
@@ -1301,15 +1368,15 @@
         tone: toneOfPill(isP),
         empty: "",
         figure: { value: fmt.formatNumber(openIss), unit: "", caption: "open across the portfolio" },
-        // Stacked: what is still unsolved against what has been closed to date.
-        meter: issueSpan ? [
-          { width: clamp(100 * issueUnsolved / issueSpan), tone: "red" },
-          { width: clamp(100 * issueClosed / issueSpan), tone: "accent" }
+        // Stacked within the open work only: still unsolved against what is in progress.
+        // Closed tickets are not shown here — the Dashboard surfaces open + in-progress only.
+        meter: openIss ? [
+          { width: clamp(100 * issueUnsolved / openIss), tone: "red" },
+          { width: clamp(100 * totals.inProgressIssues / openIss), tone: "accent" }
         ] : [],
         legend: [
           { dot: issueUnsolved > 0 ? "red" : "", label: "Unsolved", value: fmt.formatNumber(issueUnsolved), bad: issueUnsolved > 0 },
-          { dot: "", label: "In progress", value: fmt.formatNumber(totals.inProgressIssues) },
-          { dot: issueClosed > 0 ? "green" : "", label: "Closed to date", value: fmt.formatNumber(issueClosed) }
+          { dot: "", label: "In progress", value: fmt.formatNumber(totals.inProgressIssues) }
         ]
       }
     ];
@@ -1319,7 +1386,8 @@
         `<span class="ep-meter__seg ep-meter__seg--${segment.tone}" style="width:${clamp(segment.width)}%"></span>`).join("")}</span>`;
 
     // A real <button>: clickable and reachable by keyboard without a role/tabindex of our own.
-    document.querySelector("[data-overview-metrics]").innerHTML = cards.map((c) => `
+    document.querySelector("[data-overview-metrics]").innerHTML = cards.map((c) => {
+      const button = `
       <button type="button" class="ep-metric ep-metric--${c.tone}" data-overview-destination="${c.destination}"
         aria-label="${fmt.escape(c.title + (c.figure ? ": " + c.figure.value + c.figure.unit + " " + c.figure.caption : ", " + c.empty))}">
         <span class="ep-metric__head">
@@ -1332,6 +1400,7 @@
             `${c.figure.unit ? `<span class="ep-metric__unit">${fmt.escape(c.figure.unit)}</span>` : ""}` +
             `<span class="ep-metric__caption">${fmt.escape(c.figure.caption)}</span></span>`
           : `<span class="ep-metric__figure"><span class="ep-metric__empty">${fmt.escape(c.empty)}</span></span>`}
+        ${c.subline ? `<span class="ep-metric__subline">${fmt.escape(c.subline)}</span>` : ""}
         ${meterHTML(c.meter)}
         <span class="ep-metric__legend">
           ${c.legend.map((item) => `<span class="ep-metric__stat">
@@ -1340,8 +1409,19 @@
             <b class="ep-metric__stat-value${item.bad ? " is-bad" : ""}">${item.value}</b>
           </span>`).join("")}
         </span>
-      </button>
-    `).join("");
+      </button>`;
+      if (c.destination !== "washing") return button;
+      return `<div class="ep-metric-wrap ep-metric-wrap--washing">${button}
+        <label class="ep-metric__cycle">
+          <select data-washing-cycle aria-label="Select Module Cleaning cycle">
+            <option value="all"${washingSelection === "all" ? " selected" : ""}>Current Month</option>
+            <option value="1"${washingSelection === "1" ? " selected" : ""}>Cycle 1</option>
+            <option value="2"${washingSelection === "2" ? " selected" : ""}>Cycle 2</option>
+            <option value="3"${washingSelection === "3" ? " selected" : ""}>Cycle 3</option>
+          </select>
+        </label>
+      </div>`;
+    }).join("");
   }
 
   // ─── Plant Health ────────────────────────────────────────────────────
@@ -1567,6 +1647,14 @@
         openInverterHealth();
         return;
       }
+      if (destination === "washing") {
+        global.Solar91WashingBoardPrefill = {
+          plant: filters.plant,
+          cycle: currentWashingCycleSelection()
+        };
+        global.Solar91PortalNav.selectView(destination, dateRange);
+        return;
+      }
       if (filters.plant !== "__all") {
         const row = state.allRows.find(({ plant }) => plant.siteCode === filters.plant);
         if (row) global.Solar91PortalNav.selectPlantPage(filters.plant, destination, dateRange, row.plant);
@@ -1575,6 +1663,14 @@
       }
     }
     if (metrics) {
+      metrics.addEventListener("change", (ev) => {
+        const select = ev.target.closest("[data-washing-cycle]");
+        if (!select || !state) return;
+        saveWashingCycleSelection(select.value);
+        renderTiles(state.totals);
+        const refreshed = metrics.querySelector("[data-washing-cycle]");
+        if (refreshed) refreshed.focus();
+      });
       metrics.addEventListener("click", (ev) => {
         const card = ev.target.closest("[data-overview-destination]");
         if (card) openMetricDestination(card);
@@ -1619,6 +1715,12 @@
   const REFRESH_AFTER_MS = 60 * 1000;   // same freshness window as the data caches (data-adapter.js)
   let lastLoadedAt = 0;
   let loadingPortfolio = false;
+  let refreshingPortfolio = false;
+  let portfolioRefreshId = 0;
+  let pollTimer = null;
+  let pollInFlight = false;
+  let pollBackoffMs = REFRESH_AFTER_MS;
+  let localRefreshPending = false;
 
   function overviewNotice(html, kind) {
     const metrics = document.querySelector("[data-overview-metrics]");
@@ -1674,12 +1776,14 @@
           rows: portfolio.rows,
           totals: portfolio.totals,
           businessDate: portfolio.businessDate,
+          dataVersion: portfolio.dataVersion,
           sort: { column: "health", dir: "asc" }
         };
       } else {
         state.allRows = portfolio.rows;
         state.periodRows = portfolio.rows;
         state.businessDate = portfolio.businessDate || state.businessDate;
+        state.dataVersion = portfolio.dataVersion || state.dataVersion;
         activityCache = null;
       }
       // The dates this period resolved to, recorded so the Range selector agrees with the
@@ -1692,6 +1796,12 @@
       recomputeAndRender();
       stampDataTime(portfolio.asOf);
       showWarnings(portfolio.warnings);
+      updatePortfolioPoller(REFRESH_AFTER_MS);
+      if (localRefreshPending && overviewIsShowing() && document.visibilityState === "visible" &&
+          !userIsBusy()) {
+        localRefreshPending = false;
+        refreshPortfolioInPlace(false);
+      }
       if (global.Solar91Perf) global.Solar91Perf.mark("overview_usable");
     }).catch((error) => {
       loadingPortfolio = false;
@@ -1702,6 +1812,61 @@
         if (metrics) metrics.innerHTML = "";
       }
       overviewNotice(message, "error");
+    });
+  }
+
+  function refreshPortfolioInPlace(background, version) {
+    if (!state || !state.rangeStart || !state.rangeEnd) {
+      localRefreshPending = true;
+      return Promise.resolve();
+    }
+    if (refreshingPortfolio) {
+      if (!background) localRefreshPending = true;
+      return Promise.resolve();
+    }
+    const startDate = state.rangeStart;
+    const endDate = state.rangeEnd;
+    const requestId = ++portfolioRefreshId;
+    refreshingPortfolio = true;
+    data.invalidate();
+    let updated = false;
+    return data.fetchPortfolioRange(startDate, endDate).then((portfolio) => {
+      if (requestId !== portfolioRefreshId || !overviewIsShowing() ||
+          state.rangeStart !== startDate || state.rangeEnd !== endDate) return;
+      state.allRows = portfolio.rows;
+      state.periodRows = portfolio.rows;
+      state.businessDate = portfolio.businessDate || state.businessDate;
+      state.dataVersion = portfolio.dataVersion || version || state.dataVersion;
+      state.rows = applyFilters(state.periodRows);
+      state.totals = data.aggregatePortfolio(state.rows);
+      activityCache = null;
+      lastLoadedAt = Date.now();
+      render();
+      stampDataTime(portfolio.asOf);
+      showWarnings(portfolio.warnings);
+      updated = true;
+    }).catch((error) => {
+      if (!background && requestId === portfolioRefreshId) {
+        overviewNotice("The Dashboard could not be refreshed after the update. " +
+          '<button type="button" data-overview-retry>Retry</button>', "warning");
+        if (global.console && global.console.warn) {
+          global.console.warn("Dashboard refresh after a local update failed.", error);
+        }
+      }
+      if (global.console && global.console.warn && background) {
+        global.console.warn("Background Dashboard refresh failed; keeping the current figures.", error);
+      }
+    }).then(() => {
+      if (requestId === portfolioRefreshId) refreshingPortfolio = false;
+      if (overviewIsShowing() && document.visibilityState === "visible") {
+        updatePortfolioPoller(REFRESH_AFTER_MS);
+      }
+      if (localRefreshPending && document.visibilityState === "visible" &&
+          overviewIsShowing() && !userIsBusy()) {
+        localRefreshPending = false;
+        refreshPortfolioInPlace(false);
+      }
+      return updated;
     });
   }
 
@@ -1717,17 +1882,85 @@
     return !!(metrics && metrics.offsetParent !== null);
   }
 
-  // A tab left in the background makes no requests. When it comes back after the data has gone stale, the
-  // Overview (only if it is the page on screen and nothing is being edited) reads its figures again.
+  function stopPortfolioPoller() {
+    if (pollTimer !== null) global.clearTimeout(pollTimer);
+    pollTimer = null;
+  }
+
+  function schedulePortfolioPoll(delay) {
+    stopPortfolioPoller();
+    if (!state || document.visibilityState !== "visible" || !overviewIsShowing()) return;
+    pollTimer = global.setTimeout(checkPortfolioVersion, delay);
+  }
+
+  function checkPortfolioVersion() {
+    pollTimer = null;
+    if (!state || document.visibilityState !== "visible" || !overviewIsShowing() || pollInFlight) return;
+    pollInFlight = true;
+    data.fetchOverviewVersion().then((version) => {
+      pollInFlight = false;
+      if (!state || document.visibilityState !== "visible" || !overviewIsShowing()) return;
+      if (version !== state.dataVersion && !userIsBusy()) {
+        return refreshPortfolioInPlace(true, version).then((updated) => {
+          pollBackoffMs = updated ? REFRESH_AFTER_MS : Math.min(5 * 60 * 1000, pollBackoffMs * 2);
+          schedulePortfolioPoll(pollBackoffMs);
+        });
+      }
+      pollBackoffMs = REFRESH_AFTER_MS;
+      schedulePortfolioPoll(REFRESH_AFTER_MS);
+    }).catch(() => {
+      pollInFlight = false;
+      if (!state || document.visibilityState !== "visible" || !overviewIsShowing()) return;
+      pollBackoffMs = Math.min(5 * 60 * 1000, pollBackoffMs * 2);
+      schedulePortfolioPoll(pollBackoffMs);
+    });
+  }
+
+  function updatePortfolioPoller(delay) {
+    if (!overviewIsShowing() || document.visibilityState !== "visible") {
+      stopPortfolioPoller();
+      return;
+    }
+    schedulePortfolioPoll(delay);
+  }
+
   function wireVisibilityRefresh() {
     document.addEventListener("visibilitychange", () => {
-      if (document.visibilityState !== "visible" || !state || !lastLoadedAt) return;
-      if (Date.now() - lastLoadedAt < REFRESH_AFTER_MS || !overviewIsShowing() || userIsBusy()) return;
-      loadPortfolio(true);
+      if (document.visibilityState !== "visible") {
+        stopPortfolioPoller();
+        return;
+      }
+      if (!overviewIsShowing()) return;
+      if (localRefreshPending && !userIsBusy()) {
+        localRefreshPending = false;
+        refreshPortfolioInPlace(false);
+      } else {
+        checkPortfolioVersion();
+      }
+    });
+    document.addEventListener("portal:route-changed", () => {
+      if (!overviewIsShowing()) {
+        stopPortfolioPoller();
+        return;
+      }
+      if (localRefreshPending && !userIsBusy()) {
+        localRefreshPending = false;
+        refreshPortfolioInPlace(false);
+      } else {
+        checkPortfolioVersion();
+      }
+    });
+    document.addEventListener("portal:data-invalidated", () => {
+      localRefreshPending = true;
+      if (document.visibilityState === "visible" && overviewIsShowing() && !userIsBusy()) {
+        localRefreshPending = false;
+        refreshPortfolioInPlace(false);
+      }
     });
     document.addEventListener("click", (ev) => {
       if (ev.target.closest("[data-overview-retry]")) loadPortfolio(true);
     });
+    global.addEventListener("pagehide", stopPortfolioPoller);
   }
 
   function init() {

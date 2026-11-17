@@ -60,49 +60,49 @@
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 10px;
-  min-height: 36px;
+  gap: 8px;
+  min-height: 38px;
   flex-wrap: wrap;
 }
 
 .ep-issues__date-filter {
   display: flex;
   align-items: center;
-  gap: 14px;
-  min-height: 62px;
-  padding: 10px 20px;
-  border: 1px solid #e2e8e3;
-  border-radius: 15px;
+  gap: 10px;
+  min-height: 44px;
+  padding: 2px 12px;
+  border: 1px solid var(--ep-border);
+  border-radius: var(--ep-radius-md);
   background: #fff;
-  box-shadow: 0 2px 6px rgba(24, 46, 31, .06);
+  box-shadow: none;
   flex-wrap: wrap;
 }
 
 .ep-issues__date-label {
-  color: #7d8b82;
-  font-size: 14px;
-  font-weight: 650;
-  letter-spacing: .12em;
+  color: var(--ep-text-faint);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: .1em;
   text-transform: uppercase;
 }
 
 .ep-issues__date-filter .ep-toggle {
-  margin: 0 1px;
+  margin: 0;
 }
 
 .ep-issues__date-filter .ep-toggle__track {
-  width: 54px;
-  height: 30px;
-  padding: 3px;
+  width: 36px;
+  height: 20px;
+  padding: 2px;
 }
 
 .ep-issues__date-filter .ep-toggle__thumb {
-  width: 24px;
-  height: 24px;
+  width: 16px;
+  height: 16px;
 }
 
 .ep-issues__date-filter .ep-toggle input:checked + .ep-toggle__track .ep-toggle__thumb {
-  transform: translateX(24px);
+  transform: translateX(16px);
 }
 
 .ep-issues__date-quick,
@@ -119,8 +119,8 @@
 }
 
 .ep-issues__date-period {
-  width: 142px;
-  padding: 4px 20px 4px 0;
+  width: 126px;
+  padding: 4px 18px 4px 0;
   border: 0;
   outline: 0;
   appearance: none;
@@ -128,10 +128,10 @@
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%235B6761' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: right center;
-  color: #111a14;
+  color: var(--ep-text-strong);
   font: inherit;
-  font-size: 19px;
-  font-weight: 550;
+  font-size: var(--ep-fs-sm);
+  font-weight: 500;
   cursor: pointer;
 }
 
@@ -146,18 +146,19 @@
 
 .ep-issues__date-separator {
   color: #98a49c;
-  font-size: 12px;
+  font-size: var(--ep-fs-sm);
 }
 
 .ep-issues__date-custom input {
-  min-height: 32px;
+  height: 38px;
   width: 138px;
   padding: 5px 7px;
-  border: 1px solid #dfe6e1;
-  border-radius: 5px;
+  border: 1px solid var(--ep-border);
+  border-radius: var(--ep-radius-sm);
   background: #fff;
-  color: #26352c;
-  font-size: 11px;
+  color: var(--ep-text);
+  font: inherit;
+  font-size: var(--ep-fs-xs);
 }
 
 .ep-issues__date-month span {
@@ -166,14 +167,14 @@
   font-weight: 650;
 }
 .ep-issues__date-month input {
-  min-height: 32px;
+  height: 38px;
   padding: 5px 7px;
-  border: 1px solid #dfe6e1;
-  border-radius: 5px;
+  border: 1px solid var(--ep-border);
+  border-radius: var(--ep-radius-sm);
   background: #fff;
-  color: #26352c;
+  color: var(--ep-text);
   font: inherit;
-  font-size: 12px;
+  font-size: var(--ep-fs-xs);
 }
 
 .ep-issues__date-custom input:focus-visible,
@@ -203,10 +204,10 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 36px;
+  min-height: 38px;
   padding: 8px 13px;
   border: 1px solid #d5ded8;
-  border-radius: 5px;
+  border-radius: var(--ep-radius-sm);
   background: #fff;
   color: #31443a;
   font-size: 12px;
@@ -478,7 +479,7 @@
 .ep-issues__section-head h2 {
   margin: 0;
   color: #1d2b22;
-  font-size: 15px;
+  font-size: 18px;
   font-weight: 650;
   letter-spacing: -.01em;
 }
@@ -1111,8 +1112,8 @@
   .ep-issues__hero { align-items: flex-start; flex-direction: column; min-height: 0; padding: 22px; }
   .ep-issues__hero-actions { width: 100%; justify-content: space-between; }
   .ep-issues__portfolio-actions { justify-content: flex-start; }
-  .ep-issues__date-filter { flex: 1 1 100%; justify-content: space-between; gap: 8px; padding: 10px 12px; }
-  .ep-issues__date-period { width: 124px; font-size: 16px; }
+  .ep-issues__date-filter { flex: 1 1 100%; justify-content: space-between; gap: 8px; padding: 6px 10px; }
+  .ep-issues__date-period { width: 124px; }
   .ep-issues__date-month { flex: 1 1 100%; }
   .ep-issues__date-custom { flex-wrap: wrap; }
   .ep-issues__filter-row { flex-wrap: wrap; }

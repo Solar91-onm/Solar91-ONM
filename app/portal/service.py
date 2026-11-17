@@ -300,6 +300,23 @@ def _last_activity(db: Session, plant_ids: list[UUID]) -> dict[UUID, datetime]:
     return latest
 
 
+def overview_version(db: Session, user: User, plant_ids: list[UUID] | None = None) -> str:
+    """Small, role-scoped change token for the Dashboard's conditional refresh check."""
+    ids = plant_ids if plant_ids is not None else _plant_ids(overview_plants(db, user))
+    if not ids:
+        return business_today().isoformat()
+    latest = db.execute(select(
+        select(func.max(Plant.updated_at)).where(Plant.id.in_(ids)).scalar_subquery(),
+        select(func.max(Issue.updated_at)).where(Issue.plant_id.in_(ids)).scalar_subquery(),
+        select(func.max(OMTask.updated_at)).where(OMTask.plant_id.in_(ids)).scalar_subquery(),
+        select(func.max(WashingConfig.updated_at)).where(WashingConfig.plant_id.in_(ids)).scalar_subquery(),
+        select(func.max(WashingDailyReport.created_at)).where(WashingDailyReport.plant_id.in_(ids)).scalar_subquery(),
+        select(func.max(WashingDailyReport.reviewed_at)).where(WashingDailyReport.plant_id.in_(ids)).scalar_subquery(),
+    )).one()
+    stamps = [value.isoformat() if value is not None else "" for value in latest]
+    return business_today().isoformat() + "|" + "|".join(stamps)
+
+
 def _percent(part: int, whole: int) -> int | None:
     """Rounded percentage, or None when there is nothing to measure."""
     if not whole:
@@ -327,7 +344,10 @@ def classify_condition(profile: dict[str, Any]) -> str:
     return "healthy"
 
 
-_EMPTY_BLOCK = {"completed": None, "pending": None, "overdue": None, "compliancePercent": None}
+_EMPTY_BLOCK = {
+    "completed": None, "pending": None, "overdue": None, "compliancePercent": None,
+    "cycleGrades": [], "cycleGradeSummary": None, "monthlyTablesConfirmed": None, "monthlyTablesDue": None,
+}
 
 
 def build_profile(
@@ -380,6 +400,10 @@ def build_profile(
                 "thresholdPercent": None,
                 "fastWindowDays": washing.get("fast_window_days"),
                 "lastReportDate": None,
+                "cycleGrades": [],
+                "cycleGradeSummary": None,
+                "monthlyTablesConfirmed": None,
+                "monthlyTablesDue": None,
                 "active": True,
             }
         else:
@@ -405,6 +429,25 @@ def build_profile(
                 "thresholdPercent": washing.get("compliance_threshold_percent"),
                 "fastWindowDays": washing.get("fast_window_days"),
                 "lastReportDate": washing.get("last_report_date"),
+                "cycleGrades": [
+                    {
+                        "cycleNo": item.get("cycle_no"),
+                        "startDate": item.get("start_date"),
+                        "dueDate": item.get("due_date"),
+                        "grade": item.get("grade"),
+                        "compliancePercent": item.get("compliance_percent"),
+                        "daysToTarget": item.get("days_to_target"),
+                        "coverageCount": item.get("coverage_count"),
+                        "coveragePercent": item.get("coverage_percent"),
+                        "requiredTables": item.get("required_tables"),
+                        "reportCount": item.get("report_count"),
+                        "due": item.get("due"),
+                    }
+                    for item in washing.get("cycle_grades") or []
+                ],
+                "cycleGradeSummary": washing.get("cycle_grade_summary"),
+                "monthlyTablesConfirmed": washing.get("monthly_tables_confirmed"),
+                "monthlyTablesDue": washing.get("monthly_tables_due"),
                 "active": bool(washing.get("active", True)),
             }
 
@@ -587,6 +630,7 @@ def portfolio(db: Session, user: User) -> dict[str, Any]:
         "rows": rows,
         "totals": aggregate(rows),
         "asOf": datetime.now(timezone.utc).isoformat(),
+        "dataVersion": overview_version(db, user, ids),
         "businessDate": today.isoformat(),
         "scope": "assigned" if user.role == "Site Engineer" else "portfolio",
         # A section that could not be read is named here; its figures are absent (shown as "Not available").
@@ -623,6 +667,7 @@ def portfolio_for_range(db: Session, user: User, start: date, end: date) -> dict
     if not plant_ids:
         return {"rows": [], "totals": aggregate([]), "startDate": start.isoformat(), "endDate": end.isoformat(),
                 "businessDate": business_today().isoformat(),
+                "dataVersion": overview_version(db, user, plant_ids),
                 "scope": "assigned" if user.role == "Site Engineer" else "portfolio"}
 
     start_at = datetime.combine(start, time.min, tzinfo=BUSINESS_TZ)
@@ -751,19 +796,34 @@ def portfolio_for_range(db: Session, user: User, start: date, end: date) -> dict
                         counts["pending"] += 1
             cursor = (cursor.replace(day=28) + timedelta(days=4)).replace(day=1)
 
+    washing_monthly = _washing_rows(db, user)
+    monthly_washing_by_plant = washing_monthly or {}
     engineers = site_engineers_by_plant(db, plant_ids)
     washers = washing_assignees_by_plant(db, plant_ids)
     responsible = responsibilities_by_plant(db, plant_ids)
     rows = []
     for plant in plants:
+        range_washing = washing_counts.get(plant.id)
+        monthly_washing = monthly_washing_by_plant.get(str(plant.id))
         profile = build_profile(
             plant,
             issue_counts.get(plant.id, {"openIssues": 0, "closedIssues": 0, "criticalIssues": 0, "mediumIssues": 0,
                                         "unsolvedIssues": 0, "inProgressIssues": 0}),
             pm_counts.get(plant.id),
-            washing_counts.get(plant.id),
+            monthly_washing if monthly_washing is not None else range_washing,
             None,
         )
+        if monthly_washing is not None:
+            range_profile = build_profile(
+                plant, None, None, range_washing, None
+            )["washing"]
+            profile["washing"].update({
+                key: range_profile[key] for key in ("completed", "pending", "overdue")
+            })
+            profile["derivedCondition"] = classify_condition(profile)
+        elif washing_monthly is None and profile["washing"].get("compliancePercent") is not None:
+            profile["washing"]["compliancePercent"] = None
+            profile["washing"]["cycleCompliancePercent"] = None
         rows.append({
             "plant": plant_out(plant, engineers.get(plant.id, []), washers.get(plant.id, ""), user, responsible.get(plant.id)),
             "profile": profile,
@@ -777,7 +837,9 @@ def portfolio_for_range(db: Session, user: User, start: date, end: date) -> dict
         # the Overview open on one request instead of reading the whole portfolio first just to
         # learn today's date.
         "businessDate": business_today().isoformat(),
+        "dataVersion": overview_version(db, user, plant_ids),
         "scope": "assigned" if user.role == "Site Engineer" else "portfolio",
+        "warnings": ["washing_unavailable"] if washing_monthly is None else [],
     }
 
 
@@ -1039,6 +1101,7 @@ def aggregate(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "commissionedPlants": 0,
     }
     washing_scores: list[float] = []
+    cycle_scores: dict[int, list[float]] = {1: [], 2: [], 3: []}
     for row in rows:
         plant, profile = row["plant"], row["profile"]
         condition = profile.get("derivedCondition") or "unknown"
@@ -1064,7 +1127,12 @@ def aggregate(rows: list[dict[str, Any]]) -> dict[str, Any]:
         # plant's extra work cannot hide another plant's shortfall in the portfolio figure.
         washing_score = (profile.get("washing") or {}).get("compliancePercent")
         if isinstance(washing_score, (int, float)):
-            washing_scores.append(min(100, washing_score))
+            washing_scores.append(washing_score if len(rows) == 1 else min(100, washing_score))
+        for grade in (profile.get("washing") or {}).get("cycleGrades") or []:
+            cycle_no = grade.get("cycleNo")
+            score = grade.get("compliancePercent")
+            if cycle_no in cycle_scores and isinstance(score, (int, float)):
+                cycle_scores[cycle_no].append(min(100, score))
 
         if plant.get("dc_capacity_kw"):
             totals["dcCapacityMw"] += plant["dc_capacity_kw"] / 1000
@@ -1081,6 +1149,10 @@ def aggregate(rows: list[dict[str, Any]]) -> dict[str, Any]:
     totals["washingCompliancePercent"] = (
         round(sum(washing_scores) / len(washing_scores)) if washing_scores else None
     )
+    totals["washingCycleCompliancePercentByCycle"] = {
+        str(cycle_no): round(sum(scores) / len(scores)) if scores else None
+        for cycle_no, scores in cycle_scores.items()
+    }
     totals["dcCapacityMw"] = round(totals["dcCapacityMw"], 2)
     totals["acCapacityMw"] = round(totals["acCapacityMw"], 2)
     return totals

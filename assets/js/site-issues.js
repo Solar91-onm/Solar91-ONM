@@ -89,7 +89,9 @@
     error: "",
     search: "",
     plantFilter: "",
-    statusFilter: "All",
+    // The register opens on the actionable work — Open + In Progress. Resolved / Closed
+    // tickets stay out of the default view but remain reachable through the status filter.
+    statusFilter: "Active",
     equipmentFilter: "",
     sort: "recent",
     columnSort: { key: "", dir: "asc" },
@@ -160,6 +162,10 @@
 
   function plantLabel(plant) {
     return plant.displayName || plant.plantName;
+  }
+
+  function invalidateOverviewData() {
+    if (data && typeof data.invalidate === "function") data.invalidate(true);
   }
 
   function localDate(date) {
@@ -256,9 +262,11 @@
         return issueColumnValue(issue, key).toLowerCase().indexOf(term) === -1;
       })) return false;
       if (!ignoreStatus && state.statusFilter !== "All" &&
-          (state.statusFilter === "Pending Closure"
-            ? issue.status !== "Pending Closure"
-            : statusGroup(issue.status) !== state.statusFilter)) return false;
+          (state.statusFilter === "Active"
+            ? statusGroup(issue.status) === "Solved"
+            : state.statusFilter === "Pending Closure"
+              ? issue.status !== "Pending Closure"
+              : statusGroup(issue.status) !== state.statusFilter)) return false;
       var term = state.search.trim().toLowerCase();
       if (!term) return true;
       return [
@@ -374,6 +382,10 @@
         '<label class="ep-issues__select"><span class="ep-issues__sr-only">Sort issues</span><select data-issue-filter="sort">' +
           '<option value="recent">Recently reported</option><option value="oldest">Oldest first</option></select></label>' +
       '</div><div class="ep-issues__status-filters" aria-label="Filter by issue status">' +
+        '<button type="button" data-issue-status="Active" class="' + (state.statusFilter === "Active" ? "is-active" : "") + '">' +
+          'Open + in progress <b>' + unfilteredRows.filter(function (issue) {
+            return statusGroup(issue.status) !== "Solved";
+          }).length + '</b></button>' +
         '<button type="button" data-issue-status="All" class="' + (state.statusFilter === "All" ? "is-active" : "") + '">All <b>' +
           unfilteredRows.length + '</b></button>' +
         STATUSES.map(function (status) {
@@ -1149,7 +1161,7 @@
       state.plantFilter = "";
       state.search = "";
       state.columnFilters = {};
-      state.statusFilter = "All";
+      state.statusFilter = "Active";
       state.issuePhotos = {};
       state.photoBusy = {};
       state.photoError = "";
@@ -1203,7 +1215,9 @@
     } else {
       content = '<section class="ep-issues__results"><div class="ep-issues__section-head">' +
             '<h2>Issues <span>' + rows.length + '</span></h2>' +
-            '<span>' + (state.statusFilter === "All" ? "All statuses" : escape(state.statusFilter)) +
+            '<span>' + (state.statusFilter === "All" ? "All statuses"
+              : state.statusFilter === "Active" ? "Open + in progress"
+              : escape(state.statusFilter)) +
             (state.issueDateStart || state.issueDateEnd
               ? " · Occurred " + escape(state.issueDateStart || "any date") +
                 " to " + escape(state.issueDateEnd || "any date")
@@ -1863,7 +1877,7 @@
         state.plantFilter = "";
         state.equipmentFilter = "";
         state.columnFilters = {};
-        state.statusFilter = "All";
+        state.statusFilter = "Active";
         state.issueDatePeriod = "all";
         state.issueMonth = "";
         state.issueDateRangeMode = false;
@@ -2021,6 +2035,7 @@
     state.modalId = saved.id;
     state.submitNotice = successMessage;
     renderView();
+    invalidateOverviewData();
     var overview = global.Solar91PortalOverview;
     if (overview && overview.refreshInverterHealth) overview.refreshInverterHealth();
   }
@@ -2443,6 +2458,7 @@
         state.modalId = saved.id;
         state.submitNotice = saved.id + " updated.";
         renderView();
+        invalidateOverviewData();
       })
       .catch(function (error) {
         state.submitting = false;
@@ -2508,6 +2524,7 @@
       var existing = state.rows.find(function (row) { return row.dbId === saved.dbId; });
       if (existing) state.rows.splice(state.rows.indexOf(existing), 1);
       state.rows.unshift(saved);
+      invalidateOverviewData();
       if (isBreakdown) {
         var overview = global.Solar91PortalOverview;
         if (overview && overview.refreshInverterHealth) overview.refreshInverterHealth();
@@ -2524,7 +2541,7 @@
       state.modalId = saved.id;
       state.draft = null;
       state.wizardStep = 1;
-      state.statusFilter = "All";
+      state.statusFilter = "Active";
       state.search = "";
       renderView();
     }).catch(function (error) {

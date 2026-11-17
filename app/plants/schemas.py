@@ -4,7 +4,7 @@ from datetime import date, datetime
 from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 def validate_custom_fields(value: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -169,3 +169,29 @@ class SecurityContactMoveOut(BaseModel):
     person: dict[str, Any]
     from_plant: PlantOut
     to_plant: PlantOut
+
+
+class SecurityContactsUpdate(BaseModel):
+    """A single plant's security register (site engineers and guards).
+
+    This is the payload for the security-contacts-only write: the O&M Head and Assignees edit the
+    register from the Site Engineer & Security page without needing ``plants.manage`` (which would
+    let them rewrite every plant field). The lists are validated with the SAME rules as the full
+    ``custom_fields`` write, so names, 10-digit mobiles and day/night shifts stay consistent.
+    """
+
+    site_engineers: list[Any] = Field(default_factory=list)
+    guards: list[Any] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _clean(self) -> "SecurityContactsUpdate":
+        cleaned = validate_custom_fields({
+            "security_contacts": {"site_engineers": self.site_engineers, "guards": self.guards}
+        })
+        contacts = (cleaned or {}).get("security_contacts") or {}
+        self.site_engineers = contacts.get("site_engineers", [])
+        self.guards = contacts.get("guards", [])
+        return self
+
+    def as_contacts(self) -> dict[str, Any]:
+        return {"site_engineers": self.site_engineers, "guards": self.guards}

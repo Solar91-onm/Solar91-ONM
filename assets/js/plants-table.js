@@ -447,17 +447,19 @@
           ? "All " + allRows.length + " plants"
           : rows.length + " of " + allRows.length + " plants");
 
-    var pageHeader = merged
-      ? '<div class="ep-pt__head"><h1 class="ep-pt__title">' +
+    var pageHeader = !single && detailSection === "details"
+      ? ""
+      : (merged
+        ? '<div class="ep-pt__head"><h1 class="ep-pt__title">' +
           (plant ? fmt.escape(plant.displayName || plant.plantName) : "Plant Details") +
           '</h1><p class="ep-pt__sub">' +
           (plant ? fmt.escape(plant.siteCode) + " · " + fmt.escape(plant.district || "—") +
             " · " + fmt.escape(plant.discom || "—") : "") +
           "</p></div>"
-      : '<div class="ep-pt__head">' +
+        : '<div class="ep-pt__head">' +
           '<h1 class="ep-pt__title">' + title + "</h1>" +
           '<p class="ep-pt__sub">' + subtitle + "</p>" +
-        "</div>";
+        "</div>");
 
     var table = '<div class="ep-pt__table-wrap">' +
       '<div class="ep-pt__scroll" data-pt-scroll tabindex="0" role="region" aria-label="' +

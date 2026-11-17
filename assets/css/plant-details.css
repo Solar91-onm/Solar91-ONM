@@ -34,7 +34,7 @@
   display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
   min-height: 54px; padding: 8px 18px; border-bottom: 1px solid var(--ep-border-soft);
 }
-.ep-pd__health-head h2 { margin: 0; color: var(--ep-text-strong); font-size: var(--ep-fs-lg); font-weight: 650; }
+.ep-pd__health-head h2 { margin: 0; color: var(--ep-text-strong); font-size: var(--ep-fs-xl); font-weight: 650; }
 .ep-pd__open-count { color: var(--ep-accent-strong); border-color: #CFEBD2; background: var(--ep-accent-soft); }
 /* The range toggle, month picker, Raise issue, Export and Import live in this header, right of the
    title and the open count, and wrap below them when the column is too narrow to hold one line. */

@@ -126,6 +126,7 @@
           rows: rows,
           totals: body.totals || aggregatePortfolio(rows),
           asOf: body.asOf || null,
+          dataVersion: body.dataVersion || null,
           businessDate: body.businessDate || null,
           scope: body.scope || "portfolio",
           warnings: body.warnings || []
@@ -168,6 +169,8 @@
       totals: body.totals || {},
       startDate: body.startDate,
       endDate: body.endDate,
+      asOf: body.asOf || null,
+      dataVersion: body.dataVersion || null,
       businessDate: body.businessDate || null,
       scope: body.scope || "portfolio",
       warnings: body.warnings || []
@@ -188,9 +191,20 @@
           rows: (body.rows || []).map(normalizeRow),
           totals: body.totals || {},
           startDate: body.startDate,
-          endDate: body.endDate
+          endDate: body.endDate,
+          asOf: body.asOf || null,
+          dataVersion: body.dataVersion || null
         };
       });
+    });
+  }
+
+  function fetchOverviewVersion() {
+    return api().request("/api/portal/overview?version_only=true").then(function (body) {
+      if (!body || typeof body.dataVersion !== "string") {
+        throw new Error("The Overview change check returned an invalid version.");
+      }
+      return body.dataVersion;
     });
   }
 
@@ -312,10 +326,14 @@
       plantsWithOpenIssues: 0,
       pmCompleted: 0, pmPending: 0, pmOverdue: 0,
       washingCompleted: 0, washingPending: 0, washingOverdue: 0,
+      washingCycleCompliancePercentByCycle: { "1": null, "2": null, "3": null },
       dcCapacityMw: 0, acCapacityMw: 0
     };
     let washingScoreSum = 0;
     let washingScored = 0;
+    const cycleScoreSums = {
+      "1": { sum: 0, count: 0 }, "2": { sum: 0, count: 0 }, "3": { sum: 0, count: 0 }
+    };
     rows.forEach(function (row) {
       const plant = row.plant, profile = row.profile;
       const cond = profile.derivedCondition;
@@ -338,13 +356,18 @@
         totals.washingCompleted += profile.washing.completed || 0;
         totals.washingPending   += profile.washing.pending || 0;
         totals.washingOverdue   += profile.washing.overdue || 0;
-        // The plant's own monthly score (confirmed tables against the tables due so far). A plant
-        // that cleans past three cycles reads over 100% on its own row, but counts as 100 here so
-        // one plant's extra washing cannot hide another's shortfall.
         if (typeof profile.washing.compliancePercent === "number") {
-          washingScoreSum += Math.min(100, profile.washing.compliancePercent);
+          washingScoreSum += rows.length === 1
+            ? profile.washing.compliancePercent
+            : Math.min(100, profile.washing.compliancePercent);
           washingScored += 1;
         }
+        (profile.washing.cycleGrades || []).forEach(function (grade) {
+          const cycle = cycleScoreSums[String(grade.cycleNo)];
+          if (!cycle || typeof grade.compliancePercent !== "number") return;
+          cycle.sum += Math.min(100, grade.compliancePercent);
+          cycle.count += 1;
+        });
       }
       if (plant.dcCapacityKw) totals.dcCapacityMw += plant.dcCapacityKw / 1000;
       if (plant.acCapacityKw) totals.acCapacityMw += plant.acCapacityKw / 1000;
@@ -358,16 +381,25 @@
     totals.washingCompliancePercent = washingScored
       ? Math.round(washingScoreSum / washingScored)
       : null;
+    Object.keys(cycleScoreSums).forEach(function (cycleNo) {
+      const score = cycleScoreSums[cycleNo];
+      totals.washingCycleCompliancePercentByCycle[cycleNo] = score.count
+        ? Math.round(score.sum / score.count) : null;
+    });
     totals.dcCapacityMw = Math.round(totals.dcCapacityMw * 100) / 100;
     totals.acCapacityMw = Math.round(totals.acCapacityMw * 100) / 100;
     return totals;
   }
 
   /** Drop caches after a write so the next read is fresh. */
-  function invalidate() {
+  function invalidate(notifyDashboard) {
     portfolioPromise = null;
     calendarCache.clear();
     rangeCache.clear();
+    periodCache.clear();
+    if (notifyDashboard && global.document && typeof global.CustomEvent === "function") {
+      global.document.dispatchEvent(new global.CustomEvent("portal:data-invalidated"));
+    }
   }
 
   global.Solar91PortalData = {
@@ -384,6 +416,7 @@
     fetchPortfolioRange,
     fetchPortfolioPeriod,
     fetchPortfolioTrend,
+    fetchOverviewVersion,
     aggregatePortfolio,
     classifyCondition,
     invalidate

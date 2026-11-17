@@ -574,6 +574,7 @@
       [overviewEl, infoHealthEl, calendarEl, washingBoardEl, movableAssetsEl, detailsEl, securityEl, settingsEl, placeholderEl].forEach(function (section) {
         if (section) section.classList.toggle("is-visible", section === el);
       });
+      document.dispatchEvent(new CustomEvent("portal:route-changed"));
     }
 
     function showViewInfoHealthSection(showTabs, isHealth) {
@@ -835,7 +836,9 @@
     });
     var securityBtn = document.querySelector('[data-nav="security"]');
     if (securityBtn) securityBtn.addEventListener("click", function () {
-      if (currentRole !== "O&M Head" && currentRole !== "Administration") return;
+      // Must match the button's visibility rule above (O&M Head, Assignee, Administration);
+      // Assignee was wrongly excluded here, so the button showed but clicking it did nothing.
+      if (currentRole !== "O&M Head" && currentRole !== "Assignee" && currentRole !== "Administration") return;
       navState.activeView = "security";
       navState.selectedPlant = null;
       navState.selectedSubPage = null;
