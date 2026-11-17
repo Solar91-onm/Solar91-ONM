@@ -274,6 +274,13 @@
 }
 
 .ep-wb__date { color: var(--ep-text-muted); font-size: 12px; }
+.ep-wb__date-label {
+  margin-right: 4px;
+  color: var(--ep-text-faint);
+  font-family: var(--ep-font-mono, "JetBrains Mono", monospace);
+  font-size: 9px;
+  font-weight: 500;
+}
 .ep-wb__body { display: flex; align-items: center; gap: 15px; min-width: 0; }
 .ep-wb__gauge { position: relative; flex: 0 0 auto; width: 68px; height: 68px; }
 .ep-wb__ring { width: 68px; height: 68px; transform: rotate(-90deg); }

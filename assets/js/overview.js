@@ -460,11 +460,16 @@
     const wshPct = Number(totals.washingCompliancePercent) || 0;
     const washingWork = totals.washingWork || { done: 0, due: 0, pending: 0, overdue: 0, plants: 0 };
     const washingHasPlan = washingWork.due > 0;
-    // The cycle being worked on now (the highest one any plant has started) and its own tables:
-    // the month figure alone does not say how the cycle in hand is going.
-    const washingCycleWork = totals.washingCycleWork || {};
-    const washingCycleNo = ["3", "2", "1"].find((n) => (washingCycleWork[n] || {}).plants) || "";
-    const washingCycle = washingCycleNo ? washingCycleWork[washingCycleNo] : null;
+    // How many plants have finished each cycle. Cycles run in sequence -- a plant only starts
+    // cycle n+1 once cycle n is complete -- so a plant with k cycles completed has finished
+    // cycles 1..k. The fractional part is extra washing, not a finished cycle, hence the floor.
+    const washingRows = (state && state.rows) || [];
+    const washingPlants = washingRows.filter(({ profile }) =>
+      ((profile || {}).washing || {}).monthlyActivities).length;
+    const washingCycleDone = [1, 2, 3].map((n) => washingRows.filter(({ profile }) => {
+      const activities = ((profile || {}).washing || {}).monthlyActivities;
+      return activities && Math.floor(Number(activities.completed) || 0) >= n;
+    }).length);
     const openIss = totals.openIssues;
 
     function pill(label, pct, overdueCount) {
@@ -537,9 +542,11 @@
             ? "of " + fmt.formatNumber(washingWork.due) + " planned cleaning activities"
             : "No cleaning activities scheduled"
         },
-        subline: washingCycle
-          ? "Cycle " + washingCycleNo + " in progress · " + fmt.formatNumber(washingCycle.done) +
-            " of " + fmt.formatNumber(washingCycle.due) + " tables due so far"
+        subline: washingPlants
+          ? "Completed — Cycle 1: " + fmt.formatNumber(washingCycleDone[0]) +
+            " · Cycle 2: " + fmt.formatNumber(washingCycleDone[1]) +
+            " · Cycle 3: " + fmt.formatNumber(washingCycleDone[2]) +
+            " of " + fmt.formatNumber(washingPlants) + (washingPlants === 1 ? " plant" : " plants")
           : washingWork.plants
           ? (washingWork.plants === 1 && state && state.rows.length === 1
             ? state.rows[0].plant.plantName || state.rows[0].plant.siteCode

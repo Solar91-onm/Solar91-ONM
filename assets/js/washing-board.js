@@ -353,7 +353,9 @@
         '<span class="ep-wb__name">' + escape(name) + "</span>" +
         '<span class="ep-wb__code">' + escape(row.site_code) + "</span>" +
       "</span>" +
-      '<span class="ep-wb__date">' + (lastUpdated ? escape(lastUpdated) : "No records yet") + "</span>" +
+      '<span class="ep-wb__date">' + (lastUpdated
+        ? '<span class="ep-wb__date-label">Last Update :</span>' + escape(lastUpdated)
+        : "No records yet") + "</span>" +
       '<span class="ep-wb__body">' +
         '<span class="ep-wb__gauge">' + ringHTML(cycle, ringTone ? { key: ringTone } : status) + "</span>" +
         '<span class="ep-wb__facts">' +

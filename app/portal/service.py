@@ -254,7 +254,8 @@ def _pm_counts(db: Session, plant_ids: list[UUID], today: date) -> dict[UUID, di
 logger = logging.getLogger("solar91.portal")
 
 
-def _washing_rows(db: Session, user: User, plant_ids: list[UUID] | None = None) -> dict[str, dict[str, Any]] | None:
+def _washing_rows(db: Session, user: User, plant_ids: list[UUID] | None = None,
+                  month: str | None = None) -> dict[str, dict[str, Any]] | None:
     """Live washing figures per plant, straight from the module that owns them.
 
     Reads the overview in summary form: no report list and none of the per-plant day/cycle/productivity lists, which
@@ -265,7 +266,7 @@ def _washing_rows(db: Session, user: User, plant_ids: list[UUID] | None = None) 
     from app.scheduled.washing_cycles import get_overview
 
     try:
-        overview = get_overview(db, user, include_reports=False, summary=True,
+        overview = get_overview(db, user, include_reports=False, summary=True, month=month,
                                 plant_ids=set(plant_ids) if plant_ids is not None else None)
     except Exception as error:  # washing must not take the Overview down, but the failure must be visible
         # PostgreSQL aborts the whole transaction after a failed statement; roll back (this request is read-only)
@@ -820,7 +821,11 @@ def portfolio_for_range(db: Session, user: User, start: date, end: date) -> dict
                             counts["overdue"] += 1
             cursor = (cursor.replace(day=28) + timedelta(days=4)).replace(day=1)
 
-    washing_monthly = _washing_rows(db, user)
+    # Module Cleaning is reported per month, so read the month the selected range ends in (never
+    # past today). Picking a range inside an earlier month reports that month's cleaning, and the
+    # figures still come from the one calculation the Module Cleaning page uses.
+    range_month = min(end, business_today()).strftime("%Y-%m")
+    washing_monthly = _washing_rows(db, user, month=range_month)
     monthly_washing_by_plant = washing_monthly or {}
     engineers = site_engineers_by_plant(db, plant_ids)
     washers = washing_assignees_by_plant(db, plant_ids)
