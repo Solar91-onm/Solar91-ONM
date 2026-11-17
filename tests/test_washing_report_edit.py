@@ -63,8 +63,7 @@ def test_edit_can_make_a_day_scattered_and_completes_the_cycle(client, db):
 
 
 def test_engineer_edit_that_repeats_a_table_of_the_same_cycle_is_refused_and_changes_nothing(client, db):
-    # A Site Engineer's repeat is refused. (An O&M Head / Assignee repeat starts the next cycle instead:
-    # tests/test_washing_reclean_next_cycle.py.)
+    # A repeated table is refused until every configured table has been cleaned, regardless of role.
     plant = _plant(db)
     _setup_cycle_users(client, db, plant)
     _engineer(client, db, plant)
@@ -139,7 +138,7 @@ def test_sheet_records_days_from_the_end_and_as_scattered_tables(client, db):
 
 
 def test_engineer_sheet_refuses_a_table_cleaned_twice_in_one_cycle_and_saves_nothing(client, db):
-    # A Site Engineer's repeat is refused; an O&M repeat starts the next cycle (test_washing_reclean_next_cycle.py).
+    # A repeated table is refused; the next cycle starts only after the current table count is complete.
     plant = _plant(db)
     _setup_cycle_users(client, db, plant)
     _engineer(client, db, plant)

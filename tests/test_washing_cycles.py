@@ -16,6 +16,7 @@ from app.scheduled.washing_cycles import (
     _cycle_grade,
     _cycle_grade_summary,
     _cycle_work_scores,
+    cleaning_activity_metrics,
     check_cycle_compliance_alerts,
     check_missed_monthly_targets,
 )
@@ -194,7 +195,7 @@ def test_cycle_compliance_alert_uses_threshold_and_is_deduplicated(client, db):
     assert check_cycle_compliance_alerts(db, date(2026, 11, 11)) == 1     # the day after it ends
     assert check_cycle_compliance_alerts(db, date(2026, 11, 12)) == 0     # once per cycle
     notification = db.query(Notification).filter_by(event_type="washing_cycle_compliance_low").one()
-    assert "Cycle 1 ended with 0 of 10 tables done (0%)" in notification.message
+    assert "Cycle 1 ended with 0 of 10 tables done (0.0%)" in notification.message
     assert notification.user_id is not None
 
 
@@ -362,52 +363,89 @@ def test_cycle_grades_use_threshold_timing_and_exclude_running_cycles():
     assert upcoming["grade"] == "upcoming" and upcoming["compliance_percent"] is None
 
     summary = _cycle_grade_summary([on_target, on_time, overdue, running, upcoming])
-    assert summary["compliance_percent"] == 67
     assert summary["due"] == 3 and summary["running"] == 1 and summary["upcoming"] == 1
+    # Compliance is counted in tables, not in how many cycles earned a good grade, so grades
+    # carrying no table counts contribute nothing.
+    assert summary["compliance_percent"] == 0.0
+    scored = _cycle_grade_summary([
+        dict(on_target, tables_done=10, tables_due=10),
+        dict(overdue, tables_done=5, tables_due=10),
+        dict(upcoming, tables_done=0, tables_due=0),   # upcoming is left out entirely
+    ])
+    assert scored["compliance_percent"] == 75.0
 
 
-def _work(day, tables, status="Confirmed", month=11):
+def _work(day, tables, status="Confirmed", month=11, cycle=1, completed=False):
     from types import SimpleNamespace
-    return SimpleNamespace(report_date=date(2026, month, day), tables_cleaned=tables, review_status=status)
+    return SimpleNamespace(
+        report_date=date(2026, month, day), cycle_month=f"2026-{month:02d}", cycle_no=cycle,
+        tables_cleaned=tables, review_status=status, cycle_completed=completed, cleaned_table_codes=[],
+    )
 
 
 def test_cycle_work_scores_follow_the_owners_worked_example():
     """A 100-table plant: Cycle 1 and 2 fully cleaned on time, Cycle 3 only half.
     Month = (100 + 100 + 50) / 300 = 83%; each cycle scores its own work."""
-    reports = [_work(5, 100), _work(15, 100), _work(25, 50)]
+    reports = [_work(5, 100, cycle=1), _work(15, 100, cycle=2), _work(25, 50, cycle=3)]
     result = _cycle_work_scores(reports, 100, date(2026, 11, 30), None, set())
 
     assert [result["cycles"][n]["score"] for n in (1, 2, 3)] == [100, 100, 50]
-    assert result["month"] == {"tables_done": 250, "tables_due": 300, "percent": 83}
+    assert result["month"] == {"tables_done": 250, "tables_due": 300, "percent": 83.3}
 
 
-def test_catch_up_work_counts_in_the_cycle_it_is_done_and_can_exceed_100():
-    """Next month: last month's 50 missing tables plus this cycle's 100, all in days 1-10 -> 150%.
-    The catch-up days may still be tagged to the previous month; they count by their date."""
+def test_catch_up_work_counts_in_the_cycle_it_is_done():
+    """The rate uses dates, while a cycle's score uses its assigned cycle number. A cycle is a
+    fixed amount of work, so its own score stops at 100% however much is done inside it."""
     reports = [_work(3, 50, month=12), _work(8, 100, month=12)]
     result = _cycle_work_scores(reports, 100, date(2026, 12, 10), None, set())
 
-    assert result["cycles"][1]["score"] == 150
-    assert result["month"]["percent"] == 150
+    assert result["cycles"][1]["score"] == 100
+    assert result["month"]["tables_done"] == 150
+    assert result["month"]["percent"] == 100      # the rate itself is capped
 
 
-def test_extra_washing_after_all_three_cycles_raises_the_month_above_100():
-    reports = [_work(5, 100), _work(15, 100), _work(25, 100), _work(30, 40)]
-    result = _cycle_work_scores(reports, 100, date(2026, 11, 30), None, set())
+def test_extra_washing_after_all_three_cycles_raises_compliance_above_100():
+    """Washing every table again after the three cycles are complete is more than the month
+    asked for, so the plant's cleaning compliance goes past 100% instead of stopping there."""
+    assert cleaning_activity_metrics(3, 3, allow_extra=True)["compliance_percent"] == 100.0
+    # Three cycles done plus a further full wash of the plant = four of three planned.
+    extra = cleaning_activity_metrics(4, 3, allow_extra=True)
+    assert extra["compliance_percent"] == 133.3
+    assert extra["completed"] == 4 and extra["pending"] == 0
+    # Half an extra wash counts as half, so the score moves with the work.
+    assert cleaning_activity_metrics(3.5, 3, allow_extra=True)["compliance_percent"] == 116.7
+    # Only one plant may exceed 100%: across plants the same work is capped.
+    assert cleaning_activity_metrics(4, 3)["compliance_percent"] == 100.0
 
-    assert result["cycles"][3]["score"] == 140
-    assert result["month"]["percent"] == 113   # 340 / 300
 
-
-def test_open_cycle_is_scored_on_pace_and_upcoming_cycles_are_not_scored():
-    """17 Nov: Cycle 1 closed, Cycle 2 on day 7 of 10 (70 of 100 tables due so far), Cycle 3 not started."""
-    reports = [_work(4, 45), _work(14, 35), _work(16, 0)]
+def test_next_cycle_does_not_start_when_its_calendar_window_begins():
+    """17 Nov: Cycle 1 is still active; the date alone must not start Cycle 2."""
+    reports = [_work(4, 45, cycle=1), _work(14, 35, cycle=1), _work(16, 0, cycle=1)]
     result = _cycle_work_scores(reports, 100, date(2026, 11, 17), None, set())
 
-    assert result["cycles"][1] == {"tables_done": 45, "tables_due": 100, "score": 45}   # partial work counts
-    assert result["cycles"][2] == {"tables_done": 35, "tables_due": 70, "score": 50}
+    assert result["cycles"][1]["tables_done"] == 80
+    assert result["cycles"][1]["tables_due"] == 100
+    assert result["cycles"][1]["score"] == 80
+    assert result["cycles"][1]["started"] is True
+    assert result["cycles"][2]["score"] is None
+    assert result["cycles"][2]["started"] is False
     assert result["cycles"][3]["score"] is None
-    assert result["month"] == {"tables_done": 80, "tables_due": 170, "percent": 47}
+    assert result["month"] == {"tables_done": 80, "tables_due": 170, "percent": 47.1}
+
+
+def test_next_cycle_starts_only_after_all_tables_in_previous_cycle_are_cleaned():
+    reports = [
+        _work(16, 100, cycle=1, completed=True),
+        _work(17, 35, cycle=2),
+    ]
+    result = _cycle_work_scores(reports, 100, date(2026, 11, 17), None, set())
+
+    assert result["cycles"][1]["score"] == 100
+    assert result["cycles"][2]["tables_done"] == 35
+    assert result["cycles"][2]["tables_due"] == 100
+    assert result["cycles"][2]["score"] == 35
+    assert result["cycles"][2]["started"] is True
+    assert result["cycles"][3]["started"] is False
 
 
 def test_unconfirmed_and_future_work_is_not_counted():
@@ -418,20 +456,80 @@ def test_unconfirmed_and_future_work_is_not_counted():
     assert result["cycles"][2]["score"] is None
 
 
-def test_portfolio_compliance_is_tables_cleaned_over_tables_due():
-    """The tile's % is exactly cleaned / due so far. One plant is uncapped; across plants each
-    plant counts up to its own due, so extra washing at one cannot hide a shortfall at another."""
+def test_cleaning_activity_metrics_counts_verified_completions_and_pending():
+    assert cleaning_activity_metrics(85, 100, 5) == {
+        "planned": 100, "completed": 85, "pending": 15, "overdue": 5,
+        "compliance_percent": 85.0,
+    }
+    assert cleaning_activity_metrics(100, 100)["compliance_percent"] == 100.0
+    # Capped by default, so a portfolio figure can never exceed 100%.
+    assert cleaning_activity_metrics(150, 100)["compliance_percent"] == 100.0
+    # A single plant's own row credits extra cleaning beyond its planned cycles.
+    assert cleaning_activity_metrics(150, 100, allow_extra=True)["compliance_percent"] == 150.0
+    assert cleaning_activity_metrics(150, 100, allow_extra=True)["pending"] == 0
+    assert cleaning_activity_metrics(0, 0) == {
+        "planned": 0, "completed": 0, "pending": 0, "overdue": 0,
+        "compliance_percent": 0.0,
+    }
+    # Overdue is a subset of pending, never a second denominator item.
+    assert cleaning_activity_metrics(7, 10, 5)["overdue"] == 3
+
+
+def test_cleaning_compliance_follows_the_agreed_rules():
+    """Compliance = completed / planned x 100, one decimal, overdue inside pending, and above
+    100% only for a single plant that cleaned beyond its plan."""
+    assert cleaning_activity_metrics(85, 100)["compliance_percent"] == 85.0
+    assert cleaning_activity_metrics(100, 100)["compliance_percent"] == 100.0
+    assert cleaning_activity_metrics(0, 0)["compliance_percent"] == 0.0        # never divides by zero
+    assert cleaning_activity_metrics(0, 4)["compliance_percent"] == 0.0
+
+    # Overdue is a subset of pending, so it is never a second item in the denominator.
+    counted = cleaning_activity_metrics(85, 100, 5)
+    assert counted["pending"] == 15 and counted["overdue"] == 5
+    assert counted["completed"] + counted["pending"] == counted["planned"]
+
+    # A part-finished activity is not a completed one: half a wash counts as half.
+    assert cleaning_activity_metrics(2.5, 3, allow_extra=True)["compliance_percent"] == 83.3
+
+    # Only one plant may pass 100%.
+    assert cleaning_activity_metrics(4, 3, allow_extra=True)["compliance_percent"] == 133.3
+    assert cleaning_activity_metrics(4, 3)["compliance_percent"] == 100.0
+
+
+def test_one_plants_extra_cleaning_cannot_hide_another_plants_shortfall():
     from app.portal.service import aggregate
 
-    def row(done, due, cycles=()):
+    def row(completed, planned):
+        activities = cleaning_activity_metrics(completed, planned, allow_extra=True)
+        return {
+            "plant": {"dc_capacity_kw": None, "ac_capacity_kw": None, "commissioned_on": None},
+            "profile": {"derivedCondition": "unknown", "washing": {
+                "completed": activities["completed"], "pending": activities["pending"],
+                "overdue": activities["overdue"], "compliancePercent": activities["compliance_percent"],
+                "monthlyActivities": activities, "cycleGrades": []}},
+        }
+
+    # Alone, the plant that did a fourth wash reads above 100%.
+    assert aggregate([row(4, 3)])["washingCompliancePercent"] == 133.3
+    # Beside a plant that did nothing, its surplus is not lent out: 3 of 6, not 4 of 6.
+    together = aggregate([row(4, 3), row(0, 3)])
+    assert together["washingCompliancePercent"] == 50.0
+    assert together["washingWork"]["done"] == 3 and together["washingWork"]["due"] == 6
+
+
+def test_portfolio_cleaning_compliance_aggregates_activity_counts():
+    from app.portal.service import aggregate
+
+    def row(done, pending, overdue=0, cycles=()):
+        activities = cleaning_activity_metrics(done, done + pending, overdue)
         return {
             "plant": {"dc_capacity_kw": None, "ac_capacity_kw": None, "commissioned_on": None},
             "profile": {
                 "derivedCondition": "unknown",
                 "washing": {
-                    "completed": 0, "pending": 0, "overdue": 0,
-                    "compliancePercent": round(100 * done / due) if due else 100,
-                    "monthlyTablesConfirmed": done, "monthlyTablesDue": due,
+                    "completed": activities["completed"], "pending": activities["pending"],
+                    "overdue": activities["overdue"], "compliancePercent": activities["compliance_percent"],
+                    "monthlyActivities": activities,
                     "cycleGrades": [
                         {"cycleNo": n, "compliancePercent": None if d is None else 0,
                          "tablesDone": c, "tablesDue": d}
@@ -441,18 +539,21 @@ def test_portfolio_compliance_is_tables_cleaned_over_tables_due():
             },
         }
 
-    one = aggregate([row(150, 100)])
-    assert one["washingCompliancePercent"] == 150
-    assert one["washingWork"] == {"done": 150, "due": 100, "plants": 1}
+    one = aggregate([row(85, 15, 5)])
+    assert one["washingCompliancePercent"] == 85.0
+    assert one["washingCompleted"] == 85
+    assert one["washingPending"] == 15
+    assert one["washingOverdue"] == 5
+    assert one["washingWork"] == {"done": 85, "due": 100, "pending": 15, "overdue": 5, "plants": 1}
 
-    both = aggregate([row(150, 100), row(40, 100)])
-    assert both["washingCompliancePercent"] == 70          # (100 + 40) / 200
-    assert both["washingWork"] == {"done": 140, "due": 200, "plants": 2}
+    both = aggregate([row(10, 0), row(10, 80)])
+    assert both["washingCompliancePercent"] == 20.0         # (10 + 10) / (10 + 90), not a mean
+    assert both["washingWork"] == {"done": 20, "due": 100, "pending": 80, "overdue": 0, "plants": 2}
 
     by_cycle = aggregate([row(0, 0, cycles=[(45, 100), (35, 70), (0, None)])])
     assert by_cycle["washingCycleCompliancePercentByCycle"] == {"1": 45, "2": 50, "3": None}
     assert aggregate([{"plant": row(0, 0)["plant"], "profile": {"derivedCondition": "unknown"}}])[
-        "washingCompliancePercent"] is None
+        "washingCompliancePercent"] == 0.0
 
 
 def test_portal_overview_uses_table_progress_before_any_cycle_is_completed(client, db):
@@ -473,7 +574,10 @@ def test_portal_overview_uses_table_progress_before_any_cycle_is_completed(clien
     profile = next(row["profile"] for row in dashboard.json()["rows"] if row["plant"]["id"] == str(plant.id))
     module_row = next(row for row in module.json()["plants"] if row["plant_id"] == str(plant.id))
     assert profile["washing"]["completed"] == 0
-    assert profile["washing"]["compliancePercent"] > 0
+    assert profile["washing"]["compliancePercent"] == 0
+    # How many cycles are planned depends on where in the month today falls, so compare the two
+    # views against each other rather than hard-coding a number that only holds on some days.
+    assert profile["washing"]["pending"] == module_row["monthly_activities_pending"]
     assert profile["washing"]["compliancePercent"] == module_row["monthly_compliance_percent"]
     assert dashboard.json()["totals"]["washingCompliancePercent"] == profile["washing"]["compliancePercent"]
 

@@ -281,7 +281,7 @@ def _cycle_compliance(table_count: int, today: date, overrides: dict | None, led
     done = ledger.get(n, {}).get("confirmed", 0)
     return {"cycle_no": n, "start": start.isoformat(), "end": end.isoformat(), "due": due, "done": done,
             "pending": ledger.get(n, {}).get("pending", 0),
-            "percent": min(100, round(100 * done / due)) if due else 100}
+        "percent": min(100, round(100 * done / due, 1)) if due else 0.0}
 
 
 def _cycle_grade(cycle_no: int, reports: list, table_count: int, threshold_percent: int,
@@ -345,8 +345,10 @@ def _cycle_grade_summary(grades: list[dict]) -> dict:
               for grade in ("on_target", "on_time", "overdue", "missed", "running", "upcoming")}
     due = counts["on_target"] + counts["on_time"] + counts["overdue"] + counts["missed"]
     compliant = counts["on_target"] + counts["on_time"]
-    scores = [item["compliance_percent"] for item in grades
-              if item["grade"] != "upcoming" and isinstance(item.get("compliance_percent"), (int, float))]
+    scored = [item for item in grades
+              if item["grade"] != "upcoming" and isinstance(item.get("tables_due"), int)]
+    tables_due = sum(item["tables_due"] for item in scored)
+    tables_done = sum(min(item.get("tables_done") or 0, item["tables_due"]) for item in scored)
     return {
         **counts,
         "due": due,
@@ -354,64 +356,92 @@ def _cycle_grade_summary(grades: list[dict]) -> dict:
         "not_started": sum(
             1 for item in grades if item["grade"] == "missed" and item["report_count"] == 0
         ),
-        "compliance_percent": round(sum(scores) / len(scores)) if scores else None,
+        "compliance_percent": round(100 * tables_done / tables_due, 1) if tables_due else 0.0,
     }
 
 
-def _credited_cycle(report_day: date, start_dates: list[date]) -> int:
-    """The cycle a day's cleaning is credited to: the latest cycle that had started by that day.
-    Before the first start it is Cycle 1; after Cycle 3's deadline it is still Cycle 3 (extra washing)."""
-    started = [n for n, start in enumerate(start_dates, 1) if start <= report_day]
-    return started[-1] if started else 1
+def cleaning_activity_metrics(completed: float, planned: int, overdue: int = 0,
+                              *, allow_extra: bool = False) -> dict[str, int | float]:
+    """Cleaning compliance = completed / planned x 100, to one decimal place.
+
+    Overdue is a subset of pending, never a second item in the denominator, and no planned
+    activities gives 0% rather than a division by zero.
+
+    The score is capped at 100% except for ONE plant with `allow_extra`: a single plant that
+    washes every table again after its three cycles are complete has done more than the month
+    asked for, so its own score reads above 100%. That extra may be fractional (half a wash of
+    the plant = 0.5). Across several plants the score is always capped, so one plant's extra
+    work can never paper over another plant's shortfall.
+    """
+    def tidy(value: float) -> int | float:
+        """Whole counts stay ints; only genuine part-cycles are fractional."""
+        value = round(float(value), 1)
+        return int(value) if float(value).is_integer() else value
+
+    planned = max(0, int(planned or 0))
+    completed = tidy(max(0.0, float(completed or 0)))
+    if not allow_extra:
+        completed = min(completed, planned)
+    pending = tidy(max(0.0, planned - completed))
+    overdue = min(pending, max(0, int(overdue or 0)))
+    return {
+        "planned": planned,
+        "completed": completed,
+        "pending": pending,
+        "overdue": overdue,
+        "compliance_percent": round(100 * completed / planned, 1) if planned else 0.0,
+    }
 
 
 def _cycle_work_scores(reports, table_count: int, today: date, overrides: dict | None,
                        excused_dates: set[date]) -> dict:
-    """Score each cycle by the WORK done in it: confirmed tables cleaned during the cycle's dates,
-    against the tables due in the cycle so far. Uncapped, so all work is always noticed:
+    """Keep the monthly rate time-based, but score cycle progress by its assigned cycle number.
 
-    * a table counts in the cycle whose dates it was cleaned in, so catching up last month's
-      shortfall in days 1-10 raises this month's Cycle 1 (it can read 150%);
-    * cleaning after Cycle 3 (extra washing) raises Cycle 3 and the month above 100%;
-    * an open cycle is judged on pace -- against the tables due from its start up to today
-      (each day's share of the plant's tables, excused days left out) -- and a closed cycle
-      against its whole due;
-    * a cycle that has not started is not scored (score None).
-
-    The month is the same ratio over every started cycle: (done 1 + done 2 + ...) / (due 1 + due 2 + ...).
+    Dates determine how much work is due for the monthly rate; they do not start Cycle 2 or Cycle 3.
+    A cycle becomes active only after the previous cycle reaches the configured table count.
     """
     start_dates = _cycle_start_dates(today, overrides)
     due_dates = _cycle_due_dates(today, overrides)
-    # A saved Cycle 1 start can fall in the previous month; its days belong to this month's Cycle 1.
     first_day = min(today.replace(day=1), start_dates[0])
-    done = {n: 0 for n in range(1, MONTHLY_CYCLE_TARGET + 1)}
+    month_done = 0
     for report in reports:
         if report.review_status != "Confirmed" or not report.tables_cleaned:
             continue
         if not first_day <= report.report_date <= today:
             continue
-        done[_credited_cycle(report.report_date, start_dates)] += int(report.tables_cleaned)
+        month_done += int(report.tables_cleaned)
 
-    cycles = {}
-    month_done = month_due = 0
+    month_due = 0
     for n in range(1, MONTHLY_CYCLE_TARGET + 1):
         start, due_date = start_dates[n - 1], due_dates[n - 1]
-        if start > today:
-            cycles[n] = {"tables_done": 0, "tables_due": 0, "score": None}
-            continue
-        tables_due = _cycle_compliance(table_count, today, overrides, {}, excused_dates,
-                                       window=(n, start, due_date))["due"]
-        # Nothing due yet (every day so far excused) is not a failure.
-        score = round(100 * done[n] / tables_due) if tables_due else 100
-        cycles[n] = {"tables_done": done[n], "tables_due": tables_due, "score": score}
-        month_done += done[n]
-        month_due += tables_due
+        if start <= today:
+            month_due += _cycle_compliance(table_count, today, overrides, {}, excused_dates,
+                                           window=(n, start, due_date))["due"]
+
+    month = _month_key(today)
+    active_reports = [report for report in reports if report.cycle_month == month and
+                      report.report_date <= today and report.review_status in ("Pending", "Confirmed")]
+    highest_report_cycle = max((report.cycle_no for report in active_reports), default=0)
+    highest_completed_cycle = max(
+        (report.cycle_no for report in active_reports
+         if report.cycle_completed and report.review_status == "Confirmed"),
+        default=0,
+    )
+    active_cycle = min(MONTHLY_CYCLE_TARGET, max(1, highest_report_cycle, highest_completed_cycle + 1))
+    ledger = _cycle_ledger(active_reports, table_count)
+    cycles = {}
+    for n in range(1, MONTHLY_CYCLE_TARGET + 1):
+        started = n <= active_cycle
+        done = min(ledger[n]["confirmed"], table_count) if table_count else 0
+        due = table_count if started else 0
+        score = round(100 * done / due, 1) if due else None
+        cycles[n] = {"tables_done": done, "tables_due": due, "score": score, "started": started}
     return {
         "cycles": cycles,
         "month": {
             "tables_done": month_done,
             "tables_due": month_due,
-            "percent": round(100 * month_done / month_due) if month_due else 100,
+            "percent": round(100 * min(month_done, month_due) / month_due, 1) if month_due else 0.0,
         },
     }
 
@@ -898,9 +928,16 @@ def _build_overview(db: Session, user: User, include_tables: bool = False, repor
         ]
         cleaning_dates = sorted({report.report_date.isoformat() for report in cleaned_reports})
         cleaned_cycles = sorted({report.cycle_no for report in cleaned_reports})
-        closed_cycles = _closed_incomplete(month_reports, table_count)   # left incomplete by an O&M re-clean
-        current_cycle = min(MONTHLY_CYCLE_TARGET, max(cycles_this_month, max(completed_by_month.get(month, set()), default=0),
-                                                      max(closed_cycles, default=0)) + 1)
+        closed_cycles = _closed_incomplete(month_reports, table_count)
+        highest_report_cycle = max(
+            (report.cycle_no for report in month_reports if report.review_status in ("Pending", "Confirmed")),
+            default=0,
+        )
+        highest_completed_cycle = max(completed_by_month.get(month, set()), default=0)
+        current_cycle = min(MONTHLY_CYCLE_TARGET, max(
+            1, highest_report_cycle, highest_completed_cycle + 1,
+            max(closed_cycles, default=0) + 1,
+        ))
         ledger = _cycle_ledger(month_reports, table_count)   # with carried-over tables
         cleaned_confirmed = ledger[current_cycle]["confirmed"]
         cleaned_pending = ledger[current_cycle]["pending"]
@@ -950,6 +987,29 @@ def _build_overview(db: Session, user: User, include_tables: bool = False, repor
         completed_due = sum(
             1 for cycle_no in completed_dates if start_dates[cycle_no - 1] <= today
         )
+        due_dates = _cycle_due_dates(today, config.cycle_overrides)
+        # Monthly compliance is measured against the whole month's plan, not against the cycles
+        # due so far. A shifting denominator made the same finished work score differently as the
+        # month went on (150% on the 17th, 133% on the 21st, with nothing changed).
+        planned_cycles = MONTHLY_CYCLE_TARGET if table_count > 0 else 0
+        # Every cycle completed this month counts, including one finished ahead of its window.
+        completed_cycles_month = len(completed_dates)
+        overdue_cycles = sum(
+            1 for cycle_no, due_date in enumerate(due_dates, 1)
+            if table_count > 0 and start_dates[cycle_no - 1] <= today and due_date < today
+            and cycle_no not in completed_dates
+        )
+        # Washing done after all three cycles were complete (recorded on cycle 3) counts towards
+        # the month as the fraction of a whole extra wash it represents, so an extra cycle raises
+        # compliance past 100% instead of disappearing.
+        extra_tables = (
+            max(0, ledger[MONTHLY_CYCLE_TARGET]["confirmed"] - table_count)
+            if len(completed_dates) >= MONTHLY_CYCLE_TARGET and table_count else 0
+        )
+        extra_cycles = extra_tables / table_count if table_count else 0
+        # One plant's own row, so extra washing beyond its three cycles counts above 100%.
+        activities = cleaning_activity_metrics(completed_cycles_month + extra_cycles, planned_cycles,
+                                               overdue_cycles, allow_extra=True)
         # Monthly compliance is the WORK done this month: confirmed tables cleaned on this month's
         # dates (whichever month a catch-up day is tagged to) against the tables due so far -- each
         # started cycle's due, the open one on pace up to today. Uncapped, so extra washing and
@@ -957,19 +1017,28 @@ def _build_overview(db: Session, user: User, include_tables: bool = False, repor
         work = _cycle_work_scores(reports, table_count, today, config.cycle_overrides, excused_dates)
         month_confirmed_tables = work["month"]["tables_done"]
         monthly_tables_due = work["month"]["tables_due"]
-        monthly_compliance = work["month"]["percent"]
+        monthly_compliance = activities["compliance_percent"]
         today_target = _daily_table_target(table_count, today, config.cycle_overrides)
-        due_dates = _cycle_due_dates(today, config.cycle_overrides)
         compliance = _cycle_compliance(table_count, today, config.cycle_overrides, ledger, excused_dates)
         cycle_grades = []
         for cycle_no in range(1, MONTHLY_CYCLE_TARGET + 1):
+            cycle_work = work["cycles"][cycle_no]
+            cycle_reports = [report for report in month_reports if report.cycle_no == cycle_no and
+                             report.review_status in ("Pending", "Confirmed")]
+            actual_start = min((report.report_date for report in cycle_reports if report.tables_cleaned), default=None)
+            if actual_start is None and cycle_no > 1:
+                previous_done = completed_dates.get(cycle_no - 1)
+                actual_start = previous_done + timedelta(days=1) if previous_done else None
+            start_date = actual_start or (start_dates[cycle_no - 1] if cycle_work["started"] else None)
             grade = _cycle_grade(
                 cycle_no, month_reports, table_count, config.compliance_threshold_percent,
-                config.fast_window_days, start_dates[cycle_no - 1], due_dates[cycle_no - 1], today,
+                config.fast_window_days, start_date or start_dates[cycle_no - 1], due_dates[cycle_no - 1], today,
             )
-            # The grade (on target / on time / overdue / missed / running) names the timing against the
-            # threshold; the percentage is the work score, so partial and late work still count.
-            cycle_work = work["cycles"][cycle_no]
+            # Cycle scores follow completed-table progression; the monthly score remains date-based.
+            if not cycle_work["started"]:
+                grade.update({"grade": "upcoming", "start_date": None, "days_to_target": None, "due": False})
+            elif grade["grade"] == "upcoming":
+                grade.update({"grade": "running", "start_date": start_date.isoformat() if start_date else None})
             grade.update({
                 "compliance_percent": cycle_work["score"],
                 "tables_done": cycle_work["tables_done"],
@@ -1091,6 +1160,10 @@ def _build_overview(db: Session, user: User, include_tables: bool = False, repor
                 min(100, round(100 * today_cleaned / today_target)) if today_target else 100
             ),
             "monthly_compliance_percent": monthly_compliance,
+            "monthly_activities_planned": activities["planned"],
+            "monthly_activities_completed": activities["completed"],
+            "monthly_activities_pending": activities["pending"],
+            "monthly_activities_overdue": activities["overdue"],
             "monthly_tables_confirmed": month_confirmed_tables,
             "monthly_tables_due": monthly_tables_due,
             "monthly_cycles_due": due_by_today,
@@ -1159,11 +1232,21 @@ def _build_overview(db: Session, user: User, include_tables: bool = False, repor
             "tables_due_today": sum(row["tables_due_today"] for row in plant_rows),
             "tables_washed_today": sum(row["tables_washed_today"] for row in plant_rows),
             "tables_pending_today": sum(row["tables_pending_today"] for row in plant_rows),
-            # A plant may read over 100% on its own row, but it is counted as 100% here so that one
-            # plant's extra washing cannot hide another plant's shortfall in the portfolio figure.
-            "monthly_compliance_percent": round(
-                sum(min(100, row["monthly_compliance_percent"]) for row in plant_rows) / len(plant_rows)
-            ) if plant_rows else 100,
+            "monthly_compliance_percent": cleaning_activity_metrics(
+                # Each plant counts at most its own plan, so one plant's extra cleaning cannot
+                # hide another's shortfall. A single plant in view keeps its surplus.
+                sum(row["monthly_activities_completed"] if len(plant_rows) == 1
+                    else min(row["monthly_activities_completed"], row["monthly_activities_planned"])
+                    for row in plant_rows),
+                sum(row["monthly_activities_planned"] for row in plant_rows),
+                sum(row["monthly_activities_overdue"] for row in plant_rows),
+                # Above 100% only when the portfolio in view IS a single plant.
+                allow_extra=len(plant_rows) == 1,
+            )["compliance_percent"],
+            "monthly_activities_planned": sum(row["monthly_activities_planned"] for row in plant_rows),
+            "monthly_activities_completed": sum(row["monthly_activities_completed"] for row in plant_rows),
+            "monthly_activities_pending": sum(row["monthly_activities_pending"] for row in plant_rows),
+            "monthly_activities_overdue": sum(row["monthly_activities_overdue"] for row in plant_rows),
             "cycle_compliance": _portfolio_compliance(plant_rows),
             "average_delay_days": round(
                 sum(row["average_delay_days"] for row in plant_rows) / len(plant_rows), 1
@@ -1192,6 +1275,8 @@ def _build_overview(db: Session, user: User, include_tables: bool = False, repor
     if not manager:
         # Compliance / delay / ranking figures are O&M performance metrics; field users never receive them.
         hidden = ("cycle_compliance", "cycle_compliance_percent", "monthly_compliance_percent", "daily_compliance_percent",
+                  "monthly_activities_planned", "monthly_activities_completed", "monthly_activities_pending",
+                  "monthly_activities_overdue",
                   "monthly_tables_confirmed", "monthly_tables_due", "monthly_cycles_due", "monthly_cycles_completed_due",
                   "average_delay_days",
                   "compliance_threshold_percent", "overdue_days", "overdue_bucket", "overdue_cycle", "productivity",
@@ -1278,41 +1363,46 @@ def _entered_by_om(report) -> bool:
     )
 
 
-def _sequence_entry(report) -> tuple[int, bool, frozenset, bool]:
-    """One saved day as `_cycle_sequence` reads it: (tables_cleaned, counts, table numbers, entered by O&M)."""
+def _sequence_entry(report) -> tuple[int, bool, frozenset]:
+    """One saved day as `_cycle_sequence` reads it: (tables_cleaned, counts, table numbers)."""
     numbers = frozenset(n for n in (_code_number(code) for code in (report.cleaned_table_codes or [])) if n is not None)
-    return (report.tables_cleaned, report.review_status in ("Pending", "Confirmed"), numbers, _entered_by_om(report))
+    return (report.tables_cleaned, report.review_status in ("Pending", "Confirmed"), numbers)
 
 
 def _cycle_sequence(entries, total_tables: int) -> list[tuple[int, bool]]:
     """Cycle of each day of one plant-month, in date order: (cycle_no, extra) per entry of `entries`, which are
-    (tables_cleaned, counts) or (tables_cleaned, counts, table_numbers, entered_by_om) in date order (counts = awaiting
-    confirmation or confirmed; rejected days fill nothing).
+    (tables_cleaned, counts) or (tables_cleaned, counts, table_numbers) in date order (counts = awaiting confirmation
+    or confirmed; rejected days fill nothing).
 
-    A cycle fills up to the plant's table count. The day that reaches the count belongs to that cycle and completes
-    it; the tables above the count carry over to the next cycle (206 tables per cycle, 234 recorded: 28 count in
-    cycle 3), and later days go to the next cycle. Editing or back-filling a day moves the days after it accordingly.
-    After cycle 3 is full, further days stay on cycle 3 as extra washing (`extra`).
-
-    Re-cleaning (O&M Head / Assignee entries only): a day they entered that lists a table already recorded in the open
-    cycle starts the next cycle - the whole day, even when only some of its tables repeat. The open cycle stays
-    incomplete and every later day counts in the new one. A Site Engineer's day never moves a cycle on; its repeated
-    tables are refused (_assert_distinct_tables). Cycle 3 has no next cycle, so a repeat there is refused too."""
+    A cycle completes only after all configured tables have been cleaned. When table numbers are
+    recorded, distinct tables count toward completion; count-only legacy reports use tables_cleaned.
+    The day that completes a cycle belongs to it; count-only excess carries forward and later days go
+    to the next cycle. Editing or back-filling reassigns later days by the same rule. After Cycle 3 is
+    full, further days stay on Cycle 3 as extra washing (`extra`). A table cannot be counted twice in
+    an incomplete cycle; `_assert_distinct_tables` rejects that report."""
     out: list[tuple[int, bool]] = []
     cycle, counted, used = 1, 0, set()
     for entry in entries:
         tables, counts = entry[0], entry[1]
         numbers = entry[2] if len(entry) > 2 else ()
-        by_om = bool(entry[3]) if len(entry) > 3 else False
-        if counts and by_om and cycle < MONTHLY_CYCLE_TARGET and used.intersection(numbers):
-            cycle, counted, used = cycle + 1, 0, set()
-        out.append((cycle, cycle == MONTHLY_CYCLE_TARGET and total_tables > 0 and counted >= total_tables))
+        new_numbers = set(numbers) - used
+        extra = cycle == MONTHLY_CYCLE_TARGET and total_tables > 0 and counted >= total_tables
+        cleaned = (len(numbers) if extra else len(new_numbers)) if numbers else (tables or 0)
+        out.append((cycle, extra))
         if counts:
-            counted += tables or 0
+            counted += cleaned
             used.update(numbers)
             if total_tables > 0 and counted >= total_tables and cycle < MONTHLY_CYCLE_TARGET:
-                cycle, counted, used = cycle + 1, counted - total_tables, set()
+                cycle, counted = cycle + 1, counted - total_tables
+                used = set()
     return out
+
+
+def _report_table_count(report) -> int:
+    """Count distinct recorded table numbers, or the saved count for count-only reports."""
+    numbers = {_code_number(code) for code in (report.cleaned_table_codes or [])}
+    numbers.discard(None)
+    return len(numbers) if numbers else int(report.tables_cleaned or 0)
 
 
 def _completing_rows(by_cycle, total_tables: int) -> list:
@@ -1320,9 +1410,19 @@ def _completing_rows(by_cycle, total_tables: int) -> list:
     it is open), counting the tables carried over from the cycle before (_cycle_sequence)."""
     out, carry = [], 0
     for n, rows in enumerate(by_cycle, 1):
-        running, done = carry, None
+        running, done, seen = carry, None, set()
         for row in rows:
-            running += row.tables_cleaned or 0
+            # Saved days carry `cleaned_table_codes`; the CSV import plans days as `_Planned`, which
+            # has already parsed them into `numbers`. Accept either, or the upload crashes here.
+            numbers = set(getattr(row, "numbers", None) or ())
+            if not numbers:
+                numbers = {_code_number(code) for code in (getattr(row, "cleaned_table_codes", None) or [])}
+            numbers.discard(None)
+            if numbers:
+                running += len(numbers - seen)
+                seen.update(numbers)
+            else:
+                running += row.tables_cleaned or 0
             if done is None and total_tables > 0 and running >= total_tables:
                 done = row
         out.append(done)
@@ -1337,7 +1437,20 @@ def _cycle_ledger(reports, total_tables: int) -> dict[int, dict]:
     def walk(statuses: tuple[str, ...]) -> dict[int, tuple[int, int, int]]:
         carry, out = 0, {}
         for n in range(1, MONTHLY_CYCLE_TARGET + 1):
-            total = carry + sum(r.tables_cleaned or 0 for r in reports if r.cycle_no == n and r.review_status in statuses)
+            seen: set[int] = set()
+            cleaned = 0
+            for report in sorted(
+                (r for r in reports if r.cycle_no == n and r.review_status in statuses),
+                key=lambda r: (r.report_date, str(getattr(r, "created_at", "") or "")),
+            ):
+                numbers = {_code_number(code) for code in (report.cleaned_table_codes or [])}
+                numbers.discard(None)
+                if numbers:
+                    cleaned += len(numbers - seen)
+                    seen.update(numbers)
+                else:
+                    cleaned += int(report.tables_cleaned or 0)
+            total = carry + cleaned
             over = total - total_tables if n < MONTHLY_CYCLE_TARGET and total_tables > 0 and total >= total_tables else 0
             out[n] = (carry, total - over, over)
             carry = over
@@ -1348,9 +1461,7 @@ def _cycle_ledger(reports, total_tables: int) -> dict[int, dict]:
 
 
 def _closed_incomplete(reports, total_tables: int) -> set[int]:
-    """Cycles left incomplete because an O&M re-clean started a later cycle (_cycle_sequence): a later cycle already
-    has days, yet this one never reached the table count. They read as Missed and the month goes on in the later
-    cycle. Under the count rule alone a later cycle only gets days once the one before is full, so this is empty."""
+    """Return cycles with later-cycle work but fewer than the configured distinct tables."""
     active = [r for r in reports if r.review_status in ("Pending", "Confirmed")]
     highest = max((r.cycle_no for r in active), default=0)
     if total_tables <= 0 or highest < 2:
@@ -1367,7 +1478,7 @@ def _completed_cycles(db: Session, plant_id: UUID, month: str) -> set[int]:
 
 
 def _resequence_month(db: Session, plant_id: UUID, month: str, total_tables: int) -> list[dict]:
-    """Re-number one plant-month's days into cycles by date (_cycle_sequence) and refresh each cycle's completion.
+    """Re-number one plant-month's days by table-completion order and refresh each cycle's completion.
     Returns the days that moved to another cycle (for the audit log)."""
     rows = list(db.scalars(select(WashingDailyReport).where(
         WashingDailyReport.plant_id == plant_id, WashingDailyReport.cycle_month == month,
@@ -1400,7 +1511,7 @@ def _audit_moves(db: Session, user: User | None, plant: Plant, month: str, moved
 
 # Bump when the cycle counting rule changes: every saved month is recounted once, automatically, on the next start.
 CYCLE_RULE_SETTING = "washing_cycle_rule"
-CYCLE_RULE_VERSION = "date-order-carry-over-1"
+CYCLE_RULE_VERSION = "distinct-table-completion-2"
 
 
 def recount_all_months(db: Session) -> dict:
@@ -1959,16 +2070,30 @@ def month_cycles(db: Session, user: User, plant_id: UUID, month: str) -> dict:
     default_starts, default_dues = _default_start_dates(first), _default_due_dates(first)
     specific = (config.cycle_overrides or {}).get(month) or {}
     today = business_today()
+    month_end = first.replace(day=monthrange(first.year, first.month)[1])
     cycles = []
     ledger = _cycle_ledger(reports, table_count)
     closed = _closed_incomplete(reports, table_count)
+    highest_report_cycle = max((report.cycle_no for report in reports), default=0)
+    highest_completed_cycle = max(
+        (report.cycle_no for report in reports if report.cycle_completed and report.review_status == "Confirmed"),
+        default=0,
+    )
+    active_cycle = min(MONTHLY_CYCLE_TARGET, max(1, highest_report_cycle, highest_completed_cycle + 1))
     for n in range(1, MONTHLY_CYCLE_TARGET + 1):
         rows = [r for r in reports if r.cycle_no == n]
         confirmed, pending = ledger[n]["confirmed"], ledger[n]["pending"]
         done_on = next((r.report_date for r in rows if r.cycle_completed and r.review_status == "Confirmed"), None)
         due = dues[n - 1]
-        state = ("Completed" if done_on else "Missed" if n in closed else
-                 "In progress" if rows else ("Missed" if due < today else "Upcoming"))
+        # Once the month is over nothing can still be "In progress" or "Upcoming": an incomplete
+        # cycle is Missed. Cycles only advance on completion, so an empty past month never
+        # advanced and every cycle read as pending. Within the current month the sequence stands.
+        # Once the month is over, a cycle nobody ever worked on is Missed -- not "In progress" or
+        # "Upcoming". Cycles only advance on completion, so an empty past month never advanced and
+        # every cycle read as still pending. A cycle that does have work keeps its real state.
+        state = ("Completed" if done_on else
+                 "Missed" if n in closed or (today > month_end and not reports) else
+                 "In progress" if n <= active_cycle else "Upcoming")
         cycles.append({
             "cycle_no": n, "start_date": starts[n - 1].isoformat(), "due_date": due.isoformat(),
             "default_start_date": default_starts[n - 1].isoformat(), "default_due_date": default_dues[n - 1].isoformat(),
@@ -1993,7 +2118,7 @@ def month_cycles(db: Session, user: User, plant_id: UUID, month: str) -> dict:
 
 
 def recount_month(db: Session, user: User, plant_id: UUID, month: str) -> dict:
-    """O&M Head / washing Assignee: re-number a month's days into cycles by date (_cycle_sequence). Fixes months saved
+    """O&M Head / washing Assignee: re-number a month's days by table completion (_cycle_sequence). Fixes months saved
     before days moved with their edits, e.g. a day changed to 40 tables that still counted in an already full cycle."""
     if not _is_washing_manager(db, user):
         raise HTTPException(403, "Only the O&M Head or the washing Assignee can recount washing cycles")

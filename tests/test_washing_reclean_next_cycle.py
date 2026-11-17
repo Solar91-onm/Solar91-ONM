@@ -1,13 +1,5 @@
-"""Module Cleaning: tables cleaned again before a cycle is complete.
-
-When the O&M Head or a washing Assignee enters a day that lists a table already recorded in the open cycle, the whole
-day starts the next cycle (even when only some of its tables repeat). The open cycle stays incomplete and every later
-day counts in the new cycle. A Site Engineer's repeated table is still refused. Cycle 3 is the month's last cycle, so
-a repeat there is refused for everyone.
-"""
+"""Module Cleaning cycles advance only after every configured table has been cleaned."""
 from __future__ import annotations
-
-import uuid
 
 from app.core.models import WashingDailyReport
 from app.scheduled.washing_cycles import _cycle_sequence
@@ -34,103 +26,101 @@ def _team(client, db, who="head"):
     return plant, head, assignee
 
 
-def test_rule_on_its_own():
+def test_cycle_sequence_counts_distinct_tables_not_calendar_dates_or_repeats():
     om, se = True, False
-    # (tables, counts, table numbers, entered by O&M); the plant has 4 tables
-    assert _cycle_sequence([(2, True, {1, 2}, om), (2, True, {1, 2}, om)], 4) == [(1, False), (2, False)]
-    assert _cycle_sequence([(2, True, {1, 2}, om), (2, True, {2, 3}, om)], 4) == [(1, False), (2, False)]  # partly
-    assert _cycle_sequence([(2, True, {1, 2}, om), (2, True, {1, 2}, se)], 4) == [(1, False), (1, False)]  # engineer
-    assert _cycle_sequence([(2, True, {1, 2}, om), (2, False, {1, 2}, om)], 4) == [(1, False), (1, False)]  # rejected
-    assert _cycle_sequence([(2, True, {1, 2}, om), (2, True, {3, 4}, om)], 4) == [(1, False), (1, False)]  # no repeat
-    # after the repeat, later days count in the new cycle, even tables the old cycle never had
-    assert _cycle_sequence([(1, True, {1}, om), (1, True, {1}, om), (1, True, {4}, se)], 4) == [(1, False), (2, False), (2, False)]
-    # cycle 3 has no next cycle; days still count there
-    assert [c for c, _x in _cycle_sequence([(1, True, {1}, om)] * 4, 4)] == [1, 2, 3, 3]
-    # the count rule is unchanged, including the old two-value form
+    # Repeated codes do not complete a cycle or force the next cycle, regardless of who entered them.
+    assert _cycle_sequence([(2, True, {1, 2}, om), (2, True, {1, 2}, om)], 4) == [(1, False), (1, False)]
+    assert _cycle_sequence([(2, True, {1, 2}, om), (2, True, {2, 3}, om)], 4) == [(1, False), (1, False)]
+    assert _cycle_sequence([(2, True, {1, 2}, om), (2, True, {1, 2}, se)], 4) == [(1, False), (1, False)]
+    assert _cycle_sequence([(2, True, {1, 2}, om), (2, False, {1, 2}, om)], 4) == [(1, False), (1, False)]
+    # Cycle 2 starts on the day after the fourth distinct table is cleaned, even if dates are close together.
+    assert _cycle_sequence([(2, True, {1, 2}, om), (2, True, {3, 4}, om), (1, True, {1}, se)], 4) == [
+        (1, False), (1, False), (2, False)
+    ]
     assert _cycle_sequence([(4, True), (2, True)], 4) == [(1, False), (2, False)]
+    # Count-only reports remain supported, and further work after Cycle 3 is extra washing there.
+    assert [cycle for cycle, _extra in _cycle_sequence([(4, True)] * 3 + [(1, True)], 4)] == [1, 2, 3, 3]
+    assert _cycle_sequence([(4, True)] * 3 + [(1, True)], 4)[-1][1] is True
 
 
-def test_head_cleaning_the_same_tables_again_counts_in_the_next_cycle(client, db):
+def test_om_repeat_is_rejected_until_cycle_is_complete_then_next_cycle_starts(client, db):
     plant, _head, _assignee = _team(client, db)
-    d1, d2, d3 = _days(3, back=60)
+    d1, d2, d3, d4 = _days(4, back=60)
 
-    saved = _sheet(client, plant, [_picked(d1, [1, 2, 3])])
-    assert saved.status_code == 200, saved.text
-    again = _sheet(client, plant, [_picked(d2, [1, 2, 3])])
+    assert _sheet(client, plant, [_picked(d1, [1, 2, 3])]).status_code == 200
+    repeat = _sheet(client, plant, [_picked(d2, [1, 2, 3])])
+    assert repeat.status_code == 409 and "already recorded in cycle 1" in repeat.json()["detail"]
+    assert _cycles(db, plant)[0] == [1]
 
-    assert again.status_code == 200, again.text
-    assert again.json()["reports"][0]["cycle_no"] == 2
+    finish = _sheet(client, plant, [_picked(d2, [4])])
+    assert finish.status_code == 200, finish.text
+    assert finish.json()["reports"][0]["cycle_no"] == 1
+    assert finish.json()["reports"][0]["cycle_completed"] is True
+
+    next_cycle = _sheet(client, plant, [_picked(d3, [1, 2, 3]), _picked(d4, [4])])
+    assert next_cycle.status_code == 200, next_cycle.text
+    assert [row["cycle_no"] for row in next_cycle.json()["reports"]] == [2, 2]
+    assert [row["cycle_completed"] for row in next_cycle.json()["reports"]] == [False, True]
     cycles, completed = _cycles(db, plant)
-    assert cycles == [1, 2] and completed == [False, False]  # cycle 1 stays incomplete
+    assert cycles == [1, 1, 2, 2] and completed == [False, True, False, True]
 
-    # a later day goes to cycle 2 too, even with the table cycle 1 never had
-    later = _sheet(client, plant, [_picked(d3, [4])])
-    assert later.status_code == 200, later.text
-    cycles, completed = _cycles(db, plant)
-    assert cycles == [1, 2, 2] and completed == [False, False, True]  # cycle 2: 1, 2, 3 + 4 = all 4 tables
-
-    # the month view: cycle 1 was left incomplete (Missed), cycle 2 is the one the work went to
     month = client.get(f"{BASE}/plants/{plant.id}/cycles", params={"month": d1.strftime("%Y-%m")})
     assert month.status_code == 200, month.text
-    by_no = {c["cycle_no"]: c for c in month.json()["cycles"]}
-    assert by_no[1]["state"] == "Missed" and by_no[1]["confirmed"] == 3 and by_no[1]["completed_on"] is None
-    assert by_no[2]["state"] == "Completed" and by_no[2]["confirmed"] == 4
+    by_no = {cycle["cycle_no"]: cycle for cycle in month.json()["cycles"]}
+    assert by_no[1]["state"] == "Completed" and by_no[2]["state"] == "Completed"
+    assert by_no[3]["state"] == "In progress"
 
 
-def test_month_view_opens_on_the_cycle_the_re_clean_started(client, db):
+def test_cycle_two_is_not_active_until_cycle_one_is_complete(client, db):
     plant, _head, _assignee = _team(client, db)
-    d1, d2 = _days(2, back=60)
-    assert _sheet(client, plant, [_picked(d1, [1, 2]), _picked(d2, [1])]).status_code == 200
-
-    month = client.get(f"{BASE}/plants/{plant.id}/cycles", params={"month": d1.strftime("%Y-%m")})
-
-    assert month.status_code == 200, month.text
-    states = {c["cycle_no"]: c["state"] for c in month.json()["cycles"]}
-    assert states[1] == "Missed" and states[2] == "In progress"
-
-
-def test_a_partly_repeated_day_moves_whole_to_the_next_cycle(client, db):
-    plant, _head, _assignee = _team(client, db, who="assignee")
     d1, d2 = _days(2, back=30)
-
-    response = _sheet(client, plant, [_picked(d1, [1, 2]), _picked(d2, [2, 3])])  # table 2 repeats, 3 is new
-
-    assert response.status_code == 200, response.text
-    assert [r["cycle_no"] for r in response.json()["reports"]] == [1, 2]
-    assert _cycles(db, plant)[0] == [1, 2]
-
-
-def test_engineer_cleaning_the_same_table_again_is_still_refused(client, db):
-    plant, _head, _assignee = _team(client, db)
-    d1, d2 = _days(2)
-    _engineer(client, db, plant)
     assert _sheet(client, plant, [_picked(d1, [1, 2])]).status_code == 200
 
-    clash = _sheet(client, plant, [_picked(d2, [2, 3])])
+    month = client.get(f"{BASE}/plants/{plant.id}/cycles", params={"month": d1.strftime("%Y-%m")})
+    assert month.status_code == 200, month.text
+    states = {cycle["cycle_no"]: cycle["state"] for cycle in month.json()["cycles"]}
+    assert states == {1: "In progress", 2: "Upcoming", 3: "Upcoming"}
 
-    assert clash.status_code == 409 and "Table 2 is already recorded in cycle 1" in clash.json()["detail"]
+    finish = _sheet(client, plant, [_picked(d2, [3, 4])])
+    assert finish.status_code == 200, finish.text
+    month = client.get(f"{BASE}/plants/{plant.id}/cycles", params={"month": d1.strftime("%Y-%m")})
+    states = {cycle["cycle_no"]: cycle["state"] for cycle in month.json()["cycles"]}
+    assert states == {1: "Completed", 2: "In progress", 3: "Upcoming"}
+
+
+def test_partly_repeated_day_is_rejected_for_the_whole_day(client, db):
+    plant, _head, _assignee = _team(client, db, who="assignee")
+    d1, d2 = _days(2, back=30)
+    assert _sheet(client, plant, [_picked(d1, [1, 2])]).status_code == 200
+
+    response = _sheet(client, plant, [_picked(d2, [2, 3])])
+
+    assert response.status_code == 409 and "Table 2 is already recorded in cycle 1" in response.json()["detail"]
     assert _cycles(db, plant)[0] == [1]
 
 
-def test_engineer_day_after_an_om_re_clean_belongs_to_the_new_cycle(client, db):
-    plant, head, _assignee = _team(client, db)
-    d1, d2, d3 = _days(3)
-    assert _sheet(client, plant, [_picked(d1, [1, 2]), _picked(d2, [1])]).status_code == 200  # d2 starts cycle 2
+def test_engineer_repeat_is_refused_and_next_cycle_begins_after_full_clean(client, db):
+    plant, _head, _assignee = _team(client, db)
+    d1, d2, d3, d4 = _days(4)
+    assert _sheet(client, plant, [_picked(d1, [1, 2]), _picked(d2, [3, 4])]).status_code == 200
     _engineer(client, db, plant)
 
-    clash = _sheet(client, plant, [_picked(d3, [1])])          # table 1 is already in cycle 2
-    assert clash.status_code == 409 and "already recorded in cycle 2" in clash.json()["detail"]
-    fresh = _sheet(client, plant, [_picked(d3, [3])])
-    assert fresh.status_code == 200, fresh.text
-    assert fresh.json()["reports"][0]["cycle_no"] == 2 and fresh.json()["reports"][0]["review_status"] == "Pending"
-    conftest._CURRENT_USER = head
+    first = _sheet(client, plant, [_picked(d3, [1])])
+    assert first.status_code == 200, first.text
+    assert first.json()["reports"][0]["cycle_no"] == 2
+    repeat = _sheet(client, plant, [_picked(d4, [1])])
+    assert repeat.status_code == 409 and "already recorded in cycle 2" in repeat.json()["detail"]
+    assert _cycles(db, plant)[0] == [1, 1, 2]
 
 
-def test_om_repeat_in_cycle_three_is_refused(client, db):
+def test_cycle_three_repeat_is_refused_before_it_is_full(client, db):
     plant, _head, _assignee = _team(client, db)
     d1, d2, d3, d4 = _days(4, back=60)
-    assert _sheet(client, plant, [_picked(d1, [1]), _picked(d2, [1]), _picked(d3, [1])]).status_code == 200
-    assert _cycles(db, plant)[0] == [1, 2, 3]
+    assert _sheet(client, plant, [
+        _picked(d1, [1, 2, 3, 4]),
+        _picked(d2, [1, 2, 3, 4]),
+        _picked(d3, [1]),
+    ]).status_code == 200
 
     refused = _sheet(client, plant, [_picked(d4, [1])])
 
@@ -140,17 +130,15 @@ def test_om_repeat_in_cycle_three_is_refused(client, db):
     assert _cycles(db, plant)[0] == [1, 2, 3]
 
 
-def test_editing_away_the_repeat_brings_the_day_back_to_the_open_cycle(client, db):
+def test_editing_a_completed_cycle_below_table_count_reopens_it(client, db):
     plant, _head, _assignee = _team(client, db)
     d1, d2 = _days(2, back=60)
-    saved = _sheet(client, plant, [_picked(d1, [1, 2]), _picked(d2, [2])])
-    assert [r["cycle_no"] for r in saved.json()["reports"]] == [1, 2]
-    second = saved.json()["reports"][1]["id"]
+    saved = _sheet(client, plant, [_picked(d1, [1, 2]), _picked(d2, [3, 4])])
+    assert [row["cycle_no"] for row in saved.json()["reports"]] == [1, 1]
+    assert saved.json()["reports"][1]["cycle_completed"] is True
 
-    edited = client.patch(f"{BASE}/daily-reports/{second}", json={"table_numbers": [3]})
+    edited = client.patch(f"{BASE}/daily-reports/{saved.json()['reports'][1]['id']}", json={"table_numbers": [3]})
 
     assert edited.status_code == 200, edited.text
-    assert edited.json()["cycle_no"] == 1
+    assert edited.json()["cycle_no"] == 1 and edited.json()["cycle_completed"] is False
     assert _cycles(db, plant)[0] == [1, 1]
-    db.expire_all()
-    assert db.get(WashingDailyReport, uuid.UUID(second)).cleaned_table_codes == ["Table 003"]

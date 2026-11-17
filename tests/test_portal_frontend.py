@@ -532,10 +532,8 @@ def test_record_washing_keeps_the_last_cycle_open_for_extra_washing():
     assert run.returncode == 0, run.stderr or run.stdout
 
 
-def test_record_sheet_lets_om_re_clean_tables_into_the_next_cycle():
-    """O&M Head / Assignee may pick tables already cleaned in the open cycle: the day starts the next cycle (the backend
-    rule in _cycle_sequence). A Site Engineer is still told the table is already cleaned. After a saved re-clean the
-    overtaken cycle's grid ends the day before it, and the next cycle's grid starts on it."""
+def test_record_sheet_advances_only_after_every_table_is_cleaned():
+    """Dates and repeat selections do not start a later cycle; a full table set does."""
     script = """
       global.window = global;
       global.document = { querySelector: () => null, querySelectorAll: () => [], addEventListener: () => {} };
@@ -555,34 +553,39 @@ def test_record_sheet_lets_om_re_clean_tables_into_the_next_cycle():
       const day1 = { id: 'a', report_date: '2026-10-01', cycle_no: 1, tables_cleaned: 3, job_status: 'Done',
                      review_status: 'Confirmed', cycle_completed: false, cleaned_table_codes: ['Table 001', 'Table 002', 'Table 003'] };
       const rows = (reports, cycleNo, drafts) => global.__i.recordRows({
-        month: '2026-10', recordCycle: cycleNo, washingDataToday: '2026-10-05', washingReports: reports,
+        month: '2026-10', recordCycle: cycleNo, washingDataToday: '2026-10-17', washingReports: reports,
         recordDrafts: drafts || {}, washingPlant: { cycles, table_count: 10, monthly_target: 3 } });
 
-      // Unsaved: the Head picks 1-3 again on the 3rd; the 4th is then planned in cycle 2 too.
+      // Re-cleaning a table before this cycle is full is rejected for the Head too.
       const drafts = { '2026-10-03': { list: '2-5' }, '2026-10-04': { list: '1' } };
       const planned = rows([day1], 1, drafts);
       const third = planned.find((r) => r.date === '2026-10-03');
-      if (third.error) fail('O&M re-clean should not be an error: ' + third.error);
-      if (third.numbers.join(',') !== '2,3,4,5') fail('picked tables ' + third.numbers);
-      if (!/starts cycle 2/.test(third.note) || !/2\\u20133/.test(third.note)) fail('note: ' + third.note);
+      if (!/already cleaned in this cycle/.test(third.error) || third.numbers.length) fail('Head repeat: ' + third.error);
       const fourth = planned.find((r) => r.date === '2026-10-04');
-      if (fourth.numbers.join(',') !== '1') fail('the day after plans against cycle 2: ' + fourth.numbers);
-      if (!/Counts in cycle 2/.test(fourth.note)) fail('later day note: ' + fourth.note);
+      if (!/already cleaned in this cycle/.test(fourth.error) || fourth.numbers.length) fail('later day repeat: ' + fourth.error);
 
-      // A Site Engineer picking the same tables is refused.
+      // A Site Engineer is subject to the same duplicate-table rule.
       role = 'Site Engineer';
       const se = rows([day1], 1, drafts).find((r) => r.date === '2026-10-03');
       if (!/already cleaned in this cycle/.test(se.error) || se.numbers.length) fail('engineer: ' + se.error);
       role = 'O&M Head';
 
-      // Saved: the re-clean on the 3rd is cycle 2. Cycle 1's grid ends on the 2nd; cycle 2's starts on the 3rd.
-      const day3 = Object.assign({}, day1, { id: 'b', report_date: '2026-10-03', cycle_no: 2 });
-      const c1 = rows([day1, day3], 1).map((r) => r.date);
-      if (c1[c1.length - 1] !== '2026-10-02') fail('cycle 1 should end the day before cycle 2 began: ' + c1.join(','));
-      const c2 = rows([day1, day3], 2);
-      if (c2[0].date !== '2026-10-03' || !c2[0].report) fail('cycle 2 should start on its first day: ' + c2.map((r) => r.date).join(','));
-      if (c2.cleanedTables.join(',') !== '1,2,3') fail('cycle 2 cleaned tables: ' + c2.cleanedTables);
-      if (rows([day1, day3], 1).cleanedTables.join(',') !== '1,2,3') fail('cycle 1 keeps only its own tables');
+      // When all 10 tables are cleaned on the 3rd, Cycle 2 begins on the 4th.
+      const day3 = Object.assign({}, day1, {
+        id: 'b', report_date: '2026-10-03', cycle_no: 1, tables_cleaned: 7, cycle_completed: true,
+        cleaned_table_codes: ['Table 004', 'Table 005', 'Table 006', 'Table 007', 'Table 008', 'Table 009', 'Table 010']
+      });
+      const c1 = rows([day1, day3], 1);
+      if (c1[c1.length - 1].date !== '2026-10-03') fail('cycle 1 should end when all tables are cleaned: ' + c1.map((r) => r.date).join(','));
+      const unfinished = rows([day1], 1);
+      if (unfinished[unfinished.length - 1].date !== '2026-10-17') {
+        fail('Cycle 1 should remain recordable after its scheduled window until all tables are cleaned');
+      }
+      const c2 = rows([day1, day3], 2, { '2026-10-04': { list: '1' } });
+      if (c2[0].date !== '2026-10-04' || c2[0].numbers.join(',') !== '1' || c2[0].error) {
+        fail('cycle 2 should begin after cycle 1 completes: ' + JSON.stringify(c2[0]));
+      }
+      if (c1.cleanedTables.join(',') !== '1,2,3,4,5,6,7,8,9,10') fail('cycle 1 cleaned tables: ' + c1.cleanedTables);
 
       // Cycle 3 has no next cycle: a repeat there is an error even for the Head.
       const c3day = Object.assign({}, day1, { id: 'c', report_date: '2026-10-02', cycle_no: 3 });
@@ -780,12 +783,13 @@ def test_module_cleaning_board_shows_every_plant_and_opens_one_plants_calendar()
     for cls in ("ep-wb__card--ontrack", "ep-wb__card--behind", "ep-wb__card--late"):
         assert cls in styles
 
-    # What a card carries: cycle ring, the three cycle pips, tables cleaned, assignee.
-    for piece in ("ep-wb__ring", "ep-wb__pips", "ep-wb__tables", "ep-wb__assignee", "No tables cleaned"):
+    # Cards follow the plant tile reference: cycle ring, numbered pips, table progress, and assignee.
+    for piece in ("ep-wb__ring", "ep-wb__pips", "ep-wb__cycle-pip", "ep-wb__table-count",
+                  "ep-wb__tables", "ep-wb__assignee", "No tables cleaned"):
         assert piece in board
-    assert 'class="ep-wb__date-label">Last Updated :' in board
-    assert ".ep-wb__date-label {" in styles
-    assert 'font-family: var(--ep-font-mono, "JetBrains Mono", monospace);' in styles
+    assert 'class="ep-wb__date">' in board
+    assert "border-top: 3px solid var(--wb-tone);" in styles
+    assert ".ep-wb__cycle-pip--done" in styles
 
     # A card opens that plant's Module Cleaning page.
     assert 'Solar91PortalNav.selectPlantPage(card.getAttribute("data-wb-plant"), "washing")' in board
@@ -801,34 +805,27 @@ def test_module_cleaning_compliance_cycle_scope_and_board_breakdown():
     board = (PORTAL_ASSETS / "js" / "washing-board.js").read_text(encoding="utf-8")
     board_styles = (PORTAL_ASSETS / "css" / "washing-board.css").read_text(encoding="utf-8")
 
-    assert 'localStorage.setItem(WASHING_CYCLE_KEY + userId, selection)' in overview
-    assert 'const WASHING_CYCLE_KEY = "solar91:overview:washing-cycle:v2:";' in overview
-    # Default is "By date": the scored cycle follows the Range (days 1-10 / 11-20 / 21-end).
-    assert 'let washingCycleSelection = "auto";' in overview
-    assert '<option value="auto"${washingSelection === "auto" ? " selected" : ""}>By date</option>' in overview
-    assert '<option value="all"${washingSelection === "all" ? " selected" : ""}>Month so far</option>' in overview
-    assert "function cycleOfDay(day) { return day <= 10 ? 1 : day <= 20 ? 2 : 3; }" in overview
-    # The legend reads the same grades as the %, and upcoming cycles are skipped.
-    assert 'if (item.grade === "upcoming") { stats.upcoming += 1; return; }' in overview
-    assert 'else if (item.grade === "running") stats.pending += 1;' in overview
-    assert 'const wshP = pill("Module Cleaning", wshPct, washingStats.late);' in overview
-    # The tile shows only what its % is made of: tables cleaned / tables due so far, and what is still due.
-    assert 'label: "Tables cleaned", value: fmt.formatNumber(washingWork.done)' in overview
-    assert 'label: "Due so far", value: fmt.formatNumber(washingWork.due)' in overview
-    assert 'label: "Still due", value: fmt.formatNumber(washingStillDue)' in overview
-    # By date: the cycle containing the Range end, clipped to today (the 17th -> Cycle 2).
-    assert "return String(cycleOfDay(Number(last.slice(8, 10))));" in overview
-    assert 'cycle: resolveWashingCycle(currentWashingCycleSelection())' in overview
-    # One plant's cycle score is not capped (catch-up and extra washing read above 100%).
-    # Compliance = tables cleaned / tables due so far: one plant uncapped, several each up to its own due.
-    assert "target.done += single ? done : Math.min(done, due);" in adapter
-    assert "return work.due ? Math.round(100 * work.done / work.due) : 100;" in adapter
+    assert "Portfolio Cleaning Compliance" in overview
+    assert "Completed Activities" in overview
+    assert "Pending Activities" in overview
+    assert "Overdue Activities" in overview
+    assert "No cleaning activities scheduled" in overview
+    # Monthly compliance is a weighted aggregation of completed/planned activities.
+    assert "washingWork.done += completed;" in adapter
+    assert "washingWork.due += completed + pending;" in adapter
+    assert "Math.round(1000 * washingWork.done / washingWork.due) / 10" in adapter
+    assert "Math.min(pending, Math.max(0, Number(profile.washing.overdue) || 0))" in adapter
     assert "global.Solar91PortalNav.selectView(destination, dateRange)" in overview
-    # The board uses the same rule, so the two pages cannot disagree.
-    assert "done += single ? partDone : Math.min(partDone, partDue);" in board
-
+    # The board's monthly donut uses activities; the per-cycle ring remains table progress.
+    assert "monthly_activities_completed" in board
+    assert "monthly_activities_pending" in board
+    assert ">Completed <b>" in board and ">Pending <b>" in board and ">Overdue <b>" in board
+    assert "tables_done" in board and "tables_due" in board
+    assert "Math.min(100, Math.max(0, grade.compliance_percent))" in board
+    assert "No cleaning activities scheduled" in board
+    assert "selectedPlant.table_count" in board
+    assert "visibleRows()" in board
     assert "monthly_compliance_percent" in board
-    assert "monthly_tables_confirmed" in board and "monthly_tables_due" in board
     assert "function cycleCompliance(rows)" not in board
     assert "data-wb-compliance-cycle" not in board
     assert 'data-wb-period="week"' not in board and 'data-wb-period="month"' not in board
@@ -1815,11 +1812,12 @@ def test_record_sheet_tracks_exactly_which_tables_were_cleaned():
     assert "data-record-list placeholder=" in calendar
     assert "From start" not in calendar and "From end" not in calendar
     assert "data-record-mode" not in calendar and "data-record-end" not in calendar
-    assert "function parseTableList(text, total)" in calendar and "function planDay(state, draft, used, total, movedTo)" in calendar
+    assert "function parseTableList(text, total)" in calendar and "function planDay(state, draft, used, total)" in calendar
     # the exact tables are sent, shown for every saved day, and summarised for the cycle
     assert "table_numbers: row.numbers," in calendar
     assert "formatTableList(row.numbers)" in calendar
     assert "Cleaned this cycle:" in calendar and "Not cleaned yet:" in calendar
+    assert '(item.state === "Upcoming" ? " disabled" : "")' in calendar
 
 
 def test_record_sheet_uses_wheel_safe_numeric_text_inputs():

@@ -14,63 +14,6 @@
   let state = null;      // { allRows, rows, totals, sort }
   let searchTerm = "";
   const filters = { plant: "__all", health: "__all", company: "__all", district: "__all" };
-  let washingPreferenceUserId;
-  let washingCycleSelection = "auto";
-  // v2: the default became "auto" (the cycle follows the Range dates), so every user starts there
-  // once instead of keeping an old saved cycle that no longer matches the dates on screen.
-  const WASHING_CYCLE_KEY = "solar91:overview:washing-cycle:v2:";
-
-  function currentWashingCycleSelection() {
-    const user = global.Solar91PortalAPI.currentUser();
-    const userId = user && user.id ? String(user.id) : "";
-    if (userId === washingPreferenceUserId) return washingCycleSelection;
-    washingPreferenceUserId = userId;
-    washingCycleSelection = "auto";
-    if (!userId) return washingCycleSelection;
-    try {
-      const saved = global.localStorage.getItem(WASHING_CYCLE_KEY + userId);
-      if (saved === "auto" || saved === "1" || saved === "2" || saved === "3" || saved === "all") {
-        washingCycleSelection = saved;
-      }
-    } catch (error) {
-      if (global.console && global.console.warn) {
-        global.console.warn("Could not load the Module Cleaning cycle preference.", error);
-      }
-    }
-    return washingCycleSelection;
-  }
-
-  function saveWashingCycleSelection(selection) {
-    washingCycleSelection = selection;
-    const user = global.Solar91PortalAPI.currentUser();
-    const userId = user && user.id ? String(user.id) : "";
-    if (!userId) return;
-    washingPreferenceUserId = userId;
-    try {
-      global.localStorage.setItem(WASHING_CYCLE_KEY + userId, selection);
-    } catch (error) {
-      if (global.console && global.console.warn) {
-        global.console.warn("Could not save the Module Cleaning cycle preference.", error);
-      }
-    }
-  }
-
-  // "auto" (the default) scores the cycle the date is in: days 1-10 = Cycle 1, 11-20 = Cycle 2,
-  // 21-month end = Cycle 3. The date is the Range's end, clipped to today, so "This month" on the
-  // 17th shows Cycle 2 and on the 25th Cycle 3, and a cycle that has not started is never chosen.
-  // Cycle scores cover the current month, so a range ending in another month reads the month figure.
-  function cycleOfDay(day) { return day <= 10 ? 1 : day <= 20 ? 2 : 3; }
-
-  function resolveWashingCycle(selection) {
-    if (selection !== "auto") return selection;
-    if (!state || !state.rangeEnd) return "all";
-    const business = String(state.businessDate || state.rangeEnd);
-    const end = String(state.rangeEnd);
-    const last = end > business ? business : end;
-    if (last.slice(0, 7) !== business.slice(0, 7)) return "all";
-    return String(cycleOfDay(Number(last.slice(8, 10))));
-  }
-
   // The district dropdown merges values that differ only by case or spacing, so compare them the same way.
   function districtKey(value) { return String(value || "").trim().toLocaleLowerCase(); }
   function districtMatches(plant) {
@@ -473,17 +416,16 @@
     return `<span class="ep-chip ${def.cls}"><span class="ep-chip__dot"></span>${def.label}</span>`;
   }
 
-  function complianceCell(pct) {
+  function complianceCell(pct, decimals) {
     if (pct === null || pct === undefined) {
       return `<span class="ep-bar"><span class="ep-bar__value ep-bar__value--grey">N/A</span></span>`;
     }
     const colour = pct >= 85 ? "green" : pct >= 70 ? "amber" : "red";
-    // Module cleaning can pass 100% (extra washing after all three cycles): the figure is shown in
-    // full, while the bar itself stops at a full track.
+    const label = decimals ? Number(pct).toFixed(decimals) : pct + "";
     return (
       `<span class="ep-bar">` +
         `<span class="ep-bar__track"><span class="ep-bar__fill ep-bar__fill--${colour}" style="width:${Math.min(100, pct)}%"></span></span>` +
-        `<span class="ep-bar__value">${pct}%</span>` +
+        `<span class="ep-bar__value">${label}%</span>` +
       `</span>`
     );
   }
@@ -503,31 +445,6 @@
   }
 
   // ─── Header strip + big metric cards + count strip ──────────────────
-  // Plant-cycles for the selection ("1" / "2" / "3", or "all" = every started cycle this month).
-  // Upcoming cycles are skipped. done = on target or on time; pending = still open (scored on pace);
-  // late = finished after the deadline, or the deadline passed without reaching the threshold.
-  // The legend and the % read the same grades, so they can no longer disagree.
-  function washingGradeStats(rows, selection) {
-    const stats = { onTarget: 0, onTime: 0, pending: 0, late: 0, scored: 0, upcoming: 0,
-      tablesDone: 0, tablesDue: 0 };
-    (rows || []).forEach(({ profile }) => {
-      const grades = profile && profile.washing && profile.washing.cycleGrades;
-      if (!Array.isArray(grades)) return;
-      grades.forEach((item) => {
-        if (selection !== "all" && Number(selection) !== Number(item.cycleNo)) return;
-        if (item.grade === "upcoming") { stats.upcoming += 1; return; }
-        stats.scored += 1;
-        stats.tablesDone += Number(item.tablesDone) || 0;
-        stats.tablesDue += Number(item.tablesDue) || 0;
-        if (item.grade === "on_target") stats.onTarget += 1;
-        else if (item.grade === "on_time") stats.onTime += 1;
-        else if (item.grade === "running") stats.pending += 1;
-        else stats.late += 1;
-      });
-    });
-    return stats;
-  }
-
   function renderTiles(totals) {
     // Header strip — title + capacity chips
     const headline = document.querySelector("[data-portfolio-headline]");
@@ -540,19 +457,14 @@
     // Three big neutral metric cards: PM, Washing, Issues. Status is signalled
     // only by a 6px dot in the pill — number stays in primary text colour.
     const pmPct   = totals.pmCompliancePercent;
-    const washingSelection = currentWashingCycleSelection();
-    // What is actually scored: "auto" becomes the cycle the Range falls in, or the month.
-    const washingScope = resolveWashingCycle(washingSelection);
-    const washingStats = washingGradeStats(state && state.rows, washingScope);
-    const wshPct  = washingScope === "all" ? totals.washingCompliancePercent
-      : (totals.washingCycleCompliancePercentByCycle || {})[washingScope];
-    const washingScopeLabel = (washingScope === "all" ? "Month so far" : "Cycle " + washingScope) +
-      (washingSelection === "auto" ? " · by date" : "");
-    // The exact numbers the % is made of: tables cleaned / tables due so far, for the plants the
-    // filters show (one plant: its own figures; several: each counted up to its own due).
-    const washingWork = (washingScope === "all" ? totals.washingWork
-      : (totals.washingCycleWork || {})[washingScope]) || { done: 0, due: 0, plants: 0 };
-    const washingStillDue = Math.max(0, washingWork.due - washingWork.done);
+    const wshPct = Number(totals.washingCompliancePercent) || 0;
+    const washingWork = totals.washingWork || { done: 0, due: 0, pending: 0, overdue: 0, plants: 0 };
+    const washingHasPlan = washingWork.due > 0;
+    // The cycle being worked on now (the highest one any plant has started) and its own tables:
+    // the month figure alone does not say how the cycle in hand is going.
+    const washingCycleWork = totals.washingCycleWork || {};
+    const washingCycleNo = ["3", "2", "1"].find((n) => (washingCycleWork[n] || {}).plants) || "";
+    const washingCycle = washingCycleNo ? washingCycleWork[washingCycleNo] : null;
     const openIss = totals.openIssues;
 
     function pill(label, pct, overdueCount) {
@@ -576,7 +488,8 @@
         : { dot: "green", tag: "All running" };
 
     const pmP  = pill("PM", pmPct, totals.pmOverdue);
-    const wshP = pill("Module Cleaning", wshPct, washingStats.late);
+    const wshP = washingHasPlan ? pill("Module Cleaning", wshPct, totals.washingOverdue)
+      : { dot: "", tag: "N/A" };
     const isP  = issuePill(totals.criticalIssues, openIss);
 
     const ICON_PM = `<svg class="ep-metric__icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"></rect><path d="M16 2v4M8 2v4M3 10h18"></path><path d="m9 16 2 2 4-4"></path></svg>`;
@@ -617,32 +530,30 @@
         title: "Module Cleaning Compliance",
         destination: "washing",
         icon: ICON_WASH,
-        tone: wshPct === null || wshPct === undefined ? "neutral" : toneOfPill(wshP),
-        empty: wshPct === null || wshPct === undefined
-          ? (washingScope !== "all" && washingStats.upcoming && !washingStats.scored
-            ? "Cycle " + washingScope + " has not started yet"
-            : "No cleaning scheduled")
-          : "",
-        // The work score: tables cleaned against tables due so far. It is not capped for one
-        // plant, so catch-up work and extra washing read above 100%.
-        figure: wshPct === null || wshPct === undefined ? null : {
-          value: String(wshPct), unit: "%",
-          caption: washingScopeLabel
+        tone: washingHasPlan ? toneOfPill(wshP) : "neutral",
+        figure: {
+          value: wshPct.toFixed(1), unit: "%",
+          caption: washingHasPlan
+            ? "of " + fmt.formatNumber(washingWork.due) + " planned cleaning activities"
+            : "No cleaning activities scheduled"
         },
-        subline: washingWork.plants
+        subline: washingCycle
+          ? "Cycle " + washingCycleNo + " in progress · " + fmt.formatNumber(washingCycle.done) +
+            " of " + fmt.formatNumber(washingCycle.due) + " tables due so far"
+          : washingWork.plants
           ? (washingWork.plants === 1 && state && state.rows.length === 1
             ? state.rows[0].plant.plantName || state.rows[0].plant.siteCode
             : "Across " + fmt.formatNumber(washingWork.plants) + " plants")
           : "",
-        meter: wshPct === null || wshPct === undefined ? [] : [
+        meter: washingHasPlan ? [
           { width: clamp(wshPct), tone: "accent" },
           { width: 100 - clamp(wshPct), tone: "short" }
-        ],
-        // Only the figures the % is computed from: cleaned / due so far = %, and what is still due.
+        ] : [],
         legend: [
-          { dot: washingWork.done ? "green" : "", label: "Tables cleaned", value: fmt.formatNumber(washingWork.done) },
-          { dot: "", label: "Due so far", value: fmt.formatNumber(washingWork.due) },
-          { dot: washingStillDue > 0 ? "red" : "", label: "Still due", value: fmt.formatNumber(washingStillDue), bad: washingStillDue > 0 }
+          { dot: washingWork.done ? "green" : "", label: "Completed", value: fmt.formatNumber(washingWork.done) },
+          { dot: "", label: "Pending", value: fmt.formatNumber(washingWork.pending) },
+          { dot: washingWork.overdue > 0 ? "red" : "", label: "Overdue",
+            value: fmt.formatNumber(washingWork.overdue), bad: washingWork.overdue > 0 }
         ]
       },
       {
@@ -718,18 +629,7 @@
           </span>`).join("")}
         </span>
       </button>`;
-      if (c.destination !== "washing") return button;
-      return `<div class="ep-metric-wrap ep-metric-wrap--washing">${button}
-        <label class="ep-metric__cycle">
-          <select data-washing-cycle aria-label="Select Module Cleaning cycle">
-            <option value="auto"${washingSelection === "auto" ? " selected" : ""}>By date</option>
-            <option value="all"${washingSelection === "all" ? " selected" : ""}>Month so far</option>
-            <option value="1"${washingSelection === "1" ? " selected" : ""}>Cycle 1</option>
-            <option value="2"${washingSelection === "2" ? " selected" : ""}>Cycle 2</option>
-            <option value="3"${washingSelection === "3" ? " selected" : ""}>Cycle 3</option>
-          </select>
-        </label>
-      </div>`;
+      return button;
     }).join("");
   }
 
@@ -799,10 +699,13 @@
   function renderWashingCompliance({ rows, totals }) {
     document.querySelector("[data-washing-summary]").innerHTML = `
       <div class="ep-kv">
-        <div class="ep-kv__item"><span class="ep-kv__k">Portfolio Module Cleaning Compliance</span><span class="ep-kv__v">${totals.washingCompliancePercent === null ? "N/A" : totals.washingCompliancePercent + "%"}</span></div>
-        <div class="ep-kv__item"><span class="ep-kv__k">Completed Cycles</span><span class="ep-kv__v">${fmt.formatNumber(totals.washingCompleted)}</span></div>
-        <div class="ep-kv__item"><span class="ep-kv__k">Pending Cycles</span><span class="ep-kv__v">${fmt.formatNumber(totals.washingPending)}</span></div>
-        <div class="ep-kv__item"><span class="ep-kv__k">Overdue Cycles</span><span class="ep-kv__v">${fmt.formatNumber(totals.washingOverdue)}</span></div>
+        <div class="ep-kv__item"><span class="ep-kv__k">Portfolio Cleaning Compliance</span><span class="ep-kv__v">${Number(totals.washingCompliancePercent || 0).toFixed(1)}%</span></div>
+        <div class="ep-kv__item"><span class="ep-kv__k">Completed Activities</span><span class="ep-kv__v">${fmt.formatNumber(totals.washingCompleted)}</span></div>
+        <div class="ep-kv__item"><span class="ep-kv__k">Pending Activities</span><span class="ep-kv__v">${fmt.formatNumber(totals.washingPending)}</span></div>
+        <div class="ep-kv__item"><span class="ep-kv__k">Overdue Activities</span><span class="ep-kv__v">${fmt.formatNumber(totals.washingOverdue)}</span></div>
+        ${totals.washingWork && !totals.washingWork.due
+          ? '<div class="ep-kv__item"><span class="ep-kv__k">Schedule</span><span class="ep-kv__v">No cleaning activities scheduled</span></div>'
+          : ""}
       </div>
     `;
 
@@ -823,7 +726,7 @@
           <td class="num">${numCell(w.completed)}</td>
           <td class="num">${numCell(w.pending)}</td>
           <td class="num">${numCell(w.overdue)}</td>
-          <td>${complianceCell(w.compliancePercent)}</td>
+          <td>${complianceCell(w.compliancePercent, 1)}</td>
         </tr>
       `;
     }).join("");
@@ -868,7 +771,7 @@
         <td class="num">${numCell(profile.openIssues)}</td>
         <td class="num">${numCell(profile.closedIssues)}</td>
         <td>${complianceCell(profile.pm && profile.pm.compliancePercent)}</td>
-        <td>${complianceCell(profile.washing && profile.washing.compliancePercent)}</td>
+        <td>${complianceCell(profile.washing && profile.washing.compliancePercent, 1)}</td>
         <td class="num">
           <button class="ep-link-btn" data-open-plant="${plant.siteCode}">Open →</button>
         </td>
@@ -959,8 +862,7 @@
       if (destination === "washing") {
         global.Solar91WashingBoardPrefill = {
           plant: filters.plant,
-          // The board knows cycles and the month, not "auto": hand it what the tile is scoring.
-          cycle: resolveWashingCycle(currentWashingCycleSelection())
+          cycle: "all"
         };
         global.Solar91PortalNav.selectView(destination, dateRange);
         return;
@@ -973,14 +875,6 @@
       }
     }
     if (metrics) {
-      metrics.addEventListener("change", (ev) => {
-        const select = ev.target.closest("[data-washing-cycle]");
-        if (!select || !state) return;
-        saveWashingCycleSelection(select.value);
-        renderTiles(state.totals);
-        const refreshed = metrics.querySelector("[data-washing-cycle]");
-        if (refreshed) refreshed.focus();
-      });
       metrics.addEventListener("click", (ev) => {
         const card = ev.target.closest("[data-overview-destination]");
         if (card) openMetricDestination(card);

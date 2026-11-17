@@ -1,8 +1,4 @@
-/* washing-board.css — the Module Cleaning board, built to fit one screen.
-   One header row (title · month · search), one summary band (month donut · cycle bars · plant
-   status chips), one filter row, then compact plant cards. Colour carries the state: a card's
-   tinted band and ring show its lateness, each cycle bar its work score (85 / 70 thresholds, the
-   same as the Dashboard tile), so the board reads at arm's length before any text is. */
+/* washing-board.css — Module Cleaning summary and compact plant cards. */
 
 /* ── Upper area: controls on the left, compliance card on the right ── */
 .ep-wb__upper {
@@ -91,7 +87,7 @@
 }
 .ep-wb__donut-label strong { color: var(--ep-text); font-size: 19px; font-variant-numeric: tabular-nums; }
 .ep-wb__donut-label small { color: var(--ep-text-muted); font-size: 9px; }
-/* Cleaned · Due so far: one line under the donut. */
+/* Activity counts under the monthly compliance donut. */
 .ep-wb__compliance-legend { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px 16px; }
 .ep-wb__compliance-legend span { display: inline-flex; align-items: center; gap: 6px; color: var(--ep-text-muted); font-size: 12px; }
 .ep-wb__compliance-legend b { color: var(--ep-text); font-variant-numeric: tabular-nums; }
@@ -132,7 +128,7 @@
 }
 .ep-wb__scope-all.is-on { border-color: var(--ep-accent); background: var(--ep-accent); color: var(--ep-text-inverse, #fff); }
 
-/* A score bar: label · track · value. Used in the band and on every card. */
+/* A score bar: label · track · value. Used in the monthly cycle summary. */
 .ep-wb__cbar {
   display: grid;
   grid-template-columns: 52px minmax(40px, 1fr) 46px;
@@ -227,7 +223,7 @@
 /* ── Plant cards ────────────────────────────────────────────────────── */
 .ep-wb__grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(255px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
   gap: 10px;
 }
 
@@ -236,11 +232,11 @@
   --wb-tint: var(--ep-grey-soft);
   display: flex;
   flex-direction: column;
-  gap: 7px;
+  gap: 5px;
   min-width: 0;
-  padding: 10px 12px 9px;
+  padding: 10px 14px 9px;
   border: 1px solid var(--ep-border);
-  border-left: 4px solid var(--wb-tone);
+  border-top: 3px solid var(--wb-tone);
   border-radius: 12px;
   background: linear-gradient(180deg, var(--wb-tint) 0, var(--ep-bg) 42px);
   font: inherit;
@@ -253,9 +249,9 @@
 .ep-wb__card--ontrack { --wb-tone: var(--ep-accent); --wb-tint: var(--ep-accent-soft); }
 .ep-wb__card--behind  { --wb-tone: #E08A1E; --wb-tint: var(--ep-amber-soft); }
 .ep-wb__card--late    { --wb-tone: #D64535; --wb-tint: var(--ep-red-soft); }
-.ep-wb__card--done    { --wb-tone: #1D5FB8; --wb-tint: #E7F0FB; }
+.ep-wb__card--done    { --wb-tone: var(--ep-accent); --wb-tint: var(--ep-accent-soft); }
 
-.ep-wb__head { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.ep-wb__head { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; }
 .ep-wb__name {
   flex: 1 1 auto;
   min-width: 0;
@@ -266,19 +262,6 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.ep-wb__month-score {
-  flex: 0 0 auto;
-  padding: 2px 8px;
-  border-radius: 999px;
-  background: var(--ep-grey-soft);
-  color: var(--ep-text);
-  font-size: 11px;
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
-}
-.ep-wb__month-score--good { background: var(--ep-accent); color: var(--ep-text-inverse, #fff); }
-.ep-wb__month-score--warn { background: #E08A1E; color: #fff; }
-.ep-wb__month-score--bad  { background: #D64535; color: #fff; }
 .ep-wb__code {
   flex: 0 0 auto;
   padding: 2px 7px;
@@ -290,16 +273,17 @@
   color: var(--ep-text-muted);
 }
 
-.ep-wb__body { display: flex; align-items: center; gap: 12px; }
-.ep-wb__gauge { position: relative; flex: 0 0 auto; width: 54px; height: 54px; }
-.ep-wb__ring { width: 54px; height: 54px; transform: rotate(-90deg); }
-.ep-wb__ring circle { fill: none; stroke-width: 5.5; }
+.ep-wb__date { color: var(--ep-text-muted); font-size: 12px; }
+.ep-wb__body { display: flex; align-items: center; gap: 15px; min-width: 0; }
+.ep-wb__gauge { position: relative; flex: 0 0 auto; width: 68px; height: 68px; }
+.ep-wb__ring { width: 68px; height: 68px; transform: rotate(-90deg); }
+.ep-wb__ring circle { fill: none; stroke-width: 4.5; }
 .ep-wb__ring-track { stroke: var(--ep-border-soft, #e5e7eb); }
 .ep-wb__ring-fill { stroke-linecap: round; stroke: var(--wb-tone, var(--ep-accent)); }
 .ep-wb__ring-fill--ontrack { stroke: var(--ep-accent); }
 .ep-wb__ring-fill--behind  { stroke: #E08A1E; }
 .ep-wb__ring-fill--late    { stroke: #D64535; }
-.ep-wb__ring-fill--done    { stroke: #1D5FB8; }
+.ep-wb__ring-fill--done    { stroke: var(--ep-accent); }
 .ep-wb__ring-text {
   position: absolute;
   inset: 0;
@@ -309,22 +293,42 @@
   justify-content: center;
   line-height: 1.05;
 }
-.ep-wb__ring-text strong { font-size: 13px; color: var(--ep-text); font-variant-numeric: tabular-nums; }
-.ep-wb__ring-text small { font-size: 8px; color: var(--ep-text-muted); }
+.ep-wb__ring-text strong { font-size: 15px; color: var(--ep-text); font-variant-numeric: tabular-nums; }
+.ep-wb__ring-text small { font-size: 9px; color: var(--ep-text-muted); }
 
-.ep-wb__facts { display: flex; flex: 1 1 auto; flex-direction: column; gap: 3px; min-width: 0; }
-.ep-wb__tables {
+.ep-wb__facts { display: flex; flex: 1 1 auto; flex-direction: column; gap: 4px; min-width: 0; }
+.ep-wb__table-count {
   overflow: hidden;
   color: var(--ep-text);
-  font-size: 11px;
-  font-weight: 600;
+  font-size: 14px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.ep-wb__pips { display: flex; flex-direction: column; gap: 2px; }
-.ep-wb__pips .ep-wb__cbar { grid-template-columns: 20px minmax(30px, 1fr) 40px; gap: 6px; font-size: 10px; }
-.ep-wb__pips .ep-wb__cbar-track { height: 6px; }
-.ep-wb__cbar.is-focus { margin: 0 -4px; padding: 0 4px; border-radius: 5px; background: var(--ep-accent-soft); }
+.ep-wb__tables {
+  overflow: hidden;
+  color: var(--ep-text-muted);
+  font-size: 12px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ep-wb__pips { display: flex; align-items: center; gap: 7px; }
+.ep-wb__cycle-pip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.ep-wb__cycle-pip--done { background: var(--ep-accent); color: var(--ep-text-inverse, #fff); }
+.ep-wb__cycle-pip--active { border: 1px solid var(--ep-accent); background: var(--ep-accent-soft); color: var(--ep-accent-strong); }
+.ep-wb__cycle-pip--upcoming { border: 1px solid var(--ep-border); background: var(--ep-bg); color: var(--ep-text-faint); }
 
 .ep-wb__foot {
   display: flex;
@@ -357,14 +361,6 @@
 .ep-wb__pill--behind  { background: var(--ep-amber-soft); color: var(--ep-amber); }
 .ep-wb__pill--late    { background: var(--ep-red-soft); color: var(--ep-red); }
 .ep-wb__pill--done    { background: #E7F0FB; color: #1D5FB8; }
-.ep-wb__date { flex: 0 0 auto; color: var(--ep-text-muted); font-size: 10px; white-space: nowrap; }
-.ep-wb__date-label {
-  margin-right: 3px;
-  color: var(--ep-text-faint);
-  font-family: var(--ep-font-mono, "JetBrains Mono", monospace);
-  font-size: 9px;
-  font-weight: 500;
-}
 .ep-wb__assignee {
   flex: 1 1 auto;
   min-width: 0;

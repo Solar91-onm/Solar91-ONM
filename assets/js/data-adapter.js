@@ -329,18 +329,14 @@
       washingCycleCompliancePercentByCycle: { "1": null, "2": null, "3": null },
       dcCapacityMw: 0, acCapacityMw: 0
     };
-    // Module cleaning compliance = tables cleaned / tables due so far, and the tile shows exactly
-    // those two numbers. With several plants each plant's cleaned tables count up to its own due,
-    // so one plant's extra washing cannot hide another plant's shortfall; one plant is uncapped.
-    const single = rows.length === 1;
-    const washingWork = { done: 0, due: 0, plants: 0 };
+    const washingWork = { done: 0, due: 0, pending: 0, overdue: 0, plants: 0 };
     const cycleWork = {
       "1": { done: 0, due: 0, plants: 0 }, "2": { done: 0, due: 0, plants: 0 }, "3": { done: 0, due: 0, plants: 0 }
     };
     function addWork(target, done, due) {
       done = Math.max(0, Number(done) || 0);
       due = Math.max(0, Number(due) || 0);
-      target.done += single ? done : Math.min(done, due);
+      target.done += Math.min(done, due);
       target.due += due;
       target.plants += 1;
     }
@@ -363,13 +359,18 @@
         totals.pmOverdue   += profile.pm.overdue || 0;
       }
       if (profile.washing) {
-        totals.washingCompleted += profile.washing.completed || 0;
-        totals.washingPending   += profile.washing.pending || 0;
-        totals.washingOverdue   += profile.washing.overdue || 0;
-        if (typeof profile.washing.compliancePercent === "number" &&
-            typeof profile.washing.monthlyTablesDue === "number") {
-          addWork(washingWork, profile.washing.monthlyTablesConfirmed, profile.washing.monthlyTablesDue);
-        }
+        const completed = Math.max(0, Number(profile.washing.completed) || 0);
+        const pending = Math.max(0, Number(profile.washing.pending) || 0);
+        const overdue = Math.min(pending, Math.max(0, Number(profile.washing.overdue) || 0));
+        totals.washingCompleted += completed;
+        totals.washingPending += pending;
+        totals.washingOverdue += overdue;
+        washingWork.done += completed;
+        washingWork.pending += pending;
+        washingWork.overdue += overdue;
+        washingWork.due += completed + pending;
+        if (profile.washing.monthlyActivities &&
+            Number(profile.washing.monthlyActivities.planned) > 0) washingWork.plants += 1;
         (profile.washing.cycleGrades || []).forEach(function (grade) {
           const cycle = cycleWork[String(grade.cycleNo)];
           // Upcoming cycles carry no score and are never counted.
@@ -383,12 +384,13 @@
 
     const pmTotal = totals.pmCompleted + totals.pmPending + totals.pmOverdue;
     totals.pmCompliancePercent = pmTotal === 0 ? null : Math.round((totals.pmCompleted / pmTotal) * 100);
-    // Nothing due yet (every day so far excused) is not a failure: 100%. No plant scored: N/A.
+    // A period with no planned cleaning activity is 0%; the dashboard labels the empty schedule.
     function workPercent(work) {
       if (!work.plants) return null;
-      return work.due ? Math.round(100 * work.done / work.due) : 100;
+      return work.due ? Math.round(1000 * work.done / work.due) / 10 : 0;
     }
-    totals.washingCompliancePercent = workPercent(washingWork);
+    totals.washingCompliancePercent = washingWork.due
+      ? Math.round(1000 * washingWork.done / washingWork.due) / 10 : 0;
     totals.washingWork = washingWork;
     totals.washingCycleWork = cycleWork;
     Object.keys(cycleWork).forEach(function (cycleNo) {

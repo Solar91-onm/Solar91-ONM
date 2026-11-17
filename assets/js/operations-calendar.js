@@ -430,6 +430,8 @@
       });
       var status = !tableCount
         ? "Unavailable"
+        : cycle.state === "Upcoming"
+          ? "Upcoming"
         : confirmed >= tableCount
           ? "Completed"
           : overtaken
@@ -458,11 +460,9 @@
       }) || null;
       return !!selected;
     });
-    if (!selected) {
-      cycleProgress.forEach(function (item) {
-        if (item.cycle.start_date <= date) selected = item;
-      });
-    }
+    if (!selected) selected = cycleProgress.find(function (item) {
+      return item.cycle.state === "In progress" || item.cycle.state === "Missed";
+    }) || null;
     if (!selected) selected = cycleProgress[0] || null;
 
     var pills = cycleProgress.map(function (item) {
@@ -1202,9 +1202,7 @@
     var cycleCount = (state.washingPlant.cycles || []).length || 3;
     var isLastCycle = Number(cycle.cycle_no) >= cycleCount;
     if (completedOn && completedOn < lastDate && !isLastCycle) lastDate = completedOn;
-    // An O&M re-clean can start the next cycle before this one is full (_cycle_sequence in
-    // app/scheduled/washing_cycles.py): this cycle's grid then ends the day before the next cycle's first day,
-    // and that cycle's grid starts on it.
+    // Later-cycle reports start only after the previous cycle reaches the full table count.
     var activeReports = (state.washingReports || []).filter(function (report) {
       return report.review_status === "Pending" || report.review_status === "Confirmed";
     });
@@ -1266,7 +1264,6 @@
         markUsed(savedUsed, total, report);
       }
     });
-    var movedTo = 0;
     var rows = dates.map(function (date) {
       var report = reportsByDate[date];
       if (report && report.review_status !== "Rejected") {
@@ -1277,19 +1274,12 @@
         return { date: date, report: report, numbers: tableNumbersOf(report) };
       }
       var draft = state.recordDrafts[date] || {};
-      var plan = planDay(state, draft, used, total, movedTo);
-      if (plan.moves) {
-        used = {};
-        movedTo = plan.moves;
-      }
+      var plan = planDay(state, draft, used, total);
       plan.numbers.forEach(function (number) { used[number] = true; });
       return {
         date: date, report: null, draft: draft, numbers: plan.numbers,
         error: plan.error, full: plan.full, zero: plan.zero,
-        note: movedTo && !plan.error && (plan.numbers.length || plan.zero) ? "Counts in cycle " + movedTo +
-          (plan.moves ? ": tables " + formatTableList(plan.repeated) + " were already cleaned in cycle " +
-            (movedTo - 1) + ", so this day starts cycle " + movedTo + " and cycle " + (movedTo - 1) +
-            " stays incomplete." : ".") : ""
+        note: ""
       };
     });
     rows.cleanedTables = [];
@@ -1356,7 +1346,7 @@
 
   /** Which tables an unsaved day covers, given what the cycle has already used. A day is always entered as the
    *  list of tables cleaned ("pick"); the older "from start" and "from end" shortcuts were removed. */
-  function planDay(state, draft, used, total, movedTo) {
+  function planDay(state, draft, used, total) {
     var free = [];
     for (var n = 1; n <= total; n += 1) if (!used[n]) free.push(n);
     var plan = { numbers: [], error: "", full: free.length === 0, zero: !!draft.reason };
@@ -1366,19 +1356,14 @@
     var parsed = parseTableList(text, total);
     if (parsed.error) { plan.error = parsed.error; return plan; }
     var taken = parsed.numbers.filter(function (number) { return used[number]; });
-    var cycleNo = movedTo || Number(state.recordCycle) || 1;
+    var cycleNo = Number(state.recordCycle) || 1;
     var lastCycle = (state.washingPlant && state.washingPlant.cycles || []).length || 3;
     if (!taken.length) {
       plan.numbers = parsed.numbers;
-    } else if (canManageWashing() && cycleNo < lastCycle) {
-      // Re-cleaned before the cycle was full: the whole day counts in the next cycle (the server decides the
-      // same way when it saves; Site Engineers cannot do this).
-      plan.numbers = parsed.numbers;
-      plan.moves = cycleNo + 1;
-      plan.repeated = taken;
     } else {
       plan.error = "Table " + taken[0] + " is already cleaned in this cycle." +
-        (canManageWashing() ? " Cycle " + lastCycle + " is the month\u2019s last cycle." : "");
+        (canManageWashing() && cycleNo >= lastCycle
+          ? " Cycle " + lastCycle + " is the month\u2019s last cycle." : "");
     }
     return plan;
   }
@@ -1729,6 +1714,7 @@
         '<nav class="ep-calendar__record-tabs" aria-label="Module Cleaning cycle">' +
           cycles.map(function (item) {
             return '<button type="button" data-record-cycle="' + item.cycle_no + '"' +
+              (item.state === "Upcoming" ? " disabled" : "") +
               (Number(item.cycle_no) === Number(state.recordCycle) ? ' aria-current="true"' : "") + '>' +
               'Cycle ' + item.cycle_no + '</button>';
           }).join("") +
@@ -1744,8 +1730,8 @@
             ? '<div class="ep-calendar__record-table"><div class="ep-calendar__record-head"><span>Day</span><span>Tables</span><span>Table numbers</span><span>Remarks</span></div>' +
               days + '</div>'
             : '<p class="ep-calendar__empty">No reportable days for this cycle yet.</p>') +
-          '<p class="ep-calendar__record-help">Type the tables cleaned that day as numbers or ranges, e.g. 1, 2, 4, 7-8, 13 or 100-91. Each table counts once per cycle. When nothing was cleaned, choose the not-done reason for that day and add the details in Remarks.' +
-            (canManageWashing() ? " O&amp;M Head / Assignee: picking tables already cleaned in this cycle starts the next cycle from that day; this cycle then stays incomplete." : "") + '</p>' +
+          '<p class="ep-calendar__record-help">Type the tables cleaned that day as numbers or ranges, e.g. 1, 2, 4, 7-8, 13 or 100-91. Each table counts once per cycle. The next cycle starts only after all configured tables are cleaned. When nothing was cleaned, choose the not-done reason for that day and add the details in Remarks.' +
+            (canManageWashing() ? " Tables already cleaned in an incomplete cycle cannot be selected again." : "") + '</p>' +
         '</div>' +
         '<footer class="ep-calendar__record-footer"><button type="button" class="ep-calendar__close-button" data-calendar-action="close-record"' +
           (state.recordSaving ? " disabled" : "") + '>Cancel</button>' +

@@ -339,7 +339,9 @@ def classify_condition(profile: dict[str, Any]) -> str:
     wash_pct = (profile.get("washing") or {}).get("compliancePercent")
     if pm_pct is not None and pm_pct < t["attention_if_pm_compliance_below"]:
         return "attention"
-    if wash_pct is not None and wash_pct < t["attention_if_washing_compliance_below"]:
+    washing_activities = (profile.get("washing") or {}).get("monthlyActivities") or {}
+    if washing_activities.get("planned", 0) > 0 and wash_pct is not None and \
+            wash_pct < t["attention_if_washing_compliance_below"]:
         return "attention"
     return "healthy"
 
@@ -358,6 +360,9 @@ def build_profile(
     last_at: datetime | None,
 ) -> dict[str, Any]:
     """One plant's operational profile. No record ⇒ None, never 0."""
+    from app.scheduled.washing_cycles import cleaning_activity_metrics
+
+    no_activities = cleaning_activity_metrics(0, 0)
     has_any = bool(issues or pm or washing)
     if not has_any:
         return {
@@ -368,7 +373,7 @@ def build_profile(
             "criticalIssues": None, "mediumIssues": None,
             "unsolvedIssues": None, "inProgressIssues": None,
             "pm": dict(_EMPTY_BLOCK),
-            "washing": dict(_EMPTY_BLOCK),
+            "washing": dict(_EMPTY_BLOCK, compliancePercent=0.0, monthlyActivities=no_activities),
             "lastReportAt": None,
             "source": "database",
             "note": (
@@ -378,21 +383,28 @@ def build_profile(
             ),
         }
 
-    washing_block = dict(_EMPTY_BLOCK, cycleCompliancePercent=None)
+    # No washing figures at all (the read failed, or the plant has no cleaning set up): the tile
+    # must show "N/A", never 0%, which would read as a plant that cleaned nothing. A plant that IS
+    # set up but has nothing planned yet still gets 0.0 from its own activity counts below.
+    washing_block = dict(_EMPTY_BLOCK, cycleCompliancePercent=None,
+                         compliancePercent=None, monthlyActivities=no_activities)
     if washing:
         if "cycles_this_month" not in washing:
             completed = int(washing.get("completed") or 0)
             pending = int(washing.get("pending") or 0)
-            overdue = int(washing.get("overdue") or 0)
-            target = completed + pending + overdue
+            target = int(washing.get("planned") or (completed + pending))
+            activities = cleaning_activity_metrics(
+                completed, target, int(washing.get("overdue") or 0)
+            )
             washing_block = {
-                "completed": completed,
-                "pending": pending,
-                "overdue": overdue,
-                "compliancePercent": _percent(completed, target),
-                "cycleCompliancePercent": _percent(completed, target),
+                "completed": activities["completed"],
+                "pending": activities["pending"],
+                "overdue": activities["overdue"],
+                "compliancePercent": activities["compliance_percent"],
+                "monthlyActivities": activities,
+                "cycleCompliancePercent": activities["compliance_percent"],
                 "currentCycle": None,
-                "monthlyTarget": target,
+                "monthlyTarget": activities["planned"],
                 "overdueDays": None,
                 "overdueBucket": None,
                 "tableCount": None,
@@ -407,17 +419,22 @@ def build_profile(
                 "active": True,
             }
         else:
-            completed = int(washing.get("cycles_this_month") or 0)
-            target = int(washing.get("monthly_target") or 3)
+            # A float: a part-wash of the whole plant beyond its cycles counts as a fraction.
+            completed = float(washing.get("monthly_activities_completed",
+                                          washing.get("cycles_this_month") or 0))
+            target = int(washing.get("monthly_activities_planned",
+                                     washing.get("monthly_cycles_due") or washing.get("monthly_target") or 0))
             overdue_days = int(washing.get("overdue_days") or 0)
+            # This is one plant's own figure, so extra cleaning beyond its cycles reads above 100%.
+            activities = cleaning_activity_metrics(
+                completed, target, int(washing.get("monthly_activities_overdue") or 0), allow_extra=True
+            )
             washing_block = {
-                "completed": completed,
-                "pending": max(0, target - completed),
-                "overdue": 1 if overdue_days > 0 else 0,
-                # The plant's score for the month: confirmed tables against the tables due so far
-                # (washing_cycles._build_overview is authoritative). It is uncapped, so cleaning done
-                # after all three cycles are complete reads above 100%.
-                "compliancePercent": washing.get("monthly_compliance_percent"),
+                "completed": activities["completed"],
+                "pending": activities["pending"],
+                "overdue": activities["overdue"],
+                "compliancePercent": activities["compliance_percent"],
+                "monthlyActivities": activities,
                 # The current cycle's own compliance, capped at 100 (_cycle_compliance).
                 "cycleCompliancePercent": washing.get("cycle_compliance_percent"),
                 "currentCycle": washing.get("current_cycle"),
@@ -733,7 +750,7 @@ def portfolio_for_range(db: Session, user: User, start: date, end: date) -> dict
 
     washing_counts: dict[UUID, dict[str, int]] = {}
     if user.role in {"O&M Head", "Assignee", "Site Engineer"}:
-        from app.scheduled.washing_cycles import _cycle_due_dates
+        from app.scheduled.washing_cycles import _cycle_due_dates, _cycle_start_dates
 
         config_rows = db.execute(
             select(WashingConfig, Plant)
@@ -786,16 +803,21 @@ def portfolio_for_range(db: Session, user: User, start: date, end: date) -> dict
             for plant_id, config in configs.items():
                 if not (config.tables_per_cycle or table_counts.get(plant_id, 0)):
                     continue
-                counts = washing_counts.setdefault(plant_id, {"completed": 0, "pending": 0, "overdue": 0})
-                for cycle_no, due_date in enumerate(_cycle_due_dates(cursor, config.cycle_overrides), 1):
-                    if not start <= due_date <= end:
+                counts = washing_counts.setdefault(
+                    plant_id, {"planned": 0, "completed": 0, "pending": 0, "overdue": 0}
+                )
+                starts = _cycle_start_dates(cursor, config.cycle_overrides)
+                dues = _cycle_due_dates(cursor, config.cycle_overrides)
+                for cycle_no, (start_date, due_date) in enumerate(zip(starts, dues), 1):
+                    if not start <= start_date <= end:
                         continue
+                    counts["planned"] += 1
                     if completed_cycles.get((plant_id, month_key, cycle_no)):
                         counts["completed"] += 1
-                    elif due_date < end:
-                        counts["overdue"] += 1
                     else:
                         counts["pending"] += 1
+                        if due_date < end:
+                            counts["overdue"] += 1
             cursor = (cursor.replace(day=28) + timedelta(days=4)).replace(day=1)
 
     washing_monthly = _washing_rows(db, user)
@@ -815,15 +837,13 @@ def portfolio_for_range(db: Session, user: User, start: date, end: date) -> dict
             monthly_washing if monthly_washing is not None else range_washing,
             None,
         )
-        if monthly_washing is not None:
-            range_profile = build_profile(
-                plant, None, None, range_washing, None
-            )["washing"]
-            profile["washing"].update({
-                key: range_profile[key] for key in ("completed", "pending", "overdue")
-            })
-            profile["derivedCondition"] = classify_condition(profile)
-        elif washing_monthly is None and profile["washing"].get("compliancePercent") is not None:
+        # Module Cleaning is reported for the month, not for the selected date range: its
+        # percentage and its completed / pending / overdue counts all come from the same monthly
+        # calculation the Module Cleaning page shows, so the two can never disagree. (The counts
+        # used to be narrowed to the range while the percentage stayed monthly, which made the
+        # tile contradict itself.)
+        if monthly_washing is None and washing_monthly is None \
+                and profile["washing"].get("compliancePercent") is not None:
             profile["washing"]["compliancePercent"] = None
             profile["washing"]["cycleCompliancePercent"] = None
         rows.append({
@@ -1102,24 +1122,21 @@ def aggregate(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "dcCapacityMw": 0.0, "acCapacityMw": 0.0,
         "commissionedPlants": 0,
     }
-    # Module cleaning compliance = tables cleaned / tables due so far (the same rule as
-    # data-adapter.js aggregatePortfolio). With several plants each plant's cleaned tables count up
-    # to its own due, so one plant's extra washing cannot hide another's shortfall; one plant is uncapped.
-    single = len(rows) == 1
-    washing_work = {"done": 0, "due": 0, "plants": 0}
+    from app.scheduled.washing_cycles import cleaning_activity_metrics
+
     cycle_work: dict[int, dict[str, int]] = {n: {"done": 0, "due": 0, "plants": 0} for n in (1, 2, 3)}
 
     def add_work(target: dict[str, int], done: Any, due: Any) -> None:
         done_n = max(0, int(done or 0))
         due_n = max(0, int(due or 0))
-        target["done"] += done_n if single else min(done_n, due_n)
+        target["done"] += min(done_n, due_n)
         target["due"] += due_n
         target["plants"] += 1
 
     def work_percent(work: dict[str, int]) -> int | None:
         if not work["plants"]:
             return None
-        return round(100 * work["done"] / work["due"]) if work["due"] else 100
+        return round(100 * work["done"] / work["due"], 1) if work["due"] else 0.0
 
     for row in rows:
         plant, profile = row["plant"], row["profile"]
@@ -1140,12 +1157,10 @@ def aggregate(rows: list[dict[str, Any]]) -> dict[str, Any]:
             data = profile.get(block) or {}
             for field, suffix in (("completed", "Completed"), ("pending", "Pending"), ("overdue", "Overdue")):
                 value = data.get(field)
-                if isinstance(value, int):
+                # Cleaning counts can be fractional: part of an extra wash of the whole plant.
+                if isinstance(value, (int, float)) and not isinstance(value, bool):
                     totals[prefix + suffix] += value
         washing = profile.get("washing") or {}
-        if isinstance(washing.get("compliancePercent"), (int, float)) and \
-                isinstance(washing.get("monthlyTablesDue"), int):
-            add_work(washing_work, washing.get("monthlyTablesConfirmed"), washing.get("monthlyTablesDue"))
         for grade in washing.get("cycleGrades") or []:
             cycle_no = grade.get("cycleNo")
             # Upcoming cycles carry no score and are never counted.
@@ -1162,8 +1177,39 @@ def aggregate(rows: list[dict[str, Any]]) -> dict[str, Any]:
 
     pm_total = totals["pmCompleted"] + totals["pmPending"] + totals["pmOverdue"]
     totals["pmCompliancePercent"] = _percent(totals["pmCompleted"], pm_total)
-    totals["washingCompliancePercent"] = work_percent(washing_work)
-    totals["washingWork"] = washing_work
+    # The tile reads one calculation, the same one the Module Cleaning page shows: each plant's
+    # monthly activity counts, aggregated. (The per-row completed/pending above may have been
+    # narrowed to the selected date range, which would not agree with the monthly percentage.)
+    monthly = [(row["profile"].get("washing") or {}).get("monthlyActivities") or {} for row in rows]
+    washing_planned = sum(int(item.get("planned") or 0) for item in monthly)
+    single_plant = len(rows) == 1
+    if washing_planned:
+        # Across plants each plant counts at most its own plan, so one plant's extra cleaning
+        # cannot hide another plant's shortfall. A single plant keeps its surplus.
+        washing_done = sum(
+            float(item.get("completed") or 0) if single_plant
+            else min(float(item.get("completed") or 0), int(item.get("planned") or 0))
+            for item in monthly
+        )
+        washing_over = sum(int(item.get("overdue") or 0) for item in monthly)
+    else:   # no monthly figures (an older payload): fall back to the row counts
+        washing_planned = totals["washingCompleted"] + totals["washingPending"]
+        washing_done = totals["washingCompleted"]
+        washing_over = totals["washingOverdue"]
+    washing_metrics = cleaning_activity_metrics(
+        washing_done, washing_planned, washing_over,
+        # Extra cleaning reads above 100% only when a single plant is in view.
+        allow_extra=single_plant,
+    )
+    totals["washingCompliancePercent"] = washing_metrics["compliance_percent"]
+    totals["washingWork"] = {
+        "done": washing_metrics["completed"],
+        "due": washing_metrics["planned"],
+        "pending": washing_metrics["pending"],
+        "overdue": washing_metrics["overdue"],
+        "plants": sum(1 for row in rows
+                      if (row["profile"].get("washing") or {}).get("monthlyActivities", {}).get("planned", 0) > 0),
+    }
     totals["washingCycleWork"] = {str(n): work for n, work in cycle_work.items()}
     totals["washingCycleCompliancePercentByCycle"] = {
         str(cycle_no): work_percent(work) for cycle_no, work in cycle_work.items()
