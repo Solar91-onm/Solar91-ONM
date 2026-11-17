@@ -379,9 +379,12 @@ def cleaning_activity_metrics(completed: float, planned: int, overdue: int = 0,
         return int(value) if float(value).is_integer() else value
 
     planned = max(0, int(planned or 0))
-    completed = tidy(max(0.0, float(completed or 0)))
+    # The percentage keeps full precision; only the displayed count is tidied, so the figure
+    # cannot drift from the browser's own aggregate of the same numbers.
+    exact = max(0.0, float(completed or 0))
     if not allow_extra:
-        completed = min(completed, planned)
+        exact = min(exact, planned)
+    completed = tidy(exact)
     pending = tidy(max(0.0, planned - completed))
     overdue = min(pending, max(0, int(overdue or 0)))
     return {
@@ -389,7 +392,7 @@ def cleaning_activity_metrics(completed: float, planned: int, overdue: int = 0,
         "completed": completed,
         "pending": pending,
         "overdue": overdue,
-        "compliance_percent": round(100 * completed / planned, 1) if planned else 0.0,
+        "compliance_percent": round(100 * exact / planned, 1) if planned else 0.0,
     }
 
 
@@ -1007,7 +1010,7 @@ def _build_overview(db: Session, user: User, include_tables: bool = False, repor
             if len(completed_dates) >= MONTHLY_CYCLE_TARGET and table_count else 0
         )
         extra_cycles = extra_tables / table_count if table_count else 0
-        # One plant's own row, so extra washing beyond its three cycles counts above 100%.
+        # The counts stay whole activities: 2 of 3 cycles done reads as 2, not 2.4.
         activities = cleaning_activity_metrics(completed_cycles_month + extra_cycles, planned_cycles,
                                                overdue_cycles, allow_extra=True)
         # Monthly compliance is the WORK done this month: confirmed tables cleaned on this month's
@@ -1017,7 +1020,13 @@ def _build_overview(db: Session, user: User, include_tables: bool = False, repor
         work = _cycle_work_scores(reports, table_count, today, config.cycle_overrides, excused_dates)
         month_confirmed_tables = work["month"]["tables_done"]
         monthly_tables_due = work["month"]["tables_due"]
-        monthly_compliance = activities["compliance_percent"]
+        # Cycles achieved, counting the one in hand by how much of it is cleaned: a plant halfway
+        # through cycle 1 has achieved 0.5 of the month's 3, not 0. Without this a plant cleaning
+        # every day reads 0% until the moment a cycle closes, which hides all the work in flight.
+        cycle_progress = round(month_confirmed_tables / table_count, 3) if table_count else 0
+        monthly_compliance = cleaning_activity_metrics(
+            cycle_progress, planned_cycles, overdue_cycles, allow_extra=True,
+        )["compliance_percent"]
         today_target = _daily_table_target(table_count, today, config.cycle_overrides)
         compliance = _cycle_compliance(table_count, today, config.cycle_overrides, ledger, excused_dates)
         cycle_grades = []
@@ -1161,6 +1170,7 @@ def _build_overview(db: Session, user: User, include_tables: bool = False, repor
             ),
             "monthly_compliance_percent": monthly_compliance,
             "monthly_activities_planned": activities["planned"],
+            "monthly_cycle_progress": cycle_progress,
             "monthly_activities_completed": activities["completed"],
             "monthly_activities_pending": activities["pending"],
             "monthly_activities_overdue": activities["overdue"],
@@ -1235,8 +1245,8 @@ def _build_overview(db: Session, user: User, include_tables: bool = False, repor
             "monthly_compliance_percent": cleaning_activity_metrics(
                 # Each plant counts at most its own plan, so one plant's extra cleaning cannot
                 # hide another's shortfall. A single plant in view keeps its surplus.
-                sum(row["monthly_activities_completed"] if len(plant_rows) == 1
-                    else min(row["monthly_activities_completed"], row["monthly_activities_planned"])
+                sum(row["monthly_cycle_progress"] if len(plant_rows) == 1
+                    else min(row["monthly_cycle_progress"], row["monthly_activities_planned"])
                     for row in plant_rows),
                 sum(row["monthly_activities_planned"] for row in plant_rows),
                 sum(row["monthly_activities_overdue"] for row in plant_rows),
@@ -1276,6 +1286,7 @@ def _build_overview(db: Session, user: User, include_tables: bool = False, repor
         # Compliance / delay / ranking figures are O&M performance metrics; field users never receive them.
         hidden = ("cycle_compliance", "cycle_compliance_percent", "monthly_compliance_percent", "daily_compliance_percent",
                   "monthly_activities_planned", "monthly_activities_completed", "monthly_activities_pending",
+                  "monthly_cycle_progress",
                   "monthly_activities_overdue",
                   "monthly_tables_confirmed", "monthly_tables_due", "monthly_cycles_due", "monthly_cycles_completed_due",
                   "average_delay_days",

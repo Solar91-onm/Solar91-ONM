@@ -430,12 +430,19 @@ def build_profile(
             activities = cleaning_activity_metrics(
                 completed, target, int(washing.get("monthly_activities_overdue") or 0), allow_extra=True
             )
+            # The module owns the percentage (it counts the part-finished cycle); the counts here
+            # stay whole activities. Recomputing it from whole cycles would drop the work in flight.
+            if isinstance(washing.get("monthly_compliance_percent"), (int, float)):
+                activities = dict(activities, compliance_percent=washing["monthly_compliance_percent"])
             washing_block = {
                 "completed": activities["completed"],
                 "pending": activities["pending"],
                 "overdue": activities["overdue"],
                 "compliancePercent": activities["compliance_percent"],
                 "monthlyActivities": activities,
+                # Cycles achieved including the part-finished one, so the tile can aggregate the
+                # same way the Module Cleaning page does.
+                "monthlyCycleProgress": washing.get("monthly_cycle_progress"),
                 # The current cycle's own compliance, capped at 100 (_cycle_compliance).
                 "cycleCompliancePercent": washing.get("cycle_compliance_percent"),
                 "currentCycle": washing.get("current_cycle"),
@@ -1185,16 +1192,25 @@ def aggregate(rows: list[dict[str, Any]]) -> dict[str, Any]:
     # The tile reads one calculation, the same one the Module Cleaning page shows: each plant's
     # monthly activity counts, aggregated. (The per-row completed/pending above may have been
     # narrowed to the selected date range, which would not agree with the monthly percentage.)
-    monthly = [(row["profile"].get("washing") or {}).get("monthlyActivities") or {} for row in rows]
+    washing_blocks = [(row["profile"].get("washing") or {}) for row in rows]
+    monthly = [(block.get("monthlyActivities") or {}) for block in washing_blocks]
     washing_planned = sum(int(item.get("planned") or 0) for item in monthly)
     single_plant = len(rows) == 1
     if washing_planned:
-        # Across plants each plant counts at most its own plan, so one plant's extra cleaning
-        # cannot hide another plant's shortfall. A single plant keeps its surplus.
+        # Cycles achieved, counting a part-finished cycle by how much of it is cleaned, so the
+        # tile moves with the work rather than only when a cycle closes. Across plants each plant
+        # counts at most its own plan, so one plant's extra cannot hide another's shortfall.
+        def plant_progress(index):
+            block = washing_blocks[index]
+            done = block.get("monthlyCycleProgress")
+            if not isinstance(done, (int, float)):
+                done = monthly[index].get("completed") or 0
+            return float(done)
+
         washing_done = sum(
-            float(item.get("completed") or 0) if single_plant
-            else min(float(item.get("completed") or 0), int(item.get("planned") or 0))
-            for item in monthly
+            plant_progress(index) if single_plant
+            else min(plant_progress(index), int(monthly[index].get("planned") or 0))
+            for index in range(len(monthly))
         )
         washing_over = sum(int(item.get("overdue") or 0) for item in monthly)
     else:   # no monthly figures (an older payload): fall back to the row counts
@@ -1209,6 +1225,7 @@ def aggregate(rows: list[dict[str, Any]]) -> dict[str, Any]:
     totals["washingCompliancePercent"] = washing_metrics["compliance_percent"]
     totals["washingWork"] = {
         "done": washing_metrics["completed"],
+        "completed": totals["washingCompleted"],   # whole finished activities, for the legend
         "due": washing_metrics["planned"],
         "pending": washing_metrics["pending"],
         "overdue": washing_metrics["overdue"],

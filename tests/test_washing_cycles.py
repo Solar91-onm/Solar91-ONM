@@ -496,6 +496,17 @@ def test_cleaning_compliance_follows_the_agreed_rules():
     assert cleaning_activity_metrics(4, 3)["compliance_percent"] == 100.0
 
 
+def test_a_part_finished_cycle_counts_towards_compliance():
+    """Half of cycle 1 cleaned is half a cycle achieved, not nothing. A plant cleaning every day
+    used to read 0% until the moment a cycle closed, which hid all the work in flight."""
+    # 178 of 352 tables = 0.506 of one cycle, against the month's three planned cycles.
+    assert cleaning_activity_metrics(0.506, 3, 1, allow_extra=True)["compliance_percent"] == 16.9
+    # The displayed count stays whole: no cycle is finished yet.
+    assert cleaning_activity_metrics(0.506, 3, 1, allow_extra=True)["completed"] == 0.5
+    # Precision is kept for the percentage, so the browser's own aggregate agrees to the decimal.
+    assert cleaning_activity_metrics(1.0 / 3, 1)["compliance_percent"] == 33.3
+
+
 def test_one_plants_extra_cleaning_cannot_hide_another_plants_shortfall():
     from app.portal.service import aggregate
 
@@ -544,11 +555,11 @@ def test_portfolio_cleaning_compliance_aggregates_activity_counts():
     assert one["washingCompleted"] == 85
     assert one["washingPending"] == 15
     assert one["washingOverdue"] == 5
-    assert one["washingWork"] == {"done": 85, "due": 100, "pending": 15, "overdue": 5, "plants": 1}
+    assert one["washingWork"] == {"done": 85, "completed": 85, "due": 100, "pending": 15, "overdue": 5, "plants": 1}
 
     both = aggregate([row(10, 0), row(10, 80)])
     assert both["washingCompliancePercent"] == 20.0         # (10 + 10) / (10 + 90), not a mean
-    assert both["washingWork"] == {"done": 20, "due": 100, "pending": 80, "overdue": 0, "plants": 2}
+    assert both["washingWork"] == {"done": 20, "completed": 20, "due": 100, "pending": 80, "overdue": 0, "plants": 2}
 
     by_cycle = aggregate([row(0, 0, cycles=[(45, 100), (35, 70), (0, None)])])
     assert by_cycle["washingCycleCompliancePercentByCycle"] == {"1": 45, "2": 50, "3": None}
@@ -573,8 +584,11 @@ def test_portal_overview_uses_table_progress_before_any_cycle_is_completed(clien
     assert dashboard.status_code == module.status_code == 200
     profile = next(row["profile"] for row in dashboard.json()["rows"] if row["plant"]["id"] == str(plant.id))
     module_row = next(row for row in module.json()["plants"] if row["plant_id"] == str(plant.id))
+    # No cycle is finished, so the activity count is still 0 ...
     assert profile["washing"]["completed"] == 0
-    assert profile["washing"]["compliancePercent"] == 0
+    # ... but the tables already cleaned count towards the score: work in flight is not invisible.
+    assert profile["washing"]["compliancePercent"] > 0
+    assert module_row["monthly_cycle_progress"] > 0
     # How many cycles are planned depends on where in the month today falls, so compare the two
     # views against each other rather than hard-coding a number that only holds on some days.
     assert profile["washing"]["pending"] == module_row["monthly_activities_pending"]

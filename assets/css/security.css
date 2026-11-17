@@ -271,6 +271,30 @@
 }
 .ep-security__modal-head h2 { margin: 0; font-size: var(--ep-fs-xl); color: var(--ep-text-strong); }
 .ep-security__modal-head p { margin: 4px 0 0; color: var(--ep-text-muted); font-size: var(--ep-fs-sm); }
+/* Top-right of the editor: the guard switch sits beside the close button. */
+.ep-security__head-actions { display: flex; align-items: center; gap: 10px; flex: 0 0 auto; }
+.ep-security__guard-toggle {
+  min-height: 34px;
+  padding: 7px 14px;
+  border: 1px solid var(--ep-border-strong, #d4d7d4);
+  border-radius: 999px;
+  background: var(--ep-bg);
+  color: var(--ep-text);
+  font: inherit;
+  font-size: var(--ep-fs-sm);
+  font-weight: 650;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.ep-security__guard-toggle:hover { border-color: var(--ep-accent); color: var(--ep-accent-strong); }
+.ep-security__guard-toggle.is-on {
+  border-color: var(--ep-accent);
+  background: var(--ep-accent);
+  color: var(--ep-text-inverse, #fff);
+}
+.ep-security__guard-toggle:focus-visible { outline: 2px solid var(--ep-accent); outline-offset: 2px; }
+.ep-security__guard-toggle:disabled { opacity: .55; cursor: not-allowed; }
+
 .ep-security__close {
   flex: 0 0 32px;
   width: 32px;

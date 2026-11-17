@@ -116,9 +116,23 @@
    * 42-row table is a mis-drop waiting to happen, and the confirm is what makes a mis-click obvious.
    */
   function canMovePerson(siteCode, kind, index) {
-    if (!canMove()) return false;
+    // Only site engineers move between plants. Guards are posted to one site and change over on
+    // their own cycle, so a Move control on a guard row is a mis-click waiting to happen; guards
+    // are edited in place instead (see guardMode).
+    if (kind !== "engineer" || !canMove()) return false;
     var stored = storedContacts(siteCode, kind);
     return !!stored && index < stored.length;
+  }
+
+  /**
+   * Which kind the editor is currently editing. Site engineers are the day-to-day change, so the
+   * register opens on them; guards change rarely (about monthly) and are opened deliberately with
+   * the "Change guards" button, with their saved name, number and shift filled in ready to edit.
+   */
+  var guardMode = false;
+
+  function editingKind(kind) {
+    return guardMode ? kind === "guard" : kind === "engineer";
   }
 
   /** The "Move" control itself, beside the person's name. */
@@ -171,7 +185,7 @@
   function contactCell(contacts, kind, field, editingRow, siteCode) {
     if (!contacts.length) return '<span class="ep-pt__dash">—</span>';
     return '<div class="ep-security__stack">' + contacts.map(function (contact, index) {
-      if (editingRow && canEdit() && field === "name") {
+      if (editingRow && canEdit() && editingKind(kind) && field === "name") {
         return '<div class="ep-security__name-entry">' +
           '<input class="ep-security__input" type="text" maxlength="160" autocomplete="off" data-security-contact-name="' +
           kind + '" data-security-index="' + index + '" value="' + fmt.escape(contact.name) +
@@ -185,14 +199,14 @@
           moveButton(contact, kind, index, siteCode) + '</div>' +
           movePanel(contact, kind, index, siteCode);
       }
-      if (editingRow && canEdit() && field === "mobile") {
+      if (editingRow && canEdit() && editingKind(kind) && field === "mobile") {
         return '<input class="ep-security__input ep-security__input--mobile" type="tel" inputmode="numeric" maxlength="10" autocomplete="off" data-security-contact-mobile="' +
           kind + '" data-security-index="' + index + '" value="' + fmt.escape(contact.mobile) +
           '" aria-label="' + (kind === "engineer" ? "Site engineer" : "Guard") + " mobile number " +
           (index + 1) + " for " + fmt.escape(siteCode) + '"' +
           (saving ? " disabled" : "") + ">";
       }
-      if (editingRow && canEdit() && field === "shift") {
+      if (editingRow && canEdit() && editingKind(kind) && field === "shift") {
         return '<select class="ep-security__shift" data-security-contact-shift="' + kind +
           '" data-security-index="' + index + '" aria-label="' +
           (kind === "engineer" ? "Site engineer" : "Guard") + " duty shift " +
@@ -227,14 +241,17 @@
       ? drafts[plant.siteCode]
       : contactsFor(plant);
     var filter = siteFilterText(plant, contacts);
+    // Only the kind being edited can be added to, so the row offers one button, not two.
     var siteControls = editingRow && canEdit()
       ? '<div class="ep-security__site-actions">' +
-        '<button type="button" data-security-add="engineer" data-security-site="' +
-        fmt.escape(plant.siteCode) + '"' + (saving ? " disabled" : "") +
-        ' aria-label="Add site engineer for ' + fmt.escape(plant.siteCode) + '">+ Engineer</button>' +
-        '<button type="button" data-security-add="guard" data-security-site="' +
-        fmt.escape(plant.siteCode) + '"' + (saving ? " disabled" : "") +
-        ' aria-label="Add guard for ' + fmt.escape(plant.siteCode) + '">+ Guard</button></div>'
+        (guardMode
+          ? '<button type="button" data-security-add="guard" data-security-site="' +
+            fmt.escape(plant.siteCode) + '"' + (saving ? " disabled" : "") +
+            ' aria-label="Add guard for ' + fmt.escape(plant.siteCode) + '">+ Guard</button>'
+          : '<button type="button" data-security-add="engineer" data-security-site="' +
+            fmt.escape(plant.siteCode) + '"' + (saving ? " disabled" : "") +
+            ' aria-label="Add site engineer for ' + fmt.escape(plant.siteCode) + '">+ Engineer</button>') +
+        "</div>"
       : "";
     var engineerNames = contacts.engineers.map(function (contact) { return contact.name; }).join(" ");
     var guardNames = contacts.guards.map(function (contact) { return contact.name; }).join(" ");
@@ -301,12 +318,22 @@
     return '<div class="ep-security__overlay" data-security-overlay>' +
       '<section class="ep-security__modal" role="dialog" aria-modal="true" aria-labelledby="ep-security-editor-title">' +
         '<header class="ep-security__modal-head"><div><h2 id="ep-security-editor-title">' +
-          (canEdit() ? "Edit Security Register" : "Move Security Contacts") + '</h2>' +
-          '<p>' + (canEdit()
-            ? "Manage multiple site engineers and guards, including each guard’s duty shift."
-            : "Move a site engineer or guard to another plant in your assigned scope.") + '</p></div>' +
+          (!canEdit() ? "Move Security Contacts"
+            : guardMode ? "Edit Security Guards" : "Edit Security Register") + '</h2>' +
+          '<p>' + (!canEdit()
+            ? "Move a site engineer to another plant in your assigned scope."
+            : guardMode
+              ? "Change each guard’s name, mobile number and duty shift. Guards stay at their own site."
+              : "Add, edit or move site engineers. Guards are changed from the button above.") + '</p></div>' +
+          '<div class="ep-security__head-actions">' +
+          (canEdit()
+            ? '<button type="button" class="ep-security__guard-toggle' + (guardMode ? " is-on" : "") +
+              '" data-security-guard-mode="' + (guardMode ? "off" : "on") + '"' +
+              (saving ? " disabled" : "") + '>' +
+              (guardMode ? "Edit site engineers" : "Change guards") + "</button>"
+            : "") +
           '<button type="button" class="ep-security__close" data-security-close aria-label="Close editor"' +
-          (saving ? " disabled" : "") + '>×</button></header>' +
+          (saving ? " disabled" : "") + '>×</button></div></header>' +
         '<div class="ep-security__notice' + (noticeIsError ? " is-error" : "") +
           '" role="' + (noticeIsError ? "alert" : "status") + '"' + (notice ? "" : " hidden") + ">" +
           fmt.escape(notice) + "</div>" +
@@ -655,6 +682,7 @@
 
   function openEditor(container) {
     editing = true;
+    guardMode = false;   // always opens on site engineers; guards are opened deliberately
     drafts = Object.create(null);
     plants.forEach(function (plant) {
       drafts[plant.siteCode] = copyContacts(contactsFor(plant));
@@ -674,6 +702,7 @@
   function closeEditor(container) {
     if (saving || movePending) return;
     editing = false;
+    guardMode = false;
     drafts = null;
     dirty = Object.create(null);
     moving = null;
@@ -752,6 +781,18 @@
       var close = event.target.closest("[data-security-close]");
       if (close) {
         closeEditor(container);
+        return;
+      }
+      // Switch between editing site engineers and editing guards. Unsaved edits are kept: the
+      // drafts hold both kinds, so nothing typed is lost by looking at the other one.
+      var guardToggle = event.target.closest("[data-security-guard-mode]");
+      if (guardToggle) {
+        syncDrafts(container);
+        guardMode = guardToggle.getAttribute("data-security-guard-mode") === "on";
+        moving = null;
+        notice = "";
+        noticeIsError = false;
+        render(container);
         return;
       }
       if (event.target.matches("[data-security-overlay]")) {

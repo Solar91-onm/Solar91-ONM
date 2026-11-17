@@ -557,7 +557,8 @@
           { width: 100 - clamp(wshPct), tone: "short" }
         ] : [],
         legend: [
-          { dot: washingWork.done ? "green" : "", label: "Completed", value: fmt.formatNumber(washingWork.done) },
+          { dot: washingWork.completed ? "green" : "", label: "Completed",
+            value: fmt.formatNumber(typeof washingWork.completed === "number" ? washingWork.completed : washingWork.done) },
           { dot: "", label: "Pending", value: fmt.formatNumber(washingWork.pending) },
           { dot: washingWork.overdue > 0 ? "red" : "", label: "Overdue",
             value: fmt.formatNumber(washingWork.overdue), bad: washingWork.overdue > 0 }
@@ -571,13 +572,18 @@
         empty: inv.total || inv.tickets ? "" : (inv.restricted
           ? "Unit counts are not available to your role"
           : "No inverter units configured"),
+        // Counts, not a percentage: 375 of 376 rounded to "100%" and read as nothing being down,
+        // while one inverter was actually off. The raw pair cannot hide a single failed unit.
         figure: inv.total
-          ? { value: String(inv.runningPercent), unit: "%", caption: "of inverters running" }
+          ? {
+            value: fmt.formatNumber(inv.running) + "/" + fmt.formatNumber(inv.total),
+            unit: "", caption: "inverters running out of total"
+          }
           : (inv.tickets ? { value: fmt.formatNumber(inv.tickets), unit: "", caption: "open inverter issues" } : null),
         meter: inv.total ? [{ width: clamp(inv.runningPercent), tone: "accent" }] : [],
         legend: inv.total
           ? [
-            { dot: "green", label: "Running", value: fmt.formatNumber(inv.running) },
+            { dot: "green", label: "Total inverters", value: fmt.formatNumber(inv.total) },
             { dot: inv.down > 0 ? "red" : "", label: "Not running", value: fmt.formatNumber(inv.down), bad: inv.down > 0 },
             { dot: inv.tickets > 0 ? "red" : "", label: "Open tickets", value: fmt.formatNumber(inv.tickets), bad: inv.tickets > 0 }
           ]

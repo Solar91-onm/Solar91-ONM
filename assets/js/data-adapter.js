@@ -329,7 +329,10 @@
       washingCycleCompliancePercentByCycle: { "1": null, "2": null, "3": null },
       dcCapacityMw: 0, acCapacityMw: 0
     };
-    const washingWork = { done: 0, due: 0, pending: 0, overdue: 0, plants: 0 };
+    // One plant keeps any surplus from extra cleaning, so its own score can pass 100%. Across
+    // plants each counts at most its own plan, so one plant's extra cannot hide another's gap.
+    const single = rows.length === 1;
+    const washingWork = { done: 0, completed: 0, due: 0, pending: 0, overdue: 0, plants: 0 };
     const cycleWork = {
       "1": { done: 0, due: 0, plants: 0 }, "2": { done: 0, due: 0, plants: 0 }, "3": { done: 0, due: 0, plants: 0 }
     };
@@ -365,12 +368,20 @@
         totals.washingCompleted += completed;
         totals.washingPending += pending;
         totals.washingOverdue += overdue;
-        washingWork.done += completed;
+        // Cycles achieved, counting a part-finished cycle by how much of it is cleaned, so the
+        // score moves with the work instead of jumping only when a cycle closes. Planned is the
+        // month's own plan, not completed + pending, which would grow with any extra cleaning.
+        const activities = profile.washing.monthlyActivities || {};
+        const planned = Math.max(0, Number(activities.planned) || 0);
+        const progress = typeof profile.washing.monthlyCycleProgress === "number"
+          ? Math.max(0, profile.washing.monthlyCycleProgress)
+          : completed;
+        washingWork.done += single ? progress : Math.min(progress, planned);
+        washingWork.completed += completed;   // whole finished activities, for the legend
         washingWork.pending += pending;
         washingWork.overdue += overdue;
-        washingWork.due += completed + pending;
-        if (profile.washing.monthlyActivities &&
-            Number(profile.washing.monthlyActivities.planned) > 0) washingWork.plants += 1;
+        washingWork.due += planned || (completed + pending);
+        if (planned > 0) washingWork.plants += 1;
         (profile.washing.cycleGrades || []).forEach(function (grade) {
           const cycle = cycleWork[String(grade.cycleNo)];
           // Upcoming cycles carry no score and are never counted.
@@ -389,8 +400,9 @@
       if (!work.plants) return null;
       return work.due ? Math.round(1000 * work.done / work.due) / 10 : 0;
     }
-    totals.washingCompliancePercent = washingWork.due
-      ? Math.round(1000 * washingWork.done / washingWork.due) / 10 : 0;
+    totals.washingCompliancePercent = washingWork.plants
+      ? (washingWork.due ? Math.round(1000 * washingWork.done / washingWork.due) / 10 : 0)
+      : null;
     totals.washingWork = washingWork;
     totals.washingCycleWork = cycleWork;
     Object.keys(cycleWork).forEach(function (cycleNo) {

@@ -28,7 +28,9 @@
       plantSearch: "", onlyIssues: false,   // the per-plant table's own toolbar
       saveMessage: "", saveError: false, navigationError: "",
       expanded: [],  // site codes whose open inverter tickets are unfolded under the plant row
-      plantSort: { key: "", dir: "" }   // empty: the default order (worst running % first)
+      plantSort: { key: "", dir: "" },
+      plantFilters: {},    // per-column filters on the per-plant table
+      ticketFilters: {}    // per-column filters on the open-ticket register   // empty: the default order (worst running % first)
     };
 
     // The per-plant health table, laid out like the Health register: sortable headings, short and
@@ -44,6 +46,102 @@
       { key: "tickets", label: "Tickets", align: "num", sort: (row) => row.tickets }
     ];
     const INVERTER_PLANT_COLUMN_COUNT = INVERTER_PLANT_COLUMNS.length;
+
+    // The open-ticket register below. `value` is what a column filter matches and lists, so the
+    // menu offers exactly the text the column shows.
+    const INVERTER_TICKET_COLUMNS = [
+      { key: "plant", label: "Plant", value: (t) => { const p = inverterDetailsPlant(t); return p ? (p.displayName || p.plantName) : "Plant unavailable"; } },
+      { key: "inverter", label: "Inverter", value: (t) => t.serial_no || "Unit not recorded" },
+      { key: "units", label: "Units", align: "num", filter: false },
+      { key: "subpart", label: "Sub-problem", value: (t) => t.subcategory || "—" },
+      { key: "problem", label: "Issue description", value: (t) => t.description || "—" },
+      { key: "severity", label: "Severity", value: (t) => t.severity || "—" },
+      { key: "status", label: "Status", value: (t) => t.status || "—" },
+      { key: "reported", label: "Reported", filter: false },
+      { key: "etc", label: "ETC", filter: false },
+      { key: "assignee", label: "Assignee", value: (t) => t.assignee_text || "—" },
+      { key: "ticket", label: "Ticket", filter: false }
+    ];
+
+    // Which per-plant columns can be filtered, and the text each one filters on.
+    const PLANT_COLUMN_VALUE = {
+      plant: (row) => row.plant.displayName || row.plant.plantName,
+      inverter: (row) => (row.config && row.config.maker) || "Not configured",
+      issuedesc: (row) => {
+        const list = row.issueDesc || [];
+        return list.length ? list[0] : "No issues";
+      }
+    };
+
+    /**
+     * One column heading with the Health page's filter control: a chevron that opens a popover
+     * listing the values present in that column, with a search box over them. Same markup and
+     * behaviour, so the two registers are filtered the same way.
+     */
+    function ihColumnHeader(column, scope, sortAttr, sortState) {
+      const Sort = global.Solar91PortalSort;
+      let header = Sort && sortAttr
+        ? Sort.thHTML(column, sortState, sortAttr)
+        : `<th${column.align === "num" ? ' class="num"' : ""}>${fmt.escape(column.label)}</th>`;
+      const filterable = column.filter !== false &&
+        (scope === "ticket" ? !!column.value : !!PLANT_COLUMN_VALUE[column.key]);
+      if (!filterable) return header;
+
+      const store = scope === "ticket" ? inverterHealth.ticketFilters : inverterHealth.plantFilters;
+      const active = String(store[column.key] || "");
+      const menuId = "ep-ih-filter-" + scope + "-" + column.key;
+      const options = ihColumnOptions(scope, column).map((value) =>
+        `<button type="button" class="ep-ih__column-filter-option" data-ih-filter-option="${column.key}"
+          data-ih-filter-scope="${scope}" data-ih-filter-value="${fmt.escape(value)}"
+          aria-pressed="${active === value ? "true" : "false"}">${fmt.escape(value)}</button>`).join("");
+      const control = `<button type="button" class="ep-ih__filter-toggle${active ? " is-filtered" : ""}"
+          data-ih-filter-toggle="${column.key}" data-ih-filter-scope="${scope}"
+          aria-controls="${menuId}" aria-expanded="false"
+          aria-label="Filter by ${fmt.escape(column.label)}" title="Filter by ${fmt.escape(column.label)}">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4"></path></svg></button>
+        <div id="${menuId}" class="ep-ih__column-filter-menu" popover="auto"
+          data-ih-filter-menu="${column.key}" data-ih-filter-scope="${scope}">
+          <input class="ep-ih__column-filter-search" type="search" data-ih-filter-search
+            placeholder="Search options..." aria-label="Search ${fmt.escape(column.label)} options" />
+          <div class="ep-ih__column-filter-options">
+            <button type="button" class="ep-ih__column-filter-option" data-ih-filter-option="${column.key}"
+              data-ih-filter-scope="${scope}" data-ih-filter-value=""
+              aria-pressed="${active ? "false" : "true"}">All ${fmt.escape(column.label)}</button>
+            ${options}
+          </div>
+          <div class="ep-ih__column-filter-empty" data-ih-filter-empty hidden>No matching options</div>
+        </div>`;
+      header = header.replace("<th", '<th class="ep-ih__th-filtered"');
+      const openEnd = header.indexOf(">") + 1;
+      const closeStart = header.lastIndexOf("</th>");
+      return header.slice(0, openEnd) + '<div class="ep-ih__th-content">' +
+        header.slice(openEnd, closeStart) + control + "</div>" + header.slice(closeStart);
+    }
+
+    /** The distinct values present in one column, so the menu only offers what is there. */
+    function ihColumnOptions(scope, column) {
+      const seen = [];
+      const add = (value) => {
+        const text = String(value == null ? "" : value).trim();
+        if (text && seen.indexOf(text) === -1) seen.push(text);
+      };
+      if (scope === "ticket") scopedInverterTickets().forEach((ticket) => add(column.value(ticket)));
+      else {
+        const read = PLANT_COLUMN_VALUE[column.key];
+        inverterPlantRows(inverterHealthTotals()).forEach((row) => add(read(row)));
+      }
+      return seen.sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+    }
+
+    function ihFilterMatches(store, columns, read) {
+      return Object.keys(store).every((key) => {
+        const wanted = String(store[key] || "").trim();
+        if (!wanted) return true;
+        const column = columns.find((item) => item.key === key);
+        if (!column) return true;
+        return String(read(column) == null ? "" : read(column)).trim() === wanted;
+      });
+    }
     const ICON_INVERTER_LARGE = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"></rect><path d="M13 7l-4 6h3l-1 4 4-6h-3l1-4z"></path></svg>`;
     const INVERTER_HISTORY_KEY = "solar91InverterHealthOpen";
     const OPEN_INVERTER_STATUSES = [
@@ -268,10 +366,8 @@
 
     // Sortable headings when table-sort is loaded, plain ones (still aligned) until it is.
     function inverterPlantHeader() {
-      const Sort = global.Solar91PortalSort;
-      if (Sort) return Sort.headerHTML(INVERTER_PLANT_COLUMNS, inverterHealth.plantSort, "data-ih-sort");
       return INVERTER_PLANT_COLUMNS.map((column) =>
-        `<th${column.align === "num" ? ' class="num"' : ""}>${fmt.escape(column.label)}</th>`).join("");
+        ihColumnHeader(column, "plant", "data-ih-sort", inverterHealth.plantSort)).join("");
     }
 
     // The toolbar above the per-plant table: free text over plant name, site code and maker, and
@@ -280,6 +376,8 @@
       const query = inverterHealth.plantSearch.trim().toLowerCase();
       return rows.filter((row) => {
         if (inverterHealth.onlyIssues && !(row.tickets > 0 || (row.down || 0) > 0)) return false;
+        if (!ihFilterMatches(inverterHealth.plantFilters, INVERTER_PLANT_COLUMNS,
+            (column) => (PLANT_COLUMN_VALUE[column.key] || (() => ""))(row))) return false;
         if (!query) return true;
         return [row.plant.displayName || row.plant.plantName, row.plant.siteCode,
           row.plant.displayCode, (row.config && row.config.maker) || ""]
@@ -332,6 +430,8 @@
         if (inverterHealth.plantFilter && code !== inverterHealth.plantFilter) return false;
         if (inverterHealth.severity && ticket.severity !== inverterHealth.severity) return false;
         if (inverterHealth.status && ticket.status !== inverterHealth.status) return false;
+        if (!ihFilterMatches(inverterHealth.ticketFilters, INVERTER_TICKET_COLUMNS,
+            (column) => (column.value || (() => ""))(ticket))) return false;
         if (!query) return true;
         return [ticket.ticket_no, ticket.serial_no, ticket.subcategory, ticket.description,
           ticket.status, ticket.severity, ticket.assignee_text, code]
@@ -349,15 +449,13 @@
         ? plants.find((row) => row.plant.siteCode === inverterHealth.plantFilter)
         : null;
       const hasCounts = !inverterHealth.unitsRestricted && !inverterHealth.unitsError;
-      const runningPercent = totals.runningPercent;
       const severityCounts = { Critical: 0, High: 0, Medium: 0, Low: 0 };
       scopedInverterTickets().forEach((ticket) => {
         const severity = Object.keys(severityCounts).find((key) => key.toLowerCase() === String(ticket.severity || "").toLowerCase());
         if (severity) severityCounts[severity] += 1;
       });
-      const donut = hasCounts && totals.total > 0
-        ? `<span class="ep-ih__donut" style="--ep-ih-running:${runningPercent}%" role="img" aria-label="${runningPercent}% running"><strong>${runningPercent}%</strong><span>Running</span></span>`
-        : "";
+      // No percentage ring: 375 of 376 rounds to "100%" and reads as nothing being down. The
+      // headline beside it already states the running count against the total.
       const reason = inverterHealth.unitsRestricted
         ? "Inverter counts are visible to the O&M Head and Assignees."
         : inverterHealth.unitsError
@@ -471,7 +569,6 @@
           ${inverterHealth.unitsError && !inverterHealth.unitsRestricted ? `<p class="ep-ih__notice" role="status">${fmt.escape(inverterHealth.unitsError)}</p>` : ""}
           <section class="ep-panel ep-ih__hero" aria-label="Inverter summary">
             <div class="ep-ih__hero-lead">
-              ${donut}
               <div class="ep-ih__hero-text">
                 <strong>${hasCounts && totals.total
                   ? fmt.formatNumber(totals.running) + " of " + fmt.formatNumber(totals.total) + " inverters running"
@@ -519,7 +616,7 @@
               <select aria-label="Filter by severity" data-ih-severity><option value="">All severities</option>${["Critical","High","Medium","Low"].map((item) => `<option${inverterHealth.severity === item ? " selected" : ""}>${item}</option>`).join("")}</select>
               <select aria-label="Filter by status" data-ih-status><option value="">All statuses</option>${OPEN_INVERTER_STATUSES.map((item) => `<option${inverterHealth.status === item ? " selected" : ""}>${item}</option>`).join("")}</select>
             </div>
-            <div class="ep-table-wrap"><table class="ep-table ep-ih__tickets"><thead><tr><th>Plant</th><th>Inverter</th><th>Units</th><th>Sub-problem</th><th>Issue description</th><th>Severity</th><th>Status</th><th>Reported</th><th>ETC</th><th>Assignee</th><th>Ticket</th></tr></thead>
+            <div class="ep-table-wrap"><table class="ep-table ep-ih__tickets"><thead><tr>${INVERTER_TICKET_COLUMNS.map((column) => ihColumnHeader(column, "ticket")).join("")}</tr></thead>
               <tbody>${ticketRows || `<tr><td colspan="11"><div class="ep-ih__empty">${inverterHealth.ticketsError
                 ? `<strong>Tickets unavailable</strong><span>Open inverter tickets could not be loaded.</span>`
                 : inverterHealth.loading
@@ -696,6 +793,33 @@
       host.addEventListener("click", (event) => {
         const close = event.target.closest("[data-ih-close]");
         if (close) { closeInverterHealth(); return; }
+        // Column filter: the chevron opens the popover, an option applies and closes it.
+        const filterToggle = event.target.closest("[data-ih-filter-toggle]");
+        if (filterToggle) {
+          const menu = host.querySelector('[data-ih-filter-menu="' + filterToggle.getAttribute("data-ih-filter-toggle") +
+            '"][data-ih-filter-scope="' + filterToggle.getAttribute("data-ih-filter-scope") + '"]');
+          if (menu && typeof menu.togglePopover === "function") {
+            menu.togglePopover();
+            const search = menu.querySelector("[data-ih-filter-search]");
+            if (search) search.focus();
+          }
+          return;
+        }
+        const filterOption = event.target.closest("[data-ih-filter-option]");
+        if (filterOption) {
+          const key = filterOption.getAttribute("data-ih-filter-option");
+          const scope = filterOption.getAttribute("data-ih-filter-scope");
+          const value = filterOption.getAttribute("data-ih-filter-value") || "";
+          const store = scope === "ticket" ? inverterHealth.ticketFilters : inverterHealth.plantFilters;
+          if (value) store[key] = value;
+          else delete store[key];
+          const menu = filterOption.closest("[data-ih-filter-menu]");
+          if (menu && typeof menu.hidePopover === "function") {
+            try { menu.hidePopover(); } catch (error) { /* already closed */ }
+          }
+          renderInverterHealth();
+          return;
+        }
         const sortBy = event.target.closest("[data-ih-sort]");
         if (sortBy) {
           const Sort = global.Solar91PortalSort;
@@ -752,6 +876,21 @@
         }
       });
       host.addEventListener("input", (event) => {
+        // Narrow the options inside an open filter menu without redrawing the table.
+        if (event.target.matches("[data-ih-filter-search]")) {
+          const menu = event.target.closest("[data-ih-filter-menu]");
+          const term = event.target.value.trim().toLowerCase();
+          let shown = 0;
+          Array.prototype.forEach.call(menu.querySelectorAll("[data-ih-filter-option]"), (option) => {
+            const value = option.getAttribute("data-ih-filter-value") || "";
+            const match = !term || !value || option.textContent.toLowerCase().indexOf(term) !== -1;
+            option.hidden = !match;
+            if (match && value) shown += 1;
+          });
+          const empty = menu.querySelector("[data-ih-filter-empty]");
+          if (empty) empty.hidden = !term || shown > 0;
+          return;
+        }
         // Both search boxes re-render the panel, so the caret has to be put back where it was.
         const selector = event.target.matches("[data-ih-search]") ? "[data-ih-search]"
           : event.target.matches("[data-ih-plant-search]") ? "[data-ih-plant-search]" : "";

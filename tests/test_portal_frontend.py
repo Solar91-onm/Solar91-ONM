@@ -779,14 +779,20 @@ def test_module_cleaning_board_shows_every_plant_and_opens_one_plants_calendar()
     # on_track / 1d / 3d / 7d are the server's buckets; they become the three words and colours.
     assert 'on_track: { key: "ontrack", label: "On track" }' in board
     assert '"3d": { key: "behind", label: "Behind" }' in board
-    assert '"7d": { key: "late", label: "Really behind" }' in board
+    assert '"7d": { key: "late", label: "Late" }' in board
     for cls in ("ep-wb__card--ontrack", "ep-wb__card--behind", "ep-wb__card--late"):
         assert cls in styles
 
-    # Cards follow the plant tile reference: cycle ring, numbered pips, table progress, and assignee.
-    for piece in ("ep-wb__ring", "ep-wb__pips", "ep-wb__cycle-pip", "ep-wb__table-count",
-                  "ep-wb__tables", "ep-wb__assignee", "No tables cleaned"):
+    # Cards carry the cycle ring, the numbered pips and the table progress. The assignee and the
+    # repeated "x of y tables cleaned" line were dropped: the card already states the progress.
+    # The three cycles are stacked one per row, each with its own score bar, not numbered dots.
+    for piece in ("ep-wb__ring", "ep-wb__pips", "ep-wb__cbar", "ep-wb__table-count"):
         assert piece in board
+    assert ".ep-wb__pips { display: flex; flex-direction: column;" in styles
+    assert "ep-wb__assignee" not in board
+    assert '<span class="ep-wb__tables">' not in board
+    # The plant name drops its trailing site number; the code chip still separates ALN01 from ALN02.
+    assert 'name.replace(/\\s+\\d{1,}$/, "")' in board
     assert 'class="ep-wb__date">' in board
     assert "border-top: 3px solid var(--wb-tone);" in styles
     assert ".ep-wb__cycle-pip--done" in styles
@@ -811,8 +817,12 @@ def test_module_cleaning_compliance_cycle_scope_and_board_breakdown():
     assert "Overdue Activities" in overview
     assert "No cleaning activities scheduled" in overview
     # Monthly compliance is a weighted aggregation of completed/planned activities.
-    assert "washingWork.done += completed;" in adapter
-    assert "washingWork.due += completed + pending;" in adapter
+    # The score counts a part-finished cycle by how much of it is cleaned; the legend count stays whole.
+    assert "washingWork.done += single ? progress : Math.min(progress, planned);" in adapter
+    assert "washingWork.completed += completed;" in adapter
+    # The denominator is the month's own plan, not completed + pending, which would grow with
+    # any extra cleaning and so could never read above 100%.
+    assert "washingWork.due += planned || (completed + pending);" in adapter
     assert "Math.round(1000 * washingWork.done / washingWork.due) / 10" in adapter
     assert "Math.min(pending, Math.max(0, Number(profile.washing.overdue) || 0))" in adapter
     assert "global.Solar91PortalNav.selectView(destination, dateRange)" in overview
@@ -868,9 +878,12 @@ def test_overview_inverter_tile_counts_units_and_opens_standalone_health():
     assert "tickets += Number(row.open) || 0;" in overview
     assert "down += Number(row.units) || 0;" in overview
     assert "runningPercent: total ? Math.round(running / total * 100) : null" in overview
-    assert 'figure: inv.total\n          ? { value: String(inv.runningPercent), unit: "%"' in overview
-    # The legend states running, not running and open tickets against the headline percentage.
-    assert '{ dot: "green", label: "Running", value: fmt.formatNumber(inv.running) }' in overview
+    # The headline is a count pair, not a percentage: 375 of 376 rounds to "100%" and reads as
+    # nothing being down, while one inverter is actually off.
+    assert 'value: fmt.formatNumber(inv.running) + "/" + fmt.formatNumber(inv.total),' in overview
+    assert 'caption: "inverters running out of total"' in overview
+    # The legend states the total, what is not running, and open tickets.
+    assert '{ dot: "green", label: "Total inverters", value: fmt.formatNumber(inv.total) }' in overview
     assert 'label: "Not running", value: fmt.formatNumber(inv.down), bad: inv.down > 0' in overview
     assert 'label: "Open tickets", value: fmt.formatNumber(inv.tickets), bad: inv.tickets > 0' in overview
     # The filters narrow it: only the plants the tiles are showing are counted.
@@ -2553,7 +2566,9 @@ def test_inverter_health_plant_table_is_sortable_and_aligned_like_the_register()
     assert ".ep-ih__plant-table th.num .ep-sort { justify-content: center; }" in styles
 
     # Sorting is the shared table-sort module, fetched on first open; plain headings until then.
-    assert 'return Sort.headerHTML(INVERTER_PLANT_COLUMNS, inverterHealth.plantSort, "data-ih-sort")' in inverter_health
+    # Each heading is built by ihColumnHeader, which adds the Health page's column filter.
+    assert 'ihColumnHeader(column, "plant", "data-ih-sort", inverterHealth.plantSort)' in inverter_health
+    assert "Sort.thHTML(column, sortState, sortAttr)" in inverter_health
     assert 'Sort.apply(rows, inverterHealth.plantSort, INVERTER_PLANT_COLUMNS)' in inverter_health
     assert 'Sort.next(inverterHealth.plantSort, sortBy.getAttribute("data-ih-sort"))' in inverter_health
     assert 'global.Solar91Modules.load("table-sort").then(renderInverterHealth)' in inverter_health

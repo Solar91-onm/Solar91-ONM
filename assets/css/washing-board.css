@@ -321,7 +321,10 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.ep-wb__pips { display: flex; align-items: center; gap: 7px; }
+/* One row per cycle, stacked: C1 / C2 / C3 with each cycle's own score. */
+.ep-wb__pips { display: flex; flex-direction: column; gap: 3px; }
+.ep-wb__pips .ep-wb__cbar { grid-template-columns: 20px minmax(30px, 1fr) 48px; gap: 6px; font-size: 10px; }
+.ep-wb__pips .ep-wb__cbar-track { height: 6px; }
 .ep-wb__cycle-pip {
   display: inline-flex;
   align-items: center;

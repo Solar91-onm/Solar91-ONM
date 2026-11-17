@@ -51,7 +51,7 @@
     on_track: { key: "ontrack", label: "On track" },
     "1d": { key: "behind", label: "Behind" },
     "3d": { key: "behind", label: "Behind" },
-    "7d": { key: "late", label: "Really behind" }
+    "7d": { key: "late", label: "Late" }
   };
 
   function statusOf(row) {
@@ -85,6 +85,15 @@
       return cycle.confirmed + " confirmed · " + cycle.pending + " awaiting confirmation";
     }
     return cycle.confirmed + " of " + cycle.total + " tables cleaned";
+  }
+
+  /**
+   * The plant's name without its trailing site number ("ABHANERI 01" -> "ABHANERI"). The site
+   * code chip beside it is what separates ALN01 from ALN02, so the number is not repeated here.
+   */
+  function plantLabel(row) {
+    var name = String(row.plant || "").trim();
+    return name.replace(/\s+\d{1,}$/, "").trim() || name || row.site_code;
   }
 
   function plantOptions() {
@@ -294,17 +303,18 @@
 
   /** Numbered cycle markers make complete, active and upcoming cycles scannable at a glance. */
   function pipsHTML(row, target) {
-    var pips = [];
-    var completed = Number(row.cycles_this_month) || 0;
-    var current = Number(row.current_cycle) || Math.min(target, completed + 1);
+    var bars = [];
     for (var number = 1; number <= target; number += 1) {
-      var state = number <= completed ? "done" : number === current ? "active" : "upcoming";
-      var label = state === "done" ? "complete" : state === "active" ? "in progress" : "not started";
-      pips.push('<span class="ep-wb__cycle-pip ep-wb__cycle-pip--' + state +
-        '" title="Cycle ' + number + " " + label + '" aria-label="Cycle ' + number + " " + label +
-        '">' + number + "</span>");
+      var grade = gradeFor(row, String(number));
+      var score = scoreOf(grade);
+      var state = grade ? grade.grade : "";
+      var title = "Cycle " + number + ": " + (GRADE_LABEL[state] || "No grade") +
+        (score !== null ? " · " + Number(score).toFixed(1) + "%" : "") +
+        (grade && typeof grade.tables_due === "number" && state !== "upcoming"
+          ? " · " + (grade.tables_done || 0) + " of " + grade.tables_due + " tables" : "");
+      bars.push(barHTML("C" + number, score, state, ui.complianceCycle === String(number), title));
     }
-    return '<span class="ep-wb__pips" aria-label="Cycle progress">' + pips.join("") + "</span>";
+    return '<span class="ep-wb__pips" aria-label="Cycle progress">' + bars.join("") + "</span>";
   }
 
   /** Latest cycle in the completion-based sequence, or null for roles that do not see scores. */
@@ -330,13 +340,12 @@
     var ringTone = work ? { good: "ontrack", warn: "behind", bad: "late", none: "unset" }[toneOf(work.percent)] : null;
     var status = statusOf(row);
     var target = Number(row.monthly_target) || 3;
-    var name = row.plant || row.site_code;
+    var name = plantLabel(row);
     var lastUpdated = shortDate(row.last_report_date);
     var late = Number(row.overdue_days) || 0;
     var statusForDate = ui.date === "__all" ? "" : dayStatus(row);
     var cycleTables = work ? work.done + " of " + work.due + " tables" :
       cycle.total ? cycle.confirmed + " of " + cycle.total + " tables" : "Table count not set";
-    var cleanedTables = work ? work.done + " of " + work.due + " tables cleaned" : cleanedLine(cycle);
     var entryNote = statusForDate === "not_reported"
       ? '<span class="ep-wb__entry-note">No entry · ' + escape(shortDate(ui.date)) + "</span>"
       : ["confirmed", "awaiting", "not_done", "rejected"].indexOf(statusForDate) !== -1
@@ -360,7 +369,6 @@
         '<span class="ep-wb__gauge">' + ringHTML(cycle, ringTone ? { key: ringTone } : status) + "</span>" +
         '<span class="ep-wb__facts">' +
           '<span class="ep-wb__table-count">' + escape(cycleTables) + "</span>" +
-          '<span class="ep-wb__tables">' + escape(cleanedTables) + "</span>" +
           pipsHTML(row, target) +
         "</span>" +
       "</span>" +
@@ -368,7 +376,6 @@
         entryNote +
         '<span class="ep-wb__pill ep-wb__pill--' + status.key + '">' + escape(status.label) +
           (late > 0 ? " · " + late + "d" : "") + "</span>" +
-        '<span class="ep-wb__assignee">' + escape(row.assignee_name || "Unassigned") + "</span>" +
       "</span>" +
       "</button>";
   }
@@ -486,7 +493,7 @@
       { key: "__all", label: "Visible plants", n: rows.length },
       { key: "ontrack", label: "On track", n: tally.ontrack },
       { key: "behind", label: "Behind", n: tally.behind },
-      { key: "late", label: "Really behind", n: tally.late },
+      { key: "late", label: "Late", n: tally.late },
       { key: "done", label: "All cycles done", n: tally.done }
     ].map(function (item) {
       return '<button type="button" class="ep-wb__tally ep-wb__tally--' +

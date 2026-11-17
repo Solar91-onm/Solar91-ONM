@@ -1679,3 +1679,80 @@ th.num .ep-sort { justify-content: center; }
 @media (prefers-reduced-motion: reduce) {
   .ep-skeleton__bar, .ep-skeleton__block { animation: none; }
 }
+
+/* ── Inverter Health: column filters ────────────────────────────────────
+   The same control the Health register uses: a chevron in the heading opens a
+   popover listing the values present in that column, with a search over them. */
+.ep-ih__th-filtered { padding: 4px 6px !important; }
+.ep-ih__th-content { display: flex; align-items: center; gap: 2px; min-width: 0; width: 100%; }
+.ep-ih__th-content .ep-sort { min-width: 0; width: auto; flex: 1 1 0; align-items: center; gap: 1px; }
+.ep-ih__th-content .ep-sort__label { min-width: 0; flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ep-ih__filter-toggle {
+  display: grid;
+  flex: 0 0 14px;
+  place-items: center;
+  width: 14px;
+  height: 16px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--ep-text-muted);
+  cursor: pointer;
+}
+.ep-ih__filter-toggle:hover,
+.ep-ih__filter-toggle.is-filtered {
+  border-color: #c9dbcf;
+  background: var(--ep-accent-soft);
+  color: var(--ep-accent-strong);
+}
+.ep-ih__filter-toggle:focus-visible { outline: 2px solid var(--ep-accent-ring); outline-offset: 1px; }
+.ep-ih__filter-toggle svg {
+  width: 12px; height: 12px;
+  fill: none; stroke: currentColor;
+  stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.8;
+}
+.ep-ih__column-filter-menu[popover] {
+  position: fixed;
+  inset: auto;
+  width: 250px;
+  max-width: calc(100vw - 16px);
+  max-height: calc(100vh - 16px);
+  margin: 0;
+  padding: 8px;
+  overflow: hidden;
+  border: 1px solid var(--ep-border);
+  border-radius: 7px;
+  background: var(--ep-bg);
+  box-shadow: var(--ep-shadow-pop);
+  color: var(--ep-text);
+  font-size: 11px;
+}
+.ep-ih__column-filter-search {
+  width: 100%;
+  min-height: 32px;
+  padding: 6px 8px;
+  border: 1px solid var(--ep-border);
+  border-radius: 5px;
+  background: var(--ep-bg);
+  color: var(--ep-text);
+  font: inherit;
+}
+.ep-ih__column-filter-search:focus-visible { outline: 2px solid var(--ep-accent-ring); border-color: var(--ep-accent); }
+.ep-ih__column-filter-options { display: grid; max-height: 240px; gap: 2px; margin-top: 6px; overflow-y: auto; }
+.ep-ih__column-filter-option {
+  width: 100%;
+  padding: 6px 7px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--ep-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.ep-ih__column-filter-option:hover,
+.ep-ih__column-filter-option[aria-pressed="true"] { background: var(--ep-accent-soft); color: var(--ep-accent-strong); }
+.ep-ih__column-filter-option[hidden] { display: none; }
+.ep-ih__column-filter-empty { padding: 8px 7px; color: var(--ep-text-faint); }
+.ep-ih__column-filter-empty[hidden] { display: none; }

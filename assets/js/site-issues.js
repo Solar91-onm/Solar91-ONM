@@ -570,8 +570,14 @@
             escape(issue.id) + '">' + escape(issue.id) + '</button></td>' +
           '<td data-label="' + labels[10] + '">' + (state.liveMode && !state.canEdit
             ? '<span aria-label="Manage this saved ticket in Solar91 O&M">Saved</span>'
-            : '<button type="button" class="ep-issues__button ep-issues__button--small" data-issue-edit="' +
-              escape(issue.id) + '">Edit</button>') + '</td>' +
+            // A tick icon rather than an "Edit" button: the column shrinks to the icon's width
+            // and gives its space back to the description. The label stays for screen readers.
+            : '<button type="button" class="ep-issues__edit-tick" data-issue-edit="' +
+              escape(issue.id) + '" title="Edit ' + escape(issue.id) +
+              '" aria-label="Edit ' + escape(issue.id) + '">' +
+              '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" ' +
+              'stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+              '<path d="m5 13 4 4L19 7"></path></svg></button>') + '</td>' +
         '</tr>';
       }).join("") + '</tbody></table></div>';
   }
