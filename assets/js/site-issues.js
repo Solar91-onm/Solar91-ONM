@@ -1216,6 +1216,8 @@
     }).length;
     var rows = rowsFor(context);
     var unfilteredRows = rowsFor(context, true);
+    var issueHeading = state.statusFilter === "Active" ? "Open Issues:"
+      : state.statusFilter === "All" ? "Issues:" : escape(state.statusFilter) + " Issues:";
     var content = "";
     if (state.loading) {
       content = '<div class="ep-issues__message" role="status">' +
@@ -1228,7 +1230,7 @@
           '<button type="button" data-issue-action="retry">Try again</button></div>';
     } else {
       content = '<section class="ep-issues__results"><div class="ep-issues__section-head">' +
-            '<h2>Issues <span>' + rows.length + '</span></h2>' +
+            '<h2>' + issueHeading + ' <span>' + rows.length + '</span></h2>' +
             '<span>' + (state.statusFilter === "All" ? "All statuses"
               : state.statusFilter === "Active" ? "Open + in progress"
               : escape(state.statusFilter)) +

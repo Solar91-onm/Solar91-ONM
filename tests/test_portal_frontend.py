@@ -940,6 +940,8 @@ def test_site_issue_register_places_id_before_action_and_labels_description():
     assert "dueAt: issue.etc_at" in issues
     # A ticket with no ETC says so rather than showing an empty cell.
     assert 'if (!value) return \'<span class="ep-issues__unassigned">Not set</span>\';' in issues
+    assert 'state.statusFilter === "Active" ? "Open Issues:"' in issues
+    assert "'<h2>' + issueHeading + ' <span>' + rows.length + '</span></h2>'" in issues
 
 
 def test_portal_scripts_do_not_reference_removed_endpoints():
