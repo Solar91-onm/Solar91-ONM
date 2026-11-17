@@ -1,14 +1,4 @@
-/**
- * plant-details.js — the plant record editor
- * ─────────────────────────────────────────────────────────────────────
- * Plants → <plant> → Details shows that plant's stored record as a single
- * table row (plants-table.js, single mode). This file holds the editor that
- * row's "Edit" button opens, shared with the portfolio table.
- *
- * It writes through the existing PATCH /api/plants/:id (permission
- * plants.manage) and sends only the fields that changed, so a stale form
- * cannot overwrite someone else's edit.
- */
+
 (function (global) {
   "use strict";
 

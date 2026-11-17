@@ -543,6 +543,7 @@ def setup_plant(db: Session, user: User, payload: WashingSetupRequest) -> dict:
         config = WashingConfig(plant_id=plant.id, team=[], frequency_days=14)
     config.assigned_user_id = assignee.id
     config.compliance_threshold_percent = payload.compliance_threshold_percent
+    config.fast_window_days = payload.fast_window_days
     db.add(config)
     config.tables_per_cycle = payload.table_count
     table_count = payload.table_count
@@ -565,6 +566,7 @@ def setup_plant(db: Session, user: User, payload: WashingSetupRequest) -> dict:
         "assignee_user_id": str(assignee.id),
         "assignee_name": assignee.display_name,
         "compliance_threshold_percent": config.compliance_threshold_percent,
+        "fast_window_days": config.fast_window_days,
     }
 
 

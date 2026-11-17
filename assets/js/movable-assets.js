@@ -1,16 +1,4 @@
-/**
- * movable-assets.js
- * ---------------------------------------------------------------------
- * Movable Assets: one column per plant, one row per part, each cell the number
- * of units of that part the plant holds.
- *
- *   Views -> Movable Assets   every plant's column (search, SPV, district, part filters)
- *   Plant -> Movable Assets   that plant's single column
- *
- * Same look as the Details table (it reuses the ep-pt__ classes), one fixed-width column per plant. Data comes from
- * GET /api/movable-assets; cells are read-only. Roles holding plants.manage use the Edit
- * column (one dialog per plant, PUT /api/movable-assets/plant), add a part column or remove one. The API enforces every permission; the UI only hides buttons.
- */
+
 (function (global) {
   "use strict";
 

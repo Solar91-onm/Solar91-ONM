@@ -1948,7 +1948,8 @@
           siteCode: selected.siteCode,
           tableCount: cyclesData ? cyclesData.table_count : (overviewPlant && overviewPlant.table_count) || "",
           assigneeUserId: overviewPlant && overviewPlant.assignee_user_id || "",
-          complianceThreshold: overviewPlant && overviewPlant.compliance_threshold_percent || 85
+          complianceThreshold: overviewPlant && overviewPlant.compliance_threshold_percent || 85,
+          fastWindowDays: overviewPlant && overviewPlant.fast_window_days || 7
         };
         state.washingPlant = cyclesData
           ? overviewPlant || {
@@ -2717,7 +2718,8 @@
           plant_id: setup.plantId,
           table_count: count,
           assignee_user_id: assigneeId,
-          compliance_threshold_percent: setup.complianceThreshold || 85
+          compliance_threshold_percent: setup.complianceThreshold || 85,
+          fast_window_days: setup.fastWindowDays || 7
         }
       }).then(function () {
         if (!active || active.host !== host || active.state !== state) return;

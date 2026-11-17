@@ -1,19 +1,4 @@
-/**
- * modules.js — loads a portal page's JavaScript the first time that page is opened.
- *
- * The portal used to ship every module on every page load: ~520 KB of script, of which the
- * Overview needs about a quarter. The heavy pages (the operations calendar, the site-issues
- * register, BOM) were parsed and executed by every user on every visit, whether or not they
- * ever opened those pages.
- *
- * Here, only the shell — sign-in, the API client, navigation and the Overview — is loaded with
- * the page. Everything else is fetched on first use and then kept, so opening a page costs one
- * script fetch and returning to it costs nothing.
- *
- * URLs come from the `s91-modules` block in the page, which the server content-hashes like every
- * other asset URL (app/core/assets.py). A module therefore keeps its immutable cache entry across
- * navigations and is re-fetched only when its file actually changes.
- */
+
 (function (global) {
   "use strict";
 

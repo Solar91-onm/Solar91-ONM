@@ -720,7 +720,7 @@ def _config_out(c: PMUnitConfig, plant: Plant | None) -> dict[str, Any]:
 
 @router.get("/unit-config")
 def list_unit_config(db: Annotated[Session, Depends(get_db)], user: Annotated[User, Depends(get_current_user)]):
-    _require(user, CREATOR_ROLES | {"Site Engineer"}, "Unit configuration is available to the O&M team and the assigned Site Engineer")
+    _require(user, CREATOR_ROLES, "Unit configuration is available to the O&M team")
     plants = {p.id: p for p in db.scalars(select(Plant))}
     allowed = user_scoped_plant_ids(db, user)
     def visible(pid: Any) -> bool:

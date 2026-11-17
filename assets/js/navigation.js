@@ -1,14 +1,4 @@
-/**
- * navigation.js — Phase 2 sidebar navigation.
- *
- * Handles:
- *  - Overview (existing dashboard)
- *  - Plants group (expand/collapse, search, plant list, per-plant sub-nav)
- *  - Overview group (expand/collapse, portfolio-wide nav items)
- *  - Active-state highlighting and content routing
- *
- * Role-based tab visibility from Phase 1 is preserved via ROLE_TAB_VISIBILITY.
- */
+
 (function (global) {
   "use strict";
 

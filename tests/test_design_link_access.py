@@ -4,7 +4,7 @@ from types import SimpleNamespace
 import pytest
 
 from app.core.security import can_view_design_link, visible_custom_fields
-from app.portal.service import plant_out
+from app.portal.service import plant_out, site_engineer_contacts
 
 FIELDS = {
     "design_link": "https://folder.example.invalid/ABH01",
@@ -71,3 +71,27 @@ def test_portal_plant_payload_is_redacted_per_role():
 def test_security_guard_details_are_visible_only_to_authorized_operational_roles(role):
     assert visible_custom_fields(FIELDS, _user(role))["security_guard"] == FIELDS["security_guard"]
     assert visible_custom_fields(FIELDS, _user(role))["security_contacts"] == FIELDS["security_contacts"]
+
+
+def test_site_engineer_contacts_use_the_register_and_hide_mobile_numbers_for_less_privileged_roles():
+    plant = SimpleNamespace(
+        custom_fields={
+            "security_contacts": {
+                "site_engineers": [
+                    {"name": "Engineer A", "mobile_no": "9876543210"},
+                    {"name": "Engineer B", "mobile_no": ""},
+                ]
+            }
+        }
+    )
+    assert site_engineer_contacts(plant, ["Legacy Engineer"], _user("O&M Head")) == [
+        {"name": "Engineer A", "mobile": "9876543210"},
+        {"name": "Engineer B", "mobile": ""},
+    ]
+    assert site_engineer_contacts(plant, ["Legacy Engineer"], _user("Site Engineer")) == [
+        {"name": "Engineer A", "mobile": ""},
+        {"name": "Engineer B", "mobile": ""},
+    ]
+    assert site_engineer_contacts(SimpleNamespace(custom_fields={}), ["Legacy Engineer"], _user("Assignee")) == [
+        {"name": "Legacy Engineer", "mobile": ""},
+    ]

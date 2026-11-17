@@ -252,12 +252,14 @@ def import_setup(db: Session, user: User, filename: str, content: bytes, *, dry_
         count_text = _cell(row, "Number of tables")
         email = _cell(row, "Washing assignee email")
         target_text = _cell(row, "Compliance target %") or _cell(row, "Weekly target %")
+        fast_window_text = _cell(row, "Fast window days")
         active_text = _cell(row, "Active")
         notes = _cell(row, "Remarks") or _cell(row, "Notes")  # older files call the column "Notes"
         is_new = config is None or current_count == 0
         table_count = current_count
         assignee = None
         threshold = config.compliance_threshold_percent if config else 85
+        fast_window_days = config.fast_window_days if config else 7
         active = config.active if config else True
         next_notes = config.notes if config else None
 
@@ -289,6 +291,14 @@ def import_setup(db: Session, user: User, filename: str, content: bytes, *, dry_
                 threshold = int(numeric)
             except ValueError:
                 errors.append("Compliance target must be a whole number from 1 to 100")
+        if fast_window_text:
+            try:
+                numeric = float(fast_window_text)
+                if not numeric.is_integer() or not 1 <= numeric <= 31:
+                    raise ValueError
+                fast_window_days = int(numeric)
+            except ValueError:
+                errors.append("Fast window days must be a whole number from 1 to 31")
         if active_text:
             if active_text.casefold() not in {"yes", "no"}:
                 errors.append("Active must be Yes or No")
@@ -305,6 +315,7 @@ def import_setup(db: Session, user: User, filename: str, content: bytes, *, dry_
             changed = (
                 table_count != current_count
                 or threshold != (config.compliance_threshold_percent if config else 85)
+                or fast_window_days != (config.fast_window_days if config else 7)
                 or active != (config.active if config else True)
                 or next_notes != (config.notes if config else None)
                 or not same_assignee
@@ -312,8 +323,8 @@ def import_setup(db: Session, user: User, filename: str, content: bytes, *, dry_
             action = "New" if is_new else "Changed" if changed else "Unchanged"
             prepared.append({
                 "row": row_number, "plant": plant, "config": config, "table_count": table_count,
-                "assignee": assignee, "threshold": threshold, "active": active, "notes": next_notes,
-                "action": action,
+                "assignee": assignee, "threshold": threshold, "fast_window_days": fast_window_days,
+                "active": active, "notes": next_notes, "action": action,
             })
         else:
             problems.append({"row": row_number, "errors": errors})
@@ -350,6 +361,7 @@ def import_setup(db: Session, user: User, filename: str, content: bytes, *, dry_
                 _ensure_washing_assignee(db, user, item["assignee"], item["plant"].id)
                 config.assigned_user_id = item["assignee"].id
             config.compliance_threshold_percent = item["threshold"]
+            config.fast_window_days = item["fast_window_days"]
             config.active = item["active"]
             config.notes = item["notes"]
             db.add(config)

@@ -75,6 +75,7 @@
       status: plant.status || "active",
       assignedEngineer: plant.assigned_engineer || "",
       siteEngineers: plant.site_engineers || [],
+      siteEngineerContacts: Array.isArray(plant.site_engineer_contacts) ? plant.site_engineer_contacts : [],
       washingAssignee: plant.washing_assignee || "",
       pmAssignee: plant.pm_assignee || "",
       healthAssignee: plant.health_assignee || "",

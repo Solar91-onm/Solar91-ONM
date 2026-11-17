@@ -40,7 +40,7 @@ from app.core.models import (
     WashingDailyReport,
     WashingTable,
 )
-from app.core.security import user_scoped_plant_ids, visible_custom_fields
+from app.core.security import can_view_security_contacts, user_scoped_plant_ids, visible_custom_fields
 from app.core.timeutil import BUSINESS_TZ, business_today
 
 # ── Business rules (mirrored from the owning modules) ────────────────────────
@@ -378,6 +378,7 @@ def build_profile(
                 "tableCount": None,
                 "assignee": washing.get("assignee_name") or "",
                 "thresholdPercent": None,
+                "fastWindowDays": washing.get("fast_window_days"),
                 "lastReportDate": None,
                 "active": True,
             }
@@ -402,6 +403,7 @@ def build_profile(
                 "tableCount": washing.get("table_count"),
                 "assignee": washing.get("assignee_name") or "",
                 "thresholdPercent": washing.get("compliance_threshold_percent"),
+                "fastWindowDays": washing.get("fast_window_days"),
                 "lastReportDate": washing.get("last_report_date"),
                 "active": bool(washing.get("active", True)),
             }
@@ -432,11 +434,13 @@ def build_profile(
 def plant_out(
     plant: Plant, engineers: list[str], washing_assignee: str, user: User,
     responsible: dict[str, str] | None = None,
+    site_contacts: list[dict[str, str]] | None = None,
 ) -> dict[str, Any]:
     """A plant record as the portal reads it: stored columns, nothing invented.
 
     ``user`` is required so the Design/MDL folder link is only sent to roles allowed to open it.
     """
+    site_contacts = site_contacts if site_contacts is not None else site_engineer_contacts(plant, engineers, user)
     return {
         "id": str(plant.id),
         "site_code": plant.site_code,
@@ -454,6 +458,7 @@ def plant_out(
         "status": plant.status,
         "assigned_engineer": plant.assigned_engineer,
         "site_engineers": engineers,
+        "site_engineer_contacts": site_contacts,
         "washing_assignee": washing_assignee,
         "pm_assignee": (responsible or {}).get("pm", ""),
         "health_assignee": (responsible or {}).get("health", ""),
@@ -483,6 +488,40 @@ def site_engineers_by_plant(db: Session, plant_ids: list[UUID]) -> dict[UUID, li
     for names in out.values():
         names.sort()
     return out
+
+
+def site_engineer_contacts(plant: Plant, assigned: list[str], user: User | None) -> list[dict[str, str]]:
+    """Register contacts for the Sites Engineer column, with assignment fallback names.
+
+    The register is the source of truth for names and mobile numbers. If the plant has no register
+    entry, the assignment table still provides names so the column does not empty out for legacy data.
+    """
+    seen: set[str] = set()
+    entries: list[dict[str, str]] = []
+    fields = plant.custom_fields or {}
+    contacts = fields.get("security_contacts") if isinstance(fields, dict) else None
+    if isinstance(contacts, dict):
+        for person in contacts.get("site_engineers", []) or []:
+            if not isinstance(person, dict):
+                continue
+            name = str(person.get("name") or "").strip()
+            if not name or name in seen:
+                continue
+            seen.add(name)
+            mobile = str(person.get("mobile_no") or "").strip()
+            if not can_view_security_contacts(user):
+                mobile = ""
+            entries.append({"name": name, "mobile": mobile})
+
+    if entries:
+        return entries
+
+    for name in sorted(set((n or "").strip() for n in assigned if (n or "").strip())):
+        if name in seen:
+            continue
+        seen.add(name)
+        entries.append({"name": name, "mobile": ""})
+    return entries
 
 
 def responsibilities_by_plant(db: Session, plant_ids: list[UUID]) -> dict[UUID, dict[str, str]]:

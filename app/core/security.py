@@ -78,6 +78,11 @@ def can_view_design_link(user: User | None) -> bool:
     return bool(user is not None and user.is_active and user.role in DESIGN_LINK_ROLES)
 
 
+def can_view_security_contacts(user: User | None) -> bool:
+    """True when this role may see site engineer / guard phone numbers."""
+    return bool(user and user.is_active and user.role in SECURITY_CONTACT_ROLES)
+
+
 def visible_custom_fields(fields: dict[str, Any] | None, user: User | None) -> dict[str, Any]:
     """Return plant fields redacted for roles that cannot view restricted contacts or links.
 
@@ -87,7 +92,7 @@ def visible_custom_fields(fields: dict[str, Any] | None, user: User | None) -> d
     if not can_view_design_link(user):
         for key in RESTRICTED_CUSTOM_FIELDS:
             out.pop(key, None)
-    if user is None or not user.is_active or user.role not in SECURITY_CONTACT_ROLES:
+    if not can_view_security_contacts(user):
         for key in SECURITY_CONTACT_KEYS:
             out.pop(key, None)
     return out

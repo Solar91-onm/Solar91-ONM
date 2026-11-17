@@ -126,6 +126,7 @@ class WashingSetupRequest(BaseModel):
     table_count: int = Field(ge=1, le=5000)
     assignee_user_id: UUID
     compliance_threshold_percent: int = Field(default=85, ge=1, le=100)
+    fast_window_days: int = Field(default=7, ge=1, le=31)
 
 
 class WashingDailyReportRequest(BaseModel):

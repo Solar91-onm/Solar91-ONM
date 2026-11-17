@@ -1,20 +1,4 @@
-/**
- * design.js
- * ---------------------------------------------------------------------
- * Design/MDL: each plant's design drawings ("site execution") folder and an index of the
- * standard drawings showing which are present and which are not.
- *
- *   Plant -> Details -> Design/MDL    the folder link + the full drawing index (Key + Miscellaneous)
- *   Views -> Details -> Design/MDL    one row per plant: folder, present count, the Key drawings, Misc count
- *
- * Stored on the plant record, no extra table:
- *   custom_fields.design_link  = folder URL (string)
- *   custom_fields.design_index = { "<drawingId>": true }   (absent or false = not added)
- * Both are read tolerantly; a plant with neither still renders the full page with "Not added".
- * Roles holding plants.manage can tick drawings on the plant page; that writes through the
- * existing PATCH /api/plants/:id, merged over the freshly read custom_fields so cctv_url and
- * other keys survive. The API enforces the permission; the UI only hides the button.
- */
+
 (function (global) {
   "use strict";
 

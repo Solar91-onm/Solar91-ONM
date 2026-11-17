@@ -402,6 +402,7 @@ class WashingConfig(Base):
     frequency_days: Mapped[int] = mapped_column(Integer, default=14)
     assigned_user_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
     compliance_threshold_percent: Mapped[int] = mapped_column(Integer, nullable=False, default=85)
+    fast_window_days: Mapped[int] = mapped_column(Integer, nullable=False, default=7)
     active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     notes: Mapped[str | None] = mapped_column(String(500))
     cycle_overrides: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)

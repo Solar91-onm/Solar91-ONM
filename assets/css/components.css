@@ -1115,6 +1115,10 @@
   color: var(--ep-text-muted);
 }
 .ep-pt__spv { font-weight: 700; color: var(--ep-text-strong); }
+.ep-pt__engcell { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; line-height: 1.35; }
+.ep-pt__eng { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; }
+.ep-pt__eng-name { font-size: var(--ep-fs-sm); color: var(--ep-text-strong); }
+.ep-pt__eng-no { font-size: var(--ep-fs-xs); color: var(--ep-text-muted); }
 .ep-pt__cctv-placeholder { color: var(--ep-text-faint); font-size: var(--ep-fs-xs); }
 .ep-pt__dash { color: var(--ep-text-faint); }
 .ep-pt__loc {

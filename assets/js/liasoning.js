@@ -1,22 +1,4 @@
-/**
- * liasoning.js
- * ---------------------------------------------------------------------
- * Liasoning: per-plant contract and document record, laid out like the Details page.
- *
- *   Plants -> <plant> -> Details -> Liasoning    one row, this plant
- *   Views  -> Details -> Liasoning               one row per plant (search, SPV and district filters, CSV)
- *
- * Columns: Site Code | LOA | PPA | Tariff | Registered Land Lease | Commissioning Documents (+ Edit).
- *   LOA and PPA are dates, Tariff is a number (the Rs/Unit unit is in the column heading, not the cell);
- *   the last two are links to a folder or document held outside the portal.
- *
- * Stored on the plant record, no extra table:
- *   custom_fields.liasoning = { loa_date, ppa_date, tariff, land_lease_url, commissioning_docs_url }
- * Roles holding plants.manage get an Edit button; that writes through the existing PATCH
- * /api/plants/:id, merged over the freshly read custom_fields so design_link, cctv_url and other
- * keys survive. The API enforces the permission and, for roles that may not open document links
- * (everyone except O&M Head, Assignee and Administration), leaves this record out of the plant data.
- */
+
 (function (global) {
   "use strict";
 

@@ -72,6 +72,16 @@ END $$;
 ALTER TABLE washing_config
     ADD COLUMN IF NOT EXISTS assigned_user_id uuid REFERENCES users(id) ON DELETE SET NULL;
 ALTER TABLE washing_config ADD COLUMN IF NOT EXISTS compliance_threshold_percent integer NOT NULL DEFAULT 85;
+ALTER TABLE washing_config ADD COLUMN IF NOT EXISTS fast_window_days integer NOT NULL DEFAULT 7;
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                   WHERE conname = 'washing_config_fast_window_days_check') THEN
+        ALTER TABLE washing_config
+            ADD CONSTRAINT washing_config_fast_window_days_check
+            CHECK (fast_window_days BETWEEN 1 AND 31);
+    END IF;
+END $$;
 
 CREATE TABLE IF NOT EXISTS washing_daily_reports (
     id uuid PRIMARY KEY,

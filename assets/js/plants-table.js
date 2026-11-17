@@ -1,17 +1,4 @@
-/**
- * plants-table.js
- * ─────────────────────────────────────────────────────────────────────
- * The portfolio plant grid (Views → Details): every plant the signed-in user
- * may see, in one sortable, searchable, exportable table.
- *
- * Every column is read from the database through the portal API. Site Engineers
- * come from the plant assignment table and the washing assignee from the washing
- * configuration, so the people columns reflect real access, not free text.
- *
- * "Edit" writes through PATCH /api/plants/:id and is only offered to roles that
- * hold plants.manage. The same table, in single mode, is one plant's Details
- * page: that plant's row and nothing else. The editor lives in plant-details.js.
- */
+
 (function (global) {
   "use strict";
 
@@ -77,6 +64,35 @@
   }
 
   // ─── Filtering + sorting ─────────────────────────────────────────────
+  function engineerContacts(plant) {
+    var contacts = Array.isArray(plant && plant.siteEngineerContacts) ? plant.siteEngineerContacts : [];
+    if (contacts.length) {
+      return contacts.map(function (contact) {
+        return {
+          name: (contact && contact.name) || "",
+          mobile: (contact && contact.mobile) || ""
+        };
+      }).filter(function (contact) { return contact.name || contact.mobile; });
+    }
+    var names = Array.isArray(plant && plant.siteEngineers) ? plant.siteEngineers : [];
+    return names.map(function (name) { return { name: name || "", mobile: "" }; }).filter(function (contact) { return contact.name; });
+  }
+
+  function engineerCell(plant) {
+    var contacts = engineerContacts(plant);
+    if (!contacts.length) return dash("No Site Engineer assigned");
+    var html = contacts.map(function (contact) {
+      var name = (contact.name || "").trim();
+      var mobile = (contact.mobile || "").trim();
+      var block = '<div class="ep-pt__eng">';
+      if (name) block += '<span class="ep-pt__eng-name">' + fmt.escape(name) + "</span>";
+      if (mobile) block += '<span class="ep-pt__eng-no">' + fmt.escape(mobile) + "</span>";
+      block += "</div>";
+      return block;
+    }).join("");
+    return '<div class="ep-pt__engcell">' + html + "</div>";
+  }
+
   function visibleRows() {
     if (mode.kind === "single") {
       return allRows.filter(function (r) { return r.plant.siteCode === mode.siteCode; });
@@ -86,10 +102,13 @@
     var rows = allRows.filter(function (r) {
       var p = r.plant;
       if (term) {
+        var engineerText = engineerContacts(p).map(function (contact) {
+          return [contact.name, contact.mobile].filter(Boolean).join(" ");
+        }).join(" ");
         var hay = [
           p.siteCode, p.displayCode, p.plantName, p.displayName || "",
           p.projectCompany || "", p.district || "", p.discom || "",
-          (p.siteEngineers || []).join(" "), p.washingAssignee || "", p.location || ""
+          engineerText, p.washingAssignee || "", p.location || ""
         ].join(" ").toLowerCase();
         if (hay.indexOf(term) === -1) return false;
       }
@@ -125,7 +144,10 @@
     { key: "discom",    label: "Discom",
       sort: function (r) { return r.plant.discom; } },
     { key: "engineer",  label: "Site Engineer",
-      sort: function (r) { return (r.plant.siteEngineers || []).join(", ") || r.plant.assignedEngineer; } },
+      sort: function (r) {
+        var contacts = engineerContacts(r.plant);
+        return contacts.map(function (contact) { return contact.name; }).join(", ") || r.plant.assignedEngineer;
+      } },
     { key: "assignee",  label: "Cleaning Assignee",
       sort: function (r) { return r.plant.washingAssignee; } },
     { key: "pmAssignee",     label: "PM Assignee",
@@ -323,9 +345,7 @@
         '<td class="num mono">' + numText(p.dcCapacityKw) + "</td>" +
         "<td>" + (p.district ? fmt.escape(p.district) : dash()) + "</td>" +
         "<td>" + (p.discom ? fmt.escape(p.discom) : dash()) + "</td>" +
-        "<td>" + ((p.siteEngineers && p.siteEngineers.length)
-            ? fmt.escape(p.siteEngineers.join(", "))
-            : (p.assignedEngineer ? fmt.escape(p.assignedEngineer) : dash("No Site Engineer assigned"))) + "</td>" +
+        "<td>" + engineerCell(p) + "</td>" +
         "<td>" + (p.washingAssignee ? fmt.escape(p.washingAssignee) : dash("Module Cleaning not set up")) + "</td>" +
         "<td>" + (p.pmAssignee ? fmt.escape(p.pmAssignee) : dash("No Preventive Maintenance Assignee")) + "</td>" +
         "<td>" + (p.healthAssignee ? fmt.escape(p.healthAssignee) : dash("No Health Assignee")) + "</td>" +
@@ -523,6 +543,9 @@
                         .map(function (c) { return c.label; });
     var body = visibleRows().map(function (entry) {
       var p = entry.plant;
+      var engineerText = engineerContacts(p).map(function (contact) {
+        return [contact.name, contact.mobile ? "(" + contact.mobile + ")" : ""].filter(Boolean).join(" ");
+      }).join("; ") || p.assignedEngineer || "";
       return [
         p.siteCode + " " + (p.displayName || p.plantName),
         spvNumber(p),
@@ -530,7 +553,7 @@
         p.dcCapacityKw === null || p.dcCapacityKw === undefined ? "" : p.dcCapacityKw,
         p.district || "",
         p.discom || "",
-        (p.siteEngineers || []).join("; ") || p.assignedEngineer || "",
+        engineerText,
         p.washingAssignee || "",
         p.pmAssignee || "",
         p.healthAssignee || "",

@@ -1,17 +1,4 @@
-/**
- * overview.js
- * ─────────────────────────────────────────────────────────────────────
- * The portfolio-wide Overview tab.
- *
- * Three summary tiles — PM compliance, Washing compliance, Open site issues.
- *
- * The Range selector in the filter bar is the single source of truth:
- * `applyRange` records the dates on `state` and then refreshes the tiles
- * from them.
- *
- * The plant / project / district filters narrow the tiles to the selected
- * plants, while each filter keeps its full set of available options.
- */
+
 (function (global) {
   "use strict";
 
