@@ -10,6 +10,7 @@
   // Inverters: how many are installed (the saved per-plant unit configuration) and how many
   // have an open site issue against them. Both are read once; the filters narrow them here.
   let inverters = { units: [], issues: [], loaded: false, unitsRestricted: false };
+  let strings   = { units: [], issues: [], loaded: false, unitsRestricted: false };
 
   let state = null;      // { allRows, rows, totals, sort }
   let searchTerm = "";
@@ -301,14 +302,42 @@
 
   // ─── Inverters ───────────────────────────────────────────────────────
   const INVERTER = "inverter";
+  const STRING = "string";
 
   function isInverter(name) { return String(name || "").trim().toLowerCase() === INVERTER; }
+  function isString(name)   { return String(name || "").trim().toLowerCase() === STRING; }
 
   function calculateInverterTotals(codes, unitRows, issueRows) {
     let total = 0;
     let plantsWithUnits = 0;
     (unitRows || []).forEach((row) => {
       if (!isInverter(row.equipment_type) || (row.site_code && !codes.has(row.site_code))) return;
+      total += Number(row.total_units) || 0;
+      plantsWithUnits += 1;
+    });
+    let down = 0;
+    let tickets = 0;
+    let affected = 0;
+    (issueRows || []).forEach((row) => {
+      if (row.site_code && !codes.has(row.site_code)) return;
+      tickets += Number(row.open) || 0;
+      down += Number(row.units) || 0;
+      affected += 1;
+    });
+    if (total) down = Math.min(down, total);
+    const running = total ? total - down : null;
+    return {
+      total: total, down: down, running: running,
+      runningPercent: total ? Math.round(running / total * 100) : null,
+      tickets: tickets, plants: affected, configured: plantsWithUnits > 0
+    };
+  }
+
+  function calculateStringTotals(codes, unitRows, issueRows) {
+    let total = 0;
+    let plantsWithUnits = 0;
+    (unitRows || []).forEach((row) => {
+      if (!isString(row.equipment_type) || (row.site_code && !codes.has(row.site_code))) return;
       total += Number(row.total_units) || 0;
       plantsWithUnits += 1;
     });
@@ -346,22 +375,51 @@
     return totals;
   }
 
-  // ─── Inverter Health drill-down: a page module, loaded on first open ──
-  // About 45 KB that only someone opening the Inverters tile needs, so it is not part of the
-  // Dashboard shell (assets/js/inverter-health.js). The tile's own figures stay here.
+  // ─── Equipment Health drill-down panels (Inverters + Strings) ────────
+  // Both panels are instances of one parameterised Solar91EquipmentHealth module, loaded lazily
+  // from inverter-health.js on first open (about 45 KB). The tile figures stay here; the panels
+  // read them through the ctx.state getter and ctx.equipmentCache reference.
   const INVERTER_HISTORY_KEY = "solar91InverterHealthOpen";
+  const STRING_HISTORY_KEY   = "solar91StringHealthOpen";
   let inverterPanel = null;
+  let stringPanel   = null;
+
+  const INVERTER_PANEL_ICON = `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"></rect><path d="M13 7l-4 6h3l-1 4 4-6h-3l1-4z"></path></svg>`;
+  const STRING_PANEL_ICON   = `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="4" height="4" rx=".5"></rect><rect x="10" y="5" width="4" height="4" rx=".5"></rect><rect x="18" y="5" width="4" height="4" rx=".5"></rect><rect x="2" y="15" width="4" height="4" rx=".5"></rect><rect x="10" y="15" width="4" height="4" rx=".5"></rect><rect x="18" y="15" width="4" height="4" rx=".5"></rect><path d="M4 9v6M12 9v6M20 9v6"></path></svg>`;
+
+  function loadEquipmentHealthModule() {
+    if (global.Solar91EquipmentHealth) return Promise.resolve();
+    if (global.Solar91Modules) return global.Solar91Modules.load("inverter-health");
+    return Promise.reject(new Error("The Equipment Health panel is unavailable."));
+  }
 
   function inverterHealthPanel() {
     if (inverterPanel) return Promise.resolve(inverterPanel);
-    const ready = global.Solar91InverterHealth ? Promise.resolve()
-      : global.Solar91Modules ? global.Solar91Modules.load("inverter-health")
-        : Promise.reject(new Error("The Inverter Health panel is unavailable."));
-    return ready.then(() => {
-      inverterPanel = global.Solar91InverterHealth.create({
-        state: () => state, filters, inverters, fmt, isInverter, calculateInverterTotals, loadInverters
-      });
+    return loadEquipmentHealthModule().then(() => {
+      inverterPanel = global.Solar91EquipmentHealth.create(
+        { vertical: "Inverter", label: "Inverter", unitLabel: "Inverter",
+          icon: INVERTER_PANEL_ICON, historyKey: INVERTER_HISTORY_KEY,
+          mountAttr: "data-inverter-health", destination: "inverters", type: "inverter" },
+        { state: () => state, filters, equipmentCache: inverters, fmt,
+          isEquipmentType: isInverter, calculateTotals: calculateInverterTotals,
+          reloadTile: () => { return loadInverters(true); } }
+      );
       return inverterPanel;
+    });
+  }
+
+  function stringHealthPanel() {
+    if (stringPanel) return Promise.resolve(stringPanel);
+    return loadEquipmentHealthModule().then(() => {
+      stringPanel = global.Solar91EquipmentHealth.create(
+        { vertical: "String", label: "String", unitLabel: "String",
+          icon: STRING_PANEL_ICON, historyKey: STRING_HISTORY_KEY,
+          mountAttr: "data-string-health", destination: "strings", type: "string" },
+        { state: () => state, filters, equipmentCache: strings, fmt,
+          isEquipmentType: isString, calculateTotals: calculateStringTotals,
+          reloadTile: () => { return loadStrings(true); } }
+      );
+      return stringPanel;
     });
   }
 
@@ -374,12 +432,32 @@
     });
   }
 
-  // Once loaded, the panel handles Back / Forward itself. Until then, going Forward into an open
-  // panel loads it first.
+  function openStringHealth(fromHistory) {
+    if (!state) return;
+    stringHealthPanel().then((sh) => sh.open(fromHistory)).catch((error) => {
+      overviewNotice("String Health could not be opened: " +
+        fmt.escape((error && error.message) || "please retry.") +
+        ' <button type="button" data-overview-retry>Retry</button>', "error");
+    });
+  }
+
   function wireInverterHealth() {
     global.addEventListener("popstate", (event) => {
       if (!inverterPanel && event.state && event.state[INVERTER_HISTORY_KEY]) openInverterHealth(true);
     });
+  }
+
+  function wireStringHealth() {
+    global.addEventListener("popstate", (event) => {
+      if (!stringPanel && event.state && event.state[STRING_HISTORY_KEY]) openStringHealth(true);
+    });
+  }
+
+  function stringTotals() {
+    const codes = new Set(state ? state.rows.map(({ plant }) => plant.siteCode) : []);
+    const totals = calculateStringTotals(codes, strings.units, strings.issues);
+    totals.restricted = strings.unitsRestricted;
+    return totals;
   }
 
   /** One request each, both optional: the tile degrades to what the role may read. */
@@ -400,6 +478,48 @@
     // Counts per plant, not the tickets themselves: the tile needs how many units are affected.
     const summaryRequest = api.request("/api/issues/equipment-summary?vertical=Inverter").then((body) => {
       inverters.issues = (body && body.plants) || [];
+    }).catch(() => {});
+    return Promise.all([unitsRequest, summaryRequest]).then(() => {
+      render();
+      publishPlantAlerts();
+    });
+  }
+
+  /**
+   * Light the sidebar for plants with an inverter problem. It reuses the per-plant counts the
+   * tile already holds, so the sidebar adds no request of its own, and it is republished after
+   * every refresh so a raised or resolved ticket lights or clears the plant straight away.
+   */
+  function publishPlantAlerts() {
+    const nav = global.Solar91PortalNav;
+    if (!nav || !nav.setPlantAlerts) return;
+    const alerts = {};
+    (inverters.issues || []).forEach((row) => {
+      const open = Number(row.open) || 0;
+      const down = Number(row.units) || 0;
+      if (!row.site_code || (open <= 0 && down <= 0)) return;
+      alerts[row.site_code] = { open: open, down: down };
+    });
+    nav.setPlantAlerts(alerts);
+  }
+
+  /** One request each for strings, both optional. */
+  function loadStrings(force) {
+    const api = global.Solar91PortalAPI;
+    if (!api || (strings.loaded && !force)) return Promise.resolve();
+    if (force) {
+      strings.units = [];
+      strings.issues = [];
+      strings.unitsRestricted = false;
+    }
+    strings.loaded = true;
+    const unitsRequest = api.request("/api/pm-plan/unit-config").then((body) => {
+      strings.units = (body && body.configs) || [];
+    }).catch(() => {
+      strings.unitsRestricted = true;
+    });
+    const summaryRequest = api.request("/api/issues/equipment-summary?vertical=String").then((body) => {
+      strings.issues = (body && body.plants) || [];
     }).catch(() => {});
     return Promise.all([unitsRequest, summaryRequest]).then(() => { render(); });
   }
@@ -492,6 +612,13 @@
         ? { dot: "red", tag: "Attention" }
         : { dot: "green", tag: "All running" };
 
+    const str = stringTotals();
+    const stringPill = !str.total && !str.tickets
+      ? { dot: "", tag: "N/A" }
+      : str.down > 0
+        ? { dot: "red", tag: "Attention" }
+        : { dot: "green", tag: "All running" };
+
     const pmP  = pill("PM", pmPct, totals.pmOverdue);
     const wshP = washingHasPlan ? pill("Module Cleaning", wshPct, totals.washingOverdue)
       : { dot: "", tag: "N/A" };
@@ -500,6 +627,7 @@
     const ICON_PM = `<svg class="ep-metric__icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"></rect><path d="M16 2v4M8 2v4M3 10h18"></path><path d="m9 16 2 2 4-4"></path></svg>`;
     const ICON_WASH = `<svg class="ep-metric__icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v6"></path><path d="M6 8h12l-1.5 12h-9L6 8z"></path><path d="M4.22 10.22A8 8 0 0 0 12 22a8 8 0 0 0 7.78-11.78"></path></svg>`;
     const ICON_INVERTER = `<svg class="ep-metric__icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"></rect><path d="M13 7l-4 6h3l-1 4 4-6h-3l1-4z"></path></svg>`;
+    const ICON_STRING = `<svg class="ep-metric__icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="4" height="4" rx=".5"></rect><rect x="10" y="5" width="4" height="4" rx=".5"></rect><rect x="18" y="5" width="4" height="4" rx=".5"></rect><rect x="2" y="15" width="4" height="4" rx=".5"></rect><rect x="10" y="15" width="4" height="4" rx=".5"></rect><rect x="18" y="15" width="4" height="4" rx=".5"></rect><path d="M4 9v6M12 9v6M20 9v6"></path></svg>`;
     const ICON_ISSUES = `<svg class="ep-metric__icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>`;
     const CHEVRON = `<svg class="ep-metric__chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"></path></svg>`;
 
@@ -591,6 +719,31 @@
             { dot: inv.tickets > 0 ? "red" : "", label: "Open tickets", value: fmt.formatNumber(inv.tickets), bad: inv.tickets > 0 },
             { dot: "", label: "Plants affected", value: fmt.formatNumber(inv.plants) },
             { dot: "", label: "Units configured", value: fmt.formatNumber(inv.total) }
+          ]
+      },
+      {
+        title: "Strings",
+        destination: "strings",
+        icon: ICON_STRING,
+        tone: toneOfPill(stringPill),
+        empty: str.total || str.tickets ? "" : (str.restricted
+          ? "Unit counts are not available to your role"
+          : "No string units configured"),
+        figure: str.total
+          ? { value: fmt.formatNumber(str.running) + "/" + fmt.formatNumber(str.total),
+              unit: "", caption: "strings running out of total" }
+          : (str.tickets ? { value: fmt.formatNumber(str.tickets), unit: "", caption: "open string issues" } : null),
+        meter: str.total ? [{ width: clamp(str.runningPercent), tone: "accent" }] : [],
+        legend: str.total
+          ? [
+            { dot: "green", label: "Total strings", value: fmt.formatNumber(str.total) },
+            { dot: str.down > 0 ? "red" : "", label: "Not running", value: fmt.formatNumber(str.down), bad: str.down > 0 },
+            { dot: str.tickets > 0 ? "red" : "", label: "Open tickets", value: fmt.formatNumber(str.tickets), bad: str.tickets > 0 }
+          ]
+          : [
+            { dot: str.tickets > 0 ? "red" : "", label: "Open tickets", value: fmt.formatNumber(str.tickets), bad: str.tickets > 0 },
+            { dot: "", label: "Plants affected", value: fmt.formatNumber(str.plants) },
+            { dot: "", label: "Units configured", value: fmt.formatNumber(str.total) }
           ]
       },
       {
@@ -870,6 +1023,10 @@
       const dateRange = { startDate: state.rangeStart, endDate: state.rangeEnd };
       if (destination === "inverters") {
         openInverterHealth();
+        return;
+      }
+      if (destination === "strings") {
+        openStringHealth();
         return;
       }
       if (destination === "washing") {
@@ -1183,9 +1340,11 @@
   function init() {
     wireInteractions();
     wireInverterHealth();
+    wireStringHealth();
     wireVisibilityRefresh();
     loadPortfolio(false);
     loadInverters();
+    loadStrings();
   }
 
   global.Solar91PortalOverview = {
@@ -1198,6 +1357,12 @@
       inverters.loaded = false;
       return loadInverters(true).then(() => {
         if (inverterPanel && inverterPanel.isOpen()) inverterPanel.reload();
+      });
+    },
+    refreshStringHealth() {
+      strings.loaded = false;
+      return loadStrings(true).then(() => {
+        if (stringPanel && stringPanel.isOpen()) stringPanel.reload();
       });
     }
   };

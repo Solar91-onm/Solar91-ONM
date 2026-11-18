@@ -33,7 +33,7 @@ PORTAL_ASSETS = ROOT / "assets"
 SHELL_SCRIPTS = ["format.js", "portal-api.js", "data-adapter.js", "modules.js",
                  "navigation.js", "overview.js", "app.js"]
 # Pages, fetched when first opened. The calendar alone is a quarter of the old payload.
-LAZY_MODULES = ["table-sort", "register-io", "plant-details", "plants-table", "site-issues",
+LAZY_MODULES = ["table-sort", "table-column-filter", "register-io", "plant-details", "plants-table", "site-issues",
                 "movable-assets", "bom", "design", "liasoning", "operations-calendar",
                 "washing-board", "categories", "security", "settings", "photo-evidence",
                 "inverter-health"]
@@ -90,7 +90,7 @@ def test_a_module_is_fetched_once_with_whatever_it_needs():
       global.window = global;
       global.document = {
         getElementById: () => ({ textContent: JSON.stringify({
-          'table-sort': '/t.js', 'plant-details': '/pd.js', 'plants-table': '/pt.js',
+          'table-sort': '/t.js', 'table-column-filter': '/cf.js', 'plant-details': '/pd.js', 'plants-table': '/pt.js',
           'register-io': '/rio.js', 'photo-evidence': '/pe.js', 'site-issues': '/si.js' }) }),
         createElement: () => ({ set src(value) { loaded.push(value); this._src = value;
           setTimeout(() => (value === '/si.js' && loaded.filter(u => u === '/si.js').length === 1
@@ -102,10 +102,10 @@ def test_a_module_is_fetched_once_with_whatever_it_needs():
       const fail = (m) => { throw new Error(m); };
       M.load('plants-table').then(() => {
         // Its dependencies come with it, each exactly once.
-        if (loaded.join(',') !== '/t.js,/pd.js,/pt.js') fail('deps: ' + loaded);
+        if (loaded.join(',') !== '/t.js,/cf.js,/pd.js,/pt.js') fail('deps: ' + loaded);
         return M.load(['plants-table', 'table-sort']);
       }).then(() => {
-        if (loaded.length !== 3) fail('a loaded module must not be fetched again: ' + loaded);
+        if (loaded.length !== 4) fail('a loaded module must not be fetched again: ' + loaded);
         if (!M.isLoaded('plants-table') || !M.isLoaded('table-sort')) fail('isLoaded');
         // A failed fetch is not remembered as loaded, so a retry can still succeed.
         return M.load('site-issues').then(() => fail('the failure should reject'), () => {
@@ -115,7 +115,7 @@ def test_a_module_is_fetched_once_with_whatever_it_needs():
       }).then(() => {
         if (!M.isLoaded('site-issues')) fail('the retry should load it');
         if (!M.isLoaded('register-io') || !M.isLoaded('photo-evidence')) fail('site-issues deps should load alongside it');
-        if (M.known().length !== 6) fail('known: ' + M.known());
+        if (M.known().length !== 7) fail('known: ' + M.known());
       }).catch((error) => { console.error(error.message); process.exit(1); });
     """
     run = subprocess.run(["node", "-e", script], cwd=ROOT, capture_output=True, text=True, timeout=30)
@@ -182,8 +182,10 @@ def test_washing_summary_keeps_every_figure_and_drops_only_the_lists(db, client)
         for key in OMITTED_BY_SUMMARY:
             assert key in full_row, key
             assert key not in summary_row, key + " is not part of the summary"
-        # Everything else is identical, value for value.
-        assert summary_row == {k: v for k, v in full_row.items() if k not in OMITTED_BY_SUMMARY}
+        # Summary adds the board-only table range; every other field is identical.
+        assert {k: v for k, v in summary_row.items() if k != "table_range"} == {
+            k: v for k, v in full_row.items() if k not in OMITTED_BY_SUMMARY
+        }
     assert summary["portfolio"] == full["portfolio"]
     assert summary["overdue_matrix"] == full["overdue_matrix"]
     today = business_today()
@@ -318,6 +320,82 @@ def test_the_inverter_tile_reads_counts_rather_than_the_ticket_list():
     assert '"/api/issues/equipment-summary?vertical=Inverter"' in overview
     assert "/api/issues?vertical=Inverter&limit=200" not in overview
     assert "inverters.issues = (body && body.plants) || [];" in overview
+
+
+def test_equipment_summary_filters_by_string_vertical(db, client):
+    """The equipment-summary endpoint already works for any vertical; verify String."""
+    login_user(client, db, role="O&M Head")
+    plant = Plant(site_code="STR01", plant_name="String Plant")
+    db.add(plant)
+    db.flush()
+    db.add(Issue(ticket_no="STR-1", plant_id=plant.id, vertical="String",
+                 description="ground fault", severity="High", status="Open",
+                 equipment_running=False, unit_count=2))
+    db.add(Issue(ticket_no="STR-2", plant_id=plant.id, vertical="String",
+                 description="running ticket", severity="Low", status="Open",
+                 equipment_running=True, unit_count=1))
+    db.add(Issue(ticket_no="INV-1", plant_id=plant.id, vertical="Inverter",
+                 description="inverter fault", severity="Medium", status="Open",
+                 equipment_running=False, unit_count=1))
+    db.commit()
+
+    response = client.get("/api/issues/equipment-summary?vertical=String")
+    assert response.status_code == 200
+    body = response.json()
+    plants = {row["site_code"]: row for row in body["plants"]}
+    assert "STR01" in plants
+    row = plants["STR01"]
+    # Only the ticket with equipment_running=False counts as a unit down.
+    assert row["units"] == 2
+    # Both open String tickets count as open.
+    assert row["open"] == 2
+    # The Inverter ticket must NOT appear in the String summary.
+    assert row["units"] != 3
+
+
+def test_string_units_down_rule_matches_equipment_running_false_only(db, client):
+    """equipment_running IS NULL and IS TRUE must not count as units down for strings."""
+    login_user(client, db, role="O&M Head")
+    plant = Plant(site_code="STR02", plant_name="String Plant 2")
+    db.add(plant)
+    db.flush()
+    db.add(Issue(ticket_no="STR-A", plant_id=plant.id, vertical="String",
+                 description="x", severity="Medium", status="Open",
+                 equipment_running=False, unit_count=3))
+    db.add(Issue(ticket_no="STR-B", plant_id=plant.id, vertical="String",
+                 description="x", severity="Medium", status="Open",
+                 equipment_running=True, unit_count=5))
+    db.add(Issue(ticket_no="STR-C", plant_id=plant.id, vertical="String",
+                 description="x", severity="Medium", status="Open",
+                 equipment_running=None, unit_count=4))
+    db.commit()
+
+    response = client.get("/api/issues/equipment-summary?vertical=String")
+    assert response.status_code == 200
+    row = {r["site_code"]: r for r in response.json()["plants"]}.get("STR02")
+    assert row is not None
+    assert row["units"] == 3   # only the equipment_running=False ticket
+    assert row["open"] == 3    # all three tickets are open
+
+
+def test_string_tile_reads_counts_in_overview_js():
+    """The String tile must also use the summary endpoint, not the full ticket list."""
+    overview = (PORTAL_ASSETS / "js" / "overview.js").read_text(encoding="utf-8")
+    assert '"/api/issues/equipment-summary?vertical=String"' in overview
+    assert "/api/issues?vertical=String&limit=200" not in overview
+    assert "strings.issues = (body && body.plants) || [];" in overview
+
+
+def test_equipment_health_module_is_parameterised_not_forked():
+    """There must be ONE Solar91EquipmentHealth export, not a separate inverter and string copy."""
+    ih = (PORTAL_ASSETS / "js" / "inverter-health.js").read_text(encoding="utf-8")
+    assert "Solar91EquipmentHealth" in ih
+    assert "Solar91InverterHealth" not in ih
+    # The module must accept typeConfig as its first argument.
+    assert "typeConfig" in ih
+    # It must not hardcode "Inverter" in any API URL or type comparison.
+    assert '?vertical=Inverter' not in ih
+    assert '=== "inverter"' not in ih
 
 
 # ── One portfolio request on sign-in ─────────────────────────────────────────
@@ -739,22 +817,26 @@ def test_resolution_fix_photos_are_downscaled_even_though_they_still_post_as_fil
     assert "if (!prepared.length) return [];" in issues
 
 
-def test_the_inverter_drill_down_reuses_the_tiles_figures_rather_than_refetching():
+def test_the_equipment_drill_down_reuses_the_tiles_figures_rather_than_refetching():
     """The drill-down is opened from the tile, which already holds the unit configuration
     and the per-plant ticket counts. Asking for the same two answers again costs two
-    requests and could only make the two screens disagree."""
+    requests and could only make the two screens disagree.
+
+    After generalisation to Solar91EquipmentHealth the cache is called equipmentCache and
+    shared through ctx; the assertions now check the generic names.
+    """
     inverter_health = (PORTAL_ASSETS / "js" / "inverter-health.js").read_text(encoding="utf-8")
 
-    loader = inverter_health[inverter_health.index("function loadInverterHealth()"):]
+    loader = inverter_health[inverter_health.index("function loadHealth()"):]
     loader = loader[:loader.index("\n    function ", 1)]
-    assert "inverters.loaded && (inverters.units.length || inverters.unitsRestricted)" in loader
-    assert "inverters.loaded && inverters.issues.length" in loader
-    assert "inverterHealth.summary = { plants: inverters.issues };" in loader
+    assert "equipmentCache.loaded && (equipmentCache.units.length || equipmentCache.unitsRestricted)" in loader
+    assert "equipmentCache.loaded && equipmentCache.issues.length" in loader
+    assert "panelState.summary = { plants: equipmentCache.issues };" in loader
     # The ticket list is the one genuinely new read.
-    assert "api.request(inverterHealthUrl())" in loader
+    assert "api.request(healthUrl())" in loader
     # A cold open still works: the fetch is the fallback, and it fills the tile's cache too.
     assert 'api.request("/api/pm-plan/unit-config")' in loader
-    assert "inverters.loaded = true;" in loader
+    assert "equipmentCache.loaded = true;" in loader
 
 
 def test_the_portfolio_is_fetched_once_and_shared_through_the_data_adapter():

@@ -28,9 +28,11 @@
     search: "", status: "__all", plant: "__all", cycle: "__all", date: "__all",
     // "auto" = the cycle in progress, so the card opens on the cycle being worked on rather than
     // on month-to-date totals. "all" is the Month view; "1"/"2"/"3" pin one cycle.
-    entryStatus: "__all", sort: "plant", complianceCycle: "auto", compliancePeriod: "week"
+    entryStatus: "__all", sort: "plant", complianceCycle: "auto", compliancePeriod: "week",
+    view: "cards", tableSort: { key: "", dir: "" }, columnFilters: {}
   };
   var dayActivityToken = 0;
+  var viewPreferenceUser = null;
 
   function api() { return global.Solar91PortalAPI; }
   function escape(value) { return fmt.escape(value === null || value === undefined ? "" : String(value)); }
@@ -204,29 +206,6 @@
     };
   }
 
-  /** The visible plants' planned cleaning activities for the selected month. */
-  function monthScore(rows) {
-    var eligible = rows.filter(function (row) {
-      return typeof row.monthly_compliance_percent === "number";
-    });
-    var work = workScore(eligible.map(function (row) {
-      return {
-        done: row.monthly_activities_completed,
-        // What the month planned -- not completed + pending, which grows with extra cleaning and
-        // so could never read above 100%.
-        due: row.monthly_activities_planned
-      };
-    }), eligible.length === 1);
-    work.pending = eligible.reduce(function (sum, row) {
-      return sum + (Number(row.monthly_activities_pending) || 0);
-    }, 0);
-    work.overdue = Math.min(work.pending, eligible.reduce(function (sum, row) {
-      return sum + (Number(row.monthly_activities_overdue) || 0);
-    }, 0));
-    if (!eligible.length) work.score = null;
-    return work;
-  }
-
   /**
    * The cycle being worked on now: the latest one any plant on screen has started. Cycles run in
    * sequence -- a plant only enters cycle n+1 once cycle n is complete -- so this is the furthest
@@ -238,7 +217,7 @@
     return current || 1;
   }
 
-  /** What the compliance card and the compliance sort are measuring: "all" or a cycle number. */
+  /** What the compliance sort measures: "all" or the focused cycle number. */
   function scopeCycle(rows) {
     if (ui.complianceCycle !== "auto") return ui.complianceCycle;
     return String(currentCycleNo(cycleScores(rows || st.rows)));
@@ -334,6 +313,134 @@
     };
   }
 
+  function cycleProgress(row) {
+    if (!(Number(row.table_count) > 0)) return null;
+    var work = currentWork(row);
+    return work ? work.percent : cycleOf(row).percent;
+  }
+
+  var TABLE_COLUMNS = [
+    { key: "plant", label: "Plant code",
+      sort: function (row) { return row.site_code; },
+      value: function (row) { return row.site_code || "Not configured"; } },
+    { key: "range", label: "Table range",
+      sort: function (row) { return row.table_range || null; },
+      value: function (row) { return row.table_range || "Not configured"; } },
+    { key: "count", label: "Number of tables", align: "num",
+      sort: function (row) { return Number(row.table_count) > 0 ? Number(row.table_count) : null; },
+      value: function (row) { return Number(row.table_count) > 0 ? String(row.table_count) : "Not configured"; } },
+    { key: "cycle", label: "Running cycle",
+      sort: function (row) { return Number(row.table_count) > 0 ? Number(row.current_cycle) || 1 : null; },
+      value: function (row) { return Number(row.table_count) > 0 ? "Cycle " + (Number(row.current_cycle) || 1) : "Not configured"; } },
+    { key: "progress", label: "Cycle progress (%)", align: "num",
+      sort: cycleProgress,
+      value: function (row) {
+        var value = cycleProgress(row);
+        return value === null ? "Not configured" : Number(value).toFixed(1) + "%";
+      } }
+  ];
+
+  function viewPreferenceKey() {
+    var client = api();
+    var user = client && typeof client.currentUser === "function" ? client.currentUser() : null;
+    var userKey = user && (user.id || user.email) || "unknown";
+    return "solar91.washingBoardView.v1." + encodeURIComponent(userKey);
+  }
+
+  function loadViewPreference() {
+    var key = viewPreferenceKey();
+    if (viewPreferenceUser === key) return;
+    viewPreferenceUser = key;
+    ui.view = "cards";
+    try {
+      if (global.localStorage.getItem(key) === "table") ui.view = "table";
+    } catch (error) {}
+  }
+
+  function saveViewPreference() {
+    try {
+      global.localStorage.setItem(viewPreferenceKey(), ui.view);
+    } catch (error) {}
+  }
+
+  function tableFilterOptions(rows, column) {
+    var values = Object.create(null);
+    rows.forEach(function (row) {
+      var value = String(column.value(row) == null ? "" : column.value(row)).trim();
+      if (value) values["$" + value] = true;
+    });
+    return Object.keys(values).map(function (key) { return key.slice(1); })
+      .sort(function (a, b) { return a.localeCompare(b, undefined, { numeric: true }); });
+  }
+
+  function filteredTableRows(rows) {
+    var filtered = rows.filter(function (row) {
+      return Object.keys(ui.columnFilters).every(function (key) {
+        var wanted = ui.columnFilters[key];
+        if (!wanted) return true;
+        var column = TABLE_COLUMNS.find(function (item) { return item.key === key; });
+        return !column || String(column.value(row)) === wanted;
+      });
+    });
+    return global.Solar91PortalSort.apply(filtered, ui.tableSort, TABLE_COLUMNS);
+  }
+
+  function tableColumnHeader(column, rows) {
+    var header = global.Solar91PortalSort.thHTML(column, ui.tableSort, "data-wb-sort");
+    var active = String(ui.columnFilters[column.key] || "");
+    return global.Solar91PortalColumnFilter.headerHTML(header, {
+      key: column.key,
+      label: column.label,
+      values: tableFilterOptions(rows, column),
+      active: active,
+      menuId: "ep-wb-filter-menu-" + column.key,
+      attributes: {
+        toggleKey: "data-wb-column-filter-toggle",
+        menuKey: "data-wb-column-filter-menu",
+        optionKey: "data-wb-column-filter-option",
+        optionValue: "data-wb-column-filter-value",
+        search: "data-wb-column-filter-search",
+        empty: "data-wb-column-filter-empty"
+      },
+      classes: {
+        header: "ep-issues__th-filtered",
+        content: "ep-issues__th-content",
+        toggle: "ep-issues__filter-toggle",
+        menu: "ep-issues__column-filter-menu",
+        search: "ep-issues__column-filter-search",
+        options: "ep-issues__column-filter-options",
+        option: "ep-issues__column-filter-option",
+        empty: "ep-issues__column-filter-empty"
+      },
+      searchHasKey: true,
+      focusSearchOnOpen: false,
+      keepAllOptionVisible: false
+    });
+  }
+
+  function tableHTML(rows) {
+    var visible = filteredTableRows(rows);
+    if (!visible.length) {
+      return '<div class="ep-pt__empty-card">No plants match these column filters.</div>';
+    }
+    return '<div class="ep-issues__table-wrap"><table class="ep-issues__table ep-wb__table"><thead><tr>' +
+      TABLE_COLUMNS.map(function (column) { return tableColumnHeader(column, rows); }).join("") +
+      '</tr></thead><tbody>' + visible.map(function (row) {
+        var progress = cycleProgress(row);
+        var cycleLabel = TABLE_COLUMNS[3].value(row);
+        return '<tr class="ep-issues__plant-row" data-wb-plant="' + escape(row.site_code) +
+          '" tabindex="0" role="button" aria-label="Open the Module Cleaning calendar for ' +
+          escape(plantLabel(row)) + '">' +
+          '<td data-label="Plant code"><strong>' + escape(row.site_code) + "</strong></td>" +
+          '<td data-label="Table range">' + escape(row.table_range || "Not configured") + "</td>" +
+          '<td data-label="Number of tables" class="num">' +
+            escape(Number(row.table_count) > 0 ? row.table_count : "Not configured") + "</td>" +
+          '<td data-label="Running cycle">' + escape(cycleLabel) + "</td>" +
+          '<td data-label="Cycle progress (%)" class="num">' +
+            escape(progress === null ? "Not configured" : Number(progress).toFixed(1) + "%") + "</td></tr>";
+      }).join("") + "</tbody></table></div>";
+  }
+
   function cardHTML(row) {
     var work = currentWork(row);
     var cycle = work ? { number: work.number, percent: work.percent } : cycleOf(row);
@@ -416,76 +523,6 @@
     return rows;
   }
 
-  /** The summary band: month donut · Cycle 1-3 bars · plant status chips, in one row. */
-  function complianceHTML(rows) {
-    var scope = scopeCycle(rows);
-    var isMonth = scope === "all";
-    var cycleRows = cycleScores(rows);
-    var focus = isMonth ? null : cycleRows[Number(scope) - 1] || null;
-    var month = monthScore(rows);
-    // The figures the card is showing: the month to date, or the cycle in focus. The donut, the
-    // numbers under it and the caption all read the same scope, so they can never disagree.
-    var score = isMonth ? month.score : (focus && focus.started ? focus.score : null);
-    var hasScore = typeof score === "number" && isFinite(score);
-    var fill = hasScore ? Math.max(0, Math.min(100, score)) : 0;
-    var tone = hasScore ? toneOf(score) : "none";
-    var colour = tone === "good" ? "var(--ep-accent)" : tone === "warn" ? "var(--ep-amber)" : "var(--ep-red)";
-    var style = hasScore
-      ? "background:conic-gradient(" + colour + " 0 " + fill + "%,var(--ep-border-soft) " + fill + "% 100%)"
-      : "background:conic-gradient(var(--ep-border-soft) 0 100%)";
-    var scopeName = isMonth ? "month" : "Cycle " + scope;
-    var help = !rows.length ? "No plants in this view."
-      : !isMonth && focus && !focus.started
-        ? "Cycle " + scope + " has not started" + (focus.start ? " · starts " + shortDate(focus.start) : "")
-      : !hasScore ? "Scores are shown to the O&M team."
-      : isMonth && !month.due ? "No cleaning activities scheduled"
-      : isMonth
-        ? (rows.length === 1 ? "This plant" : rows.length + " plants") +
-          " · month · overdue is included in pending"
-        : ((focus.plants === 1 ? (rows.length === 1 ? "This plant" : "1 plant")
-            : focus.plants + " plants") + " in " + scopeName + " so far" +
-          (ui.complianceCycle === "auto" ? " · in progress" : ""));
-    var cycles = cycleRows.map(function (cycle) {
-      var title = cycle.started
-        ? "Cycle " + cycle.n + ": " + cycle.done + " of " + cycle.due + " tables cleaned"
-        : "Cycle " + cycle.n + " is upcoming" + (cycle.start ? " · starts " + shortDate(cycle.start) : "");
-      return '<button type="button" class="ep-wb__scope' +
-        (!isMonth && String(cycle.n) === scope ? " is-on" : "") + '" data-wb-scope="' + cycle.n + '">' +
-        barHTML("Cycle " + cycle.n, cycle.started ? cycle.score : null,
-          cycle.started ? (cycle.score === null ? "running" : "scored") : "upcoming",
-          false, title) + "</button>";
-    }).join("");
-    // A compact card on the right: the donut, the figures it is made of on one line below it,
-    // then the three cycle bars (click one to focus it).
-    return '<aside class="ep-wb__compliance" aria-label="Module Cleaning compliance">' +
-      '<h2>Compliance <button type="button" class="ep-wb__scope-all' +
-        (isMonth ? " is-on" : "") + '" data-wb-scope="all">Month</button></h2>' +
-      '<div class="ep-wb__donut" style="' + style + '">' +
-        '<span class="ep-wb__donut-label"><strong>' + (hasScore ? Number(score).toFixed(1) + "%" : "N/A") +
-        "</strong><small>" + escape(scopeName) + "</small></span></div>" +
-      '<div class="ep-wb__compliance-legend">' +
-      (isMonth
-        ? '<span><i class="ep-wb__key ep-wb__key--target"></i>Completed <b>' +
-            (hasScore ? escape(month.done) : "—") + "</b></span>" +
-          '<span><i class="ep-wb__key ep-wb__key--ontime"></i>Planned <b>' +
-            (hasScore ? escape(month.due) : "—") + "</b></span>" +
-          '<span><i class="ep-wb__key ep-wb__key--ontime"></i>Pending <b>' +
-            (hasScore ? escape(month.pending) : "—") + "</b></span>" +
-          '<span><i class="ep-wb__key ep-wb__key--ontime"></i>Overdue <b>' +
-            (hasScore ? escape(month.overdue) : "—") + "</b></span>"
-        // One cycle: tables cleaned in that cycle against the tables due in it so far.
-        : '<span><i class="ep-wb__key ep-wb__key--target"></i>Cleaned <b>' +
-            (hasScore ? escape(focus.done) : "—") + "</b></span>" +
-          '<span><i class="ep-wb__key ep-wb__key--ontime"></i>Due so far <b>' +
-            (hasScore ? escape(focus.due) : "—") + "</b></span>" +
-          '<span><i class="ep-wb__key ep-wb__key--ontime"></i>Still due <b>' +
-            (hasScore ? escape(Math.max(0, focus.due - focus.done)) : "—") + "</b></span>") +
-      "</div>" +
-      '<p class="ep-wb__compliance-note">' + escape(help) + "</p>" +
-      '<div class="ep-wb__sum-cycles">' + cycles + "</div>" +
-      "</aside>";
-  }
-
   function countsHTML(rows) {
     var tally = { ontrack: 0, behind: 0, late: 0, done: 0, unset: 0 };
     rows.forEach(function (row) { tally[statusOf(row).key] += 1; });
@@ -548,8 +585,12 @@
           '<option value="compliance-high"' + (ui.sort === "compliance-high" ? " selected" : "") + '>Compliance: high to low</option>' +
           '<option value="compliance-low"' + (ui.sort === "compliance-low" ? " selected" : "") + '>Compliance: low to high</option>' +
         '</select></label>' +
-      '</div></div>' +
-      complianceHTML(rows) + "</div>" +
+        '<button type="button" class="ep-wb__view-toggle" data-wb-view-toggle aria-pressed="' +
+          (ui.view === "table" ? "true" : "false") + '" aria-label="Switch to ' +
+          (ui.view === "table" ? "cards" : "table") + ' view" title="Switch to ' +
+          (ui.view === "table" ? "cards" : "table") + ' view">' +
+          (ui.view === "table" ? "Table" : "Cards") + "</button>" +
+      '</div></div></div>' +
       (st.loading
         ? '<div class="ep-pt__loading" role="status">Loading Module Cleaning…</div>'
         : st.error
@@ -562,7 +603,8 @@
               ? '<div class="ep-pt__error" role="alert">Entry status could not be loaded. ' +
                 escape(st.dayActivityError) + ' <button type="button" data-wb-retry-day>Try again</button></div>'
           : rows.length
-        ? '<div class="ep-wb__grid">' + rows.map(cardHTML).join("") + "</div>"
+        ? ui.view === "table" ? tableHTML(rows)
+          : '<div class="ep-wb__grid">' + rows.map(cardHTML).join("") + "</div>"
         : '<div class="ep-pt__empty-card">' +
           (ui.entryStatus === "missing"
             ? "No plants are missing an entry for " + escape(shortDate(ui.date)) + "."
@@ -574,6 +616,47 @@
   }
 
   function wire(container) {
+    var viewToggle = container.querySelector("[data-wb-view-toggle]");
+    if (viewToggle) {
+      viewToggle.addEventListener("click", function () {
+        var x = global.scrollX || 0;
+        var y = global.scrollY || 0;
+        ui.view = ui.view === "cards" ? "table" : "cards";
+        saveViewPreference();
+        render(container);
+        if (typeof global.scrollTo === "function") global.scrollTo(x, y);
+      });
+    }
+
+    global.Solar91PortalColumnFilter.wire(container, {
+      attributes: {
+        toggleKey: "data-wb-column-filter-toggle",
+        menuKey: "data-wb-column-filter-menu",
+        optionKey: "data-wb-column-filter-option",
+        optionValue: "data-wb-column-filter-value",
+        search: "data-wb-column-filter-search",
+        empty: "data-wb-column-filter-empty"
+      },
+      classes: {
+        menu: "ep-issues__column-filter-menu",
+        search: "ep-issues__column-filter-search",
+        empty: "ep-issues__column-filter-empty"
+      },
+      focusSearchOnOpen: false,
+      keepAllOptionVisible: false,
+      onSelect: function (key, _scope, value) {
+        ui.columnFilters[key] = value;
+        render(container);
+      }
+    });
+
+    container.querySelectorAll("[data-wb-sort]").forEach(function (button) {
+      button.addEventListener("click", function () {
+        global.Solar91PortalSort.next(ui.tableSort, button.getAttribute("data-wb-sort"));
+        render(container);
+      });
+    });
+
     var month = container.querySelector("[data-wb-month]");
     if (month) {
       month.addEventListener("change", function () {
@@ -603,6 +686,7 @@
       select.addEventListener("change", function () {
         var filter = select.getAttribute("data-wb-filter");
         ui[filter] = select.value;
+        if (filter === "sort") ui.tableSort = { key: "", dir: "" };
         if (filter === "date" && ui.date === "__all") ui.entryStatus = "__all";
         if (filter === "date" || filter === "entryStatus") {
           if (ui.date !== "__all") {
@@ -611,15 +695,6 @@
           }
           clearDayActivity();
         }
-        render(container);
-      });
-    });
-    // Focus the month or one cycle: it sorts the plants and outlines that cycle on every card.
-    container.querySelectorAll("[data-wb-scope]").forEach(function (button) {
-      button.addEventListener("click", function () {
-        var scope = button.getAttribute("data-wb-scope");
-        // Clicking the cycle already in focus returns to "auto" (follow the cycle in progress).
-        ui.complianceCycle = scopeCycle() === scope && scope !== "all" ? "auto" : scope;
         render(container);
       });
     });
@@ -633,6 +708,13 @@
       card.addEventListener("click", function () {
         // Straight into that plant's own Module Cleaning calendar.
         global.Solar91PortalNav.selectPlantPage(card.getAttribute("data-wb-plant"), "washing");
+      });
+    });
+    container.querySelectorAll("tr[data-wb-plant]").forEach(function (row) {
+      row.addEventListener("keydown", function (event) {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        event.preventDefault();
+        global.Solar91PortalNav.selectPlantPage(row.getAttribute("data-wb-plant"), "washing");
       });
     });
   }
@@ -690,6 +772,7 @@
 
   function show(container, selectedMonth) {
     if (!container) return;
+    loadViewPreference();
     var mine = ++token;
     var prefill = global.Solar91WashingBoardPrefill;
     if (prefill) {

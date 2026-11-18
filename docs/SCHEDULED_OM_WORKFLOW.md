@@ -164,6 +164,7 @@ Latest production fields are introduced by `007_rev14_production.sql`.
 ## Cleaning activity compliance
 - Dashboard, plant profile and Module Cleaning monthly compliance use **confirmed completed cleaning activities ÷ planned cleaning activities**, capped at 100% and rounded to one decimal place. A planned cycle counts as one activity only after its completion is confirmed; partial table cleaning and rejected or pending reports do not complete it. Overdue activities remain part of pending.
 - The Module Cleaning board's cycle ring and cycle bars are a separate progress measure: confirmed distinct tables cleaned ÷ configured tables for that cycle. Cycle dates and the existing lateness threshold continue to measure pace; they do not determine the activity-compliance score.
+- The Module Cleaning board defaults to cards and offers a per-user cards/table view preference. Its table range uses the registered table codes; its “Cycle progress (%)” column uses the same cycle figure as the card ring, not monthly activity compliance. Switching views only rerenders the already-loaded rows.
 - A period with no planned activity reports 0% and is labeled as unscheduled. The current washing schema has no cancelled-activity status/history, so no status is invented or excluded as cancelled. It also has no reliable module-area values; Cleaning Coverage is therefore not shown. Actual module area per table or report would be required to calculate it.
 
 ## Washing day summary and cycle sheet view (October 2026)

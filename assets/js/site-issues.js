@@ -53,11 +53,13 @@
   }
   // "inverter" check used in wizard step 2 (matches overview.js's own isInverter()).
   function isDraftInverter(equipment) {
-    return String(equipment || "").trim().toLowerCase() === "inverter";
+    var lower = String(equipment || "").trim().toLowerCase();
+    return lower === "inverter" || lower === "string";
   }
 
   // Per-session cache of unit config keyed by site code, loaded lazily in the wizard.
   var unitConfigCache = {};
+  var stringUnitConfigCache = {};
   var unitConfigLoading = null;
 
   function loadUnitConfigFor(siteCode) {
@@ -68,8 +70,11 @@
         var configs = (body && body.configs) || [];
         state.plants.forEach(function (plant) { unitConfigCache[plant.siteCode] = 0; });
         configs.forEach(function (config) {
-          if (String(config.equipment_type || "").trim().toLowerCase() === "inverter") {
+          var eqType = String(config.equipment_type || "").trim().toLowerCase();
+          if (eqType === "inverter") {
             unitConfigCache[config.site_code] = Number(config.total_units) || 0;
+          } else if (eqType === "string") {
+            stringUnitConfigCache[config.site_code] = Number(config.total_units) || 0;
           }
         });
       }).catch(function (error) {
@@ -436,81 +441,64 @@
     return Object.keys(values).sort(function (a, b) { return a.localeCompare(b); });
   }
 
-  function filterColumnOptions(menu, term) {
-    var normalizedTerm = String(term || "").trim().toLowerCase();
-    var visibleCount = 0;
-    Array.prototype.forEach.call(menu.querySelectorAll("[data-issue-column-filter-option]"), function (option) {
-      var visible = !normalizedTerm ||
-        option.textContent.trim().toLowerCase().indexOf(normalizedTerm) !== -1;
-      option.hidden = !visible;
-      if (visible) visibleCount += 1;
-    });
-    var empty = menu.querySelector("[data-issue-column-filter-empty]");
-    if (empty) empty.hidden = visibleCount > 0;
-  }
-
-  function positionColumnFilter(toggle, menu) {
-    var toggleRect = toggle.getBoundingClientRect();
-    var menuRect = menu.getBoundingClientRect();
-    var left = Math.max(8, Math.min(toggleRect.left, global.innerWidth - menuRect.width - 8));
-    var top = toggleRect.bottom + 4;
-    if (top + menuRect.height > global.innerHeight - 8) {
-      top = Math.max(8, toggleRect.top - menuRect.height - 4);
-    }
-    menu.style.left = Math.round(left) + "px";
-    menu.style.top = Math.round(top) + "px";
-  }
-
   var FILTERABLE_ISSUE_COLUMNS = ["plant", "equipment", "subpart", "maker", "problem", "assignee", "status"];
 
   function issueColumnHeader(column) {
     var header = global.Solar91PortalSort.thHTML(column, state.columnSort, "data-issue-sort");
     if (!state.canEdit || FILTERABLE_ISSUE_COLUMNS.indexOf(column.key) === -1) return header;
 
-    var menuId = "ep-issue-filter-menu-" + column.key;
     var activeFilter = String(state.columnFilters[column.key] || "");
-    var options = issueColumnOptions(column.key).map(function (value) {
-      return '<button type="button" class="ep-issues__column-filter-option" data-issue-column-filter-option="' +
-        column.key + '" data-issue-column-filter-value="' + escape(value) + '" aria-pressed="' +
-        (activeFilter === value ? "true" : "false") + '">' + escape(value) + "</button>";
-    }).join("");
-    var filter = '<button type="button" class="ep-issues__filter-toggle' +
-      (activeFilter ? " is-filtered" : "") + '" data-issue-column-filter-toggle="' + column.key +
-      '" aria-label="Filter by ' + escape(column.label) + '" aria-controls="' + menuId +
-      '" aria-expanded="false" title="Filter by ' + escape(column.label) + '">' +
-      '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4"></path></svg></button>' +
-      '<div id="' + menuId + '" class="ep-issues__column-filter-menu" popover="auto" data-issue-column-filter-menu="' +
-      column.key + '">' +
-      '<input class="ep-issues__column-filter-search" type="search" data-issue-column-filter-search="' +
-      column.key + '" placeholder="Search options..." aria-label="Search ' + escape(column.label) + ' options" />' +
-      '<div class="ep-issues__column-filter-options">' +
-      '<button type="button" class="ep-issues__column-filter-option" data-issue-column-filter-option="' +
-      column.key + '" data-issue-column-filter-value="" aria-pressed="' +
-      (activeFilter ? "false" : "true") + '">All ' + escape(column.label) + "</button>" +
-      options + '</div><div class="ep-issues__column-filter-empty" data-issue-column-filter-empty hidden>' +
-      "No matching options</div></div>";
-    header = header.replace("<th", '<th class="ep-issues__th-filtered"');
-    var openEnd = header.indexOf(">") + 1;
-    var closeStart = header.lastIndexOf("</th>");
-    return header.slice(0, openEnd) + '<div class="ep-issues__th-content">' +
-      header.slice(openEnd, closeStart) + filter + "</div>" + header.slice(closeStart);
+    return global.Solar91PortalColumnFilter.headerHTML(header, {
+      key: column.key,
+      label: column.label,
+      values: issueColumnOptions(column.key),
+      active: activeFilter,
+      menuId: "ep-issue-filter-menu-" + column.key,
+      attributes: {
+        toggleKey: "data-issue-column-filter-toggle",
+        menuKey: "data-issue-column-filter-menu",
+        optionKey: "data-issue-column-filter-option",
+        optionValue: "data-issue-column-filter-value",
+        search: "data-issue-column-filter-search",
+        empty: "data-issue-column-filter-empty"
+      },
+      classes: {
+        header: "ep-issues__th-filtered",
+        content: "ep-issues__th-content",
+        toggle: "ep-issues__filter-toggle",
+        menu: "ep-issues__column-filter-menu",
+        search: "ep-issues__column-filter-search",
+        options: "ep-issues__column-filter-options",
+        option: "ep-issues__column-filter-option",
+        empty: "ep-issues__column-filter-empty"
+      },
+      searchHasKey: true,
+      focusSearchOnOpen: false,
+      keepAllOptionVisible: false
+    });
   }
 
   function wireColumnFilterMenus(host) {
-    Array.prototype.forEach.call(host.querySelectorAll("[data-issue-column-filter-menu]"), function (menu) {
-      var key = menu.getAttribute("data-issue-column-filter-menu");
-      var toggle = host.querySelector('[data-issue-column-filter-toggle="' + key + '"]');
-      menu.addEventListener("toggle", function () {
-        var isOpen = menu.matches(":popover-open");
-        if (toggle) toggle.setAttribute("aria-expanded", isOpen ? "true" : "false");
-        if (isOpen) {
-          var search = menu.querySelector("[data-issue-column-filter-search]");
-          if (search) {
-            search.value = "";
-            filterColumnOptions(menu, "");
-          }
-        }
-      });
+    global.Solar91PortalColumnFilter.wire(host, {
+      attributes: {
+        toggleKey: "data-issue-column-filter-toggle",
+        menuKey: "data-issue-column-filter-menu",
+        optionKey: "data-issue-column-filter-option",
+        optionValue: "data-issue-column-filter-value",
+        search: "data-issue-column-filter-search",
+        empty: "data-issue-column-filter-empty"
+      },
+      classes: {
+        menu: "ep-issues__column-filter-menu",
+        search: "ep-issues__column-filter-search",
+        empty: "ep-issues__column-filter-empty"
+      },
+      focusSearchOnOpen: false,
+      keepAllOptionVisible: false,
+      onSelect: function (key, _scope, value) {
+        state.columnFilters[key] = value;
+        renderView();
+      }
     });
   }
 
@@ -951,22 +939,25 @@
   }
 
   function renderInverterRunningBlock(draft) {
-    // Only shown when the chosen category is "Inverter".
+    // Shown for Inverter and String categories (any equipment type handled by isDraftInverter).
     if (!isDraftInverter(draft.equipment)) return "";
+    var equipLabel = String(draft.equipment || "Inverter").trim();
+    var isStringEquip = equipLabel.toLowerCase() === "string";
     var isRunning = draft.equipmentRunning === true;
     var isBreakdown = draft.equipmentRunning === false;
-    // Unit select for Breakdown: show numbered unit options if total_units is known for this plant.
-    var totalUnits = unitConfigCache[draft.plantCode] || 0;
-    var configPending = unitConfigCache[draft.plantCode] === undefined && !!unitConfigLoading;
+    // Unit select for Breakdown: pick the right cache for this equipment type.
+    var cache = isStringEquip ? stringUnitConfigCache : unitConfigCache;
+    var totalUnits = cache[draft.plantCode] || 0;
+    var configPending = cache[draft.plantCode] === undefined && !!unitConfigLoading;
     var unitSelectHtml = "";
     if (isBreakdown) {
       if (state.unitConfigError) {
         unitSelectHtml = '<p class="ep-issues__inline-error" role="alert">' +
-          'Inverter unit configuration could not be loaded: ' + escape(state.unitConfigError) +
+          equipLabel + ' unit configuration could not be loaded: ' + escape(state.unitConfigError) +
           ' <button type="button" class="ep-issues__button ep-issues__button--small" ' +
             'data-issue-action="retry-unit-config">Retry</button></p>';
       } else if (configPending) {
-        unitSelectHtml = '<p class="ep-issues__category-note" role="status">Loading inverter unit configuration…</p>';
+        unitSelectHtml = '<p class="ep-issues__category-note" role="status">Loading ' + equipLabel.toLowerCase() + ' unit configuration…</p>';
       } else if (totalUnits > 0) {
         var options = "";
         for (var i = 1; i <= totalUnits; i++) {
@@ -992,7 +983,7 @@
       }
     }
     return '<fieldset class="ep-issues__wizard-fieldset">' +
-      '<legend class="ep-issues__wizard-field-label">Is the inverter running? <span class="ep-issues__required" aria-hidden="true">*</span></legend>' +
+      '<legend class="ep-issues__wizard-field-label">Is the ' + equipLabel.toLowerCase() + ' running? <span class="ep-issues__required" aria-hidden="true">*</span></legend>' +
       '<div class="ep-issues__wizard-radio-row">' +
         '<label><input type="radio" name="equipmentRunning" value="running"' + (isRunning ? " checked" : "") + ' required /> Running</label>' +
         '<label><input type="radio" name="equipmentRunning" value="breakdown"' + (isBreakdown ? " checked" : "") + ' required /> Breakdown</label>' +
@@ -1431,10 +1422,6 @@
           if (editError) editError.hidden = true;
         }
       }
-      if (event.target.matches("[data-issue-column-filter-search]")) {
-        filterColumnOptions(event.target.closest("[data-issue-column-filter-menu]"), event.target.value);
-        return;
-      }
       // (The unit-config Retry used to be handled here, in the *input* handler, where `action`
       // does not exist: every keystroke in the register threw, so the search box and the custom
       // date range below never ran. It is a button, so it now lives in the click handler.)
@@ -1795,28 +1782,6 @@
         siteCode: (active.context && active.context.plantCode) || "",
         onImported: function () { state.loaded = false; renderView(); }
       })) return;
-      var filterToggle = event.target.closest("[data-issue-column-filter-toggle]");
-      if (filterToggle && state.canEdit) {
-        var filterKey = filterToggle.getAttribute("data-issue-column-filter-toggle");
-        var filterMenu = host.querySelector('[data-issue-column-filter-menu="' + filterKey + '"]');
-        if (!filterMenu) return;
-        if (filterMenu.matches(":popover-open")) {
-          filterMenu.hidePopover();
-        } else {
-          filterMenu.showPopover();
-          positionColumnFilter(filterToggle, filterMenu);
-        }
-        return;
-      }
-      var filterOption = event.target.closest("[data-issue-column-filter-option]");
-      if (filterOption && state.canEdit) {
-        var optionKey = filterOption.getAttribute("data-issue-column-filter-option");
-        var optionMenu = filterOption.closest("[data-issue-column-filter-menu]");
-        if (optionMenu && optionMenu.matches(":popover-open")) optionMenu.hidePopover();
-        state.columnFilters[optionKey] = filterOption.getAttribute("data-issue-column-filter-value") || "";
-        renderView();
-        return;
-      }
       var sortButton = event.target.closest("[data-issue-sort]");
       if (sortButton) {
         global.Solar91PortalSort.next(state.columnSort, sortButton.getAttribute("data-issue-sort"));
@@ -2058,6 +2023,7 @@
     invalidateOverviewData();
     var overview = global.Solar91PortalOverview;
     if (overview && overview.refreshInverterHealth) overview.refreshInverterHealth();
+    if (overview && overview.refreshStringHealth) overview.refreshStringHealth();
   }
 
   function submitIssueCloseFlow(form) {
@@ -2501,10 +2467,10 @@
     state.submitError = "";
     renderView();
     var units = parseInt(draft.unitCount, 10);
-    // Inverter running/breakdown mapping:
+    // Equipment running/breakdown mapping (Inverter and String):
     // equipment_running=false (Breakdown) → serial_no = chosen unit labels, unit_count = number of down units.
     // equipment_running=true (Running) → no extra fields (serial_no/unit_count from form as-is).
-    // equipment_running=null (not an inverter ticket) → unchanged legacy behaviour.
+    // equipment_running=null (other category) → unchanged legacy behaviour.
     var isBreakdown = isDraftInverter(draft.equipment) && draft.equipmentRunning === false;
     var totalUnitsForPlant = unitConfigCache[draft.plantCode] || 0;
     var serialForPayload = (draft.serialNo || "").trim() || null;
@@ -2532,7 +2498,7 @@
       occurred_at: toUtcTimestamp(draft.occurredAt, "09:00"),
       etc_at: draft.dueAt ? toUtcTimestamp(draft.dueAt) : null,
       photo_count: 0,
-      // equipment_running: null = not an inverter ticket (not sent), true = running, false = breakdown.
+      // equipment_running: null = not an equipment-breakdown ticket (not sent), true = running, false = breakdown.
       equipment_running: isDraftInverter(draft.equipment) && draft.equipmentRunning !== null
         ? draft.equipmentRunning : undefined
     };
@@ -2547,7 +2513,12 @@
       invalidateOverviewData();
       if (isBreakdown) {
         var overview = global.Solar91PortalOverview;
-        if (overview && overview.refreshInverterHealth) overview.refreshInverterHealth();
+        var eqLower = String(draft.equipment || "").trim().toLowerCase();
+        if (eqLower === "string") {
+          if (overview && overview.refreshStringHealth) overview.refreshStringHealth();
+        } else {
+          if (overview && overview.refreshInverterHealth) overview.refreshInverterHealth();
+        }
       }
       if (!draft.evidenceFiles.length) return null;
       // The ticket is already saved. Photos go up separately, through the shared /api/photos

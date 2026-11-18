@@ -19,6 +19,8 @@ from app.scheduled.washing_cycles import (
     cleaning_activity_metrics,
     check_cycle_compliance_alerts,
     check_missed_monthly_targets,
+    _code_number,
+    format_table_codes,
 )
 from tests.conftest import grant_assignee_plants, login_user, tiny_png_bytes
 from tests import conftest
@@ -51,6 +53,37 @@ def _setup_cycle_users(client, db, plant):
     })
     assert setup.status_code == 200, setup.text
     return head, assignee
+
+
+def test_table_code_helpers_compress_contiguous_and_gapped_ranges():
+    assert _code_number("Table 040") == 40
+    assert _code_number("Legacy T-7") == 7
+    assert _code_number("Table A") is None
+    assert format_table_codes(["Table 001", "Table 002", "Table 003", "Table 007"]) == "1–3, 7"
+    assert format_table_codes(["Table 001", "Table 003", "Table 004", "Table 007"]) == "1, 3–4, 7"
+    assert format_table_codes([]) == ""
+
+
+def test_summary_overview_includes_table_range_only_for_registered_codes(client, db):
+    configured = _plant(db)
+    unrecorded = Plant(site_code="CYCLE02", plant_name="Unrecorded Tables")
+    db.add(unrecorded)
+    head = login_user(client, db, role="O&M Head", name="Range Head", email="range-head@example.com")
+    db.add_all([
+        WashingConfig(plant_id=configured.id, tables_per_cycle=4),
+        WashingConfig(plant_id=unrecorded.id, tables_per_cycle=4),
+        WashingTable(legacy_id="RANGE-001", plant_id=configured.id, table_code="Table 001"),
+        WashingTable(legacy_id="RANGE-002", plant_id=configured.id, table_code="Table 002"),
+        WashingTable(legacy_id="RANGE-004", plant_id=configured.id, table_code="Table 004"),
+    ])
+    db.commit()
+    _act_as(head)
+
+    response = client.get(f"{BASE}/overview?include_reports=false&summary=true")
+    assert response.status_code == 200, response.text
+    rows = {row["site_code"]: row for row in response.json()["plants"]}
+    assert rows["CYCLE01"]["table_range"] == "1–2, 4"
+    assert rows["CYCLE02"]["table_range"] is None
 
 
 def test_cycle_requires_daily_reports_and_reviewer_confirmation(client, db, monkeypatch):

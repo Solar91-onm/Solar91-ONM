@@ -245,6 +245,10 @@
   }
 
   var allPlants = [];            // populated from catalog
+  // Plants with an open inverter problem, keyed by site code: { open, down }. Filled by
+  // overview.js from the equipment summary it already reads, so the sidebar costs no request
+  // of its own. A plant with no entry simply shows no light.
+  var plantAlerts = {};
 
   // ─── Group expand / collapse ────────────────────────────────────────
   function toggleGroup(groupName) {
@@ -263,6 +267,36 @@
   function populatePlantList(plants) {
     allPlants = plants;
     renderPlantList("");
+  }
+
+  /**
+   * The blinking red light beside a plant whose inverters need attention. It sits just before
+   * the site-code chip, and its title says what it is so the dot is never the only signal.
+   */
+  function plantAlertHTML(siteCode) {
+    var alert = plantAlerts[siteCode];
+    if (!alert) return "";
+    var parts = [];
+    if (alert.down > 0) {
+      parts.push(alert.down + (alert.down === 1 ? " inverter not running" : " inverters not running"));
+    }
+    if (alert.open > 0) {
+      parts.push(alert.open + (alert.open === 1 ? " open inverter ticket" : " open inverter tickets"));
+    }
+    var label = parts.join(" · ");
+    return '<span class="ep-hint-light ep-hint-light--red ep-nav-plant__alert" role="img"' +
+      ' data-plant-alert="' + (alert.down > 0 ? "down" : "open") + '"' +
+      ' title="' + global.Solar91PortalFormat.escape(label) + '"' +
+      ' aria-label="' + global.Solar91PortalFormat.escape(label) + '"></span>';
+  }
+
+  /**
+   * Record which plants have an inverter problem and repaint the list.
+   * `alerts` is { siteCode: { open, down } }; anything falsy clears every light.
+   */
+  function setPlantAlerts(alerts) {
+    plantAlerts = alerts || {};
+    renderPlantList(document.querySelector("[data-plant-search]")?.value || "");
   }
 
   function renderPlantList(searchTerm) {
@@ -285,6 +319,7 @@
         '<div class="ep-nav-plant__row">' +
           '<button class="ep-nav-plant__toggle" type="button">' +
             '<span class="ep-nav-plant__name">' + fmt.escape(plant.displayName || plant.plantName) + '</span>' +
+            plantAlertHTML(plant.siteCode) +
             '<span class="ep-nav-plant__code">' + fmt.escape(plant.displayCode) + '</span>' +
           '</button>' +
           '<button class="ep-nav-chevron ep-nav-plant__chevron' + (isOpen ? ' is-open' : '') + '" type="button" data-plant-chevron ' +
@@ -1030,6 +1065,7 @@
     selectView: selectView,
     selectPlantPage: selectPlantPage,
     refresh: refresh,
+    setPlantAlerts: setPlantAlerts,
     getState: function () { return navState; }
   };
 }(window));

@@ -84,7 +84,15 @@
   margin: 0 auto;
   width: 100%;
 }
-@media (max-width: 760px) { .ep-metrics { grid-template-columns: 1fr; } }
+/* Five tiles: 3-column on wide screens (PM / Cleaning / Inverters | Strings / Issues). */
+@media (min-width: 900px) {
+  .ep-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+/* Medium: keep 2 columns; 5th tile spans both so it is not stranded alone. */
+@media (min-width: 760px) and (max-width: 899px) {
+  .ep-metrics > :nth-child(5) { grid-column: span 2; }
+}
+@media (max-width: 759px) { .ep-metrics { grid-template-columns: 1fr; } }
 
 .ep-metric {
   padding: 22px 24px;
@@ -848,6 +856,22 @@
 .ep-nav-plant.is-selected .ep-nav-plant__name {
   color: var(--ep-accent-strong);
 }
+/* Inverter alert light, just before the site-code chip. It reuses .ep-hint-light--red (the
+   portal's one traffic-light primitive) and only adds the pulse and the placement. margin-left
+   is auto so the light and the code sit together on the right; a plant without one is unchanged. */
+.ep-nav-plant__alert {
+  margin-left: auto;
+  animation: ep-nav-alert-pulse 1.4s ease-in-out infinite;
+}
+@keyframes ep-nav-alert-pulse {
+  0%, 100% { opacity: 1;   box-shadow: 0 0 5px 1px rgba(220,38,38,0.45); }
+  50%      { opacity: 0.3; box-shadow: 0 0 2px 0 rgba(220,38,38,0.15); }
+}
+/* Steady, never blinking, when motion is unwelcome — the colour still carries the meaning. */
+@media (prefers-reduced-motion: reduce) {
+  .ep-nav-plant__alert { animation: none; opacity: 1; }
+}
+
 .ep-nav-plant__code {
   font-family: var(--ep-font-mono);
   font-size: 10px;
@@ -1370,9 +1394,11 @@
 .ep-overview-notice.is-error { border-color: #f1a7a1; background: #fdf1f0; color: #8a1c13; }
 .ep-overview-notice button { padding: 4px 10px; border: 1px solid currentColor; border-radius: 999px; background: transparent; color: inherit; font: inherit; font-weight: 600; cursor: pointer; }
 
-/* Standalone Dashboard drill-down; deliberately not a tab-view. */
-.ep-inverter-health[hidden] { display: none; }
-.ep-inverter-health {
+/* Standalone Dashboard drill-downs (Inverter Health and String Health share one implementation). */
+.ep-inverter-health[hidden],
+.ep-string-health[hidden] { display: none; }
+.ep-inverter-health,
+.ep-string-health {
   position: fixed;
   inset: 0;
   left: var(--ep-sidebar-w);
@@ -1381,7 +1407,8 @@
   background: var(--ep-bg-page);
   color: var(--ep-text);
 }
-.ep-shell.is-sidebar-collapsed .ep-inverter-health { left: var(--ep-sidebar-w-collapsed); }
+.ep-shell.is-sidebar-collapsed .ep-inverter-health,
+.ep-shell.is-sidebar-collapsed .ep-string-health { left: var(--ep-sidebar-w-collapsed); }
 .ep-ih { min-height: 100%; }
 .ep-ih__header {
   position: sticky;

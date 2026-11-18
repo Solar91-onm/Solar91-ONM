@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from calendar import monthrange
 from datetime import date, datetime, timedelta, timezone
+import json
 import re
 import uuid
 from uuid import UUID
@@ -801,10 +802,19 @@ def _build_overview(db: Session, user: User, include_tables: bool = False, repor
     allowed_plant_ids = user_scoped_plant_ids(db, user) or set() if user.role == "Site Engineer" else set()
 
     configured_plants = select(WashingConfig.plant_id)
-    table_counts_query = (
-        select(WashingTable.plant_id.label("plant_id"), func.count(WashingTable.id).label("table_count"))
-        .where(WashingTable.plant_id.in_(configured_plants))
-    )
+    table_count_columns = [
+        WashingTable.plant_id.label("plant_id"),
+        func.count(WashingTable.id).label("table_count"),
+    ]
+    if summary:
+        recorded_code = func.coalesce(WashingTable.table_code, WashingTable.legacy_id)
+        code_aggregate = (
+            func.json_group_array(recorded_code)
+            if db.get_bind().dialect.name == "sqlite"
+            else func.array_agg(recorded_code)
+        )
+        table_count_columns.append(code_aggregate.label("table_codes"))
+    table_counts_query = select(*table_count_columns).where(WashingTable.plant_id.in_(configured_plants))
     latest_reports_query = (
         select(
             WashingDailyReport.plant_id.label("plant_id"),
@@ -817,17 +827,22 @@ def _build_overview(db: Session, user: User, include_tables: bool = False, repor
     if user.role == "Site Engineer":
         table_counts_query = table_counts_query.where(WashingTable.plant_id.in_(allowed_plant_ids))
         latest_reports_query = latest_reports_query.where(WashingDailyReport.plant_id.in_(allowed_plant_ids))
+    if plant_ids is not None:
+        table_counts_query = table_counts_query.where(WashingTable.plant_id.in_(plant_ids))
     table_counts_subquery = table_counts_query.group_by(WashingTable.plant_id).subquery()
     latest_reports_subquery = latest_reports_query.group_by(WashingDailyReport.plant_id).subquery()
 
+    plant_columns = [
+        Plant,
+        WashingConfig,
+        User.display_name,
+        func.coalesce(WashingConfig.tables_per_cycle, table_counts_subquery.c.table_count, 0),
+        latest_reports_subquery.c.last_report_date,
+    ]
+    if summary:
+        plant_columns.append(table_counts_subquery.c.table_codes)
     plant_stmt = (
-        select(
-            Plant,
-            WashingConfig,
-            User.display_name,
-            func.coalesce(WashingConfig.tables_per_cycle, table_counts_subquery.c.table_count, 0),
-            latest_reports_subquery.c.last_report_date,
-        )
+        select(*plant_columns)
         .outerjoin(WashingConfig, WashingConfig.plant_id == Plant.id)
         .outerjoin(User, User.id == WashingConfig.assigned_user_id)
         .outerjoin(table_counts_subquery, table_counts_subquery.c.plant_id == Plant.id)
@@ -844,7 +859,9 @@ def _build_overview(db: Session, user: User, include_tables: bool = False, repor
     last_report_by_plant: dict[UUID, date] = {}
     assignee_names: dict[UUID, str] = {}
     pool: list[Plant] = []
-    for plant, config, assignee_name, table_count, last_report in plant_config_rows:
+    table_ranges: dict[UUID, str | None] = {}
+    for row in plant_config_rows:
+        plant, config, assignee_name, table_count, last_report = row[:5]
         pool.append(plant)
         if config is None or not (manager or (user.role == "Site Engineer" and plant.id in allowed_plant_ids)):
             continue
@@ -852,6 +869,12 @@ def _build_overview(db: Session, user: User, include_tables: bool = False, repor
             continue
         visible_configs.append((plant, config))
         table_counts[plant.id] = int(table_count or 0)
+        if summary:
+            registered_codes = row[5]
+            if isinstance(registered_codes, str):
+                registered_codes = json.loads(registered_codes)
+            table_range = format_table_codes(registered_codes or [])
+            table_ranges[plant.id] = table_range or None
         if last_report:
             last_report_by_plant[plant.id] = last_report
         if config.assigned_user_id and assignee_name:
@@ -1146,6 +1169,7 @@ def _build_overview(db: Session, user: User, include_tables: bool = False, repor
             "plant": plant.plant_name,
             "site_code": plant.site_code,
             "table_count": table_count,
+            **({"table_range": table_ranges.get(plant.id)} if summary else {}),
             "active": config.active,
             "notes": config.notes,
             "district": plant.district,
