@@ -63,22 +63,36 @@ def test_engineer_sheet_saves_every_day_pending_with_one_notification(client, db
     assert all("filled 3 days" in (n.message or "") for n in rows)
 
 
-def test_sheet_is_all_or_nothing_and_rejects_days_already_reported(client, db):
+def test_sheet_is_all_or_nothing_and_accepts_more_than_one_entry_for_a_date(client, db):
+    """A date may carry several entries; an invalid day still saves none of them.
+
+    A date that already had an entry used to be refused with "Edit those days". That lost real
+    work: when a cycle finishes in the morning and more tables are cleaned the same afternoon,
+    the afternoon's work belongs to the NEXT cycle and cannot be merged into the existing entry.
+    A second entry for a date is ordinary work and counts exactly as a fresh day does.
+    """
     plant = _plant(db)
     _setup_cycle_users(client, db, plant)
     _engineer(client, db, plant)
     d1, d2 = _days(2)
+    count = lambda: db.query(WashingDailyReport).filter_by(plant_id=plant.id).count()
     assert _sheet(client, plant, [_done(d1, 1)]).status_code == 200
+    assert count() == 1
 
-    taken = _sheet(client, plant, [_done(d2, 1), _done(d1, 1)])
-    assert taken.status_code == 409 and "Edit those days" in taken.json()["detail"]
-    duplicate = _sheet(client, plant, [_done(d2, 1), _done(d2, 2)])
-    assert duplicate.status_code == 422
+    again = _sheet(client, plant, [_done(d2, 1), _done(d1, 1)])
+    assert again.status_code == 200, again.text
+    assert count() == 3, "a date that already has an entry accepts another"
+
+    same_date_twice = _sheet(client, plant, [_done(d2, 1), _done(d2, 2)])
+    assert same_date_twice.status_code == 200, same_date_twice.text
+    assert count() == 5, "two entries for one date may even arrive in the same sheet"
+
+    # All or nothing is unchanged: one bad day and the whole sheet is refused.
     too_old = _sheet(client, plant, [_done(d2, 1), _done(business_today() - timedelta(days=46), 1)])
     assert too_old.status_code == 422
     future = _sheet(client, plant, [_done(business_today() + timedelta(days=1), 1)])
     assert future.status_code == 422
-    assert db.query(WashingDailyReport).filter_by(plant_id=plant.id).count() == 1
+    assert count() == 5, "a refused sheet saves nothing at all"
 
 
 def test_sheet_persists_inclusive_table_ranges_and_contiguous_days(client, db):
