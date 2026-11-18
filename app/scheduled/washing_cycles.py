@@ -5,6 +5,7 @@ from datetime import date, datetime, timedelta, timezone
 import json
 import re
 import uuid
+from typing import NamedTuple
 from uuid import UUID
 
 from fastapi import HTTPException
@@ -602,6 +603,10 @@ def _report_out(report: WashingDailyReport, plant: Plant, viewer: User, config: 
         "job_status": report.job_status,
         "tables_cleaned": report.tables_cleaned,
         "cleaned_table_codes": report.cleaned_table_codes or [],
+        # Extra cleaning is tagged to the cycle it happened during (cycle_no above) but is not
+        # part of that cycle's progress, so the register and calendar can say "Extra — during
+        # Cycle 1" without the reader mistaking it for cycle work.
+        "is_extra": bool(report.is_extra),
         "remarks": report.remarks,
         "exception_reason": report.exception_reason,
         "evidence": [
@@ -1388,11 +1393,21 @@ def _month_wash_summary(reports, table_count: int) -> dict:
     (that work is recorded on cycle 3); it is a count for the record, never an extra cycle."""
     active = [r for r in reports if r.review_status in ("Pending", "Confirmed")]
     confirmed = [r for r in active if r.review_status == "Confirmed"]
+    # Entries marked extra (mid-cycle re-cleaning) are held apart from the cycle figures: they are
+    # not cycle work, so they must not reach the ledger, the counts or the compliance behind them.
+    marked_extra = [r for r in confirmed if getattr(r, "is_extra", False)]
+    confirmed = [r for r in confirmed if not getattr(r, "is_extra", False)]
     completed_on = {r.cycle_no: r.report_date for r in sorted(confirmed, key=lambda r: r.report_date) if r.cycle_completed}
     cycles_completed = len(completed_on)
     confirmed_tables = sum(r.tables_cleaned for r in confirmed)
     last_cycle_tables = _cycle_ledger(confirmed, table_count)[MONTHLY_CYCLE_TARGET]["confirmed"]   # with tables carried in
-    extra_tables = max(0, last_cycle_tables - table_count) if cycles_completed >= MONTHLY_CYCLE_TARGET and table_count else 0
+    all_cycles_done = cycles_completed >= MONTHLY_CYCLE_TARGET
+    extra_tables = max(0, last_cycle_tables - table_count) if all_cycles_done and table_count else 0
+    # A month still in progress does not advertise bonus work before the required work is done, so
+    # mid-cycle re-cleaning joins the total only once all three cycles are complete. The entry
+    # itself is saved and visible in the register and the calendar either way.
+    if all_cycles_done:
+        extra_tables += sum(r.tables_cleaned for r in marked_extra)
     return {
         "tables_per_cycle": table_count,
         "cycles_completed": min(cycles_completed, MONTHLY_CYCLE_TARGET),
@@ -1419,10 +1434,23 @@ def _entered_by_om(report) -> bool:
     )
 
 
-def _sequence_entry(report) -> tuple[int, bool, frozenset]:
-    """One saved day as `_cycle_sequence` reads it: (tables_cleaned, counts, table numbers)."""
+class _SeqEntry(NamedTuple):
+    """One saved day as `_cycle_sequence` reads it.
+
+    The extra flag is a NAMED field, never a positional slot: callers already pass a 4th
+    positional element meaning "entered by O&M" (the CSV daily import does), which the sequence
+    ignores. Reading the flag by name keeps every positional caller behaving exactly as before.
+    """
+    tables: int
+    counts: bool
+    numbers: frozenset = frozenset()
+    is_extra: bool = False
+
+
+def _sequence_entry(report) -> _SeqEntry:
     numbers = frozenset(n for n in (_code_number(code) for code in (report.cleaned_table_codes or [])) if n is not None)
-    return (report.tables_cleaned, report.review_status in ("Pending", "Confirmed"), numbers)
+    return _SeqEntry(report.tables_cleaned, report.review_status in ("Pending", "Confirmed"), numbers,
+                     bool(getattr(report, "is_extra", False)))
 
 
 def _cycle_sequence(entries, total_tables: int) -> list[tuple[int, bool]]:
@@ -1435,16 +1463,29 @@ def _cycle_sequence(entries, total_tables: int) -> list[tuple[int, bool]]:
     The day that completes a cycle belongs to it; count-only excess carries forward and later days go
     to the next cycle. Editing or back-filling reassigns later days by the same rule. After Cycle 3 is
     full, further days stay on Cycle 3 as extra washing (`extra`). A table cannot be counted twice in
-    an incomplete cycle; `_assert_distinct_tables` rejects that report."""
+    an incomplete cycle; `_assert_distinct_tables` rejects that report.
+
+    An entry may also be MARKED extra (`is_extra`, migration 048) for re-cleaning done while a cycle
+    is still running. That cannot be derived from counts, so it is stored. A marked entry is reported
+    against the cycle that was running when it happened, but contributes nothing: it does not add to
+    the accumulated count, does not consume table numbers, and can never be the entry that completes
+    a cycle. That keeps repeated tables legal (via `_assert_distinct_tables`, which skips `extra`)
+    without letting rework stand in for required work."""
     out: list[tuple[int, bool]] = []
     cycle, counted, used = 1, 0, set()
     for entry in entries:
         tables, counts = entry[0], entry[1]
         numbers = entry[2] if len(entry) > 2 else ()
+        # By name, never by position: a plain tuple's 4th slot means "entered by O&M" elsewhere.
+        marked_extra = bool(getattr(entry, "is_extra", False))
+        # After Cycle 3 is full, further work is extra too — that stays derived, as it always was.
+        derived_extra = cycle == MONTHLY_CYCLE_TARGET and total_tables > 0 and counted >= total_tables
+        out.append((cycle, marked_extra or derived_extra))
+        if marked_extra:
+            # Tagged to the running cycle, but it moves nothing.
+            continue
         new_numbers = set(numbers) - used
-        extra = cycle == MONTHLY_CYCLE_TARGET and total_tables > 0 and counted >= total_tables
-        cleaned = (len(numbers) if extra else len(new_numbers)) if numbers else (tables or 0)
-        out.append((cycle, extra))
+        cleaned = (len(numbers) if derived_extra else len(new_numbers)) if numbers else (tables or 0)
         if counts:
             counted += cleaned
             used.update(numbers)
@@ -1547,7 +1588,10 @@ def _resequence_month(db: Session, plant_id: UUID, month: str, total_tables: int
             row.cycle_no = cycle_no
     for row in rows:
         row.cycle_completed = False
-    confirmed = [[row for row in rows if row.cycle_no == n and row.review_status == "Confirmed"]
+    # Extra entries are tagged to a cycle but are not part of its work, so they are left out
+    # here: one must never be the row that completes a cycle.
+    confirmed = [[row for row in rows
+                  if row.cycle_no == n and row.review_status == "Confirmed" and not row.is_extra]
                  for n in range(1, MONTHLY_CYCLE_TARGET + 1)]
     for row in _completing_rows(confirmed, total_tables):
         if row is not None:
@@ -1637,7 +1681,7 @@ def _locked_report_plant(db: Session, user: User, plant_id: UUID) -> tuple[Plant
 def _add_report(
     db: Session, user: User, plant: Plant, manager: bool, total_tables: int, *,
     report_date: date, job_status: str, tables_cleaned: int, exception_reason: str | None,
-    remarks: str | None, cleaned_codes: list[str] | None = None,
+    remarks: str | None, cleaned_codes: list[str] | None = None, is_extra: bool = False,
 ) -> tuple[WashingDailyReport, bool]:
     """Create one daily report (no commit, no notification). Returns the report and whether it completed a cycle."""
     _validate_report_date(user, manager, report_date)
@@ -1653,6 +1697,7 @@ def _add_report(
         cleaned_table_codes=list(cleaned_codes or []),
         remarks=(remarks or "").strip() or None,
         exception_reason=exception_reason,
+        is_extra=is_extra,
         reported_by_id=user.id,
         reported_by=user.display_name,
     )
@@ -1686,6 +1731,7 @@ def create_daily_report(db: Session, user: User, payload: WashingDailyReportRequ
         report_date=payload.report_date or business_today(), job_status=payload.job_status,
         tables_cleaned=payload.tables_cleaned, exception_reason=payload.exception_reason,
         remarks=payload.remarks, cleaned_codes=payload.cleaned_table_codes,
+        is_extra=payload.is_extra,
     )
     cycle_no = report.cycle_no
     if report.review_status != "Confirmed":
@@ -1714,19 +1760,15 @@ def create_sheet_reports(db: Session, user: User, payload: WashingSheetRequest) 
     A Site Engineer's days wait for O&M confirmation and raise ONE review notification for the whole sheet;
     the O&M Head / a washing Assignee saves them as confirmed, like a single O&M entry."""
     plant, config, manager, total_tables = _locked_report_plant(db, user, payload.plant_id)
+    # A date may carry more than one entry. Real case: tables 91-100 finish a cycle in the morning
+    # and 1-10 are cleaned the same afternoon, which opens the next cycle. Refusing the second
+    # entry lost that work. The cycle engine already orders days by (report_date, created_at) and
+    # rolls the cycle on the entry after the one that completes it, so a same-date entry needs no
+    # special handling here — it is an ordinary entry and counts toward its cycle and compliance
+    # exactly as a fresh day does. Sorting is stable, so entries keep the order they were sent in.
     entries = sorted(payload.entries, key=lambda entry: entry.report_date)
-    dates = [entry.report_date for entry in entries]
-    if len(set(dates)) != len(dates):
-        raise HTTPException(422, "Each date can appear only once in a washing sheet")
-    for value in dates:
-        _validate_report_date(user, manager, value)
-    taken = sorted(set(db.scalars(select(WashingDailyReport.report_date).where(
-        WashingDailyReport.plant_id == plant.id,
-        WashingDailyReport.report_date.in_(dates),
-        WashingDailyReport.review_status.in_(["Pending", "Confirmed"]),
-    ))))
-    if taken:
-        raise HTTPException(409, "Already reported for " + ", ".join(_day_label(value) for value in taken) + ". Edit those days instead of adding them again.")
+    for entry in entries:
+        _validate_report_date(user, manager, entry.report_date)
     created: list[WashingDailyReport] = []
     for entry in entries:
         if entry.table_start is not None and max(entry.table_start, entry.table_end) > total_tables:

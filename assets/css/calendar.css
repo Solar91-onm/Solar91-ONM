@@ -692,6 +692,19 @@
   color: #76201b;
 }
 
+/* Extra cleaning: work done that is NOT cycle progress. Same saturated blue and dotted edge as
+   the day chip, so the two views agree, and deliberately unlike the lavender that means "nothing
+   recorded" — an absence of work and bonus work must never look alike. Wins over the status
+   colour it would otherwise take, because "extra" is the thing the reader must not miss. */
+.ep-calendar__event--extra {
+  border-left-color: #14407a;
+  border-top: 1px dotted #14407a;
+  border-right: 1px dotted #14407a;
+  border-bottom: 1px dotted #14407a;
+  background: #a8cdf7;
+  color: #14407a;
+}
+
 .ep-calendar__event--deadline:not(.ep-calendar__event--overdue) {
   border-left-color: #506d9a;
   background: linear-gradient(120deg, #edf2fb, #dfe8f7);
@@ -1766,6 +1779,17 @@
 /* The one people come here for: no entry at all for the chosen date. */
 .ep-calendar__day-chip--not_reported { background: #f1e7f6; color: #6b2f8f; }
 .ep-calendar__day-chip--rejected     { background: #fde8e4; color: #9a3412; }
+/* Extra cleaning: re-cleaning that is NOT part of a cycle's progress.
+   Deliberately a saturated blue, not another pale tint. Every other chip here is a pale wash,
+   and pale washes sit within ~8 CIELAB of one another — far too close to tell apart at chip
+   size. Measured: this background is 23.6 dE from not_reported's lavender (and 30+ from the
+   rest), text contrast 6.2:1. An absence of work and bonus work must never look alike.
+   The dotted edge repeats the message without colour, for anyone who cannot use hue. */
+.ep-calendar__day-chip--extra {
+  background: #a8cdf7;
+  color: #14407a;
+  border: 1px dotted #14407a;
+}
 
 @media (max-width: 720px) {
   .ep-calendar__day-row { grid-template-columns: minmax(0, 1fr) auto; }

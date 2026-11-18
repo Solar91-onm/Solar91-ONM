@@ -484,6 +484,10 @@ class WashingDailyReport(Base):
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     review_note: Mapped[str | None] = mapped_column(Text)
     cycle_completed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # Re-cleaning recorded while a cycle is still running (migration 048). It cannot be derived
+    # from counts, so it is stored: such an entry never advances a cycle and never reaches
+    # compliance. "Extra" after Cycle 3 is full stays derived, as it always was.
+    is_extra: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 

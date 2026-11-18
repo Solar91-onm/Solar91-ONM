@@ -58,7 +58,10 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
         "services.view", "requirements.view", "requirements.create", "requirements.manage",
     },
     # Administration is a read-only Command Center and Reports role.
-    "Administration": {"plants.view", "issues.view", "tasks.view", "reports.view"},
+    "Administration": {
+        "plants.view", "issues.view", "tasks.view", "reports.view",
+        "requirements.view", "requirements.manage",
+    },
     # Exactly one assigned plant; no fleet-wide modules.
     "Site Engineer": {
         "plants.view", "issues.view", "issues.create", "tasks.view", "tasks.execute", "washing.log",
@@ -218,7 +221,7 @@ ROLE_MODULES: dict[str, list[str]] = {
     "Assignee": ["Command Center", "Plants", "Site Issues", "Preventive Maintenance", "Work / Assignments",
                  "Project Handover", "Extra Services", "Notifications", "Operations Calendar", "Requirements",
                  "My Profile"],
-    "Administration": ["Command Center", "Operations Calendar"],
+    "Administration": ["Command Center", "Operations Calendar", "Requirements"],
     "Site Engineer": ["Command Center", "My Plant", "Site Issues", "Preventive Maintenance", "Notifications",
                       "Operations Calendar", "Requirements", "My Profile"],
     "Viewer": ["Notifications", "My Profile"],

@@ -26,7 +26,6 @@ from app.core.fastjson import json_response
 from app.scheduled.history import history_since, recent_or_open
 from app.scheduled.washing_cycles import add_excused_reason, confirm_sheet_reports, create_daily_report, create_sheet_reports, day_activity, delete_daily_report, get_overview, list_assignees, list_excused_reasons, month_cycles, recount_month, remove_excused_reason, review_daily_report, save_cycle_schedule, save_excused_reasons, set_cycle_date, setup_plant, update_daily_report
 from app.scheduled.washing_import import MAX_IMPORT_BYTES, export_bytes, import_setup, template_bytes
-from app.scheduled.washing_daily_import import MAX_DAILY_BYTES, daily_template_bytes, import_daily
 
 router = APIRouter(prefix="/api/scheduled", tags=["Preventive Maintenance"])
 settings = get_settings()
@@ -690,31 +689,6 @@ def import_washing_setup(
     dry_run: bool = True,
 ):
     return import_setup(db, user, file.filename or "", file.file.read(MAX_IMPORT_BYTES + 1), dry_run=dry_run)
-
-
-@router.get("/washing/daily-template")
-def washing_daily_template(
-    db: Annotated[Session, Depends(get_db)],
-    user: Annotated[User, Depends(get_current_user)],
-    month: str | None = None,
-    plant_ids: str | None = None,
-):
-    content, filename = daily_template_bytes(db, user, month, plant_ids.split(",") if plant_ids else None)
-    return Response(
-        content=content,
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-    )
-
-
-@router.post("/washing/daily-import", dependencies=[Depends(require_csrf)])
-def import_washing_days(
-    db: Annotated[Session, Depends(get_db)],
-    user: Annotated[User, Depends(get_current_user)],
-    file: UploadFile = File(...),
-    dry_run: bool = True,
-):
-    return import_daily(db, user, file.filename or "", file.file.read(MAX_DAILY_BYTES + 1), dry_run=dry_run)
 
 
 @router.post("/washing/daily-reports", dependencies=[Depends(require_csrf)])

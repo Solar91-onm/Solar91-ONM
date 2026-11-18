@@ -41,7 +41,7 @@
   // (Assignee was shown the button but bounced back to the Dashboard by the guard).
   // The server enforces the same roles (SECURITY_CONTACT_ROLES / SECURITY_MOVE_ROLES).
   var SECURITY_PAGE_ROLES = ["O&M Head", "Assignee", "Administration"];
-  var REQUIREMENTS_PAGE_ROLES = ["O&M Head", "Assignee", "Site Engineer"];
+  var REQUIREMENTS_PAGE_ROLES = ["O&M Head", "Assignee", "Administration", "Site Engineer"];
 
   function canOpenSecurity(role) {
     return SECURITY_PAGE_ROLES.indexOf(role) !== -1;

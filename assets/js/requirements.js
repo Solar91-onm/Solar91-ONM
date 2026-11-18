@@ -27,7 +27,10 @@
     plantsError: "",
     selectedPlantId: "",
     submitting: false,
-    submitError: ""
+    submitError: "",
+    editOpen: false,
+    editRow: null,
+    editDemands: [""]
   };
 
   var COLUMNS = [
@@ -35,7 +38,8 @@
     { key: "description", label: "Requirements", sort: function (row) { return row.demandCount; } },
     { key: "status", label: "Status", sort: function (row) { return row.status; } },
     { key: "demandCount", label: "Points", align: "num", sort: function (row) { return row.demandCount; } },
-    { key: "priority", label: "Priority", sort: function (row) { return priorityRank(row.priority); } }
+    { key: "priority", label: "Priority", sort: function (row) { return priorityRank(row.priority); } },
+    { key: "actions", label: "Actions" }
   ];
 
   function escape(value) {
@@ -172,6 +176,15 @@
           '<td data-label="Points" class="num"><strong class="ep-requirements__points">' +
             escape(row.demandCount) + '</strong><small>demands</small></td>' +
           '<td data-label="Priority">' + priorityCell(row) + "</td>" +
+          '<td data-label="Actions">' + (canManage()
+            ? '<button type="button" class="ep-requirements__edit-button" data-requirement-edit="' +
+              escape(row.id) + '" title="Edit ' + escape(row.ticketNo) +
+              '" aria-label="Edit ' + escape(row.ticketNo) + '">' +
+              '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" ' +
+              'stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+              '<path d="M12 20h9"></path><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"></path>' +
+              "</svg></button>"
+            : '<span class="ep-requirements__unavailable">View only</span>') + "</td>" +
         "</tr>";
       }).join("") + "</tbody></table></div>";
   }
@@ -187,32 +200,68 @@
 
   function renderForm() {
     if (!state.formOpen) return "";
+    var isEdit = !!state.editRow;
+    var demandRows = isEdit ? state.editDemands : state.editDemands;
+    if (!demandRows.length) demandRows = [""];
     var plants = state.plants;
-    var plantField = state.plantsLoading
-      ? '<p class="ep-issues__message" role="status">Loading assigned plants…</p>'
-      : state.plantsError
-        ? '<p class="ep-issues__message ep-issues__message--error" role="alert">' + escape(state.plantsError) + "</p>"
-        : plants.length === 0
-          ? '<p class="ep-issues__message ep-issues__message--error" role="alert">No assigned plant is available for this account.</p>'
-          : '<label class="ep-issues__wizard-field">Plant site code<select name="plantId" required>' +
-            plants.map(function (plant) {
-              var plantId = plant.dbId || plant.id;
-              return '<option value="' + escape(plantId) + '"' +
-                (state.selectedPlantId === plantId ? " selected" : "") + ">" +
-                escape(plant.siteCode) + " · " + escape(plant.plantName) + "</option>";
-            }).join("") + "</select></label>";
+    var plantField = isEdit
+      ? '<div class="ep-requirements__edit-plant"><span>Plant</span><strong>' +
+        escape(state.editRow.siteCode) + "</strong></div>"
+      : state.plantsLoading
+        ? '<p class="ep-issues__message" role="status">Loading assigned plants…</p>'
+        : state.plantsError
+          ? '<p class="ep-issues__message ep-issues__message--error" role="alert">' + escape(state.plantsError) + "</p>"
+          : plants.length === 0
+            ? '<p class="ep-issues__message ep-issues__message--error" role="alert">No assigned plant is available for this account.</p>'
+            : '<label class="ep-issues__wizard-field">Plant site code<select name="plantId" required>' +
+              plants.map(function (plant) {
+                var plantId = plant.dbId || plant.id;
+                return '<option value="' + escape(plantId) + '"' +
+                  (state.selectedPlantId === plantId ? " selected" : "") + ">" +
+                  escape(plant.siteCode) + " · " + escape(plant.plantName) + "</option>";
+              }).join("") + "</select></label>";
+
+    var demandFields = '<div class="ep-requirements__demands" data-requirement-demands>' +
+      demandRows.map(function (demand, index) {
+        return '<div class="ep-requirements__demand-row">' +
+          '<label for="requirement-demand-' + index + '">Demand ' + (index + 1) + "</label>" +
+          '<div><input id="requirement-demand-' + index + '" type="text" name="demand" maxlength="1000" ' +
+            'value="' + escape(demand) + '" data-requirement-demand ' +
+            'placeholder="Enter demand ' + (index + 1) + '" required />' +
+            (demandRows.length > 1
+              ? '<button type="button" data-requirement-remove-demand="' + index +
+                '" aria-label="Remove Demand ' + (index + 1) + '">×</button>'
+              : "") + "</div></div>";
+      }).join("") +
+      '<button type="button" class="ep-requirements__add-demand" data-requirement-add-demand>' +
+      '+ Add another demand</button></div>';
+
+    var editControls = isEdit
+      ? '<div class="ep-requirements__edit-controls">' +
+        '<label>Priority<select name="priority">' +
+          ["Critical", "Medium", "Low"].map(function (priority) {
+            return '<option value="' + priority + '"' +
+              (state.editRow.priority === priority ? " selected" : "") + ">" + priority + "</option>";
+          }).join("") + "</select></label>" +
+        '<label>Status<select name="status">' +
+          ["Open", "Completed"].map(function (status) {
+            return '<option value="' + status + '"' +
+              (state.editRow.status === status ? " selected" : "") + ">" + status + "</option>";
+          }).join("") + "</select></label></div>"
+      : "";
 
     return '<div class="ep-issues__overlay" data-requirement-overlay>' +
       '<button type="button" class="ep-issues__backdrop" data-requirement-action="close-form" aria-label="Close requirement form"></button>' +
       '<aside class="ep-issues__drawer" role="dialog" aria-modal="true" aria-labelledby="requirement-drawer-title">' +
-        '<header class="ep-issues__drawer-head"><div><p>New site request</p>' +
-          '<h2 id="requirement-drawer-title">Raise a requirement</h2></div>' +
+        '<header class="ep-issues__drawer-head"><div><p>' + (isEdit ? "Edit saved ticket" : "New site request") + "</p>" +
+          '<h2 id="requirement-drawer-title">' + (isEdit ? "Edit requirement" : "Raise a requirement") + "</h2></div>" +
           '<button type="button" class="ep-issues__drawer-x" data-requirement-action="close-form" aria-label="Close">×</button></header>' +
         '<div class="ep-issues__drawer-content"><form class="ep-requirements__form" data-requirement-form>' +
           plantField +
-          '<label class="ep-issues__wizard-field">Requirements<textarea name="description" rows="8" maxlength="5000" required placeholder="Enter one demand per line"></textarea>' +
-            '<small>Enter each demand on its own line. Blank lines are ignored; points are counted automatically.</small>' +
-            '<small data-requirement-point-count>0 demand points</small></label>' +
+          demandFields +
+          editControls +
+          '<small data-requirement-point-count>' + demandRows.filter(function (value) { return String(value).trim(); }).length +
+            " demand point" + (demandRows.filter(function (value) { return String(value).trim(); }).length === 1 ? "" : "s") + "</small>" +
           (state.submitError ? '<p class="ep-issues__wizard-error" role="alert">' + escape(state.submitError) + "</p>" : "") +
           '<div class="ep-issues__wizard-actions"><button type="button" class="ep-issues__button" data-requirement-action="close-form">Cancel</button>' +
             '<button type="submit" class="ep-issues__button ep-issues__button--primary"' +
@@ -311,6 +360,9 @@
 
   function loadPlantsAndOpenForm() {
     state.formOpen = true;
+    state.editOpen = false;
+    state.editRow = null;
+    state.editDemands = [""];
     state.submitError = "";
     state.plantsError = "";
     state.plantsLoading = true;
@@ -349,25 +401,48 @@
   function submitRequirement(form) {
     if (state.submitting) return;
     var formData = new FormData(form);
-    var description = String(formData.get("description") || "").trim();
+    var demands = Array.prototype.map.call(
+      form.querySelectorAll("[data-requirement-demand]"),
+      function (input) { return String(input.value || "").trim(); }
+    ).filter(function (value) { return !!value; });
+    var description = demands.join("\n");
     var plantId = String(formData.get("plantId") || "");
-    if (!plantId || !description) {
-      state.submitError = "Choose a plant and enter at least one requirement.";
+    if (!description) {
+      state.submitError = "Enter at least one demand.";
+      renderView();
+      return;
+    }
+    if (!state.editRow && !plantId) {
+      state.submitError = "Choose a plant.";
       renderView();
       return;
     }
     state.submitting = true;
     state.submitError = "";
     renderView();
-    api.request("/api/requirements", {
-      method: "POST",
-      body: { plant_id: plantId, description: description }
-    }).then(function () {
+    var request = state.editRow
+      ? api.request("/api/requirements/" + encodeURIComponent(state.editRow.id), {
+        method: "PATCH",
+        body: {
+          description: description,
+          priority: String(formData.get("priority") || state.editRow.priority),
+          status: String(formData.get("status") || state.editRow.status)
+        }
+      })
+      : api.request("/api/requirements", {
+        method: "POST",
+        body: { plant_id: plantId, description: description }
+      });
+    var wasEdit = !!state.editRow;
+    request.then(function () {
       state.formOpen = false;
+      state.editOpen = false;
+      state.editRow = null;
+      state.editDemands = [""];
       state.submitting = false;
       state.status = "Open";
       state.offset = 0;
-      state.notice = "Requirement ticket created.";
+      state.notice = wasEdit ? "Requirement ticket updated." : "Requirement ticket created.";
       loadRows();
     }).catch(function (error) {
       state.submitting = false;
@@ -380,13 +455,16 @@
     if (wiredHost === hostElement) return;
     wiredHost = hostElement;
     hostElement.addEventListener("click", function (event) {
-      var button = event.target.closest("[data-requirement-action], [data-requirement-view], [data-requirement-status]");
+      var button = event.target.closest("[data-requirement-action], [data-requirement-view], [data-requirement-status], [data-requirement-edit], [data-requirement-add-demand], [data-requirement-remove-demand]");
       if (!button || !hostElement.contains(button)) return;
       var action = button.getAttribute("data-requirement-action");
       if (action === "open-form") {
         loadPlantsAndOpenForm();
       } else if (action === "close-form") {
         state.formOpen = false;
+        state.editOpen = false;
+        state.editRow = null;
+        state.editDemands = [""];
         state.submitError = "";
         renderView();
       } else if (action === "retry") {
@@ -410,6 +488,28 @@
       } else if (button.hasAttribute("data-requirement-status")) {
         updateTicket(button.getAttribute("data-requirement-status"), "status",
           button.getAttribute("data-next-status"));
+      } else if (button.hasAttribute("data-requirement-edit")) {
+        var rowId = button.getAttribute("data-requirement-edit");
+        var row = state.rows.find(function (item) { return item.id === rowId; });
+        if (!row) return;
+        state.editRow = row;
+        state.editOpen = true;
+        state.formOpen = true;
+        state.submitError = "";
+        state.editDemands = String(row.description || "").split(/\r?\n/).filter(function (value) {
+          return !!value.trim();
+        });
+        if (!state.editDemands.length) state.editDemands = [""];
+        renderView();
+      } else if (button.hasAttribute("data-requirement-add-demand")) {
+        state.editDemands.push("");
+        renderView();
+      } else if (button.hasAttribute("data-requirement-remove-demand")) {
+        var removeIndex = Number(button.getAttribute("data-requirement-remove-demand"));
+        if (state.editDemands.length > 1) {
+          state.editDemands.splice(removeIndex, 1);
+          renderView();
+        }
       }
     });
     hostElement.addEventListener("change", function (event) {
@@ -424,11 +524,20 @@
       submitRequirement(form);
     });
     hostElement.addEventListener("input", function (event) {
-      if (event.target.matches('[name="description"]')) {
+      var demandInput = event.target.closest("[data-requirement-demand]");
+      if (demandInput) {
+        var demandIndex = Array.prototype.indexOf.call(
+          hostElement.querySelectorAll("[data-requirement-demand]"),
+          demandInput
+        );
+        if (demandIndex >= 0) state.editDemands[demandIndex] = demandInput.value;
         var count = hostElement.querySelector("[data-requirement-point-count]");
         if (count) {
-          var lines = event.target.value.split(/\r?\n/).filter(function (line) { return line.trim(); }).length;
-          count.textContent = lines + " demand point" + (lines === 1 ? "" : "s");
+          var values = Array.prototype.map.call(
+            hostElement.querySelectorAll("[data-requirement-demand]"),
+            function (input) { return String(input.value || "").trim(); }
+          ).filter(function (value) { return !!value; });
+          count.textContent = values.length + " demand point" + (values.length === 1 ? "" : "s");
         }
       }
     });

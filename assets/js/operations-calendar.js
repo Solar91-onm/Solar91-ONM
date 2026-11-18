@@ -211,6 +211,10 @@
     var title = eventChipTitle(event);
     var reportChip = '<span class="ep-calendar__event ' + statusClass(event.status) +
       (deadline ? " ep-calendar__event--deadline" : "") +
+      // Extra cleaning gets its own colour: it is work done, but it is not cycle progress, so it
+      // must not read like a confirmed cycle day. A date carrying both an ordinary and an extra
+      // entry renders both chips, because each saved report becomes its own event.
+      (event.isExtra ? " ep-calendar__event--extra" : "") +
       (tables ? " ep-calendar__event--washing-detail" : "") +
       '" title="' + escape(eventCellDescription(event, context)) + '">' +
       (tables
@@ -2015,10 +2019,13 @@
               : report.job_status === "Done" ? "Completed" : "Not done";
           events.push({
             date: report.report_date,
-            title: report.job_status === "Done"
-              ? Number(report.tables_cleaned || 0) + " tables cleaned"
-              : "No module cleaning reported",
+            title: report.is_extra === true
+              ? Number(report.tables_cleaned || 0) + " tables re-cleaned (extra)"
+              : report.job_status === "Done"
+                ? Number(report.tables_cleaned || 0) + " tables cleaned"
+                : "No module cleaning reported",
             status: status,
+            isExtra: report.is_extra === true,
             plantSiteCode: selected.siteCode,
             plantName: selected.plantName,
             cycleNo: report.cycle_no,

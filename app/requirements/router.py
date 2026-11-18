@@ -14,7 +14,7 @@ from app.core.models import Plant, RequirementTicket, User
 from app.core.security import require_csrf, require_permission, user_scoped_plant_ids
 
 router = APIRouter(prefix="/api/requirements", tags=["Requirements"])
-MANAGER_ROLES = {"O&M Head", "Assignee"}
+MANAGER_ROLES = {"O&M Head", "Assignee", "Administration"}
 
 
 def _demand_count(description: str) -> int:
@@ -40,6 +40,20 @@ class RequirementPriorityUpdate(BaseModel):
 
 class RequirementStatusUpdate(BaseModel):
     status: Literal["Open", "Completed"]
+
+
+class RequirementUpdate(BaseModel):
+    description: str = Field(min_length=1, max_length=5000)
+    priority: Literal["Critical", "Medium", "Low"]
+    status: Literal["Open", "Completed"]
+
+    @field_validator("description")
+    @classmethod
+    def clean_description(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("Enter at least one requirement")
+        return value
 
 
 class RequirementOut(BaseModel):
@@ -197,6 +211,42 @@ def create_requirement(
     db.commit()
     db.refresh(ticket)
     return _requirement_dict(ticket, user.display_name, None)
+
+
+@router.patch(
+    "/{ticket_id}",
+    response_model=RequirementOut,
+    dependencies=[Depends(require_csrf)],
+)
+def update_requirement(
+    ticket_id: UUID,
+    data: RequirementUpdate,
+    db: Annotated[Session, Depends(get_db)],
+    user: Annotated[User, Depends(require_permission("requirements.manage"))],
+):
+    ticket = _scoped_ticket(db, user, ticket_id)
+    if user.role not in MANAGER_ROLES:
+        raise HTTPException(403, "Only an Administrator, Assignee or O&M Head can edit requirements")
+
+    ticket.description = data.description
+    ticket.demand_count = _demand_count(data.description)
+    ticket.priority = data.priority
+    ticket.status = data.status
+    if data.status == "Completed":
+        ticket.completed_by = ticket.completed_by or user.id
+        ticket.completed_at = ticket.completed_at or datetime.now(timezone.utc)
+    else:
+        ticket.completed_by = None
+        ticket.completed_at = None
+    db.commit()
+    db.refresh(ticket)
+    creator = db.get(User, ticket.created_by) if ticket.created_by else None
+    completer = db.get(User, ticket.completed_by) if ticket.completed_by else None
+    return _requirement_dict(
+        ticket,
+        creator.display_name if creator else None,
+        completer.display_name if completer else None,
+    )
 
 
 @router.patch(

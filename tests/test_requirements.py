@@ -143,6 +143,37 @@ def test_requirement_priority_is_limited_to_supported_levels(client, db):
     assert invalid.status_code == 422
 
 
+def test_administrator_and_assignee_can_edit_requirement(client, db):
+    plant = _plant(db, "REQ10")
+    engineer = login_user(client, db, role="Site Engineer", email="requirements-edit-engineer@example.com")
+    grant_assignee_plants(db, engineer.id, plant.id)
+    created = _ticket(client, plant)
+
+    assignee = login_user(client, db, role="Assignee", email="requirements-edit-assignee@example.com")
+    grant_assignee_plants(db, assignee.id, plant.id)
+    assignee_edit = client.patch(f"/api/requirements/{created['id']}", json={
+        "description": "Demand one\nDemand two",
+        "priority": "Critical",
+        "status": "Completed",
+    })
+    assert assignee_edit.status_code == 200, assignee_edit.text
+    assert assignee_edit.json()["demandCount"] == 2
+    assert assignee_edit.json()["priority"] == "Critical"
+    assert assignee_edit.json()["status"] == "Completed"
+
+    login_user(client, db, role="Administration", email="requirements-edit-admin@example.com")
+    admin_edit = client.patch(f"/api/requirements/{created['id']}", json={
+        "description": "Updated administration demand",
+        "priority": "Low",
+        "status": "Open",
+    })
+    assert admin_edit.status_code == 200, admin_edit.text
+    assert admin_edit.json()["demandCount"] == 1
+    assert admin_edit.json()["priority"] == "Low"
+    assert admin_edit.json()["status"] == "Open"
+    assert admin_edit.json()["completedAt"] is None
+
+
 def test_requirement_points_sort_numerically_and_column_filters_compose(client, db):
     plant = _plant(db, "REQ08")
     engineer = login_user(client, db, role="Site Engineer", email="requirements-sort@example.com")

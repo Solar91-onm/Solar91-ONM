@@ -168,6 +168,9 @@ def test_requirements_register_uses_portal_navigation_and_shared_table_controls(
     assert "Solar91PortalColumnFilter.headerHTML" in requirements
     assert 'Solar91PortalSort.wire(host, state.sort, loadRows' in requirements
     assert 'api.can("requirements.create")' in requirements
+    assert 'data-requirement-edit="' in requirements
+    assert 'Demand ' in requirements
+    assert 'Enter one demand per line' not in requirements
     assert 'class="ep-issues__table-wrap"' in requirements
     assert 'class="ep-issues__table ep-requirements__table"' in requirements
     assert ".ep-requirements__table th:nth-child(2)" in styles

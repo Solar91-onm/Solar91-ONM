@@ -20,6 +20,9 @@ from app.scheduled.washing_cycles import (
     check_cycle_compliance_alerts,
     check_missed_monthly_targets,
     _code_number,
+    _cycle_sequence,
+    _month_wash_summary,
+    _SeqEntry,
     format_table_codes,
 )
 from tests.conftest import grant_assignee_plants, login_user, tiny_png_bytes
@@ -847,3 +850,186 @@ def test_engineer_cannot_change_cycle_dates_or_confirmed_reports(client, db):
     assert client.patch(f"{BASE}/plants/{plant.id}/cycle-date", json={"month": month, "cycle_no": 1, "due_date": business_today().isoformat()}).status_code == 403
     assert client.patch(f"{BASE}/daily-reports/{made.json()['id']}", json={"tables_cleaned": 2}).status_code == 403
     assert client.delete(f"{BASE}/daily-reports/{made.json()['id']}").status_code == 403
+
+# ── Extra cleaning (migration 048) and more than one entry on a date ──────────
+#
+# These test the cycle engine directly: a wrong answer here is invisible until
+# someone's month is wrong.
+
+def _entry(tables, numbers, counts=True, extra=False):
+    """One entry as _cycle_sequence reads it.
+
+    _SeqEntry, not a plain tuple: the extra flag is read by name because a 4th POSITIONAL slot
+    already means "entered by O&M" to other callers (the CSV daily import passes it).
+    """
+    return _SeqEntry(tables, counts, frozenset(numbers), extra)
+
+
+def test_two_entries_on_one_date_split_across_the_cycle_they_complete():
+    """91-100 completes the cycle and belongs to it; 1-10 recorded the same day opens the next."""
+    sequence = _cycle_sequence([
+        _entry(90, range(1, 91)),      # tables 1-90
+        _entry(10, range(91, 101)),    # completes cycle 1
+        _entry(10, range(1, 11)),      # same date, next cycle
+    ], 100)
+    assert sequence[0] == (1, False)
+    assert sequence[1] == (1, False), "the entry that completes a cycle belongs to it"
+    assert sequence[2] == (2, False), "the next entry rolls to the next cycle"
+
+
+def test_an_extra_entry_mid_cycle_changes_no_cycle_and_no_count():
+    """Re-cleaning 11-20 while cycle 1 is half done is tagged to cycle 1 and moves nothing."""
+    without = _cycle_sequence([
+        _entry(50, range(1, 51)),
+        _entry(50, range(51, 101)),
+    ], 100)
+    with_extra = _cycle_sequence([
+        _entry(50, range(1, 51)),
+        _entry(10, range(11, 21), extra=True),   # repeats tables already cleaned
+        _entry(50, range(51, 101)),
+    ], 100)
+    assert with_extra[1] == (1, True), "tagged to the cycle that was running"
+    # Every ordinary entry lands on exactly the cycle it would have without the extra one.
+    assert [with_extra[0], with_extra[2]] == [without[0], without[1]]
+
+
+def test_an_extra_entry_can_never_complete_a_cycle():
+    """Even when its own table count exceeds the plant total, it must not roll the cycle."""
+    sequence = _cycle_sequence([
+        _entry(10, range(1, 11)),
+        _entry(500, range(1, 501), extra=True),   # far more than the 100 tables configured
+        _entry(10, range(11, 21)),
+    ], 100)
+    assert sequence[1] == (1, True)
+    assert sequence[2] == (1, False), "the cycle is still cycle 1 after a huge extra entry"
+
+
+def test_a_rejected_extra_entry_counts_nowhere():
+    rejected = _cycle_sequence([
+        _entry(50, range(1, 51)),
+        _entry(50, range(11, 61), counts=False, extra=True),
+        _entry(50, range(51, 101)),
+    ], 100)
+    assert rejected[2] == (1, False)
+    assert rejected[1][1] is True
+
+
+class _Row:
+    """A saved day, as the summary helpers read one."""
+    def __init__(self, cycle_no, tables, numbers, *, status="Confirmed",
+                 is_extra=False, completed=False, day=1, job_status="Done"):
+        self.cycle_no = cycle_no
+        self.cycle_month = "2026-01"
+        self.tables_cleaned = tables
+        self.cleaned_table_codes = [f"Table {n:03d}" for n in numbers]
+        self.review_status = status
+        self.is_extra = is_extra
+        self.cycle_completed = completed
+        self.report_date = date(2026, 1, day)
+        self.job_status = job_status
+
+
+def _full_month_rows():
+    """Three complete cycles of a 10-table plant."""
+    return [
+        _Row(1, 10, range(1, 11), completed=True, day=1),
+        _Row(2, 10, range(1, 11), completed=True, day=2),
+        _Row(3, 10, range(1, 11), completed=True, day=3),
+    ]
+
+
+def test_extra_cleaning_leaves_the_month_figures_identical():
+    """The compliance-bearing figures must not move by a single table."""
+    rows = [_Row(1, 5, range(1, 6), day=1)]
+    without = _month_wash_summary(rows, 10)
+    with_extra = _month_wash_summary(
+        rows + [_Row(1, 3, range(1, 4), is_extra=True, day=2)], 10)
+    for key in ("cycles_completed", "confirmed_tables", "pending_tables", "times_washed"):
+        assert with_extra[key] == without[key], key
+
+
+def test_extra_total_waits_until_all_three_cycles_are_complete():
+    """Saved and visible throughout, but out of the extra total while a cycle is still open."""
+    extra = _Row(1, 4, range(1, 5), is_extra=True, day=4)
+
+    open_month = _month_wash_summary([_Row(1, 5, range(1, 6), day=1), extra], 10)
+    assert open_month["cycles_completed"] < 3
+    assert open_month["extra_tables"] == 0, "a month in progress does not advertise bonus work"
+
+    done_month = _month_wash_summary(_full_month_rows() + [extra], 10)
+    assert done_month["cycles_completed"] == 3
+    assert done_month["extra_tables"] == 4, "it joins the total once the required work is done"
+    assert done_month["extra_times"] == 0.4
+
+
+def test_a_rejected_extra_entry_reaches_no_total():
+    rejected = _Row(1, 4, range(1, 5), is_extra=True, status="Rejected", day=4)
+    summary = _month_wash_summary(_full_month_rows() + [rejected], 10)
+    assert summary["extra_tables"] == 0
+    assert summary["confirmed_tables"] == _month_wash_summary(_full_month_rows(), 10)["confirmed_tables"]
+
+
+def test_a_second_entry_on_the_same_date_opens_the_next_cycle(client, db):
+    """91-100 completes the cycle; 1-10 recorded the same day opens the next, and both are kept."""
+    plant = _plant(db)
+    head, _assignee = _setup_cycle_users(client, db, plant)   # 4-table plant
+    _act_as(head)
+    day = business_today() - timedelta(days=3)
+
+    first = client.post(f"{BASE}/daily-reports/sheet", json={
+        "plant_id": str(plant.id),
+        "entries": [{"report_date": day.isoformat(), "job_status": "Done",
+                     "tables_cleaned": 4, "table_numbers": [1, 2, 3, 4]}]})
+    assert first.status_code == 200, first.text
+    assert first.json()["reports"][0]["cycle_completed"] is True
+
+    second = client.post(f"{BASE}/daily-reports/sheet", json={
+        "plant_id": str(plant.id),
+        "entries": [{"report_date": day.isoformat(), "job_status": "Done",
+                     "tables_cleaned": 2, "table_numbers": [1, 2]}]})
+    assert second.status_code == 200, second.text
+    assert second.json()["reports"][0]["cycle_no"] == 2, "the same-date entry opens the next cycle"
+
+    db.expire_all()
+    rows = db.query(WashingDailyReport).filter_by(plant_id=plant.id).order_by(
+        WashingDailyReport.created_at).all()
+    assert len(rows) == 2, "both entries are kept; neither replaces the other"
+    assert [r.cycle_no for r in rows] == [1, 2]
+
+
+def test_mid_cycle_extra_entry_saves_repeats_tables_and_moves_no_cycle(client, db):
+    """The whole point: tables already cleaned this cycle can be recorded again as extra."""
+    plant = _plant(db)
+    head, _assignee = _setup_cycle_users(client, db, plant)   # 4-table plant
+    _act_as(head)
+    first, second = business_today() - timedelta(days=4), business_today() - timedelta(days=3)
+
+    ordinary = client.post(f"{BASE}/daily-reports/sheet", json={
+        "plant_id": str(plant.id),
+        "entries": [{"report_date": first.isoformat(), "job_status": "Done",
+                     "tables_cleaned": 2, "table_numbers": [1, 2]}]})
+    assert ordinary.status_code == 200, ordinary.text
+
+    # An ORDINARY repeat of table 1 is still refused -- the once-per-cycle rule is intact.
+    repeat = client.post(f"{BASE}/daily-reports/sheet", json={
+        "plant_id": str(plant.id),
+        "entries": [{"report_date": second.isoformat(), "job_status": "Done",
+                     "tables_cleaned": 1, "table_numbers": [1]}]})
+    assert repeat.status_code == 409 and "already recorded in cycle 1" in repeat.json()["detail"]
+
+    # The same repeat recorded as EXTRA is accepted.
+    extra = client.post(f"{BASE}/daily-reports", json={
+        "plant_id": str(plant.id), "report_date": second.isoformat(), "job_status": "Done",
+        "tables_cleaned": 2, "cleaned_table_codes": ["Table 001", "Table 002"],
+        "remarks": "Bird droppings, re-cleaned", "is_extra": True})
+    assert extra.status_code == 200, extra.text
+    body = extra.json()
+    assert body["is_extra"] is True
+    assert body["cycle_no"] == 1, "tagged to the cycle that was running"
+
+    db.expire_all()
+    rows = db.query(WashingDailyReport).filter_by(plant_id=plant.id).all()
+    assert len(rows) == 2
+    # The cycle has NOT advanced and has NOT been completed by the extra entry.
+    assert all(not r.cycle_completed for r in rows), "extra cleaning cannot complete a cycle"
+    assert {r.cycle_no for r in rows} == {1}

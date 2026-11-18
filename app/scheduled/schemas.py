@@ -137,9 +137,15 @@ class WashingDailyReportRequest(BaseModel):
     exception_reason: Literal["Rain", "Water shortage", "Machine breakdown", "Access restriction", "Safety stand-down", "Other"] | None = None
     remarks: str | None = Field(default=None, max_length=4000)
     report_date: date | None = None
+    # Mid-cycle re-cleaning (migration 048). It reuses this request, and so the existing review
+    # workflow, rather than adding a second approval path: a Site Engineer's entry still waits for
+    # confirmation and an O&M / Assignee entry is still saved confirmed as their own record.
+    is_extra: bool = False
 
     @model_validator(mode="after")
     def validate_report(self):
+        if self.is_extra and self.job_status != "Done":
+            raise ValueError("Extra cleaning records work that was done")
         if self.job_status == "Not done" and self.exception_reason is None:
             raise ValueError("Choose an exception reason for work that was not done")
         if self.job_status == "Done" and self.exception_reason is not None:
