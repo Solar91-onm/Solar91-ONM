@@ -13,7 +13,7 @@ The PM calendar's **Set up PM** dialog is currently a frontend-only form and pre
 - **Maintenance Scope Library** is grouped (PV Area / Plant Side / GSS Side / Miscellaneous) for filtering only; Add PM task/template list every equipment type.
 
 ## Scope editing and equipment list (migration 017)
-- O&M Head: *Edit scope* on the Maintenance Scope Library moves each equipment between PV Area / Plant Side / GSS Side / Miscellaneous or hides it from PM (`GET/PUT/DELETE /api/pm-plan/scope`). Defaults: PV Area = Inverter, Piling and Foundation, WMS; hidden = Module, String, Modules cleaning, MMS, Switchyard (Plant/GSS), VCB-Kiosk. RTCC is named OLTC(RTCC).
+- O&M Head: *Edit scope* on the Maintenance Scope Library moves each equipment between PV Area / Plant Side / GSS Side / Miscellaneous or hides it from PM (`GET/PUT/DELETE /api/pm-plan/scope`). Defaults: PV Area = Inverter, Piling and Foundation, WMS; hidden = Module, String, Modules cleaning, MMS, Switchyard - Plant side, Switchyard, VCB-Kiosk. RTCC is named OLTC(RTCC).
 - Plants: AC/DC capacity comes from one accessor (`plantDcKw`/`plantAcKw`: plant record > Excel registry > legacy MW) used by the table, KPI totals, profile, export and capacity filters, so plants added later are counted and totals equal the table.
 
 ## Excel plan template
@@ -42,12 +42,12 @@ Defined once in `app/pmplan/cycle.py` and served read-only at `GET /api/pm-plan/
 | Plant side | Transmission line | 23–24 |
 | GSS side | VCB - GSS side | 25–26 |
 | GSS side | 4 Pole - GSS side | 27–28 |
-| GSS side | Transmission line - GSS side | 29–30 |
+| GSS side | Switchyard | 29–30 |
 
-The two Transmission line phases share the days left after the fixed phases.
+The Plant-side Transmission line and GSS-side Switchyard phases share the days left after the fixed phases.
 - **Add PM task / Assign to plants**: *Follow the 30-day PM cycle* is ticked by default (`follow_cycle` on `/api/pm-plan/tasks` and template apply). The date becomes the cycle start (day 1); the job starts on its equipment's first cycle day and its units spread over that phase (*Finish within* still overrides). A single unit is due on the last day of its phase. Unticked = previous behaviour.
 - **Upload (Excel/CSV)**: the upload dialog asks for the cycle start (`follow_cycle=true&cycle_start=YYYY-MM-DD` on `/api/pm-plan/import`). A row's own Start date is that row's cycle start; blank rows use the dialog date. The dry run returns `schedule` (equipment, area, dates, task count), shown in the confirmation.
-- `4 Pole - GSS side` and `Transmission line - GSS side` are new equipment types (like `VCB - GSS side`) so 4 Pole and Transmission line can be planned on both sides. Assignees need these types in their equipment assignment to work on them.
+- `4 Pole - GSS side` and `Switchyard` are the GSS-side equipment types (alongside `VCB - GSS side`). The existing `Switchyard - Plant side` remains distinct. Assignees need the `Switchyard` type in their equipment assignment to work on it.
 - **One job per plant** (`ONE_JOB_TYPES` in `app/pmplan/cycle.py`): *ACCB Panel* (ACCB-1 and ACCB-2 are maintained together), *Aux. Transformer*, *ACDB* and *Miscellaneous* are always planned as a single unit (unit 1 of 1), whatever the request, Unit configuration, Equipment Register or upload says. Add PM task locks *Number of units* to 1 for them and Equipment coverage counts their inventory as 1. Work orders created earlier (e.g. two ACCB units) are left as they are.
 - **Miscellaneous** is an equipment type on the Plant side between Earthing and Transmission line. In *Add PM task* the planner ticks the items the job covers (Street Light, ERT) and may type others; the choice is required and is saved as the task's remark (task log "Remarks: …", `remarks` on `/api/pm-plan/tasks`). The Plant side Excel pre-fills Remarks with "Street Light, ERT". Assignees need *Miscellaneous* (and *ACDB*) in their equipment assignment to work on them.
 - **MCCB is not part of Preventive Maintenance** (`NOT_IN_PM`): Add PM task, templates (create and *Assign to plants*), unit counts and uploads reject it, and PM forms and the scope editor no longer list it, even if a saved scope does. It stays an equipment and issue type elsewhere; MCCB work orders created earlier are kept as they are.

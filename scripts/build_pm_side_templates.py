@@ -65,7 +65,7 @@ ROWS = {
          "1. Breaker mechanical operation. 2. Contacts / terminals. 3. Relay & trip-circuit test. 4. Interlocks.", None),
         ("4 Pole - GSS side", "GSS 4 Pole structure PM", "PTW required", 2,
          "1. Structure & foundation. 2. Insulators / jumpers. 3. Earthing connection. 4. Hardware tightening.", None),
-        ("Transmission line - GSS side", "GSS transmission line patrol & PM", "PTW required", 4,
+        ("Switchyard", "GSS switchyard patrol & PM", "PTW required", 4,
          "1. Line patrol. 2. Conductor / sag. 3. Insulators / jumpers. 4. Poles / towers. 5. Vegetation & ROW.", None),
     ],
 }
@@ -89,7 +89,7 @@ def _base_types_and_ideas() -> tuple[list[str], dict[str, str]]:
     types = [r[0] for r in wb["Lists"].iter_rows(min_row=2, values_only=True) if r and r[0]]
     ideas = {r[0]: r[1] for r in wb["Task ideas"].iter_rows(min_row=2, values_only=True) if r and r[0]}
     ideas.setdefault("4 Pole - GSS side", ideas.get("4 Pole"))
-    ideas.setdefault("Transmission line - GSS side", ideas.get("Transmission line"))
+    ideas.setdefault("Switchyard", "GSS switchyard patrol & PM")
     ideas.setdefault(MISC, "Street Light, ERT and other small items — one job per plant; list them in Remarks")
     ideas.setdefault("ACDB", "Incomer / outgoing breaker operation, busbar / terminal thermal scan, cable lugs, panel cleaning")
     return types, ideas
@@ -118,7 +118,7 @@ def _how_to(ws, side: str) -> None:
     ws["B3"].font = Font(name="Arial", size=10, color="FF555555")
     rows = [
         ("Order of work", f"The portal does the {TITLE[side]} equipment in this order:\n{order}"
-         + ("\nThe GSS side (VCB, 4 Pole, Transmission line) follows after the plant side is finished."
+         + ("\nThe GSS side (VCB, 4 Pole, Switchyard) follows after the plant side is finished."
             if side == "plant" else "\nThe GSS side starts after the plant side work (Inverter … Transmission line) at the plant.")),
         ("Date", "There is no date column. Choose the cycle start date (day 1) in the portal when you upload: "
                  "Preventive Maintenance → Import CSV / Excel. Every equipment's dates follow from the order above."),

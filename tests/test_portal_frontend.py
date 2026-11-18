@@ -152,6 +152,26 @@ def test_security_tab_label_and_header_count_people():
     assert 'currentRole !== "Administration"' not in navigation
 
 
+def test_requirements_register_uses_portal_navigation_and_shared_table_controls(client):
+    page = _page(client)
+    navigation = (PORTAL_ASSETS / "js" / "navigation.js").read_text(encoding="utf-8")
+    modules = (PORTAL_ASSETS / "js" / "modules.js").read_text(encoding="utf-8")
+    requirements = (PORTAL_ASSETS / "js" / "requirements.js").read_text(encoding="utf-8")
+    styles = (PORTAL_ASSETS / "css" / "requirements.css").read_text(encoding="utf-8")
+
+    assert page.index('data-nav="security"') < page.index('data-nav="requirements"')
+    assert '<span class="ep-nav-item__label">Requirements</span>' in page
+    assert 'data-tab-view="requirements"' in page
+    assert '"requirements": "/assets/js/requirements.js?v=' in page
+    assert 'if (navState.activeView === "requirements") return ["requirements"];' in navigation
+    assert 'requirements: ["table-sort", "table-column-filter"]' in modules
+    assert "Solar91PortalColumnFilter.headerHTML" in requirements
+    assert 'Solar91PortalSort.wire(host, state.sort, loadRows' in requirements
+    assert 'class="ep-issues__table-wrap"' in requirements
+    assert 'class="ep-issues__table ep-requirements__table"' in requirements
+    assert ".ep-requirements__table th:nth-child(2)" in styles
+
+
 def test_inverter_issue_description_and_refresh_are_wired():
     overview = (PORTAL_ASSETS / "js" / "overview.js").read_text(encoding="utf-8")
     inverter_health = (PORTAL_ASSETS / "js" / "inverter-health.js").read_text(encoding="utf-8")
@@ -888,6 +908,40 @@ def test_module_cleaning_card_ring_uses_monthly_compliance_without_zero_fallback
       assert.strictEqual(box.value({table_count:10}),'Not available');
       assert.strictEqual(box.value({table_count:0}),'Not configured');
       assert(box.ring(null,'Compliance',{key:'unset'}).includes('<strong>—</strong>'));
+    """
+    run = subprocess.run(["node", "-e", script], cwd=ROOT, capture_output=True, text=True, timeout=20)
+    assert run.returncode == 0, run.stderr or run.stdout
+
+
+def test_module_cleaning_compliance_sort_matches_the_card_ring_in_both_directions():
+    script = r"""
+      const fs=require('fs'),vm=require('vm'),assert=require('assert');
+      const source=fs.readFileSync('assets/js/washing-board.js','utf8');
+      function extract(name){
+        const start=source.indexOf('function '+name+'(');
+        assert(start>=0,name+' missing');
+        const open=source.indexOf('{',start);let depth=0;
+        for(let i=open;i<source.length;i++){
+          if(source[i]==='{')depth++;
+          else if(source[i]==='}'&&--depth===0)return source.slice(start,i+1);
+        }
+        throw new Error(name+' is incomplete');
+      }
+      const box={};
+      vm.createContext(box);
+      vm.runInContext(extract('monthlyCompliance')+extract('sortByCompliance')+
+        ';this.sort=sortByCompliance',box);
+      const rows=[
+        {site_code:'BEE01',table_count:10,monthly_compliance_percent:0,cycle_grades:[{compliance_percent:0}]},
+        {site_code:'NSR01',table_count:10,monthly_compliance_percent:16.5,cycle_grades:[{compliance_percent:49.5}]},
+        {site_code:'RAM01',table_count:10,monthly_compliance_percent:13.3,cycle_grades:[{compliance_percent:40}]},
+        {site_code:'EXTRA01',table_count:10,monthly_compliance_percent:133.3},
+        {site_code:'NONE01',table_count:0,monthly_compliance_percent:0}
+      ];
+      const high=box.sort(rows.slice(),'compliance-high').map(row=>row.site_code);
+      assert.deepStrictEqual(Array.from(high),['EXTRA01','NSR01','RAM01','BEE01','NONE01']);
+      const low=box.sort(rows.slice(),'compliance-low').map(row=>row.site_code);
+      assert.deepStrictEqual(Array.from(low),['BEE01','RAM01','NSR01','EXTRA01','NONE01']);
     """
     run = subprocess.run(["node", "-e", script], cwd=ROOT, capture_output=True, text=True, timeout=20)
     assert run.returncode == 0, run.stderr or run.stdout

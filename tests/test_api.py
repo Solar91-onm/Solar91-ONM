@@ -476,7 +476,8 @@ def test_site_engineer_scope_uses_explicit_assignment_not_legacy_engineer_text(c
     body = boot.json()
     assert body['pending_access'] is True
     assert body['scope']['plant_ids'] == []
-    assert body['modules'] == ['Command Center', 'My Plant', 'Site Issues', 'Preventive Maintenance', 'Notifications', 'Operations Calendar', 'My Profile']
+    assert body['modules'] == ['Command Center', 'My Plant', 'Site Issues', 'Preventive Maintenance',
+                               'Notifications', 'Operations Calendar', 'Requirements', 'My Profile']
 
     plants = client.get('/api/plants')
     assert plants.status_code == 200

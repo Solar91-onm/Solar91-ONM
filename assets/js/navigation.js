@@ -41,9 +41,14 @@
   // (Assignee was shown the button but bounced back to the Dashboard by the guard).
   // The server enforces the same roles (SECURITY_CONTACT_ROLES / SECURITY_MOVE_ROLES).
   var SECURITY_PAGE_ROLES = ["O&M Head", "Assignee", "Administration"];
+  var REQUIREMENTS_PAGE_ROLES = ["O&M Head", "Assignee", "Site Engineer"];
 
   function canOpenSecurity(role) {
     return SECURITY_PAGE_ROLES.indexOf(role) !== -1;
+  }
+
+  function canOpenRequirements(role) {
+    return REQUIREMENTS_PAGE_ROLES.indexOf(role) !== -1;
   }
 
   function restrictedPages() {
@@ -130,7 +135,7 @@
       details = "details";
     }
     if (snapshot.activeView === "overview" || snapshot.activeView === "settings" ||
-        snapshot.activeView === "security") {
+        snapshot.activeView === "security" || snapshot.activeView === "requirements") {
       return {
         activeView: snapshot.activeView,
         selectedPlant: null,
@@ -468,6 +473,7 @@
    */
   function modulesForState() {
     if (navState.activeView === "overview") return [];
+    if (navState.activeView === "requirements") return ["requirements"];
     if (navState.activeView === "security") return ["security"];
     if (navState.activeView === "settings") return ["settings"];
 
@@ -497,6 +503,7 @@
 
   /** Where the page being opened draws itself, so a skeleton can stand in while its script loads. */
   function hostForState() {
+    if (navState.activeView === "requirements") return document.querySelector("[data-requirements-host]");
     if (navState.activeView === "security") return document.querySelector("[data-security-host]");
     if (navState.activeView === "settings") return document.querySelector("[data-settings-host]");
     var plantCode = navState.activeView === "plant-sub" ? navState.selectedPlant : null;
@@ -573,6 +580,10 @@
     if (navState.activeView === "security" && !canOpenSecurity(currentRole)) {
       navState.activeView = "overview";
     }
+    if (navState.activeView === "requirements") {
+      if (!canOpenRequirements(currentRole)) setOverviewState();
+      return;
+    }
     if (navState.activeView === "plant-sub") {
       navState.selectedSubPage = normalizePlantPage(navState.selectedSubPage);
     }
@@ -603,6 +614,7 @@
     var washingBoardEl = document.querySelector('[data-tab-view="washing-board"]');
     var movableAssetsEl = document.querySelector('[data-tab-view="movable-assets"]');
     var detailsEl = document.querySelector('[data-tab-view="plant-details"]');
+    var requirementsEl = document.querySelector('[data-tab-view="requirements"]');
     var securityEl = document.querySelector('[data-tab-view="security"]');
     var settingsEl = document.querySelector('[data-tab-view="settings"]');
     var placeholderEl = document.querySelector('[data-tab-view="placeholder"]');
@@ -615,7 +627,7 @@
     var viewHealthPanel = document.querySelector('[data-view-section-panel="health"]');
 
     function showOnly(el) {
-      [overviewEl, infoHealthEl, calendarEl, washingBoardEl, movableAssetsEl, detailsEl, securityEl, settingsEl, placeholderEl].forEach(function (section) {
+      [overviewEl, infoHealthEl, calendarEl, washingBoardEl, movableAssetsEl, detailsEl, requirementsEl, securityEl, settingsEl, placeholderEl].forEach(function (section) {
         if (section) section.classList.toggle("is-visible", section === el);
       });
       document.dispatchEvent(new CustomEvent("portal:route-changed"));
@@ -644,6 +656,15 @@
       navState.selectedRange = null;
       if (global.Solar91PortalSettings) {
         global.Solar91PortalSettings.render(document.querySelector("[data-settings-host]"));
+      }
+      try { sessionStorage.setItem("solar91Portal.navState", JSON.stringify(navState)); } catch (_) {}
+      return;
+    }
+    if (navState.activeView === "requirements") {
+      showOnly(requirementsEl);
+      if (titleEl) titleEl.textContent = "Requirements";
+      if (global.Solar91PortalRequirements) {
+        global.Solar91PortalRequirements.show(document.querySelector("[data-requirements-host]"));
       }
       try { sessionStorage.setItem("solar91Portal.navState", JSON.stringify(navState)); } catch (_) {}
       return;
@@ -817,6 +838,10 @@
         btn.classList.toggle("is-active", navState.activeView === "security");
         return;
       }
+      if (nav === "requirements") {
+        btn.classList.toggle("is-active", navState.activeView === "requirements");
+        return;
+      }
       if (nav.indexOf("plant:") === 0) return; // rendered with the selected plant sub-navigation
 
       var isActive = false;
@@ -852,7 +877,12 @@
     if (settings) settings.hidden = restricted;
     var security = document.querySelector('[data-nav="security"]');
     if (security) security.hidden = !canOpenSecurity(role);
+    var requirements = document.querySelector('[data-nav="requirements"]');
+    if (requirements) requirements.hidden = !canOpenRequirements(role);
     if (navState.activeView === "security" && security && security.hidden) {
+      setOverviewState();
+    }
+    if (navState.activeView === "requirements" && requirements && requirements.hidden) {
       setOverviewState();
     }
     renderPlantList(document.querySelector("[data-plant-search]")?.value || "");
@@ -869,6 +899,19 @@
     var settingsBtn = document.querySelector('[data-nav="settings"]');
     if (settingsBtn) settingsBtn.addEventListener("click", function () {
       navState.activeView = "settings";
+      navState.selectedPlant = null;
+      navState.selectedSubPage = null;
+      navState.selectedViewPage = null;
+      navState.selectedRange = null;
+      writeNavigationHistory(false);
+      renderPlantList(document.querySelector("[data-plant-search]")?.value || "");
+      updateContentArea();
+      updateHighlights();
+    });
+    var requirementsBtn = document.querySelector('[data-nav="requirements"]');
+    if (requirementsBtn) requirementsBtn.addEventListener("click", function () {
+      if (!canOpenRequirements(currentRole)) return;
+      navState.activeView = "requirements";
       navState.selectedPlant = null;
       navState.selectedSubPage = null;
       navState.selectedViewPage = null;

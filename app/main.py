@@ -34,6 +34,7 @@ from app.plants.router import router as plants_router
 from app.photos.router import router as photos_router
 from app.pmplan.router import router as pmplan_router
 from app.portal.router import router as portal_router
+from app.requirements.router import router as requirements_router
 from app.scada.router import router as scada_router
 from app.scheduled.router import router as scheduled_router
 from app.scheduled.washing_cycles import invalidate_overview_cache
@@ -362,6 +363,7 @@ app.include_router(users_router)
 app.include_router(users_invites_router)
 app.include_router(movable_assets_router)
 app.include_router(bom_router)
+app.include_router(requirements_router)
 
 @app.get("/",include_in_schema=False)
 def index(request:Request):

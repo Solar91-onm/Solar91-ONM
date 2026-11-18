@@ -15,7 +15,7 @@ A cycle is CYCLE_DAYS (30) days from its start date, the same length as the Mont
                Transmission line               remaining days
   GSS side     VCB - GSS side                  2 days
                4 Pole - GSS side               2 days
-               Transmission line - GSS side    remaining days
+               Switchyard                       remaining days
 
 The two "remaining days" phases share what is left of the 30 days after the fixed phases (4 days -> 2 each).
 
@@ -54,7 +54,7 @@ _PHASES: list[tuple[str, str, tuple[str, ...], int | None]] = [
     ("Plant side", "Transmission line", ("Transmission line",), None),
     ("GSS side", "VCB", ("VCB - GSS side",), 2),
     ("GSS side", "4 Pole", ("4 Pole - GSS side",), 2),
-    ("GSS side", "Transmission line", ("Transmission line - GSS side",), None),
+    ("GSS side", "Switchyard", ("Switchyard",), None),
 ]
 
 

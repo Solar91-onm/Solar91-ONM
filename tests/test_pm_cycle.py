@@ -35,7 +35,7 @@ def test_cycle_order_and_days_fill_thirty_days():
     assert days[("Plant side", "Transmission line")] == (23, 24)
     assert days[("GSS side", "VCB")] == (25, 26)
     assert days[("GSS side", "4 Pole")] == (27, 28)
-    assert days[("GSS side", "Transmission line")] == (29, 30)
+    assert days[("GSS side", "Switchyard")] == (29, 30)
     assert CYCLE[-1]["end_day"] == CYCLE_DAYS == 30
     assert phase_for("ACCB Panel")["equipment_types"] == ["ACCB Panel"]        # MCCB is no longer in PM
     assert phase_for("RMS")["phase"] == phase_for("CCTV")["phase"] == "Miscellaneous"
@@ -59,7 +59,7 @@ def test_single_unit_equipment_uses_its_turn_in_the_cycle(client, db):
     login_user(client, db, role="O&M Head")
     _plant(db)
     for etype, start_day, end_day in (("VCB Panel", 10, 11), ("Transformer", 12, 13), ("VCB - GSS side", 25, 26),
-                                      ("Transmission line - GSS side", 29, 30), ("RMS", 20, 22)):
+                                      ("Switchyard", 29, 30), ("RMS", 20, 22)):
         res = client.post("/api/pm-plan/tasks", json=_body(equipment_type=etype, task_name=f"{etype} PM"))
         assert res.status_code == 200, res.text
         task = db.query(OMTask).filter(OMTask.task_type == etype).one()
@@ -211,7 +211,7 @@ def test_chained_window_moves_later_phases_after_booked_work():
     assert chained_window("ACCB Panel", START)["start"] == START + timedelta(days=7)          # nothing booked: day 8
     w = chained_window("ACCB Panel", START, {inv: START + timedelta(days=9)})                 # inverters ran to day 10
     assert w["start"] == START + timedelta(days=10) and w["moved_days"] == 3
-    gss = chained_window("Transmission line - GSS side", START, {inv: START + timedelta(days=9)})
+    gss = chained_window("Switchyard", START, {inv: START + timedelta(days=9)})
     assert gss["start"] == START + timedelta(days=31) and gss["moved_days"] == 3              # the delay carries to the GSS side
     early = chained_window("ACCB Panel", START, {inv: START + timedelta(days=2)})             # finishing early keeps the standard day
     assert early["start"] == START + timedelta(days=7) and early["moved_days"] == 0
@@ -330,7 +330,7 @@ def test_plant_then_gss_templates_upload_in_order(client, db):
     assert gss.status_code == 200, gss.text
     assert [(s["equipment_type"], s["start"], s["end"]) for s in gss.json()["schedule"]] == [
         ("VCB - GSS side", "2026-11-25", "2026-11-26"), ("4 Pole - GSS side", "2026-11-27", "2026-11-28"),
-        ("Transmission line - GSS side", "2026-11-29", "2026-11-30")]
+        ("Switchyard", "2026-11-29", "2026-11-30")]
 
 
 def test_long_inverter_round_moves_the_gss_side_upload_too(client, db):

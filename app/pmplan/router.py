@@ -976,7 +976,7 @@ def _side_error(side: str | None, equipment_type: str) -> str | None:
     area = phase_for(equipment_type)["area"]
     if side == "gss" and area != "GSS side":
         return (f"'{equipment_type}' is not GSS side equipment. This is the GSS side template: use VCB - GSS side, "
-                f"4 Pole - GSS side or Transmission line - GSS side, or move the row to the Plant side template")
+                f"4 Pole - GSS side or Switchyard, or move the row to the Plant side template")
     if side == "plant" and area == "GSS side":
         return f"'{equipment_type}' is GSS side equipment. Move this row to the GSS side template"
     return None

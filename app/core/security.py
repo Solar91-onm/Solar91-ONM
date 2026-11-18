@@ -48,18 +48,21 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
         "plants.view", "plants.manage", "issues.view", "issues.create", "issues.progress", "issues.resolve",
         "issues.manage", "issues.close", "handover.manage", "tasks.view", "tasks.create", "tasks.execute",
         "tasks.manage", "washing.manage", "services.manage", "documents.view", "users.manage", "audit.view",
-        "reports.view", "performance.view", "services.view",
+        "reports.view", "performance.view", "services.view", "requirements.view", "requirements.manage",
     },
     # Assignee = Solar91 O&M team member, scoped to their assigned plants.
     "Assignee": {
         "plants.view", "issues.view", "issues.create", "issues.progress", "issues.resolve",
         "tasks.view", "tasks.create", "tasks.execute", "washing.log", "handover.execute", "documents.view",
-        "services.view",
+        "services.view", "requirements.view", "requirements.manage",
     },
     # Administration is a read-only Command Center and Reports role.
     "Administration": {"plants.view", "issues.view", "tasks.view", "reports.view"},
     # Exactly one assigned plant; no fleet-wide modules.
-    "Site Engineer": {"plants.view", "issues.view", "issues.create", "tasks.view", "tasks.execute", "washing.log"},
+    "Site Engineer": {
+        "plants.view", "issues.view", "issues.create", "tasks.view", "tasks.execute", "washing.log",
+        "requirements.view", "requirements.create",
+    },
     # New Clerk-authenticated users wait here until an O&M Head assigns one of the four operational roles.
     "Viewer": set(),
 }
@@ -210,11 +213,13 @@ def plant_scope_matches(db: Session, user: User, plant_id: UUID | None) -> bool:
 ROLE_MODULES: dict[str, list[str]] = {
     "O&M Head": ["Command Center", "Plants", "Site Issues", "Preventive Maintenance", "Work / Assignments",
                  "Data / Imports", "Settings", "Project Handover", "Extra Services",
-                 "Notifications", "Operations Calendar", "My Profile"],
+                 "Notifications", "Operations Calendar", "Requirements", "My Profile"],
     "Assignee": ["Command Center", "Plants", "Site Issues", "Preventive Maintenance", "Work / Assignments",
-                 "Project Handover", "Extra Services", "Notifications", "Operations Calendar", "My Profile"],
+                 "Project Handover", "Extra Services", "Notifications", "Operations Calendar", "Requirements",
+                 "My Profile"],
     "Administration": ["Command Center", "Operations Calendar"],
-    "Site Engineer": ["Command Center", "My Plant", "Site Issues", "Preventive Maintenance", "Notifications", "Operations Calendar", "My Profile"],
+    "Site Engineer": ["Command Center", "My Plant", "Site Issues", "Preventive Maintenance", "Notifications",
+                      "Operations Calendar", "Requirements", "My Profile"],
     "Viewer": ["Notifications", "My Profile"],
 }
 

@@ -9,6 +9,7 @@
     liasoning: ["table-sort"],
     bom: ["table-sort"],
     "site-issues": ["table-sort", "table-column-filter", "register-io", "photo-evidence"],
+    requirements: ["table-sort", "table-column-filter"],
     "inverter-health": ["table-sort", "table-column-filter"],
     "operations-calendar": ["register-io", "photo-evidence"],
     "washing-board": ["table-sort", "table-column-filter"],

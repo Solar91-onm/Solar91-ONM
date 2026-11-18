@@ -329,6 +329,17 @@
     return Number(value).toFixed(1) + "%";
   }
 
+  function sortByCompliance(rows, direction) {
+    return rows.sort(function (a, b) {
+      var left = monthlyCompliance(a);
+      var right = monthlyCompliance(b);
+      if (left === null && right !== null) return 1;
+      if (right === null && left !== null) return -1;
+      if (left !== right) return (left - right) * (direction === "compliance-low" ? 1 : -1);
+      return String(a.site_code).localeCompare(String(b.site_code), undefined, { numeric: true });
+    });
+  }
+
   function cleaningTableRecord(row) {
     if (!(Number(row.table_count) > 0)) return null;
     if (ui.date !== "__all") {
@@ -552,25 +563,7 @@
       return [row.plant, row.site_code, row.district, row.assignee_name]
         .join(" ").toLowerCase().indexOf(term) !== -1;
     });
-    if (ui.sort !== "plant") {
-      // By the focused scope's work score (the month, or the chosen cycle). Plants without a
-      // score (not set up, a cycle not started, a role that does not see scores) sort last.
-      var sortScope = scopeCycle(rows);
-      var scoreFor = function (row) {
-        var value = sortScope === "all" ? row.monthly_compliance_percent
-          : scoreOf(gradeFor(row, sortScope));
-        return typeof value === "number" ? value : null;
-      };
-      rows.sort(function (a, b) {
-        var left = scoreFor(a);
-        var right = scoreFor(b);
-        if (left === null && right !== null) return 1;
-        if (right === null && left !== null) return -1;
-        var direction = ui.sort === "compliance-low" ? 1 : -1;
-        if (left !== right) return (left - right) * direction;
-        return String(a.site_code).localeCompare(String(b.site_code), undefined, { numeric: true });
-      });
-    }
+    if (ui.sort !== "plant") sortByCompliance(rows, ui.sort);
     return rows;
   }
 

@@ -50,6 +50,7 @@
 <link rel="stylesheet" href="/assets/css/calendar.css"/>
 <link rel="stylesheet" href="/assets/css/settings.css"/>
 <link rel="stylesheet" href="/assets/css/site-issues.css"/>
+<link rel="stylesheet" href="/assets/css/requirements.css"/>
 <link rel="stylesheet" href="/assets/css/plant-details.css"/>
 <link rel="stylesheet" href="/assets/css/design.css"/>
 <link rel="stylesheet" href="/assets/css/liasoning.css"/>
@@ -174,6 +175,13 @@
             <path d="m9 12 2 2 4-4"></path>
           </svg>
           <span class="ep-nav-item__label">Site Engineer and Security</span>
+        </button>
+        <button class="ep-nav-item ep-nav-item--top" type="button" data-nav="requirements" hidden>
+          <svg class="ep-nav-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M8 6h13M8 12h13M8 18h13"></path>
+            <path d="M3 6h.01M3 12h.01M3 18h.01"></path>
+          </svg>
+          <span class="ep-nav-item__label">Requirements</span>
         </button>
       </div>
 
@@ -352,6 +360,11 @@
             <div data-security-host></div>
           </section>
 
+          <!-- ═════════════ REQUIREMENTS ═════════════ -->
+          <section class="ep-tab-view" data-tab-view="requirements">
+            <div data-requirements-host></div>
+          </section>
+
           <!-- ═════════════ SETTINGS ═════════════ -->
           <section class="ep-tab-view" data-tab-view="settings">
             <div data-settings-host></div>
@@ -420,6 +433,7 @@ window.S91_CONFIG = JSON.parse(document.getElementById("s91-config").textContent
   "plant-details": "/assets/js/plant-details.js",
   "plants-table": "/assets/js/plants-table.js",
   "security": "/assets/js/security.js",
+  "requirements": "/assets/js/requirements.js",
   "site-issues": "/assets/js/site-issues.js",
   "movable-assets": "/assets/js/movable-assets.js",
   "bom": "/assets/js/bom.js",

@@ -5,7 +5,7 @@ from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Index, Integer, JSON, Numeric, SmallInteger, String, Text, UniqueConstraint, func, text
+from sqlalchemy import Boolean, CheckConstraint, Date, DateTime, Float, ForeignKey, Index, Integer, JSON, Numeric, SmallInteger, String, Text, UniqueConstraint, func, text
 from sqlalchemy.orm import Mapped, mapped_column, validates
 
 from app.core.database import Base
@@ -173,6 +173,28 @@ class Issue(Base):
     @property
     def units(self) -> list[dict[str, Any]]:
         return [entry for entry in (self.legacy_payload or {}).get("units", []) if isinstance(entry, dict)]
+
+
+class RequirementTicket(Base, TimestampMixin):
+    __tablename__ = "requirement_tickets"
+    id: Mapped[uuid.UUID] = uuid_pk()
+    ticket_no: Mapped[str] = mapped_column(String(40), unique=True, nullable=False)
+    plant_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("plants.id", ondelete="SET NULL"))
+    site_code: Mapped[str] = mapped_column(String(80), nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    demand_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    priority: Mapped[str] = mapped_column(String(20), default="Medium", nullable=False)
+    status: Mapped[str] = mapped_column(String(20), default="Open", nullable=False)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    completed_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    __table_args__ = (
+        CheckConstraint("priority IN ('Critical', 'Medium', 'Low')", name="ck_requirement_tickets_priority"),
+        CheckConstraint("status IN ('Open', 'Completed')", name="ck_requirement_tickets_status"),
+        CheckConstraint("demand_count >= 1", name="ck_requirement_tickets_demand_count"),
+        Index("ix_requirement_tickets_status_created", "status", "created_at"),
+        Index("ix_requirement_tickets_plant_status", "plant_id", "status"),
+    )
 
 
 class IssueHistory(Base):
