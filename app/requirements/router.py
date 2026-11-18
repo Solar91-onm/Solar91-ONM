@@ -174,14 +174,12 @@ def create_requirement(
     db: Annotated[Session, Depends(get_db)],
     user: Annotated[User, Depends(require_permission("requirements.create"))],
 ):
-    if user.role != "Site Engineer":
-        raise HTTPException(403, "Only Site Engineers can raise a requirement")
     plant = db.get(Plant, data.plant_id)
     if plant is None:
         raise HTTPException(404, "Plant not found")
     scope = user_scoped_plant_ids(db, user)
-    if scope is None or plant.id not in scope:
-        raise HTTPException(403, "This plant is outside your assigned plant")
+    if scope is not None and plant.id not in scope:
+        raise HTTPException(403, "This plant is outside your assigned plants")
 
     ticket_id = uuid4()
     ticket = RequirementTicket(

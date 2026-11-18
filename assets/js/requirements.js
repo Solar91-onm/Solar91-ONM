@@ -43,8 +43,7 @@
   }
 
   function canCreate() {
-    var user = api && api.currentUser ? api.currentUser() : null;
-    return !!user && user.role === "Site Engineer";
+    return !!(api && api.can && api.can("requirements.create"));
   }
 
   function canManage() {

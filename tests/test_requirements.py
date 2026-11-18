@@ -40,6 +40,18 @@ def test_site_engineer_creates_scoped_ticket_and_counts_nonempty_lines(client, d
     assert listed["items"][0]["id"] == created["id"]
 
 
+def test_om_head_can_raise_a_requirement_and_the_page_permission_exposes_the_action(client, db):
+    plant = _plant(db, "REQ09")
+    head = login_user(client, db, role="O&M Head", email="requirements-create-head@example.com")
+    session = client.get("/api/auth/session").json()
+
+    created = _ticket(client, plant)
+
+    assert "requirements.create" in session["permissions"]
+    assert created["siteCode"] == plant.site_code
+    assert created["createdByName"] == head.display_name
+
+
 def test_requirement_create_rejects_unassigned_plants_and_empty_demands(client, db):
     assigned = _plant(db, "REQ02")
     other = _plant(db, "REQ03")

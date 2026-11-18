@@ -48,13 +48,14 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
         "plants.view", "plants.manage", "issues.view", "issues.create", "issues.progress", "issues.resolve",
         "issues.manage", "issues.close", "handover.manage", "tasks.view", "tasks.create", "tasks.execute",
         "tasks.manage", "washing.manage", "services.manage", "documents.view", "users.manage", "audit.view",
-        "reports.view", "performance.view", "services.view", "requirements.view", "requirements.manage",
+        "reports.view", "performance.view", "services.view", "requirements.view", "requirements.create",
+        "requirements.manage",
     },
     # Assignee = Solar91 O&M team member, scoped to their assigned plants.
     "Assignee": {
         "plants.view", "issues.view", "issues.create", "issues.progress", "issues.resolve",
         "tasks.view", "tasks.create", "tasks.execute", "washing.log", "handover.execute", "documents.view",
-        "services.view", "requirements.view", "requirements.manage",
+        "services.view", "requirements.view", "requirements.create", "requirements.manage",
     },
     # Administration is a read-only Command Center and Reports role.
     "Administration": {"plants.view", "issues.view", "tasks.view", "reports.view"},
