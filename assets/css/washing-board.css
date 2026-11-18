@@ -154,7 +154,32 @@
 }
 .ep-wb__view-toggle:hover { border-color: var(--ep-accent); }
 .ep-wb__view-toggle:focus-visible { outline: 2px solid var(--ep-accent); outline-offset: 1px; }
-.ep-wb__table td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.ep-wb__table-wrap { overflow-x: auto; }
+.ep-wb__table { min-width: 760px; }
+.ep-wb__table th,
+.ep-wb__table td { text-align: center; }
+.ep-wb__table th { font-size: 10px; }
+.ep-wb__table th:nth-child(1),
+.ep-wb__table td:nth-child(1) { width: 14%; }
+.ep-wb__table th:nth-child(2),
+.ep-wb__table td:nth-child(2) { width: 25%; }
+.ep-wb__table th:nth-child(3),
+.ep-wb__table td:nth-child(3) { width: 18%; }
+.ep-wb__table th:nth-child(4),
+.ep-wb__table td:nth-child(4) { width: 19%; }
+.ep-wb__table th:nth-child(5),
+.ep-wb__table td:nth-child(5) { width: 24%; }
+.ep-wb__table .ep-issues__th-content { justify-content: center; }
+.ep-wb__table .ep-issues__th-content .ep-sort { flex: 0 1 auto; }
+.ep-wb__table .ep-issues__th-content .ep-sort__label { flex: 0 1 auto; }
+.ep-wb__table td {
+  padding: 10px 8px;
+  color: var(--ep-text-strong);
+  font-size: 12px;
+  font-weight: 550;
+}
+.ep-wb__table td strong { color: var(--ep-text-strong); font-size: 12px; font-weight: 700; }
+.ep-wb__table td.num { text-align: center; font-variant-numeric: tabular-nums; }
 
 /* ── Plant cards ────────────────────────────────────────────────────── */
 .ep-wb__grid {

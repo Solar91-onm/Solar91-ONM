@@ -398,6 +398,25 @@
 
 .ep-calendar__wash-hover-card[hidden] { display: none; }
 
+.ep-calendar__wash-hover-card--reason {
+  width: max-content;
+  max-width: min(280px, calc(100vw - 16px));
+  min-width: 120px;
+  padding: 9px 12px;
+  border-top-width: 3px;
+  border-top-color: #d58b23;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #fffaf0, #fff);
+}
+
+.ep-calendar__wash-reason {
+  color: #68420f;
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
 .ep-calendar__pm-hover-card {
   border-top-color: #5b8dcc;
 }

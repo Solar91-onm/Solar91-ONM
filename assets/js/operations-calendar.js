@@ -397,6 +397,19 @@
     var reportsOnDate = reportsThroughDate.filter(function (event) {
       return event.date === date;
     });
+    var hasCleaning = reportsOnDate.some(function (report) {
+      return report.jobStatus === "Done";
+    });
+    if (reportsOnDate.length && !hasCleaning) {
+      var reasons = [];
+      reportsOnDate.forEach(function (report) {
+        var reason = (report.remarks || "").trim() || (report.exceptionReason || "").trim();
+        if (reason && reasons.indexOf(reason) === -1) reasons.push(reason);
+      });
+      return reasons.length
+        ? '<div class="ep-calendar__wash-reason">' + escape(reasons.join(" · ")) + '</div>'
+        : "";
+    }
     var cycleDefinitions = (plant.cycles || []).slice().sort(function (a, b) {
       return Number(a.cycle_no) - Number(b.cycle_no);
     });
@@ -594,6 +607,10 @@
     tooltip.dataset.hoverKind = isWashing ? "washing" : "pm";
     tooltip.dataset.date = day.dataset.date;
     tooltip.dataset.requestId = String(state.requestId);
+    tooltip.classList.toggle(
+      "ep-calendar__wash-hover-card--reason",
+      isWashing && content.indexOf("ep-calendar__wash-reason") !== -1
+    );
     tooltip.hidden = false;
     positionWashingTooltip(host, day);
   }
@@ -1305,7 +1322,7 @@
     }
   }
 
-  /** "1, 2, 4, 7-8, 13" or "100-91" (either direction) -> ascending unique numbers, or an error message. */
+  /** "1, 2, 4, 7-8, 13" or "100-91" (either direction) -> ordered unique numbers, or an error message. */
   function parseTableList(text, total) {
     var cleaned = String(text || "").replace(/\s*([-\u2013\u2014])\s*/g, "$1");
     var parts = cleaned.split(/[,;\s]+/).filter(Boolean);
@@ -1327,18 +1344,19 @@
         if (number === to) break;
       }
     }
-    numbers.sort(function (a, b) { return a - b; });
     return { numbers: numbers, error: "" };
   }
 
-  /** [1,2,3,7,9,10] -> "1\u20133, 7, 9\u201310" */
+  /** Compresses consecutive numbers without changing the order in which the user entered them. */
   function formatTableList(numbers) {
-    var sorted = (numbers || []).slice().sort(function (a, b) { return a - b; });
+    var ordered = numbers || [];
     var parts = [];
-    for (var i = 0; i < sorted.length;) {
+    for (var i = 0; i < ordered.length;) {
       var j = i;
-      while (j + 1 < sorted.length && sorted[j + 1] === sorted[j] + 1) j += 1;
-      parts.push(j > i ? sorted[i] + "\u2013" + sorted[j] : String(sorted[i]));
+      var step = j + 1 < ordered.length && Math.abs(ordered[j + 1] - ordered[j]) === 1
+        ? ordered[j + 1] - ordered[j] : 0;
+      while (step && j + 1 < ordered.length && ordered[j + 1] - ordered[j] === step) j += 1;
+      parts.push(j > i ? ordered[i] + "\u2013" + ordered[j] : String(ordered[i]));
       i = j + 1;
     }
     return parts.join(", ");
@@ -2011,6 +2029,7 @@
             jobStatus: report.job_status,
             reportedBy: report.reported_by,
             remarks: report.remarks,
+            exceptionReason: report.exception_reason,
             source: "Saved daily report",
             kind: "report"
           });
@@ -2024,7 +2043,22 @@
         });
         state.tooltips = {};
         events.forEach(function (event) {
-          var detail = eventCellDescription(event, context) + " · Cycle " + event.cycleNo + " · " + event.status;
+          var reportsForDate = events.filter(function (item) { return item.date === event.date; });
+          var noCleaning = reportsForDate.length && reportsForDate.every(function (item) {
+            return item.jobStatus !== "Done";
+          });
+          var detail = noCleaning
+            ? (event.remarks || "").trim() || (event.exceptionReason || "").trim()
+            : eventCellDescription(event, context) + " · Cycle " + event.cycleNo + " · " + event.status;
+          if (!detail) {
+            if (noCleaning && !state.tooltips[event.date]) state.tooltips[event.date] = [];
+            return;
+          }
+          if (noCleaning) {
+            if (!state.tooltips[event.date]) state.tooltips[event.date] = [];
+            if (state.tooltips[event.date].indexOf(detail) === -1) state.tooltips[event.date].push(detail);
+            return;
+          }
           if (event.reportedBy) detail += " · " + event.reportedBy;
           if (!state.tooltips[event.date]) state.tooltips[event.date] = [];
           state.tooltips[event.date].push(detail);

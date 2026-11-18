@@ -190,9 +190,7 @@ class WashingSheetEntry(BaseModel):
         if (self.table_start is None) != (self.table_end is None):
             raise ValueError("Enter both the first and last table numbers")
         if self.table_start is not None:
-            if self.table_end < self.table_start:
-                raise ValueError("Last table number must be at least the first table number")
-            if self.tables_cleaned != self.table_end - self.table_start + 1:
+            if self.tables_cleaned != abs(self.table_end - self.table_start) + 1:
                 raise ValueError("Tables cleaned must match the selected table-number range")
         if self.job_status == "Not done" and (self.tables_cleaned or self.table_start is not None):
             raise ValueError("A not-done exception cannot include cleaned tables")
@@ -249,9 +247,7 @@ class WashingReportUpdateRequest(BaseModel):
         if (self.table_start is None) != (self.table_end is None):
             raise ValueError("Enter both the first and last table numbers")
         if self.table_start is not None:
-            if self.table_end < self.table_start:
-                raise ValueError("Last table number must be at least the first table number")
-            count = self.table_end - self.table_start + 1
+            count = abs(self.table_end - self.table_start) + 1
             if self.tables_cleaned is not None and self.tables_cleaned != count:
                 raise ValueError("Tables cleaned must match the selected table-number range")
         return self

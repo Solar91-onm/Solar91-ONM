@@ -100,6 +100,22 @@ def test_sheet_persists_inclusive_table_ranges_and_contiguous_days(client, db):
     ]
 
 
+def test_sheet_preserves_descending_range_order(client, db):
+    plant = _plant(db)
+    _setup_cycle_users(client, db, plant)
+    _engineer(client, db, plant)
+    day = _days(1)[0]
+
+    response = _sheet(client, plant, [
+        {**_done(day, 2), "table_start": 4, "table_end": 3},
+    ])
+
+    assert response.status_code == 200, response.text
+    report = response.json()["reports"][0]
+    assert report["tables_cleaned"] == 2
+    assert report["cleaned_table_codes"] == ["Table 004", "Table 003"]
+
+
 def test_sheet_rejects_invalid_or_out_of_configured_range(client, db):
     plant = _plant(db)
     _setup_cycle_users(client, db, plant)  # 4 configured tables

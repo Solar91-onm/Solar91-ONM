@@ -827,6 +827,7 @@ def test_module_cleaning_board_shows_every_plant_and_opens_one_plants_calendar()
 def test_module_cleaning_table_reuses_board_rows_and_cycle_progress():
     board = (PORTAL_ASSETS / "js" / "washing-board.js").read_text(encoding="utf-8")
     helper = (PORTAL_ASSETS / "js" / "table-column-filter.js").read_text(encoding="utf-8")
+    board_styles = (PORTAL_ASSETS / "css" / "washing-board.css").read_text(encoding="utf-8")
     assert 'view: "cards"' in board
     assert "solar91.washingBoardView.v1." in board
     assert "currentUser()" in board and "localStorage.getItem(key)" in board
@@ -836,12 +837,19 @@ def test_module_cleaning_table_reuses_board_rows_and_cycle_progress():
     assert "function cardHTML(row)" in board and "function cycleProgress(row)" in board
     assert 'class="ep-issues__table-wrap"><table class="ep-issues__table ep-wb__table"' in board
     assert 'data-label="Table range"' in board
-    assert 'data-label="Number of tables"' in board
+    assert 'label: "Tables cleaned"' in board
+    assert 'data-label="Tables cleaned"' in board
+    assert "function cleaningTableRecord(row)" in board
+    assert "st.dayActivity.byCode" in board and "day.table_data_by_cycle" in board
+    assert "row.cycle_table_data" in board
+    assert "entry.tables_cleaned" in board and "entry.table_range" in board
     assert 'data-label="Running cycle"' in board
     assert 'data-label="Cycle progress (%)"' in board
     assert "Solar91PortalColumnFilter.headerHTML" in board
     assert "global.Solar91PortalSort.apply(filtered, ui.tableSort, TABLE_COLUMNS)" in board
     assert 'Solar91PortalNav.selectPlantPage(row.getAttribute("data-wb-plant"), "washing")' in board
+    assert ".ep-wb__table th,\n.ep-wb__table td { text-align: center; }" in board_styles
+    assert ".ep-wb__table td {\n  padding: 10px 8px;\n  color: var(--ep-text-strong);" in board_styles
     toggle = board[board.index('viewToggle.addEventListener("click"'):]
     toggle = toggle[:toggle.index('var month = container.querySelector("[data-wb-month]")')]
     assert "api().request" not in toggle and "render(container)" in toggle
@@ -1375,6 +1383,11 @@ def test_plant_washing_calendar_has_date_cycle_hover_and_setup_action():
     assert "renderWashingHoverCard(state, day.dataset.date)" in calendar
     assert 'event.kind === "report" && event.date <= date' in calendar
     assert 'return event.date === date;' in calendar
+    assert 'if (reportsOnDate.length && !hasCleaning)' in calendar
+    assert '(report.remarks || "").trim() || (report.exceptionReason || "").trim()' in calendar
+    assert 'exceptionReason: report.exception_reason' in calendar
+    assert "ep-calendar__wash-hover-card--reason" in calendar
+    assert ".ep-calendar__wash-reason" in styles
     assert 'report.jobStatus === "Done"' in calendar
     assert 'report.reviewStatus === "Confirmed"' in calendar
     assert "ep-wash-cycle-card__ring" in calendar
@@ -1921,6 +1934,45 @@ def test_record_sheet_tracks_exactly_which_tables_were_cleaned():
     assert "formatTableList(row.numbers)" in calendar
     assert "Cleaned this cycle:" in calendar and "Not cleaned yet:" in calendar
     assert '(item.state === "Upcoming" ? " disabled" : "")' in calendar
+
+
+def test_record_sheet_preserves_entered_table_range_direction():
+    script = r"""
+      const fs=require('fs'),vm=require('vm'),assert=require('assert');
+      const source=fs.readFileSync('assets/js/operations-calendar.js','utf8');
+      function extract(name) {
+        const start=source.indexOf('function '+name+'(');
+        assert(start>=0,name+' missing');
+        const open=source.indexOf('{',start);
+        let depth=0;
+        for(let i=open;i<source.length;i++) {
+          if(source[i]==='{') depth++;
+          else if(source[i]==='}' && --depth===0) return source.slice(start,i+1);
+        }
+        throw new Error(name+' is incomplete');
+      }
+      const box={}; vm.createContext(box);
+      vm.runInContext(extract('parseTableList')+extract('formatTableList')+
+        ';this.parse=parseTableList;this.format=formatTableList;',box);
+      const parsed=box.parse('100-91, 1-3',100);
+      assert.strictEqual(parsed.error,'');
+      assert.deepStrictEqual(Array.from(parsed.numbers),[100,99,98,97,96,95,94,93,92,91,1,2,3]);
+      assert.strictEqual(box.format(parsed.numbers),'100\u201391, 1\u20133');
+    """
+    run = subprocess.run(["node", "-e", script], cwd=ROOT, capture_output=True, text=True, timeout=20)
+    assert run.returncode == 0, run.stderr or run.stdout
+
+
+def test_issue_edit_resolution_keeps_only_the_closing_remark_field():
+    issues = (PORTAL_ASSETS / "js" / "site-issues.js").read_text(encoding="utf-8")
+    form = issues[issues.index("function renderEditForm(issue)"):
+                  issues.index("function formatIssueDate(value)")]
+
+    assert "Closing remark" in form and 'name="resolutionRemark"' in form
+    assert "Fixed on" in form and 'name="fixedOn"' in form
+    assert "Fix photos (optional, up to 10)" in form
+    assert "Root cause" not in form and "Corrective action" not in form
+    assert "Reason for the change" not in form and 'name="changeReason"' not in form
 
 
 def test_record_sheet_uses_wheel_safe_numeric_text_inputs():
@@ -2559,7 +2611,8 @@ def test_dashboard_tiles_are_buttons_with_state_coloured_figures_and_meters():
 
     # The headline figure is coloured by the tile's state, from the tokens.
     assert ".ep-metric--accent .ep-metric__value, .ep-metric--accent .ep-metric__unit { color: var(--ep-accent); }" in styles
-    assert ".ep-metric--red    .ep-metric__value, .ep-metric--red    .ep-metric__unit { color: var(--ep-red); }" in styles
+    assert '.ep-metric[data-overview-destination="health"] .ep-metric__value { color: var(--ep-red); }' in styles
+    assert '.ep-metric[data-overview-destination="strings"] .ep-metric__value { color: var(--ep-text-strong); }' in styles
     assert ".ep-metric--neutral .ep-metric__value, .ep-metric--neutral .ep-metric__unit { color: var(--ep-text-muted); }" in styles
     # Icon chip tinted by the same state.
     assert ".ep-metric--accent .ep-metric__chip { background: var(--ep-accent-soft); color: var(--ep-accent-strong); }" in styles

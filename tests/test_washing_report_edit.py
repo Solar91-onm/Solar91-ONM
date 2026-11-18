@@ -11,7 +11,7 @@ from tests.test_washing_sheet import _days, _engineer, _sheet
 
 
 def _ranged(day, start, end):
-    return {"report_date": day.isoformat(), "job_status": "Done", "tables_cleaned": end - start + 1,
+    return {"report_date": day.isoformat(), "job_status": "Done", "tables_cleaned": abs(end - start) + 1,
             "table_start": start, "table_end": end}
 
 
@@ -58,7 +58,7 @@ def test_edit_can_make_a_day_scattered_and_completes_the_cycle(client, db):
     edited = client.patch(f"{BASE}/daily-reports/{d3}", json={"table_numbers": [4, 3]})
 
     assert edited.status_code == 200, edited.text
-    assert edited.json()["tables_cleaned"] == 2 and edited.json()["cleaned_table_codes"] == ["Table 003", "Table 004"]
+    assert edited.json()["tables_cleaned"] == 2 and edited.json()["cleaned_table_codes"] == ["Table 004", "Table 003"]
     assert _row(db, d3).cycle_completed is True  # 1 + 1 + 2 fills the plant's 4 tables
 
 
@@ -106,7 +106,7 @@ def test_edit_rejects_out_of_range_or_inconsistent_table_numbers(client, db):
     url = f"{BASE}/daily-reports/{d1}"
 
     assert client.patch(url, json={"table_start": 1, "table_end": 5}).status_code == 422  # plant has 4 tables
-    assert client.patch(url, json={"table_start": 3, "table_end": 2}).status_code == 422
+    assert client.patch(url, json={"table_start": 3, "table_end": 2, "tables_cleaned": 1}).status_code == 422
     assert client.patch(url, json={"table_end": 2}).status_code == 422
     assert client.patch(url, json={"table_start": 1, "table_end": 2, "tables_cleaned": 3}).status_code == 422
     assert client.patch(url, json={"table_numbers": [4, 5]}).status_code == 422  # table 5 does not exist
@@ -133,7 +133,7 @@ def test_sheet_records_days_from_the_end_and_as_scattered_tables(client, db):
 
     assert saved.status_code == 200, saved.text
     first, second = saved.json()["reports"]
-    assert first["cleaned_table_codes"] == ["Table 003", "Table 004"] and first["tables_cleaned"] == 2
+    assert first["cleaned_table_codes"] == ["Table 004", "Table 003"] and first["tables_cleaned"] == 2
     assert second["cleaned_table_codes"] == ["Table 001"]
 
 

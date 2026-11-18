@@ -149,7 +149,8 @@
 
   function dayStatus(row) {
     if (!st.dayActivity || st.dayActivity.date !== ui.date) return "";
-    return st.dayActivity.byCode["$" + row.site_code] || "";
+    var entry = st.dayActivity.byCode["$" + row.site_code];
+    return entry && entry.status || "";
   }
 
   function clearDayActivity() {
@@ -319,16 +320,60 @@
     return work ? work.percent : cycleOf(row).percent;
   }
 
+  function cleaningTableRecord(row) {
+    if (!(Number(row.table_count) > 0)) return null;
+    if (ui.date !== "__all") {
+      var day = st.dayActivity && st.dayActivity.date === ui.date
+        ? st.dayActivity.byCode["$" + row.site_code] : null;
+      var dayEntries = day && day.table_data_by_cycle || [];
+      if (ui.cycle !== "__all") {
+        return dayEntries.find(function (entry) {
+          return Number(entry.cycle_no) === Number(ui.cycle);
+        }) || null;
+      }
+      if (dayEntries.length === 1) return dayEntries[0];
+      if (dayEntries.length > 1) return {
+        job_status: dayEntries.some(function (entry) { return entry.job_status === "Done"; }) ? "Done" : "Not done",
+        tables_cleaned: dayEntries.reduce(function (sum, entry) { return sum + (Number(entry.tables_cleaned) || 0); }, 0),
+        table_range: dayEntries.map(function (entry) { return entry.table_range; }).filter(Boolean).join(" · ")
+      };
+      return null;
+    }
+    var cycleNo = ui.cycle === "__all" ? Number(row.current_cycle) || 1 : Number(ui.cycle);
+    return (row.cycle_table_data || []).find(function (entry) {
+      return Number(entry.cycle_no) === cycleNo;
+    }) || null;
+  }
+
+  function cleanedTablesValue(row) {
+    if (!(Number(row.table_count) > 0)) return "Not configured";
+    var entry = cleaningTableRecord(row);
+    if (!entry) return "No entry";
+    if (entry.job_status !== "Done") return "Not done";
+    return Number(entry.tables_cleaned) > 0 ? String(entry.tables_cleaned) : "No tables cleaned";
+  }
+
+  function cleanedRangeValue(row) {
+    if (!(Number(row.table_count) > 0)) return "Not configured";
+    var entry = cleaningTableRecord(row);
+    if (!entry) return "No entry";
+    if (entry.job_status !== "Done") return "No tables cleaned";
+    return entry.table_range || "Range not recorded";
+  }
+
   var TABLE_COLUMNS = [
     { key: "plant", label: "Plant code",
       sort: function (row) { return row.site_code; },
       value: function (row) { return row.site_code || "Not configured"; } },
     { key: "range", label: "Table range",
-      sort: function (row) { return row.table_range || null; },
-      value: function (row) { return row.table_range || "Not configured"; } },
-    { key: "count", label: "Number of tables", align: "num",
-      sort: function (row) { return Number(row.table_count) > 0 ? Number(row.table_count) : null; },
-      value: function (row) { return Number(row.table_count) > 0 ? String(row.table_count) : "Not configured"; } },
+      sort: function (row) { return cleanedRangeValue(row); },
+      value: cleanedRangeValue },
+    { key: "count", label: "Tables cleaned", align: "num",
+      sort: function (row) {
+        var entry = cleaningTableRecord(row);
+        return entry && entry.job_status === "Done" ? Number(entry.tables_cleaned) : null;
+      },
+      value: cleanedTablesValue },
     { key: "cycle", label: "Running cycle",
       sort: function (row) { return Number(row.table_count) > 0 ? Number(row.current_cycle) || 1 : null; },
       value: function (row) { return Number(row.table_count) > 0 ? "Cycle " + (Number(row.current_cycle) || 1) : "Not configured"; } },
@@ -433,8 +478,8 @@
           escape(plantLabel(row)) + '">' +
           '<td data-label="Plant code"><strong>' + escape(row.site_code) + "</strong></td>" +
           '<td data-label="Table range">' + escape(row.table_range || "Not configured") + "</td>" +
-          '<td data-label="Number of tables" class="num">' +
-            escape(Number(row.table_count) > 0 ? row.table_count : "Not configured") + "</td>" +
+          '<td data-label="Tables cleaned" class="num">' +
+            escape(cleanedTablesValue(row)) + "</td>" +
           '<td data-label="Running cycle">' + escape(cycleLabel) + "</td>" +
           '<td data-label="Cycle progress (%)" class="num">' +
             escape(progress === null ? "Not configured" : Number(progress).toFixed(1) + "%") + "</td></tr>";
@@ -752,7 +797,10 @@
         }
         var byCode = Object.create(null);
         body.plants.forEach(function (plant) {
-          if (plant.site_code) byCode["$" + plant.site_code] = plant.status;
+          if (plant.site_code) byCode["$" + plant.site_code] = {
+            status: plant.status,
+            table_data_by_cycle: plant.table_data_by_cycle || []
+          };
         });
         var missing = st.rows.some(function (row) {
           return !Object.prototype.hasOwnProperty.call(byCode, "$" + row.site_code);

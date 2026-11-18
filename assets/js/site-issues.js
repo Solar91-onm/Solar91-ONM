@@ -701,17 +701,12 @@
       '</div>' +
       '<label class="ep-issues__wizard-field">Issue details' +
         '<textarea name="problem" required rows="3" maxlength="4000">' + escape(value("problem", issue.problem)) + '</textarea></label>' +
-      // Shown only when Resolved is chosen. These are what the API stores as the
-      // resolution, and it will not accept the transition without them.
+      // Shown only when Resolved is chosen; date and closing remark are optional.
       '<fieldset class="ep-issues__wizard-field ep-issues__edit-resolution" data-issue-resolution' +
         (status === "Resolved" ? "" : " hidden") + '>' +
         '<legend>Resolution</legend>' +
         '<small>Resolved walks the ticket through the stages in between, so its history still reads correctly.</small>' +
         '<div class="ep-issues__wizard-fields ep-issues__wizard-fields--two">' +
-          '<label class="ep-issues__wizard-field">Root cause' +
-            '<textarea name="rootCause" rows="2" maxlength="4000">' + escape(value("rootCause", "")) + '</textarea></label>' +
-          '<label class="ep-issues__wizard-field">Corrective action' +
-            '<textarea name="correctiveAction" rows="2" maxlength="4000">' + escape(value("correctiveAction", "")) + '</textarea></label>' +
           '<label class="ep-issues__wizard-field">Fixed on' +
             '<input name="fixedOn" type="date" value="' + escape(value("fixedOn", "")) + '" max="' + escape(todayISO()) + '" /></label>' +
           '<label class="ep-issues__wizard-field">Closing remark' +
@@ -720,8 +715,6 @@
         '<label class="ep-issues__wizard-field">Fix photos (optional, up to 10)' +
           '<input name="resolutionEvidence" type="file" accept="image/jpeg,image/png,image/webp" multiple /></label>' +
       '</fieldset>' +
-      '<label class="ep-issues__wizard-field">Reason for the change' +
-        '<input name="changeReason" value="' + escape(value("changeReason", "")) + '" maxlength="500" placeholder="Why the ticket is being corrected (optional)" /></label>' +
       '<p class="ep-issues__wizard-error" data-issue-edit-error' +
         (state.submitError ? '' : ' hidden') + '>' + escape(state.submitError) + '</p>' +
       '<div class="ep-issues__wizard-actions ep-issues__edit-actions">' +
@@ -2095,7 +2088,7 @@
     if (!form) return;
     var draft = { id: form.dataset.issueEditForm };
     ["equipment", "subpart", "supplierMaker", "serialNo", "unitCount", "assignedTo", "status",
-      "rootCause", "correctiveAction", "fixedOn", "resolutionRemark", "problem", "changeReason", "closeNote"]
+      "fixedOn", "resolutionRemark", "problem", "closeNote"]
       .forEach(function (name) {
         var control = form.elements[name];
         if (control) draft[name] = control.value;
@@ -2344,9 +2337,6 @@
     // No early return on an empty payload: status and assignee are saved through
     // their own endpoints below, so changing only one of those is still a change.
     // The "nothing to do" check is the steps list further down.
-    var reason = read("changeReason");
-    if (reason) payload.change_reason = reason;
-
     // Assignment and status are not part of PATCH; each has its own endpoint,
     // so they are applied in turn after the details and only when they changed.
     var base = "/api/issues/" + encodeURIComponent(issue.dbId);
@@ -2367,17 +2357,13 @@
       });
     }
     if (nextStatus === "Resolved" && issue.status !== "Resolved") {
-      var rootCause = read("rootCause");
-      var correctiveAction = read("correctiveAction");
       var photoInput = form.elements.resolutionEvidence;
       var photos = photoInput && photoInput.files ? Array.prototype.slice.call(photoInput.files) : [];
-      // Root cause, corrective action and fix photos are all optional: a ticket can be resolved
-      // with the resolution left blank.
 
       // Walk the stages in between first, so the transition the API expects is legal.
       (STEPS_BEFORE_RESOLVE[issue.status] || []).forEach(function (stage) {
         steps.push(function () {
-          return api.request(base + "/status", { method: "POST", body: { status: stage, note: reason || null } });
+          return api.request(base + "/status", { method: "POST", body: { status: stage } });
         });
       });
       steps.push(function () {
@@ -2398,12 +2384,9 @@
           return api.request(base + "/resolve", {
             method: "POST",
             body: {
-              root_cause: rootCause,
-              corrective_action: correctiveAction,
               evidence_ids: (uploaded || []).map(function (entry) { return entry.id; }),
               fixed_on: read("fixedOn") || null,
               remark: read("resolutionRemark") || null,
-              note: reason || null
             }
           });
         });
@@ -2412,7 +2395,7 @@
       steps.push(function () {
         return nextStatus === "Open"
           ? api.request(base + "/reset", { method: "POST", body: {} })
-          : api.request(base + "/status", { method: "POST", body: { status: nextStatus, note: reason || null } });
+          : api.request(base + "/status", { method: "POST", body: { status: nextStatus } });
       });
     }
     if (!steps.length) {

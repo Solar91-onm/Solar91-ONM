@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 
 from app.core.timeutil import business_today
 from app.core.models import (
@@ -62,6 +62,7 @@ def test_table_code_helpers_compress_contiguous_and_gapped_ranges():
     assert format_table_codes(["Table 001", "Table 002", "Table 003", "Table 007"]) == "1–3, 7"
     assert format_table_codes(["Table 001", "Table 003", "Table 004", "Table 007"]) == "1, 3–4, 7"
     assert format_table_codes([]) == ""
+    assert format_table_codes(["Table 025", "Table 024", "Table 023"], preserve_order=True) == "25–23"
 
 
 def test_summary_overview_includes_table_range_only_for_registered_codes(client, db):
@@ -84,6 +85,45 @@ def test_summary_overview_includes_table_range_only_for_registered_codes(client,
     rows = {row["site_code"]: row for row in response.json()["plants"]}
     assert rows["CYCLE01"]["table_range"] == "1–2, 4"
     assert rows["CYCLE02"]["table_range"] is None
+
+
+def test_summary_overview_includes_saved_daily_and_cycle_table_ranges(client, db):
+    plant = _plant(db)
+    today = business_today()
+    month = today.strftime("%Y-%m")
+    head = login_user(client, db, role="O&M Head", name="Cleaning Data Head", email="cleaning-data@example.com")
+    db.add(WashingConfig(plant_id=plant.id, tables_per_cycle=100))
+    db.add_all([
+        WashingDailyReport(
+            plant_id=plant.id, cycle_month=month, cycle_no=1, report_date=today - timedelta(days=2),
+            job_status="Done", tables_cleaned=3,
+            cleaned_table_codes=["Table 025", "Table 024", "Table 023"],
+            reported_by=head.display_name, review_status="Confirmed",
+        ),
+        WashingDailyReport(
+            plant_id=plant.id, cycle_month=month, cycle_no=1, report_date=today - timedelta(days=1),
+            job_status="Done", tables_cleaned=25,
+            cleaned_table_codes=[f"Table {number:03d}" for number in range(100, 75, -1)],
+            reported_by=head.display_name, review_status="Pending",
+        ),
+    ])
+    db.commit()
+    _act_as(head)
+
+    response = client.get(f"{BASE}/overview?include_reports=false&summary=true")
+    assert response.status_code == 200, response.text
+    row = next(item for item in response.json()["plants"] if item["site_code"] == plant.site_code)
+    assert row["cycle_table_data"] == [
+        {"cycle_no": 1, "tables_cleaned": 28, "job_status": "Done",
+         "table_range": "25–23 · 100–76"},
+    ]
+    day = today - timedelta(days=2)
+    day_response = client.get(f"{BASE}/day-activity?day={day.isoformat()}")
+    assert day_response.status_code == 200, day_response.text
+    day_row = next(item for item in day_response.json()["plants"] if item["site_code"] == plant.site_code)
+    assert day_row["table_data_by_cycle"] == [
+        {"cycle_no": 1, "tables_cleaned": 3, "job_status": "Done", "table_range": "25–23"},
+    ]
 
 
 def test_cycle_requires_daily_reports_and_reviewer_confirmation(client, db, monkeypatch):

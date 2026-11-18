@@ -954,6 +954,26 @@ def _build_overview(db: Session, user: User, include_tables: bool = False, repor
         ]
         cleaning_dates = sorted({report.report_date.isoformat() for report in cleaned_reports})
         cleaned_cycles = sorted({report.cycle_no for report in cleaned_reports})
+        cycle_table_data = []
+        if summary:
+            cycle_table_data_map: dict[int, dict] = {}
+            for report in sorted(month_reports, key=lambda item: (item.report_date, str(item.created_at or ""))):
+                if report.review_status not in ("Pending", "Confirmed"):
+                    continue
+                cycle_no = int(report.cycle_no or 1)
+                entry = cycle_table_data_map.setdefault(cycle_no, {
+                    "cycle_no": cycle_no, "tables_cleaned": 0,
+                    "job_status": "Not done", "ranges": [],
+                })
+                if report.job_status == "Done" and report.tables_cleaned:
+                    entry["tables_cleaned"] += int(report.tables_cleaned)
+                    entry["job_status"] = "Done"
+                    table_range = format_table_codes(report.cleaned_table_codes or [], preserve_order=True)
+                    if table_range:
+                        entry["ranges"].append(table_range)
+            for entry in sorted(cycle_table_data_map.values(), key=lambda item: item["cycle_no"]):
+                entry["table_range"] = " · ".join(entry.pop("ranges")) or None
+                cycle_table_data.append(entry)
         closed_cycles = _closed_incomplete(month_reports, table_count)
         highest_report_cycle = max(
             (report.cycle_no for report in month_reports if report.review_status in ("Pending", "Confirmed")),
@@ -1206,6 +1226,7 @@ def _build_overview(db: Session, user: User, include_tables: bool = False, repor
             "cycle_compliance_percent": compliance["percent"],
             "cycle_grades": cycle_grades,
             "cycle_grade_summary": _cycle_grade_summary(cycle_grades),
+            **({"cycle_table_data": cycle_table_data} if summary else {}),
             "average_delay_days": round(sum(delays) / len(delays), 1) if delays else 0,
             "exceptions_this_month": sum(1 for report in reports if report.cycle_month == month and report.exception_reason),
             **({} if summary else {
@@ -1708,15 +1729,19 @@ def create_sheet_reports(db: Session, user: User, payload: WashingSheetRequest) 
         raise HTTPException(409, "Already reported for " + ", ".join(_day_label(value) for value in taken) + ". Edit those days instead of adding them again.")
     created: list[WashingDailyReport] = []
     for entry in entries:
-        if entry.table_end is not None and entry.table_end > total_tables:
+        if entry.table_start is not None and max(entry.table_start, entry.table_end) > total_tables:
             raise HTTPException(
                 422,
-                f"Table number {entry.table_end} exceeds this plant's configured table count ({total_tables})",
+                f"Table number {max(entry.table_start, entry.table_end)} exceeds this plant's configured table count ({total_tables})",
             )
         if entry.table_numbers is not None:
             cleaned_codes = _numbered_codes(entry.table_numbers, total_tables)
         elif entry.table_start is not None and entry.table_end is not None:
-            cleaned_codes = [f"Table {number:03d}" for number in range(entry.table_start, entry.table_end + 1)]
+            step = 1 if entry.table_start <= entry.table_end else -1
+            cleaned_codes = [
+                f"Table {number:03d}"
+                for number in range(entry.table_start, entry.table_end + step, step)
+            ]
         else:
             cleaned_codes = []
         report, _completed = _add_report(
@@ -1769,13 +1794,16 @@ def _code_number(code: object) -> int | None:
     return int(match.group(1)) if match else None
 
 
-def format_table_codes(codes) -> str:
-    """["Table 001", "Table 002", "Table 007"] -> "1-2, 7": which tables a day covered, for people reading the record."""
-    numbers = sorted({n for n in (_code_number(code) for code in (codes or [])) if n is not None})
+def format_table_codes(codes, *, preserve_order: bool = False) -> str:
+    """Compress table codes for display, optionally preserving a recorded range's direction."""
+    numbers = [n for n in (_code_number(code) for code in (codes or [])) if n is not None]
+    if not preserve_order:
+        numbers = sorted(set(numbers))
     parts, i = [], 0
     while i < len(numbers):
         j = i
-        while j + 1 < len(numbers) and numbers[j + 1] == numbers[j] + 1:
+        step = numbers[j + 1] - numbers[j] if j + 1 < len(numbers) and abs(numbers[j + 1] - numbers[j]) == 1 else 0
+        while step and j + 1 < len(numbers) and numbers[j + 1] - numbers[j] == step:
             j += 1
         parts.append(f"{numbers[i]}–{numbers[j]}" if j > i else str(numbers[i]))
         i = j + 1
@@ -1787,7 +1815,7 @@ def _numbered_codes(numbers: list[int], total_tables: int) -> list[str]:
     too_high = [number for number in numbers if number > total_tables]
     if too_high:
         raise HTTPException(422, f"Table number {max(too_high)} exceeds this plant's configured table count ({total_tables})")
-    return [f"Table {number:03d}" for number in sorted(set(numbers))]
+    return [f"Table {number:03d}" for number in numbers]
 
 
 def _assert_distinct_tables(db: Session, plant_id: UUID, months, total_tables: int, touched: set) -> None:
@@ -1835,10 +1863,14 @@ def update_daily_report(db: Session, user: User, report_id: UUID, payload: Washi
             codes = _numbered_codes(payload.table_numbers, total_tables)
             tables = len(codes)
         elif payload.table_start is not None:
-            if payload.table_end > total_tables:
-                raise HTTPException(422, f"Table number {payload.table_end} exceeds this plant's configured table count ({total_tables})")
-            tables = payload.table_end - payload.table_start + 1
-            codes = [f"Table {number:03d}" for number in range(payload.table_start, payload.table_end + 1)]
+            if max(payload.table_start, payload.table_end) > total_tables:
+                raise HTTPException(422, f"Table number {max(payload.table_start, payload.table_end)} exceeds this plant's configured table count ({total_tables})")
+            tables = abs(payload.table_end - payload.table_start) + 1
+            step = 1 if payload.table_start <= payload.table_end else -1
+            codes = [
+                f"Table {number:03d}"
+                for number in range(payload.table_start, payload.table_end + step, step)
+            ]
         else:
             tables = payload.tables_cleaned if payload.tables_cleaned is not None else report.tables_cleaned
         if tables < 1:
@@ -2046,6 +2078,25 @@ def day_activity(db: Session, user: User, day: date, plant_id: UUID | None = Non
         row["cleaned_pending"] = sum(r.tables_cleaned for r in reps if r.review_status == "Pending")
         row["not_done_reason"] = next((r.exception_reason for r in reps if r.exception_reason and r.review_status != "Rejected"), None)
         row["reported_by"] = sorted({r.reported_by for r in reps if r.reported_by})
+        table_data_by_cycle: dict[int, dict] = {}
+        for report in sorted(reps, key=lambda item: str(item.created_at or "")):
+            if report.review_status not in ("Pending", "Confirmed"):
+                continue
+            cycle_no = int(report.cycle_no or 1)
+            entry = table_data_by_cycle.setdefault(cycle_no, {
+                "cycle_no": cycle_no, "tables_cleaned": 0,
+                "job_status": "Not done", "ranges": [],
+            })
+            if report.job_status == "Done" and report.tables_cleaned:
+                entry["tables_cleaned"] += int(report.tables_cleaned)
+                entry["job_status"] = "Done"
+                table_range = format_table_codes(report.cleaned_table_codes or [], preserve_order=True)
+                if table_range:
+                    entry["ranges"].append(table_range)
+        row["table_data_by_cycle"] = []
+        for entry in sorted(table_data_by_cycle.values(), key=lambda item: item["cycle_no"]):
+            entry["table_range"] = " · ".join(entry.pop("ranges")) or None
+            row["table_data_by_cycle"].append(entry)
         if any(r.review_status == "Pending" for r in reps):
             status = "awaiting"
         elif row["cleaned_confirmed"]:

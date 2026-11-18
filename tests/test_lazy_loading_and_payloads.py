@@ -182,10 +182,12 @@ def test_washing_summary_keeps_every_figure_and_drops_only_the_lists(db, client)
         for key in OMITTED_BY_SUMMARY:
             assert key in full_row, key
             assert key not in summary_row, key + " is not part of the summary"
-        # Summary adds the board-only table range; every other field is identical.
-        assert {k: v for k, v in summary_row.items() if k != "table_range"} == {
+        # Summary adds compact board table data; every other field is identical.
+        summary_table_fields = {"table_range", "cycle_table_data"}
+        assert {k: v for k, v in summary_row.items() if k not in summary_table_fields} == {
             k: v for k, v in full_row.items() if k not in OMITTED_BY_SUMMARY
         }
+        assert "cycle_table_data" in summary_row
     assert summary["portfolio"] == full["portfolio"]
     assert summary["overdue_matrix"] == full["overdue_matrix"]
     today = business_today()
