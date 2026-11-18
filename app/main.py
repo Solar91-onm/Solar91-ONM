@@ -448,6 +448,25 @@ def _is_missing_core_table(message:str)->bool:
     """True when PostgreSQL/SQLite reports that a core Solar91 table does not exist (schema never applied)."""
     return any(f'relation "{name}" does not exist' in message or f"no such table: {name}" in message for name in ("users","plants","issues","om_tasks"))
 
+# Columns whose absence means the consolidated Preventive Maintenance update has not been run;
+# those have one file to point at, so they keep their own message.
+_PM_PENDING_COLUMNS=("unit_no","cycle_id","units_per_day","pm_unit_config","pm_scope_config","planned_due_on","missed_days","rolled_count","total_units","cycle_day")
+
+def _missing_schema_object(message:str)->str|None:
+    """The table or column the database says is absent, or None when that is not the problem.
+
+    Migrations here are applied by hand in Supabase, so code can reach production before its
+    migration does. When that happens the operator needs to be told WHICH object is missing —
+    naming it is the difference between a one-line fix and a hunt. Matching a fixed list of
+    column names (as this once did) silently stops working for every migration added after it,
+    which is exactly how a pending migration ends up reading as an unexplained outage."""
+    if not ("does not exist" in message or "no such column" in message or "no such table" in message):
+        return None
+    import re
+    match=re.search(r'no such (?:column|table):\s*"?([\w.]+)"?',message) or \
+          re.search(r'(?:column|relation)\s+"?([\w.]+)"?\s+does not exist',message)
+    return match.group(1) if match else None
+
 @app.exception_handler(SQLAlchemyError)
 async def database_error(request:Request,exc:SQLAlchemyError):
     text=str(getattr(exc,"orig",exc)).lower()
@@ -460,8 +479,11 @@ async def database_error(request:Request,exc:SQLAlchemyError):
             logger.error("Database schema missing on %s: %s. DATABASE_URL reaches a database without the Solar91 tables; apply database/migrations to that Supabase project.",request.url.path,text.splitlines()[0][:200])
         return JSONResponse(status_code=503,content={"error":"database_schema_missing","detail":"The Solar91 database tables were not found. An administrator must connect the portal to the correct Supabase project or apply the database migrations."})
     logger.exception("Database error on %s",request.url.path)
-    if ("does not exist" in text or "no such column" in text or "no such table" in text) and any(k in text for k in ("unit_no","cycle_id","units_per_day","pm_unit_config","pm_scope_config","planned_due_on","missed_days","rolled_count","total_units","cycle_day")):
-        return JSONResponse(status_code=503,content={"error":"database_migration_pending","detail":"The database is missing the latest Preventive Maintenance update. Run database/SUPABASE_RUN_THIS.sql in the Supabase SQL editor, then reload."})
+    missing=_missing_schema_object(text)
+    if missing is not None:
+        if any(k in text for k in _PM_PENDING_COLUMNS):
+            return JSONResponse(status_code=503,content={"error":"database_migration_pending","detail":"The database is missing the latest Preventive Maintenance update. Run database/SUPABASE_RUN_THIS.sql in the Supabase SQL editor, then reload."})
+        return JSONResponse(status_code=503,content={"error":"database_migration_pending","detail":f"The database is missing \"{missing}\", which a newer migration adds. Run the newest files in database/migrations in the Supabase SQL editor, then reload."})
     return JSONResponse(status_code=503,content={"error":"database_error","detail":"The database operation could not be completed."})
 
 @app.exception_handler(Exception)

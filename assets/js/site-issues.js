@@ -2348,12 +2348,16 @@
     }
     if (nextAssignee !== (issue.assignedTo || "")) {
       steps.push(function () {
+        // The edit drawer collects no note, and `note` is optional on both endpoints. This used
+        // to read a `reason` variable that was never declared, so under "use strict" every save
+        // that changed the assignee threw a ReferenceError before any request was sent — which
+        // took the whole save chain (status included) down with it.
         if (!nextAssignee) {
           // Clearing an assignment is a reassignment to nobody.
-          return api.request(base + "/reassign", { method: "POST", body: { assigned_to: null, note: reason || null } });
+          return api.request(base + "/reassign", { method: "POST", body: { assigned_to: null, note: null } });
         }
         return api.request(base + (issue.assignedTo ? "/reassign" : "/assign"),
-          { method: "POST", body: { assigned_to: nextAssignee, note: reason || null } });
+          { method: "POST", body: { assigned_to: nextAssignee, note: null } });
       });
     }
     if (nextStatus === "Resolved" && issue.status !== "Resolved") {
