@@ -253,14 +253,16 @@
   // ─── Card ────────────────────────────────────────────────────────────
   var RING = 2 * Math.PI * 22;        // r=22 in the ring's viewBox
 
-  function ringHTML(cycle, status) {
-    var filled = RING * Math.min(100, cycle.percent) / 100;
+  function ringHTML(percent, label, status) {
+    var filled = percent === null ? 0 : RING * Math.min(100, Math.max(0, percent)) / 100;
     return '<svg class="ep-wb__ring" viewBox="0 0 52 52" aria-hidden="true">' +
       '<circle class="ep-wb__ring-track" cx="26" cy="26" r="22"></circle>' +
       '<circle class="ep-wb__ring-fill ep-wb__ring-fill--' + status.key + '" cx="26" cy="26" r="22" ' +
         'stroke-dasharray="' + filled.toFixed(1) + " " + (RING - filled).toFixed(1) + '"></circle>' +
       "</svg>" +
-      '<span class="ep-wb__ring-text"><strong>' + Number(cycle.percent).toFixed(1) + '%</strong><small>Cycle ' + cycle.number + "</small></span>";
+      '<span class="ep-wb__ring-text"><strong>' +
+        (percent === null ? "—" : Number(percent).toFixed(1) + "%") +
+        "</strong><small>" + escape(label) + "</small></span>";
   }
 
   /** One small bar per cycle: its work score (or its grade, for roles that do not see scores). */
@@ -314,10 +316,17 @@
     };
   }
 
-  function cycleProgress(row) {
-    if (!(Number(row.table_count) > 0)) return null;
-    var work = currentWork(row);
-    return work ? work.percent : cycleOf(row).percent;
+  function monthlyCompliance(row) {
+    if (!(Number(row.table_count) > 0) ||
+        typeof row.monthly_compliance_percent !== "number" ||
+        !isFinite(row.monthly_compliance_percent)) return null;
+    return Math.max(0, row.monthly_compliance_percent);
+  }
+
+  function monthlyComplianceValue(row) {
+    var value = monthlyCompliance(row);
+    if (value === null) return Number(row.table_count) > 0 ? "Not available" : "Not configured";
+    return Number(value).toFixed(1) + "%";
   }
 
   function cleaningTableRecord(row) {
@@ -377,12 +386,9 @@
     { key: "cycle", label: "Running cycle",
       sort: function (row) { return Number(row.table_count) > 0 ? Number(row.current_cycle) || 1 : null; },
       value: function (row) { return Number(row.table_count) > 0 ? "Cycle " + (Number(row.current_cycle) || 1) : "Not configured"; } },
-    { key: "progress", label: "Cycle progress (%)", align: "num",
-      sort: cycleProgress,
-      value: function (row) {
-        var value = cycleProgress(row);
-        return value === null ? "Not configured" : Number(value).toFixed(1) + "%";
-      } }
+    { key: "progress", label: "Compliance (%)", align: "num",
+      sort: monthlyCompliance,
+      value: monthlyComplianceValue }
   ];
 
   function viewPreferenceKey() {
@@ -471,25 +477,25 @@
     return '<div class="ep-issues__table-wrap"><table class="ep-issues__table ep-wb__table"><thead><tr>' +
       TABLE_COLUMNS.map(function (column) { return tableColumnHeader(column, rows); }).join("") +
       '</tr></thead><tbody>' + visible.map(function (row) {
-        var progress = cycleProgress(row);
         var cycleLabel = TABLE_COLUMNS[3].value(row);
         return '<tr class="ep-issues__plant-row" data-wb-plant="' + escape(row.site_code) +
           '" tabindex="0" role="button" aria-label="Open the Module Cleaning calendar for ' +
           escape(plantLabel(row)) + '">' +
           '<td data-label="Plant code"><strong>' + escape(row.site_code) + "</strong></td>" +
-          '<td data-label="Table range">' + escape(row.table_range || "Not configured") + "</td>" +
+          '<td data-label="Table range">' + escape(cleanedRangeValue(row)) + "</td>" +
           '<td data-label="Tables cleaned" class="num">' +
             escape(cleanedTablesValue(row)) + "</td>" +
           '<td data-label="Running cycle">' + escape(cycleLabel) + "</td>" +
-          '<td data-label="Cycle progress (%)" class="num">' +
-            escape(progress === null ? "Not configured" : Number(progress).toFixed(1) + "%") + "</td></tr>";
+          '<td data-label="Compliance (%)" class="num">' +
+            escape(monthlyComplianceValue(row)) + "</td></tr>";
       }).join("") + "</tbody></table></div>";
   }
 
   function cardHTML(row) {
     var work = currentWork(row);
     var cycle = work ? { number: work.number, percent: work.percent } : cycleOf(row);
-    var ringTone = work ? { good: "ontrack", warn: "behind", bad: "late", none: "unset" }[toneOf(work.percent)] : null;
+    var compliance = monthlyCompliance(row);
+    var ringTone = { good: "ontrack", warn: "behind", bad: "late", none: "unset" }[toneOf(compliance)];
     var status = statusOf(row);
     var target = Number(row.monthly_target) || 3;
     var name = plantLabel(row);
@@ -518,7 +524,7 @@
         ? '<span class="ep-wb__date-label">Last Update :</span>' + escape(lastUpdated)
         : "No records yet") + "</span>" +
       '<span class="ep-wb__body">' +
-        '<span class="ep-wb__gauge">' + ringHTML(cycle, ringTone ? { key: ringTone } : status) + "</span>" +
+          '<span class="ep-wb__gauge">' + ringHTML(compliance, "Compliance", { key: ringTone }) + "</span>" +
         '<span class="ep-wb__facts">' +
           '<span class="ep-wb__table-count">' + escape(cycleTables) + "</span>" +
           pipsHTML(row, target) +

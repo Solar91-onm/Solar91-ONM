@@ -104,3 +104,18 @@ def test_the_api_still_returns_the_extra_day_so_the_page_can_show_it(client, db)
     last = next(c for c in payload["cycles"] if c["cycle_no"] == 3)
     assert last["state"] == "Completed"
     assert last["reports"] >= 2, last
+
+
+def test_month_end_plant_compliance_credits_confirmed_extra_washing(client, db):
+    login_user(client, db, role="O&M Head", name="Wash Head 4", email="wash-head4@example.com")
+    plant = _plant_with_washing(db)
+    _fill_three_cycles_then_wash_again(db, plant)
+
+    response = client.get(
+        f"/api/scheduled/washing/overview?month={MONTH}&include_reports=false&summary=true"
+    )
+    assert response.status_code == 200, response.text
+    row = next(item for item in response.json()["plants"] if item["plant_id"] == str(plant.id))
+    assert row["monthly_activities_completed"] == 4
+    assert row["monthly_activities_planned"] == 3
+    assert row["monthly_compliance_percent"] == 133.3

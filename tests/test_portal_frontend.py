@@ -824,7 +824,7 @@ def test_module_cleaning_board_shows_every_plant_and_opens_one_plants_calendar()
     assert "Solar91PortalWashingBoard.show(document.querySelector(\"[data-washing-board-host]\"))" in nav
 
 
-def test_module_cleaning_table_reuses_board_rows_and_cycle_progress():
+def test_module_cleaning_table_reuses_board_rows_and_compliance():
     board = (PORTAL_ASSETS / "js" / "washing-board.js").read_text(encoding="utf-8")
     helper = (PORTAL_ASSETS / "js" / "table-column-filter.js").read_text(encoding="utf-8")
     board_styles = (PORTAL_ASSETS / "css" / "washing-board.css").read_text(encoding="utf-8")
@@ -832,19 +832,21 @@ def test_module_cleaning_table_reuses_board_rows_and_cycle_progress():
     assert "solar91.washingBoardView.v1." in board
     assert "currentUser()" in board and "localStorage.getItem(key)" in board
     assert 'localStorage.setItem(viewPreferenceKey(), ui.view)' in board
-    assert 'label: "Cycle progress (%)"' in board
-    assert "return work ? work.percent : cycleOf(row).percent;" in board
-    assert "function cardHTML(row)" in board and "function cycleProgress(row)" in board
+    assert 'label: "Compliance (%)"' in board
+    assert "function cardHTML(row)" in board and "function monthlyCompliance(row)" in board
+    assert 'ringHTML(compliance, "Compliance"' in board
+    assert "monthly_compliance_percent" in board
     assert 'class="ep-issues__table-wrap"><table class="ep-issues__table ep-wb__table"' in board
     assert 'data-label="Table range"' in board
     assert 'label: "Tables cleaned"' in board
     assert 'data-label="Tables cleaned"' in board
     assert "function cleaningTableRecord(row)" in board
+    assert 'escape(cleanedRangeValue(row)) + "</td>"' in board
     assert "st.dayActivity.byCode" in board and "day.table_data_by_cycle" in board
     assert "row.cycle_table_data" in board
     assert "entry.tables_cleaned" in board and "entry.table_range" in board
     assert 'data-label="Running cycle"' in board
-    assert 'data-label="Cycle progress (%)"' in board
+    assert 'data-label="Compliance (%)"' in board
     assert "Solar91PortalColumnFilter.headerHTML" in board
     assert "global.Solar91PortalSort.apply(filtered, ui.tableSort, TABLE_COLUMNS)" in board
     assert 'Solar91PortalNav.selectPlantPage(row.getAttribute("data-wb-plant"), "washing")' in board
@@ -854,6 +856,41 @@ def test_module_cleaning_table_reuses_board_rows_and_cycle_progress():
     toggle = toggle[:toggle.index('var month = container.querySelector("[data-wb-month]")')]
     assert "api().request" not in toggle and "render(container)" in toggle
     assert "function filterOptions(menu, term, options)" in helper
+
+
+def test_module_cleaning_card_ring_uses_monthly_compliance_without_zero_fallback():
+    script = r"""
+      const fs=require('fs'),vm=require('vm'),assert=require('assert');
+      const source=fs.readFileSync('assets/js/washing-board.js','utf8');
+      function extract(name){
+        const start=source.indexOf('function '+name+'(');
+        assert(start>=0,name+' missing');
+        const open=source.indexOf('{',start);let depth=0;
+        for(let i=open;i<source.length;i++){
+          if(source[i]==='{')depth++;
+          else if(source[i]==='}'&&--depth===0)return source.slice(start,i+1);
+        }
+        throw new Error(name+' is incomplete');
+      }
+      const box={RING:2*Math.PI*22,escape:s=>String(s)};
+      vm.createContext(box);
+      vm.runInContext(extract('monthlyCompliance')+extract('monthlyComplianceValue')+
+        extract('ringHTML')+';this.compliance=monthlyCompliance;'+
+        'this.value=monthlyComplianceValue;this.ring=ringHTML',box);
+      const row={table_count:10,monthly_compliance_percent:133.3};
+      assert.strictEqual(box.compliance(row),133.3);
+      assert.strictEqual(box.value(row),'133.3%');
+      const html=box.ring(box.compliance(row),'Compliance',{key:'ontrack'});
+      assert(html.includes('133.3%'));
+      assert(html.includes('<small>Compliance</small>'));
+      assert.strictEqual(box.compliance({table_count:10}),null);
+      assert.strictEqual(box.compliance({table_count:0,monthly_compliance_percent:100}),null);
+      assert.strictEqual(box.value({table_count:10}),'Not available');
+      assert.strictEqual(box.value({table_count:0}),'Not configured');
+      assert(box.ring(null,'Compliance',{key:'unset'}).includes('<strong>—</strong>'));
+    """
+    run = subprocess.run(["node", "-e", script], cwd=ROOT, capture_output=True, text=True, timeout=20)
+    assert run.returncode == 0, run.stderr or run.stdout
 
 
 def test_module_cleaning_cycle_sort_and_board_breakdown():
@@ -2687,6 +2724,9 @@ def test_inverter_health_hero_band_fleet_composition_and_fitted_ticket_table():
     # The ticket table fits the frame instead of scrolling sideways.
     assert "min-width: 1420px" not in styles
     assert ".ep-ih__tickets { table-layout: fixed; width: 100%; min-width: 0; }" in styles
+    assert ".ep-ih__tickets thead th {" in styles
+    assert ".ep-ih__tickets .ep-ih__th-content .ep-sort__label {" in styles
+    assert "padding: 8px 5px;" in styles
 
 
 def test_inverter_health_plant_table_is_sortable_and_aligned_like_the_register():

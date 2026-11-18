@@ -1536,7 +1536,24 @@
 .ep-ih__toolbar-end { margin-left: auto; }
 /* The ticket table fits the frame: fixed columns, long text clipped with its full value on hover. */
 .ep-ih__tickets { table-layout: fixed; width: 100%; min-width: 0; }
-.ep-ih__tickets th, .ep-ih__tickets td { overflow: hidden; text-overflow: ellipsis; }
+.ep-ih__tickets th, .ep-ih__tickets td {
+  box-sizing: border-box;
+  padding: 8px 5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ep-ih__tickets thead th {
+  font-size: 10px;
+  line-height: 1.3;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.ep-ih__tickets .ep-ih__th-content .ep-sort__label {
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+  white-space: normal;
+}
+.ep-ih__tickets .ep-ih__th-filtered { padding: 5px 3px !important; }
 .ep-ih__tickets td > span:not(.ep-chip):not(.ep-ih__ticket-actions),
 .ep-ih__tickets td > .ep-plant-cell > span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ep-ih__tickets th:nth-child(1), .ep-ih__tickets td:nth-child(1) { width: 13%; }
