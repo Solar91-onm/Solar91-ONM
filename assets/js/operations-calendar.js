@@ -1312,6 +1312,10 @@
     var activeReports = (state.washingReports || []).filter(function (report) {
       return report.review_status === "Pending" || report.review_status === "Confirmed";
     });
+    var regularReportByDate = {};
+    activeReports.forEach(function (report) {
+      if (!isExtraReport(report)) regularReportByDate[report.report_date] = true;
+    });
     var nextFirst = activeReports.filter(function (report) {
       return Number(report.cycle_no) > Number(cycle.cycle_no);
     }).reduce(function (first, report) {
@@ -1340,20 +1344,13 @@
         return !latest || report.report_date > latest ? report.report_date : latest;
       }, "");
       if (previousCompletion) {
-        // This cycle begins ON the day the one before it filled, not the day after. A cycle is often
-        // finished in the morning and the next round started the same afternoon, and the grid used to
-        // start a day later, so that work had no row here at all. Recording it from the cycle being
-        // finished (planDay splits the day in one entry) is the quicker way; this is how it is added
-        // afterwards, and how a cycle that was only ever started that afternoon is recorded.
+        // Include the previous cycle's completion date, but do not offer it as a new ordinary
+        // entry when that date already has a report in another cycle.
         startDate = previousCompletion;
       }
     }
     if (ownFirst && ownFirst < startDate) startDate = ownFirst;
-    // A cycle's own saved days always have a row, whatever the clamps above decided. The day a cycle
-    // fills and the next round starts that same afternoon carries an entry in BOTH cycles, so
-    // `nextFirst` is that very date and the clamp above would end this cycle the day before its own
-    // last entry — hiding the day that completed it. Pulling the grid back out to `ownLast` keeps
-    // every saved day of the selected cycle visible, exactly as `ownFirst` does at the other end.
+    // A cycle's own saved days always have a row, whatever the clamps above decided.
     if (ownLast && ownLast > lastDate) lastDate = ownLast;
     if (!canManageWashing()) {
       var firstAllowed = new Date(today + "T12:00:00");
@@ -1366,10 +1363,8 @@
 
     var dates = dateRange(startDate, lastDate);
     // Saved days of the SELECTED cycle only, by date, keeping the order the API sent them in
-    // (report_date, created_at). A date can carry more than one entry of a cycle, and the day a
-    // cycle fills carries entries of two cycles, so each date holds a LIST and every entry gets its
-    // own row. Keying one report per date used to drop whichever entry was read first and could show
-    // another cycle's work on this cycle's tab.
+    // (report_date, created_at). A date can have regular and extra entries, and historical data may
+    // include entries from multiple cycles, so keep every saved report on its own row.
     var savedByDate = {};
     (state.washingReports || []).forEach(function (report) {
       if (report.review_status === "Rejected") return;
@@ -1409,6 +1404,7 @@
         });
         return;
       }
+      if (regularReportByDate[date]) return;
       var draft = state.recordDrafts[date] || {};
       var plan = planDay(state, draft, used, total);
       plan.numbers.forEach(function (number) { used[number] = true; });
@@ -1494,7 +1490,7 @@
     return cycleNo >= lastCycle ? 0 : cycleNo + 1;
   }
 
-  /** What the sheet tells the user about a day that both finishes this cycle and starts the next round. */
+  /** What the sheet tells the user about Cycle 3 completing before more work that same day. */
   function rollOverNote(state, plan) {
     var rolled = plan && plan.nextNumbers || [];
     if (!rolled.length) return "";
@@ -1506,22 +1502,13 @@
       (next ? "start cycle " + next : "count as extra washing") + " on this same date.";
   }
 
-  /** Total tables an unsaved day records, both parts of a day that rolls into the next cycle. */
+  /** Total tables in the regular entry and any same-day extra cleaning after Cycle 3. */
   function rowTableCount(row) {
     return (row.numbers || []).length + ((row.nextNumbers || []).length);
   }
 
-  /** Which tables an unsaved day covers, given what the cycle has already used. A day is always entered as the
-   *  list of tables cleaned ("pick"); the older "from start" and "from end" shortcuts were removed.
-   *
-   *  One day can both FINISH this cycle and START the next round: the site engineer cleans the tables the
-   *  cycle still needs and carries straight on into the next round the same afternoon. Those later tables are
-   *  already cleaned in this cycle, so they cannot be added to it -- but they are real work on that date, and
-   *  the billing reads it. So when the entry covers every table this cycle still needs, the already-cleaned
-   *  tables are split off as `nextNumbers` and saved as a SECOND entry for the SAME date. The backend decides
-   *  which cycle that entry lands in (`_cycle_sequence` in app/scheduled/washing_cycles.py): the next cycle,
-   *  or extra washing when this is the month's last cycle. An entry that does NOT close the cycle keeps the
-   *  old "already cleaned" error, so a mistyped table can never roll into the next cycle silently. */
+  /** The cycle sheet permits one regular entry per plant/date. After Cycle 3 completes, same-day
+   *  work is extra cleaning; between cycles, use the separate Extra Cleaning action. */
   function planDay(state, draft, used, total) {
     var free = [];
     for (var n = 1; n <= total; n += 1) if (!used[n]) free.push(n);
@@ -1532,27 +1519,18 @@
     var parsed = parseTableList(text, total);
     if (parsed.error) { plan.error = parsed.error; return plan; }
     var taken = parsed.numbers.filter(function (number) { return used[number]; });
-    var cycleNo = Number(state.recordCycle) || 1;
     var next = nextCycleNo(state);
     if (!taken.length) {
       plan.numbers = parsed.numbers;
       return plan;
     }
-    // `taken` are the repeats, so the rest of the entry is made up only of the cycle's open tables.
-    // Matching the open count therefore means every one of them is in this entry: the cycle closes on
-    // this date, and the repeats are the next round, which the backend numbers.
     var fresh = parsed.numbers.filter(function (number) { return !used[number]; });
-    if (fresh.length === free.length) {
+    if (!next && fresh.length === free.length) {
       plan.numbers = fresh;                 // the entered order is kept inside each part
       plan.nextNumbers = taken;
       return plan;
     }
-    plan.error = "Table " + taken[0] + " is already cleaned in this cycle. Add the " + free.length +
-      " table" + (free.length === 1 ? "" : "s") + " still open (" + formatTableList(free) +
-      ") to finish cycle " + cycleNo + " on this date, and the repeated tables are then saved as " +
-      (next
-        ? "cycle " + next + " on the same date."
-        : "extra washing on the same date, because cycle " + cycleNo + " is the month's last cycle.");
+    plan.error = "Table " + taken[0] + " is already cleaned in this cycle. Use + Extra cleaning to record additional cleaning.";
     return plan;
   }
 
@@ -1926,9 +1904,7 @@
             ? '<div class="ep-calendar__record-table"><div class="ep-calendar__record-head"><span>Day</span><span>Tables</span><span>Table numbers</span><span>Remarks</span></div>' +
               days + '</div>'
             : '<p class="ep-calendar__empty">No reportable days for this cycle yet.</p>') +
-          '<p class="ep-calendar__record-help">Type the tables cleaned that day as numbers or ranges, e.g. 1, 2, 4, 7-8, 13 or 100-91. Each table counts once per cycle. The next cycle starts only after all configured tables are cleaned. Confirmed extra cleaning contributes to compliance but not cycle progress. When nothing was cleaned, choose the not-done reason for that day and add the details in Remarks.' +
-            ' If the same day finishes this cycle and the next round is started too, type everything cleaned that day in one go, e.g. 1-25, 26-35: the tables this cycle still needs complete it and the rest are saved separately on the same date as the next cycle' +
-            (nextCycleNo(state) ? "" : " (extra washing in the month's last cycle)") + '.' +
+          '<p class="ep-calendar__record-help">Type the tables cleaned that day as numbers or ranges, e.g. 1, 2, 4, 7-8, 13 or 100-91. Each table counts once per cycle. The next cycle starts only after all configured tables are cleaned. Use + Extra cleaning for re-cleaning between cycles; confirmed extra cleaning contributes to compliance but not cycle progress. After Cycle 3 is complete, further cleaning is counted as extra cleaning. When nothing was cleaned, choose the not-done reason for that day and add the details in Remarks.' +
             (canManageWashing() ? " Apart from that, tables already cleaned in an incomplete cycle cannot be selected again." : "") + '</p>' +
         '</div>' +
         '<footer class="ep-calendar__record-footer"><button type="button" class="ep-calendar__close-button" data-calendar-action="close-record"' +
@@ -3034,11 +3010,7 @@
             table_numbers: row.numbers,
             remarks: row.draft.remarks || null
           });
-          // A day that finishes this cycle and starts the next round the same afternoon: the tables
-          // already cleaned in this cycle go in a SECOND entry for the same date, sent right after the
-          // one that fills the cycle. The backend keeps that order and numbers the cycles itself
-          // (create_sheet_reports / _cycle_sequence in app/scheduled/washing_cycles.py), so the roll-over
-          // lands in the next cycle, or on the last cycle as extra washing.
+          // Once Cycle 3 is complete, any further tables cleaned that day are extra cleaning.
           if (row.nextNumbers && row.nextNumbers.length) {
             entries.push({
               report_date: row.date,

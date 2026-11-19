@@ -63,14 +63,8 @@ def test_engineer_sheet_saves_every_day_pending_with_one_notification(client, db
     assert all("filled 3 days" in (n.message or "") for n in rows)
 
 
-def test_sheet_is_all_or_nothing_and_accepts_more_than_one_entry_for_a_date(client, db):
-    """A date may carry several entries; an invalid day still saves none of them.
-
-    A date that already had an entry used to be refused with "Edit those days". That lost real
-    work: when a cycle finishes in the morning and more tables are cleaned the same afternoon,
-    the afternoon's work belongs to the NEXT cycle and cannot be merged into the existing entry.
-    A second entry for a date is ordinary work and counts exactly as a fresh day does.
-    """
+def test_sheet_is_all_or_nothing_and_rejects_a_second_regular_entry_for_a_date(client, db):
+    """Regular entries cannot reopen a date; additional re-cleaning uses Extra Cleaning."""
     plant = _plant(db)
     _setup_cycle_users(client, db, plant)
     _engineer(client, db, plant)
@@ -80,19 +74,24 @@ def test_sheet_is_all_or_nothing_and_accepts_more_than_one_entry_for_a_date(clie
     assert count() == 1
 
     again = _sheet(client, plant, [_done(d2, 1), _done(d1, 1)])
-    assert again.status_code == 200, again.text
-    assert count() == 3, "a date that already has an entry accepts another"
+    assert again.status_code == 409
+    assert "already exists" in again.json()["detail"]
+    assert count() == 1, "the sheet is all-or-nothing when a date is already used"
 
     same_date_twice = _sheet(client, plant, [_done(d2, 1), _done(d2, 2)])
-    assert same_date_twice.status_code == 200, same_date_twice.text
-    assert count() == 5, "two entries for one date may even arrive in the same sheet"
+    assert same_date_twice.status_code == 409
+    assert count() == 1, "a sheet cannot contain two regular entries for one date"
+
+    valid = _sheet(client, plant, [_done(d2, 1)])
+    assert valid.status_code == 200, valid.text
+    assert count() == 2
 
     # All or nothing is unchanged: one bad day and the whole sheet is refused.
-    too_old = _sheet(client, plant, [_done(d2, 1), _done(business_today() - timedelta(days=46), 1)])
+    too_old = _sheet(client, plant, [_done(d1 - timedelta(days=1), 1), _done(business_today() - timedelta(days=46), 1)])
     assert too_old.status_code == 422
     future = _sheet(client, plant, [_done(business_today() + timedelta(days=1), 1)])
     assert future.status_code == 422
-    assert count() == 5, "a refused sheet saves nothing at all"
+    assert count() == 2, "a refused sheet saves nothing at all"
 
 
 def test_sheet_persists_inclusive_table_ranges_and_contiguous_days(client, db):

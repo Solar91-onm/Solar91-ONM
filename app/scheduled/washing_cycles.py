@@ -1888,8 +1888,7 @@ def _validate_report_date(user: User, manager: bool, value: date) -> None:
 
 
 def _locked_report_plant(db: Session, user: User, plant_id: UUID) -> tuple[Plant, WashingConfig, bool, int]:
-    """Who may submit daily washing reports for a plant; locks the plant's washing config so concurrent
-    submissions for the same plant run one after another (no duplicate days, correct cycle numbers)."""
+    """Who may submit washing reports; locks the config so concurrent submissions serialize per plant."""
     manager = _is_washing_manager(db, user)
     if user.role != "Site Engineer" and not manager:
         raise HTTPException(403, "Only a Site Engineer can submit a daily washing report; the O&M team reviews it")
@@ -1914,12 +1913,9 @@ def _add_report(
 
     `created_at` orders entries that share a date. Every reader of a plant-month (_resequence_month,
     _cycle_ledger, _assert_distinct_tables, month_cycles, day_activity) sorts by (report_date,
-    created_at), and the server default `now()` is the TRANSACTION timestamp, so two entries saved
-    for one date in a single sheet request would tie and be sequenced in an arbitrary order. For a
-    day that fills a cycle and starts the next one that same date, the wrong order counts the
-    next cycle's tables against the cycle still running and the save is refused as a repeat. The
-    caller therefore passes a distinct, increasing value per entry; left out, the database default
-    stands exactly as before."""
+    created_at). A Cycle 3 completion and its same-day extra-cleaning entry must remain in submitted
+    order; callers pass distinct timestamps for sheet entries, while single reports use the database
+    default."""
     _validate_report_date(user, manager, report_date)
     month = _month_key(report_date)
     # Counts remain compatible with older clients; the current daily sheet can also persist numbered tables.
@@ -1964,9 +1960,10 @@ def create_daily_report(db: Session, user: User, payload: WashingDailyReportRequ
     plant, config, manager, total_tables = _locked_report_plant(db, user, payload.plant_id)
     if payload.job_status == "Done" and payload.tables_cleaned == 0:
         raise HTTPException(422, "Enter at least one cleaned table for a Done report")
+    report_date = payload.report_date or business_today()
     report, _cycle_completed = _add_report(
         db, user, plant, manager, total_tables,
-        report_date=payload.report_date or business_today(), job_status=payload.job_status,
+        report_date=report_date, job_status=payload.job_status,
         tables_cleaned=payload.tables_cleaned, exception_reason=payload.exception_reason,
         remarks=payload.remarks, cleaned_codes=payload.cleaned_table_codes,
         is_extra=payload.is_extra,
@@ -1994,25 +1991,45 @@ def _day_label(value: date) -> str:
     return f"{value.day} {value.strftime('%b')}"
 
 
+def _assert_single_sheet_report_date(db: Session, plant_id: UUID, report_date: date) -> None:
+    query = select(WashingDailyReport.id).where(
+        WashingDailyReport.plant_id == plant_id,
+        WashingDailyReport.report_date == report_date,
+        WashingDailyReport.is_extra.is_(False),
+        WashingDailyReport.review_status.in_(("Pending", "Confirmed")),
+    )
+    if db.scalar(query.limit(1)) is not None:
+        raise HTTPException(
+            409,
+            f"A module cleaning entry already exists for {_day_label(report_date)}. "
+            "Edit that entry or use Extra Cleaning for additional cleaning on that date.",
+        )
+
+
 def create_sheet_reports(db: Session, user: User, payload: WashingSheetRequest) -> dict:
     """Save several days of one plant's cycle sheet in one go. All days are saved or none is.
     A Site Engineer's days wait for O&M confirmation and raise ONE review notification for the whole sheet;
     the O&M Head / a washing Assignee saves them as confirmed, like a single O&M entry."""
     plant, config, manager, total_tables = _locked_report_plant(db, user, payload.plant_id)
-    # A date may carry more than one entry. Real case: tables 91-100 finish a cycle in the morning
-    # and 1-10 are cleaned the same afternoon, which opens the next cycle. Refusing the second
-    # entry lost that work. The cycle engine already orders days by (report_date, created_at) and
-    # rolls the cycle on the entry after the one that completes it, so a same-date entry needs no
-    # special handling here — it is an ordinary entry and counts toward its cycle and compliance
-    # exactly as a fresh day does. Sorting is stable, so entries keep the order they were sent in.
+    # One regular module-cleaning entry is allowed per plant/date. Extra cleaning is a separate
+    # entry and may share a date with the regular report; Cycle 3's same-day post-completion
+    # rollover uses that explicit extra flag.
     entries = sorted(payload.entries, key=lambda entry: entry.report_date)
+    regular_dates: set[date] = set()
     for entry in entries:
         _validate_report_date(user, manager, entry.report_date)
+        if entry.is_extra:
+            continue
+        if entry.report_date in regular_dates:
+            raise HTTPException(
+                409,
+                f"A module cleaning entry already exists for {_day_label(entry.report_date)}. "
+                "Edit that entry or use Extra Cleaning for additional cleaning on that date.",
+            )
+        regular_dates.add(entry.report_date)
+        _assert_single_sheet_report_date(db, plant.id, entry.report_date)
     created: list[WashingDailyReport] = []
-    # Entries of one date are sequenced by created_at, and the database default is the transaction
-    # timestamp, which would make them all equal. Stamping each entry a microsecond apart keeps the
-    # order the user entered them in, so the entry that fills a cycle is counted before the entry
-    # that starts the next one on the same date. See _add_report.
+    # Keep same-date regular/extra entries in their submitted order for calendar display and recounts.
     stamp = datetime.now(timezone.utc)
     for index, entry in enumerate(entries):
         if entry.table_start is not None and max(entry.table_start, entry.table_end) > total_tables:

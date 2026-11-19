@@ -176,10 +176,8 @@ class WashingSheetEntry(BaseModel):
     job_status: Literal["Done", "Not done"]
     exception_reason: Literal["Rain", "Water shortage", "Machine breakdown", "Access restriction", "Safety stand-down", "Other"] | None = None
     remarks: str | None = Field(default=None, max_length=4000)
-    # Re-cleaning recorded while a cycle is still running (migration 048), as on the single-day
-    # request. The sheet sends it for the tables re-cleaned on the day the month's LAST cycle fills:
-    # there is no next cycle for that work to open, so it is the month's extra cleaning. Below the
-    # last cycle the same day's re-clean is the next cycle's real work and is sent without the flag.
+    # Explicit extra cleaning (migration 048). Between-cycle re-cleaning uses this flag through
+    # the Extra Cleaning action; the sheet also uses it for work after Cycle 3 completes that day.
     is_extra: bool = False
 
     @model_validator(mode="after")

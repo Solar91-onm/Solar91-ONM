@@ -1,11 +1,7 @@
-"""Record module cleaning: one day that finishes a cycle and starts the next round.
+"""Record module cleaning: one ordinary entry per plant/date and explicit extra-cleaning behavior.
 
-A site engineer often cleans the tables a cycle still needs and then carries straight on into the
-next round the same afternoon. Those later tables are already cleaned in the running cycle, so they
-cannot be added to it -- but they are real work on that date and the billing reads it. The sheet
-therefore splits such a day into two entries for the SAME date: the tables that complete this cycle,
-and the repeats, which the backend numbers as the next cycle (or, in the month's last cycle, as
-extra cleaning).
+Between-cycle re-cleaning uses the Extra Cleaning action rather than splitting an ordinary entry
+into the next cycle on the same date. Cycle 3's same-day post-completion work remains extra cleaning.
 
 The sheet's own functions decide all of this, so these load `assets/js/operations-calendar.js`
 in node with the browser globals stubbed and its one export line swapped for the internals under
@@ -122,26 +118,23 @@ def _case(typed, *, cleaned=(), cycle=1, last_cycle=3, total=35, reason=""):
             "lastCycle": last_cycle, "total": total, "reason": reason}
 
 
-def test_a_day_that_fills_the_cycle_splits_the_repeats_into_the_next_round(plan_day):
-    """The case from the field: 1-25 were all that cycle 1 still needed, and 26-35 were cleaned
-    again the same afternoon. Both parts are kept, in the order they were entered."""
+def test_a_mid_cycle_repeat_cannot_roll_into_the_next_cycle_on_the_same_date(plan_day):
+    """Between-cycle re-cleaning must use the separate Extra Cleaning action."""
     done = range(26, 36)                                       # 26-35 cleaned earlier in cycle 1
     plan, = plan_day(_case("1-25, 26-35", cleaned=done))
 
-    assert not plan["error"]
-    assert plan["numbers"] == list(range(1, 26))
-    assert plan["nextNumbers"] == list(range(26, 36))
-    assert plan["count"] == 35, "the day's count is everything cleaned, both parts"
-    assert plan["note"] == ("25 tables complete cycle 1 · 10 tables (26–35) "
-                            "start cycle 2 on this same date.")
+    assert plan["error"] == (
+        "Table 26 is already cleaned in this cycle. Use + Extra cleaning to record additional cleaning."
+    )
+    assert plan["numbers"] == [] and plan["nextNumbers"] == []
 
 
-def test_the_repeats_may_be_typed_first_or_scattered(plan_day):
-    """Operators do not type tidily. The split is by what the cycle still needs, not by position."""
+def test_cycle_three_still_splits_same_day_post_completion_work_as_extra(plan_day):
+    """After Cycle 3 completes, same-day repeated tables remain extra cleaning."""
     done = range(26, 36)
     first, scattered = plan_day(
-        _case("26-35, 1-25", cleaned=done),
-        _case("26-30, 1-25, 31-35", cleaned=done),
+        _case("26-35, 1-25", cleaned=done, cycle=3),
+        _case("26-30, 1-25, 31-35", cleaned=done, cycle=3),
     )
     assert first["numbers"] == list(range(1, 26)) and first["nextNumbers"] == list(range(26, 36))
     assert scattered["numbers"] == list(range(1, 26))
@@ -149,20 +142,17 @@ def test_the_repeats_may_be_typed_first_or_scattered(plan_day):
 
 
 def test_descending_and_mixed_ranges_keep_the_order_they_were_entered(plan_day):
-    plan, = plan_day(_case("25-1, 35-26", cleaned=range(26, 36)))
+    plan, = plan_day(_case("25-1, 35-26", cleaned=range(26, 36), cycle=3))
     assert plan["numbers"] == list(range(25, 0, -1))
     assert plan["nextNumbers"] == list(range(35, 25, -1))
 
 
-def test_a_repeat_that_does_not_finish_the_cycle_is_still_refused(plan_day):
-    """Only the day the cycle actually closes may roll over, so a mistyped table cannot open the
-    next cycle silently. The message says exactly what is still missing."""
+def test_mid_cycle_repeats_are_refused_and_directed_to_extra_cleaning(plan_day):
     plan, = plan_day(_case("1-20, 26-35", cleaned=range(26, 36)))
 
     assert plan["numbers"] == [] and plan["nextNumbers"] == []
     assert "Table 26 is already cleaned in this cycle." in plan["error"]
-    assert "Add the 25 tables still open (1–25) to finish cycle 1 on this date" in plan["error"]
-    assert "saved as cycle 2 on the same date" in plan["error"]
+    assert "Use + Extra cleaning" in plan["error"]
     assert not plan["note"]
 
 
@@ -174,7 +164,7 @@ def test_the_last_cycle_calls_the_roll_over_extra_washing(plan_day):
     )
     assert split["nextNumbers"] == list(range(26, 36))
     assert "count as extra washing on this same date." in split["note"]
-    assert "saved as extra washing on the same date" in refused["error"]
+    assert "Use + Extra cleaning" in refused["error"]
 
 
 def test_an_ordinary_day_is_unchanged(plan_day):
@@ -200,15 +190,15 @@ def test_a_full_cycle_still_blocks_the_row(plan_day):
     assert plan["numbers"] == [] and plan["nextNumbers"] == []
 
 
-def test_the_sheet_sends_the_roll_over_as_a_second_entry_for_the_same_date():
-    """The save path must send both parts, the completing one first (the backend keeps that order),
-    and must not drop one of a date's entries from the sheet afterwards."""
+def test_only_cycle_three_sends_same_date_repeats_as_extra_cleaning():
+    """Mid-cycle rollover is gone, while post-Cycle-3 same-day work remains explicitly extra."""
     calendar = CALENDAR.read_text(encoding="utf-8")
     save = calendar[calendar.index("if (row.error) { invalidRange = true; return; }"):]
     save = save[:save.index("if (invalidRange")]
-    assert save.index("table_numbers: row.numbers") < save.index("table_numbers: row.nextNumbers"), \
-        "the entry that completes the cycle must be sent before the roll-over"
-    assert "is_extra: !nextCycleNo(state)" in save, "only the last cycle's roll-over is extra cleaning"
+    assert "is_extra: !nextCycleNo(state)" in save
+    assert "Use + Extra cleaning to record additional cleaning." in calendar
+    assert "If the same day finishes this cycle and the next round" not in calendar
+    assert "if (regularReportByDate[date]) return;" in calendar
     # Saved reports are replaced by id: a date can now hold more than one entry.
     assert "savedIds.indexOf(item.id) === -1" in calendar
     assert not re.search(r"return item\.report_date !== report\.report_date;", calendar), \
@@ -264,15 +254,15 @@ def test_the_next_cycle_shows_its_entry_on_that_same_date(record_rows):
     assert grid["openTables"] == list(range(1, 26))
 
 
-def test_the_next_cycle_can_be_recorded_on_the_completion_date_afterwards(record_rows):
-    """Cycle 1 filled on the 19th and nothing else is saved yet: the 19th is still offered on cycle
-    2's tab, so work done that afternoon can be added after the fact."""
+def test_a_regular_entry_on_another_cycle_hides_the_blank_date(record_rows):
+    """A date with a regular entry elsewhere is not offered again as a blank row."""
     done = [_saved("2026-11-10", 1, range(26, 36)),
             _saved("2026-11-19", 1, range(1, 26), completed=True)]
 
     grid = record_rows(2, done, today=TODAY, month=MONTH)
 
-    assert [row["date"] for row in grid["rows"]][0] == "2026-11-19"
+    assert "2026-11-19" not in [row["date"] for row in grid["rows"]]
+    assert [row["date"] for row in grid["rows"]][0] == "2026-11-20"
     assert all(not row["saved"] for row in grid["rows"])
     assert grid["openTables"] == list(range(1, 36)), "cycle 2 starts with every table open"
 

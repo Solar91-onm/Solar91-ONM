@@ -969,8 +969,8 @@ def test_a_rejected_extra_entry_reaches_no_total():
     assert summary["confirmed_tables"] == _month_wash_summary(_full_month_rows(), 10)["confirmed_tables"]
 
 
-def test_a_second_entry_on_the_same_date_opens_the_next_cycle(client, db):
-    """91-100 completes the cycle; 1-10 recorded the same day opens the next, and both are kept."""
+def test_a_regular_second_entry_on_the_same_date_is_rejected_but_extra_is_allowed(client, db):
+    """Between-cycle re-cleaning uses Extra Cleaning, which can share a date with the regular report."""
     plant = _plant(db)
     head, _assignee = _setup_cycle_users(client, db, plant)   # 4-table plant
     _act_as(head)
@@ -987,14 +987,26 @@ def test_a_second_entry_on_the_same_date_opens_the_next_cycle(client, db):
         "plant_id": str(plant.id),
         "entries": [{"report_date": day.isoformat(), "job_status": "Done",
                      "tables_cleaned": 2, "table_numbers": [1, 2]}]})
-    assert second.status_code == 200, second.text
-    assert second.json()["reports"][0]["cycle_no"] == 2, "the same-date entry opens the next cycle"
+    assert second.status_code == 409
+    assert "already exists" in second.json()["detail"]
 
     db.expire_all()
     rows = db.query(WashingDailyReport).filter_by(plant_id=plant.id).order_by(
         WashingDailyReport.created_at).all()
-    assert len(rows) == 2, "both entries are kept; neither replaces the other"
-    assert [r.cycle_no for r in rows] == [1, 2]
+    assert len(rows) == 1
+
+    extra = client.post(f"{BASE}/daily-reports", json={
+        "plant_id": str(plant.id), "report_date": day.isoformat(), "job_status": "Done",
+        "tables_cleaned": 2, "cleaned_table_codes": ["Table 001", "Table 002"],
+        "is_extra": True,
+    })
+    assert extra.status_code == 200, extra.text
+    assert extra.json()["is_extra"] is True
+    db.expire_all()
+    rows = db.query(WashingDailyReport).filter_by(plant_id=plant.id).order_by(
+        WashingDailyReport.created_at).all()
+    assert len(rows) == 2
+    assert sum(row.is_extra for row in rows) == 1
 
 
 def test_mid_cycle_extra_entry_saves_repeats_tables_and_moves_no_cycle(client, db):
