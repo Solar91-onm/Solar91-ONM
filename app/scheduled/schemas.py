@@ -176,9 +176,16 @@ class WashingSheetEntry(BaseModel):
     job_status: Literal["Done", "Not done"]
     exception_reason: Literal["Rain", "Water shortage", "Machine breakdown", "Access restriction", "Safety stand-down", "Other"] | None = None
     remarks: str | None = Field(default=None, max_length=4000)
+    # Re-cleaning recorded while a cycle is still running (migration 048), as on the single-day
+    # request. The sheet sends it for the tables re-cleaned on the day the month's LAST cycle fills:
+    # there is no next cycle for that work to open, so it is the month's extra cleaning. Below the
+    # last cycle the same day's re-clean is the next cycle's real work and is sent without the flag.
+    is_extra: bool = False
 
     @model_validator(mode="after")
     def validate_entry(self):
+        if self.is_extra and self.job_status != "Done":
+            raise ValueError("Extra cleaning records work that was done")
         if self.table_numbers is not None:
             if self.table_start is not None or self.table_end is not None:
                 raise ValueError("Send either a table range or a list of table numbers, not both")

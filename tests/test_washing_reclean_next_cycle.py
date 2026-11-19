@@ -142,3 +142,87 @@ def test_editing_a_completed_cycle_below_table_count_reopens_it(client, db):
     assert edited.status_code == 200, edited.text
     assert edited.json()["cycle_no"] == 1 and edited.json()["cycle_completed"] is False
     assert _cycles(db, plant)[0] == [1, 1]
+
+
+def test_one_date_can_finish_a_cycle_and_start_the_next_in_the_same_save(client, db):
+    """The real case the record sheet now sends: the tables a cycle still needed, plus the tables
+    re-cleaned the same afternoon, saved together for ONE date.
+
+    Both entries share a date, so they are sequenced by created_at. The database default is the
+    TRANSACTION timestamp, which is identical for every row of one request: without an explicit,
+    increasing stamp per entry the two tie, the re-clean can be counted against the cycle that is
+    still running, and the save is refused as a repeat. Order must be the order they were sent in.
+    """
+    plant, _head, _assignee = _team(client, db)                 # 4 tables per cycle
+    d1, d2 = _days(2, back=30)
+    assert _sheet(client, plant, [_picked(d1, [1, 2])]).status_code == 200
+
+    rolled = _sheet(client, plant, [_picked(d2, [3, 4]), _picked(d2, [1, 2])])
+
+    assert rolled.status_code == 200, rolled.text
+    rows = rolled.json()["reports"]
+    assert [row["cycle_no"] for row in rows] == [1, 2]
+    assert [row["cycle_completed"] for row in rows] == [True, False]
+    assert [row["report_date"] for row in rows] == [d2.isoformat(), d2.isoformat()]
+    cycles, completed = _cycles(db, plant)
+    assert cycles == [1, 1, 2] and completed == [False, True, False]
+
+    month = client.get(f"{BASE}/plants/{plant.id}/cycles", params={"month": d1.strftime("%Y-%m")}).json()
+    by_no = {cycle["cycle_no"]: cycle for cycle in month["cycles"]}
+    assert by_no[1]["state"] == "Completed" and by_no[1]["completed_on"] == d2.isoformat()
+    # the re-cleaned tables are the next cycle's work on that same date, so the billing can see them
+    assert by_no[2]["state"] == "In progress"
+    assert (by_no[2]["confirmed"], by_no[2]["started_on"]) == (2, d2.isoformat())
+    assert len([r for r in month["reports"] if r["report_date"] == d2.isoformat()]) == 2
+
+
+def test_the_same_date_roll_over_survives_a_recount(client, db):
+    """A recount re-reads the month from the database and must keep the two entries of one date in
+    the order they were saved, or the cycle numbers would flip on the next deploy's recount."""
+    plant, _head, _assignee = _team(client, db)
+    d1, d2 = _days(2, back=30)
+    assert _sheet(client, plant, [_picked(d1, [1, 2])]).status_code == 200
+    assert _sheet(client, plant, [_picked(d2, [3, 4]), _picked(d2, [1, 2])]).status_code == 200
+
+    recount = client.post(f"{BASE}/plants/{plant.id}/recount", params={"month": d1.strftime("%Y-%m")})
+
+    assert recount.status_code == 200, recount.text
+    assert recount.json()["moved"] == []
+    assert _cycles(db, plant) == ([1, 1, 2], [False, True, False])
+
+
+def test_the_last_cycle_records_the_same_date_roll_over_as_extra_washing(client, db):
+    """Cycle 3 has no next cycle, so the tables re-cleaned on the day it fills are the month's extra
+    cleaning. The sheet marks them `is_extra` (migration 048), which is what puts them in the
+    month's extra total: the cycle ledger counts distinct tables, so a repeat alone adds nothing.
+    """
+    plant, _head, _assignee = _team(client, db)
+    d1, d2, d3 = _days(3, back=30)
+    assert _sheet(client, plant, [_picked(d1, [1, 2, 3, 4]), _picked(d2, [1, 2, 3, 4])]).status_code == 200
+
+    extra = dict(_picked(d3, [1, 2]), is_extra=True)
+    last = _sheet(client, plant, [_picked(d3, [1, 2, 3, 4]), extra])
+
+    assert last.status_code == 200, last.text
+    rows = last.json()["reports"]
+    assert [row["cycle_no"] for row in rows] == [3, 3]
+    assert [row["cycle_completed"] for row in rows] == [True, False]
+    assert [row["is_extra"] for row in rows] == [False, True]
+    month = client.get(f"{BASE}/plants/{plant.id}/cycles", params={"month": d1.strftime("%Y-%m")}).json()
+    assert month["summary"]["cycles_completed"] == 3
+    assert month["summary"]["extra_tables"] == 2
+    # the extra entry never stands in for cycle work: cycle 3 is still exactly its table count
+    assert month["cycles"][2]["confirmed"] == 4
+
+
+def test_a_repeat_that_does_not_finish_the_cycle_is_still_refused(client, db):
+    """The roll-over is only legal on the day the cycle actually closes. A repeat sent with less than
+    the cycle's remaining tables stays a repeat, so a mistyped table cannot open the next cycle."""
+    plant, _head, _assignee = _team(client, db)
+    d1, d2 = _days(2, back=30)
+    assert _sheet(client, plant, [_picked(d1, [1, 2])]).status_code == 200
+
+    short = _sheet(client, plant, [_picked(d2, [3]), _picked(d2, [1])])
+
+    assert short.status_code == 409 and "already recorded in cycle 1" in short.json()["detail"]
+    assert _cycles(db, plant)[0] == [1], "a refused sheet saves nothing at all"

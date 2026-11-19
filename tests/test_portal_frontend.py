@@ -607,10 +607,16 @@ def test_record_sheet_advances_only_after_every_table_is_cleaned():
       if (unfinished[unfinished.length - 1].date !== '2026-10-17') {
         fail('Cycle 1 should remain recordable after its scheduled window until all tables are cleaned');
       }
-      const c2 = rows([day1, day3], 2, { '2026-10-04': { list: '1' } });
-      if (c2[0].date !== '2026-10-04' || c2[0].numbers.join(',') !== '1' || c2[0].error) {
-        fail('cycle 2 should begin after cycle 1 completes: ' + JSON.stringify(c2[0]));
+      // Cycle 2 opens ON the day cycle 1 filled, because the next round is often started that same
+      // afternoon, and on every day after it. Its tables all start open: cycle 1 reserves none of them.
+      const c2 = rows([day1, day3], 2, { '2026-10-03': { list: '1-4' }, '2026-10-04': { list: '5' } });
+      if (c2[0].date !== '2026-10-03' || c2[0].numbers.join(',') !== '1,2,3,4' || c2[0].error) {
+        fail('cycle 2 should open on the day cycle 1 completed: ' + JSON.stringify(c2[0]));
       }
+      if (c2[1].date !== '2026-10-04' || c2[1].numbers.join(',') !== '5' || c2[1].error) {
+        fail('cycle 2 should continue the days after it: ' + JSON.stringify(c2[1]));
+      }
+      if (c2.openTables.join(',') !== '1,2,3,4,5,6,7,8,9,10') fail('cycle 2 open tables: ' + c2.openTables);
       if (c1.cleanedTables.join(',') !== '1,2,3,4,5,6,7,8,9,10') fail('cycle 1 cleaned tables: ' + c1.cleanedTables);
 
       // Cycle 3 has no next cycle: a repeat there is an error even for the Head.
@@ -1641,7 +1647,9 @@ def test_plant_washing_range_sheet_and_health_issue_wizard_are_wired():
     assert '"/api/scheduled/washing/daily-reports/sheet"' in calendar
     assert "table_numbers: row.numbers" in calendar  # the sheet now sends the exact tables of each day
     assert "function syncRecordRangeInputs" in calendar
-    assert "previousCompletion" in calendar and "startDate = afterPrevious" in calendar
+    # A cycle's sheet opens on the day the cycle before it filled, so the next round started that
+    # same afternoon has a row (see test_washing_sheet_rollover_ui.py).
+    assert "previousCompletion" in calendar and "startDate = previousCompletion" in calendar
     assert "ep-calendar__record-modal" in calendar_styles
     assert "function renderDraftRecordPhotos(state, row)" in calendar
     assert 'data-record-draft-photo data-date="' in calendar

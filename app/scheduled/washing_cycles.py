@@ -1682,8 +1682,18 @@ def _add_report(
     db: Session, user: User, plant: Plant, manager: bool, total_tables: int, *,
     report_date: date, job_status: str, tables_cleaned: int, exception_reason: str | None,
     remarks: str | None, cleaned_codes: list[str] | None = None, is_extra: bool = False,
+    created_at: datetime | None = None,
 ) -> tuple[WashingDailyReport, bool]:
-    """Create one daily report (no commit, no notification). Returns the report and whether it completed a cycle."""
+    """Create one daily report (no commit, no notification). Returns the report and whether it completed a cycle.
+
+    `created_at` orders entries that share a date. Every reader of a plant-month (_resequence_month,
+    _cycle_ledger, _assert_distinct_tables, month_cycles, day_activity) sorts by (report_date,
+    created_at), and the server default `now()` is the TRANSACTION timestamp, so two entries saved
+    for one date in a single sheet request would tie and be sequenced in an arbitrary order. For a
+    day that fills a cycle and starts the next one that same date, the wrong order counts the
+    next cycle's tables against the cycle still running and the save is refused as a repeat. The
+    caller therefore passes a distinct, increasing value per entry; left out, the database default
+    stands exactly as before."""
     _validate_report_date(user, manager, report_date)
     month = _month_key(report_date)
     # Counts remain compatible with older clients; the current daily sheet can also persist numbered tables.
@@ -1701,6 +1711,8 @@ def _add_report(
         reported_by_id=user.id,
         reported_by=user.display_name,
     )
+    if created_at is not None:
+        report.created_at = created_at
     if manager and user.role != "Site Engineer":
         # An O&M entry (e.g. back-filling an older date) is the O&M team's own record, so it needs no second review.
         report.review_status = "Confirmed"
@@ -1770,7 +1782,12 @@ def create_sheet_reports(db: Session, user: User, payload: WashingSheetRequest) 
     for entry in entries:
         _validate_report_date(user, manager, entry.report_date)
     created: list[WashingDailyReport] = []
-    for entry in entries:
+    # Entries of one date are sequenced by created_at, and the database default is the transaction
+    # timestamp, which would make them all equal. Stamping each entry a microsecond apart keeps the
+    # order the user entered them in, so the entry that fills a cycle is counted before the entry
+    # that starts the next one on the same date. See _add_report.
+    stamp = datetime.now(timezone.utc)
+    for index, entry in enumerate(entries):
         if entry.table_start is not None and max(entry.table_start, entry.table_end) > total_tables:
             raise HTTPException(
                 422,
@@ -1790,6 +1807,7 @@ def create_sheet_reports(db: Session, user: User, payload: WashingSheetRequest) 
             db, user, plant, manager, total_tables,
             report_date=entry.report_date, job_status=entry.job_status, tables_cleaned=entry.tables_cleaned,
             exception_reason=entry.exception_reason, remarks=entry.remarks, cleaned_codes=cleaned_codes,
+            is_extra=entry.is_extra, created_at=stamp + timedelta(microseconds=index),
         )
         created.append(report)
     _assert_distinct_tables(db, plant.id, [report.cycle_month for report in created], total_tables, {report.id for report in created})
