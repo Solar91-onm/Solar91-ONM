@@ -309,29 +309,22 @@
   }
 
   /**
-   * The blinking red light beside a plant whose inverters need attention. It sits just before
-   * the site-code chip, and its title says what it is so the dot is never the only signal.
+   * The blinking red light marks a plant with one or more breakdown inverters.
    */
   function plantAlertHTML(siteCode) {
     var alert = plantAlerts[siteCode];
-    if (!alert) return "";
-    var parts = [];
-    if (alert.down > 0) {
-      parts.push(alert.down + (alert.down === 1 ? " inverter not running" : " inverters not running"));
-    }
-    if (alert.open > 0) {
-      parts.push(alert.open + (alert.open === 1 ? " open inverter ticket" : " open inverter tickets"));
-    }
-    var label = parts.join(" · ");
+    var down = alert ? Number(alert.down) || 0 : 0;
+    if (down <= 0) return "";
+    var label = down + (down === 1 ? " inverter in breakdown" : " inverters in breakdown");
     return '<span class="ep-hint-light ep-hint-light--red ep-nav-plant__alert" role="img"' +
-      ' data-plant-alert="' + (alert.down > 0 ? "down" : "open") + '"' +
+      ' data-plant-alert="down"' +
       ' title="' + global.Solar91PortalFormat.escape(label) + '"' +
       ' aria-label="' + global.Solar91PortalFormat.escape(label) + '"></span>';
   }
 
   /**
    * Record which plants have an inverter problem and repaint the list.
-   * `alerts` is { siteCode: { open, down } }; anything falsy clears every light.
+   * `alerts` is { siteCode: { down } }; anything falsy clears every light.
    */
   function setPlantAlerts(alerts) {
     plantAlerts = alerts || {};

@@ -1004,12 +1004,11 @@ def test_module_cleaning_cycle_sort_and_board_breakdown():
     assert ".ep-wb__compliance" not in board_styles and ".ep-wb__donut" not in board_styles
 
 
-def test_a_plants_module_cleaning_calendar_opens_on_the_week():
-    """A plant's cleaning calendar opens on the current week (seven cells), with Month still one
-    click away. PM and the portfolio calendar are untouched and still open on the month."""
+def test_module_cleaning_calendar_defaults_to_month_with_week_toggle_available():
+    """Module Cleaning opens on the full month; users can still switch to the current week."""
     calendar = (PORTAL_ASSETS / "js" / "operations-calendar.js").read_text(encoding="utf-8")
 
-    assert 'span: context.type === "washing" && context.plantCode ? "week" : "month",' in calendar
+    assert 'span: "month",' in calendar
     assert "weekStart: weekStartOf(" in calendar
     assert 'var week = state.span === "week";' in calendar
     assert "var cells = week ? 7 :" in calendar
@@ -1247,12 +1246,11 @@ def test_plant_details_health_merge_preserves_site_engineer_scope_and_views_heal
     assert '<h2>Health</h2>' in issues
 
 
-def test_sidebar_lights_plants_that_have_an_inverter_problem():
-    """A blinking red light sits between the plant name and its site code when that plant has
-    an inverter problem, and it costs no request of its own.
+def test_sidebar_lights_plants_only_when_an_inverter_is_in_breakdown():
+    """A blinking red light marks breakdown inverters, not other open inverter tickets.
 
     The counts come from the per-plant equipment summary the Inverters tile already holds, so the
-    sidebar and the tile can never disagree, and a plant with nothing open gets no light at all."""
+    sidebar and the tile can never disagree, and a plant with no breakdown units gets no light."""
     navigation = (PORTAL_ASSETS / "js" / "navigation.js").read_text(encoding="utf-8")
     overview = (PORTAL_ASSETS / "js" / "overview.js").read_text(encoding="utf-8")
     styles = (PORTAL_ASSETS / "css" / "components.css").read_text(encoding="utf-8")
@@ -1263,19 +1261,21 @@ def test_sidebar_lights_plants_that_have_an_inverter_problem():
     assert row.index("ep-nav-plant__name") < row.index("plantAlertHTML(plant.siteCode)") \
         < row.index("ep-nav-plant__code")
 
-    # Nothing open means no light, so a healthy plant's row is exactly as it was.
+    # Open tickets alone do not light the sidebar; only a breakdown unit does.
     assert "function plantAlertHTML(siteCode)" in navigation
-    assert "if (!alert) return \"\";" in navigation
+    assert "if (down <= 0) return \"\";" in navigation
     # It reuses the portal's one traffic-light primitive rather than a second dot.
     assert 'class="ep-hint-light ep-hint-light--red ep-nav-plant__alert"' in navigation
     # The dot is never the only signal: it carries a title and an aria-label naming the fault.
-    assert "inverter not running" in navigation and "open inverter ticket" in navigation
+    assert "inverter in breakdown" in navigation
+    assert "open inverter ticket" not in navigation[navigation.index("function plantAlertHTML"):]
     assert "aria-label=" in navigation[navigation.index("function plantAlertHTML"):]
 
     # Fed from the counts the tile already read -- the sidebar adds no request of its own.
     assert "function publishPlantAlerts()" in overview
     assert "(inverters.issues || []).forEach((row) => {" in overview
-    assert "if (!row.site_code || (open <= 0 && down <= 0)) return;" in overview
+    assert "if (!row.site_code || down <= 0) return;" in overview
+    assert "alerts[row.site_code] = { down: down };" in overview
     assert "nav.setPlantAlerts(alerts);" in overview
     assert "setPlantAlerts: setPlantAlerts," in navigation
     # Republished on every inverter refresh, so raising or resolving a ticket moves the light.

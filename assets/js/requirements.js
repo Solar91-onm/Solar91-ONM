@@ -277,7 +277,7 @@
     var visibleRows = filteredRows();
     host.innerHTML = '<div class="ep-issues ep-requirements">' +
       '<section class="ep-issues__hero ep-requirements__hero"><div><p class="ep-issues__eyebrow">Site requests</p>' +
-        '<h1>Requirements</h1><p>Track plant requests from submission through completion.</p></div>' +
+        '<h1>Requirements</h1></div>' +
         (canCreate() ? '<div class="ep-issues__hero-actions"><button type="button" class="ep-issues__button ep-issues__button--primary" data-requirement-action="open-form">Raise requirement</button></div>' : "") +
       "</section>" +
       '<section class="ep-panel ep-requirements__panel">' +

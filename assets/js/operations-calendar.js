@@ -102,9 +102,7 @@
         month: initialMonth || (context.startDate
           ? context.startDate.slice(0, 7)
           : monthKey(new Date())),
-        // Module Cleaning for one plant is read a week at a time — that is the span a
-        // cleaning crew works to. The Month button shows the whole month.
-        span: context.type === "washing" && context.plantCode ? "week" : "month",
+        span: "month",
         weekStart: weekStartOf(initialMonth
           ? dateFromKey(initialMonth + "-01")
           : context.startDate ? dateFromKey(context.startDate) : new Date()),
@@ -2111,7 +2109,7 @@
           '<button type="button" data-calendar-action="next" aria-label="' +
           (state.span === "week" ? "Next week" : "Next month") + '">›</button>' +
         '</div>' +
-        // Module Cleaning opens on the week in hand; the whole month stays one click away.
+        // The month is the default for Module Cleaning; the Week button remains available.
         '<div class="ep-calendar__span" role="group" aria-label="Dates shown">' +
           '<button type="button" data-calendar-action="span-week"' +
             (state.span === "week" ? ' class="is-on" aria-pressed="true"' : ' aria-pressed="false"') + ">Week</button>" +

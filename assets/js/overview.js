@@ -521,10 +521,9 @@
     if (!nav || !nav.setPlantAlerts) return;
     const alerts = {};
     (inverters.issues || []).forEach((row) => {
-      const open = Number(row.open) || 0;
       const down = Number(row.units) || 0;
-      if (!row.site_code || (open <= 0 && down <= 0)) return;
-      alerts[row.site_code] = { open: open, down: down };
+      if (!row.site_code || down <= 0) return;
+      alerts[row.site_code] = { down: down };
     });
     nav.setPlantAlerts(alerts);
   }
