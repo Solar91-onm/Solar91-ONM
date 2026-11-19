@@ -183,8 +183,8 @@ def test_inverter_issue_description_and_refresh_are_wired():
     styles = (PORTAL_ASSETS / "css" / "plant-details.css").read_text(encoding="utf-8")
 
     assert '{ key: "issuedesc", label: "Issue description"' in inverter_health
-    assert '"Issue description", "Running %", "Open tickets"' in inverter_health
-    assert 'if (ticket.equipment_running !== false) return;' in inverter_health
+    assert '"Issue description", typeConfig.type === "string" ? "Working %" : "Running %", "Open tickets"' in inverter_health
+    assert 'return typeConfig.type === "string" || ticket.equipment_running === false;' in inverter_health
     assert 'title="${fmt.escape(full)}"' in inverter_health
     assert ">No issues</span>" in inverter_health
     assert "refreshInverterHealth()" in overview
@@ -349,10 +349,11 @@ def test_overview_range_and_trend_requests_are_cached_deduped_and_bounded():
     script = """
       global.window = global;
       let calls = 0;
+      const urls = [];
       let fail = false;
       global.Solar91PortalAPI = {
-        request: () => { calls++; return fail ? Promise.reject(new Error('boom'))
-                                              : Promise.resolve({ rows: [], totals: {} }); },
+        request: (url) => { calls++; urls.push(url); return fail ? Promise.reject(new Error('boom'))
+                                                                 : Promise.resolve({ rows: [], totals: {} }); },
         normalizePlant: (p) => p,
         plants: () => Promise.resolve([])
       };
@@ -367,6 +368,12 @@ def test_overview_range_and_trend_requests_are_cached_deduped_and_bounded():
         await d.fetchPortfolioRange('2026-10-01', '2026-10-31');
         await d.fetchPortfolioRange('2026-10-01', '2026-10-31');
         fail_if(calls !== 1, 'repeated range made ' + calls + ' requests, expected 1');
+        calls = 0;
+        urls.length = 0;
+        await d.fetchPortfolioRange('2026-10-01', '2026-10-31', 'PM-NORTH');
+        await d.fetchPortfolioRange('2026-10-01', '2026-10-31', 'PM-SOUTH');
+        fail_if(calls !== 2 || !urls.every(url => url.includes('&site_code=')),
+          'plant-scoped range requests were not kept distinct');
 
         // Concurrent identical trend calls share one in-flight request.
         calls = 0;
@@ -1529,6 +1536,7 @@ def test_module_cleaning_calendar_header_uses_plant_name_and_code_without_subtit
     assert 'var subtitleMarkup = context.type === "washing" ? ""' in calendar
     assert ".ep-calendar__plant-name { color: var(--ep-text-strong); }" in styles
     assert ".ep-calendar__plant-code { color: var(--ep-accent-strong); }" in styles
+    assert "font-size: 22px;" in styles
 
 
 def test_operations_calendar_month_dates_fit_one_responsive_frame():
@@ -1571,7 +1579,9 @@ def test_pm_overview_routes_through_role_scoped_portal_data_and_existing_calenda
     assert 'data-tab-view="pm-overview"' in page
     assert '"pm-overview": "/assets/js/pm-overview.js"' in page
     assert 'href="/assets/css/pm-overview.css"' in page
-    assert "data.fetchPortfolioRange(period.start, period.end)" in overview
+    assert 'data.fetchPortfolioRange(period.start, period.end, state.siteCode || "")' in overview
+    assert "function withTimeout(promise, requestName)" in overview
+    assert "state.calendarLoading = false;" in overview
     assert 'data.fetchCalendarMonth("pm", state.month, state.siteCode || "")' in overview
     assert "data.aggregatePortfolio(rows).totals" in overview
     assert 'entry.status !== "Cancelled"' in overview
@@ -1602,6 +1612,9 @@ def test_pm_overview_renders_monthly_plants_and_opens_selected_saved_task():
         date: month + '-28', completedOn: null
       };
       const listeners = {};
+      let pauseCalendar = false;
+      let finishCalendar;
+      const portfolioScopes = [];
       const host = {
         innerHTML: '',
         addEventListener: (name, callback) => { listeners[name] = callback; },
@@ -1612,8 +1625,13 @@ def test_pm_overview_renders_monthly_plants_and_opens_selected_saved_task():
       global.Solar91PortalFormat = { escape: value => String(value).replace(/[&<>"]/g, c =>
         ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]) };
       global.Solar91PortalData = {
-        fetchPortfolioRange: () => Promise.resolve({ rows: [row] }),
-        fetchCalendarMonth: () => Promise.resolve({ entries: [entry], truncated: false, limit: 4000 }),
+        fetchPortfolioRange: (start, end, siteCode) => {
+          portfolioScopes.push(siteCode || '');
+          return Promise.resolve({ rows: [row] });
+        },
+        fetchCalendarMonth: () => pauseCalendar
+          ? new Promise(resolve => { finishCalendar = resolve; })
+          : Promise.resolve({ entries: [entry], truncated: false, limit: 4000 }),
         aggregatePortfolio: rows => ({ totals: {
           pmCompleted: rows.reduce((n, r) => n + r.profile.pm.completed, 0),
           pmPending: rows.reduce((n, r) => n + r.profile.pm.pending, 0),
@@ -1644,6 +1662,9 @@ def test_pm_overview_renders_monthly_plants_and_opens_selected_saved_task():
 
         Solar91PortalPMOverview.show(host, { siteCode: 'PM-NORTH', parent: 'overview', plant });
         await tick();
+        if (portfolioScopes[portfolioScopes.length - 1] !== 'PM-NORTH') {
+          throw new Error('single-plant PM view requested the whole portfolio');
+        }
         if (!host.innerHTML.includes('PM work orders') || !host.innerHTML.includes('Inspect inverter')) {
           throw new Error('plant PM schedule was not rendered');
         }
@@ -1654,6 +1675,20 @@ def test_pm_overview_renders_monthly_plants_and_opens_selected_saved_task():
         if (!calendar || calendar[1] !== (month + '-28').slice(0, 7) ||
             calendar[2] !== 'saved-pm-task') {
           throw new Error('saved PM task did not open in its calendar month');
+        }
+
+        pauseCalendar = true;
+        Solar91PortalPMOverview.show(host, { parent: 'overview' });
+        await tick();
+        if (!host.innerHTML.includes('North Plant') ||
+            host.innerHTML.includes('Loading PM overview…') ||
+            !host.innerHTML.includes('Loading scheduled PM work…')) {
+          throw new Error('PM portfolio did not render while its schedule request was pending');
+        }
+        finishCalendar({ entries: [entry], truncated: false, limit: 4000 });
+        await tick();
+        if (!host.innerHTML.includes('Inverter')) {
+          throw new Error('PM schedule did not render after its delayed response');
         }
       })().catch(error => { console.error(error.stack || error.message); process.exit(1); });
     """
@@ -1770,7 +1805,9 @@ def test_plant_washing_range_sheet_and_health_issue_wizard_are_wired():
     assert "ep-calendar__record-modal" in calendar_styles
     assert "function renderDraftRecordPhotos(state, row)" in calendar
     assert 'data-record-draft-photo data-date="' in calendar
-    assert 'summary>Photos · selected photos upload when this entry is saved' in calendar
+    assert 'summary>Evidence · images or PDFs up to 10 MB upload when this entry is saved' in calendar
+    assert 'accept="image/jpeg,image/png,image/webp,application/pdf,.pdf"' in calendar
+    assert 'photo.contentType === "application/pdf"' in (PORTAL_ASSETS / "js" / "photo-evidence.js").read_text(encoding="utf-8")
     assert "recordPendingPhotos[draftKey]" in calendar
     assert "Array.isArray(result.reports)" in calendar
     assert "uploadRecordPhotoFile(host, state, item.report, item.phase, item.slot, item.file)" in calendar
@@ -2754,7 +2791,9 @@ def test_inverter_health_shows_maker_and_capacity_after_the_unit_count():
 
     # And the per-plant CSV carries them in the same position as the table (the label is now
     # per equipment type, e.g. "Total inverters" or "Total strings").
-    assert '"Total " + label.toLowerCase() + "s", "Maker", "Capacity (kW)",\n        "Running"' in inverter_health
+    assert '"Total " + label.toLowerCase() + "s", "Maker", "Capacity (kW)",' in inverter_health
+    assert 'typeConfig.type === "string" ? "Working" : "Running"' in inverter_health
+    assert 'typeConfig.type === "string" ? "Not working" : "Not running"' in inverter_health
     assert "data-ih-export-plants" in inverter_health
 
 

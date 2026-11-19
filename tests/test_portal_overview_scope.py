@@ -68,6 +68,30 @@ def test_site_engineer_overview_and_range_remain_limited_to_assigned_plant(clien
     assert [row["plant"]["site_code"] for row in date_range.json()["rows"]] == [assigned.site_code]
 
 
+def test_range_can_be_limited_to_one_visible_plant_without_widening_engineer_scope(client, db):
+    assigned, other = _plants(db)
+    user = login_user(client, db, role="Site Engineer", email="overview-filtered-engineer@example.com")
+    db.add(UserPlantAssignment(
+        user_id=user.id,
+        plant_id=assigned.id,
+        assignment_role="Site Engineer",
+    ))
+    db.commit()
+    dates = {
+        "start_date": business_today().isoformat(),
+        "end_date": business_today().isoformat(),
+    }
+
+    selected = client.get("/api/portal/overview/range",
+                          params={**dates, "site_code": assigned.site_code})
+    outside_scope = client.get("/api/portal/overview/range",
+                               params={**dates, "site_code": other.site_code})
+
+    assert selected.status_code == 200, selected.text
+    assert [row["plant"]["site_code"] for row in selected.json()["rows"]] == [assigned.site_code]
+    assert outside_scope.status_code == 404
+
+
 def test_viewer_cannot_read_overview_portfolio(client, db):
     _plants(db)
     login_user(client, db, role="Viewer", email="overview-viewer@example.com")

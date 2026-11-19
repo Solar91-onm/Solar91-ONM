@@ -6,6 +6,7 @@ all bytes are stored; on a partial failure, newly uploaded objects are cleaned u
 from __future__ import annotations
 
 import base64
+from io import BytesIO
 import json
 import re
 from sqlalchemy import Text
@@ -15,6 +16,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile
 from fastapi.responses import JSONResponse
+from PIL import Image, ImageDraw
 from sqlalchemy import and_, case, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -35,6 +37,7 @@ EXTENSIONS = {"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp"}
 MAX_FILES = 10
 MAX_ISSUE_PHOTOS = 4   # one ticket's evidence; the Raise issue form offers the same four
 MAX_SIZE = 15 * 1024 * 1024
+MAX_WASHING_PDF_SIZE = 10 * 1024 * 1024
 PHOTO_STORAGE_FULL = "Photo storage is full — contact an administrator."
 
 
@@ -90,6 +93,7 @@ def _row(photo: SitePhoto, plant: Plant) -> dict:
             "linkType": photo.link_type, "linkId": photo.link_id,
             "inventoryId": photo.link_id if photo.link_type == "inventory" else "",
             "fileName": photo.file_name, "fileSize": photo.size_bytes, "previewUrl": None,
+            "contentType": photo.content_type,
             "thumbnailUrl": f"/api/photos/{photo.id}/image?size=thumb",
             "originalUrl": f"/api/photos/{photo.id}/image?size=original",
             "thumbnailSizeBytes": photo.thumbnail_size_bytes,
@@ -345,6 +349,9 @@ def image(photo_id: uuid.UUID, db: Annotated[Session, Depends(get_db)], user: An
     headers = {"Cache-Control": "private, max-age=31536000, immutable", "X-Content-Type-Options": "nosniff"}
     if original_purged:
         headers["X-Photo-Original-Purged"] = "true"
+    if size == "original" and not original_purged and obj.content_type == "application/pdf":
+        mime = "application/pdf"
+        headers["Content-Disposition"] = 'attachment; filename="module-cleaning-evidence.pdf"'
     return Response(content=contents, media_type=mime, headers=headers)
 
 
@@ -355,6 +362,32 @@ def _photo_settings(category: str = "") -> PhotoSettings:
                          thumb_side=480 if field_evidence else max(160, min(s.photo_thumb_side, s.photo_max_side)),
                          thumb_quality=65 if field_evidence else min(90, max(30, s.photo_thumb_quality)),
                          method=min(6, max(0, s.photo_webp_method)))
+
+
+def _pdf_thumbnail(settings: PhotoSettings) -> bytes:
+    width = settings.thumb_side
+    height = round(width * 3 / 4)
+    image = Image.new("RGB", (width, height), "#f1f4f8")
+    draw = ImageDraw.Draw(image)
+    left, top = round(width * 0.35), round(height * 0.12)
+    right, bottom = round(width * 0.65), round(height * 0.88)
+    draw.rounded_rectangle((left, top, right, bottom), radius=max(4, width // 40),
+                           fill="#ffffff", outline="#cbd5e1", width=max(1, width // 160))
+    draw.polygon(
+        [(right - width // 12, top), (right, top + height // 10), (right - width // 12, top + height // 10)],
+        fill="#e2e8f0",
+    )
+    badge_top = top + height // 3
+    draw.rounded_rectangle((left, badge_top, right, badge_top + height // 5),
+                           radius=max(3, width // 60), fill="#b42318")
+    line_left = left + width // 18
+    line_right = right - width // 18
+    for offset in (height // 2, height * 3 // 5, height * 7 // 10):
+        draw.rounded_rectangle((line_left, top + offset, line_right, top + offset + max(2, width // 100)),
+                               radius=max(1, width // 120), fill="#cbd5e1")
+    output = BytesIO()
+    image.save(output, format="WEBP", quality=settings.thumb_quality, method=settings.method)
+    return output.getvalue()
 
 
 def _check_washing_photo_write(db: Session, user: User, link_id: str | None) -> WashingDailyReport:
@@ -468,12 +501,27 @@ def create_photos(db: Annotated[Session, Depends(get_db)], user: Annotated[User,
     # Cheap checks of every file (type, size, magic bytes) before anything is decoded or stored.
     for file in files:
         mime = (file.content_type or "").lower()
-        if mime not in EXTENSIONS: raise HTTPException(415, "Upload JPEG, PNG, or WebP photos")
         size = _upload_size(file)
-        if size > MAX_SIZE: raise HTTPException(413, "Each photo must be 15 MB or smaller")
-        if size < 32: raise HTTPException(422, "Photo is empty or invalid")
+        if mime == "application/pdf":
+            if category != "washing" or phase not in {"before", "after"} or slot not in {1, 2}:
+                raise HTTPException(415, "PDF files are only allowed in module cleaning Before/After slots")
+            if size > MAX_WASHING_PDF_SIZE:
+                raise HTTPException(413, "Each module cleaning PDF must be 10 MB or smaller")
+            if size < 8:
+                raise HTTPException(422, "PDF file is empty or invalid")
+        else:
+            if mime not in EXTENSIONS:
+                raise HTTPException(415, "Upload JPEG, PNG, WebP photos, or a PDF in a module cleaning slot")
+            if size > MAX_SIZE:
+                raise HTTPException(413, "Each photo must be 15 MB or smaller")
+            if size < 32:
+                raise HTTPException(422, "Photo is empty or invalid")
         head = file.file.read(16); file.file.seek(0)
-        if not header_matches(mime, head): raise HTTPException(415, "The selected file is not a valid JPEG, PNG, or WebP photo")
+        if mime == "application/pdf":
+            if not head.startswith(b"%PDF-"):
+                raise HTTPException(415, "The selected file is not a valid PDF")
+        elif not header_matches(mime, head):
+            raise HTTPException(415, "The selected file is not a valid JPEG, PNG, or WebP photo")
     # Checks are done: hand the pooled connection back while photos are decoded and sent to Storage.
     replacing = None
     if kind == "washing":
@@ -504,18 +552,32 @@ def create_photos(db: Annotated[Session, Depends(get_db)], user: Annotated[User,
             mime = (file.content_type or "").lower()
             data = file.file.read(MAX_SIZE + 1)
             file.file.close()
-            photo = optimize_photo(data, mime, settings)
+            if mime == "application/pdf":
+                thumbnail = _pdf_thumbnail(settings)
+                stored_data = data
+                stored_type = mime
+                width = settings.thumb_side
+                height = round(settings.thumb_side * 3 / 4)
+                extension = ".pdf"
+            else:
+                photo = optimize_photo(data, mime, settings)
+                stored_data = photo.data
+                thumbnail = photo.thumbnail
+                stored_type = photo.content_type
+                width = photo.width
+                height = photo.height
+                extension = ".webp"
             del data
-            projected_usage += len(photo.data) + len(photo.thumbnail)
+            projected_usage += len(stored_data) + len(thumbnail)
             app_settings = get_settings()
             if projected_usage > app_settings.storage_block_bytes:
                 raise HTTPException(507, PHOTO_STORAGE_FULL)
             photo_id = uuid.uuid4()
-            path = f"site-photos/{plant.id}/{photo_id}.webp"
-            storage.upload(path, photo.data, photo.content_type)
+            path = f"site-photos/{plant.id}/{photo_id}{extension}"
+            storage.upload(path, stored_data, stored_type)
             uploaded.append(path)
             thumb_path = f"site-photo-thumbnails/{plant.id}/{photo_id}.webp"
-            storage.upload(thumb_path, photo.thumbnail, "image/webp")
+            storage.upload(thumb_path, thumbnail, "image/webp")
             uploaded.append(thumb_path)
             if replacing is not None:
                 db.delete(replacing)
@@ -524,11 +586,14 @@ def create_photos(db: Annotated[Session, Depends(get_db)], user: Annotated[User,
             records.append(SitePhoto(id=photo_id, plant_id=plant.id, uploaded_by=user.id,
                             uploader_name=user.display_name, category=category, description=description.strip(),
                             tags=parsed_tags, link_type=kind, link_id=ref, storage_path=path, thumbnail_path=thumb_path,
-                            file_name=(file.filename or "photo")[:255], content_type=photo.content_type, size_bytes=len(photo.data),
-                            thumbnail_size_bytes=len(photo.thumbnail), width=photo.width, height=photo.height,
+                            file_name=(file.filename or ("evidence.pdf" if mime == "application/pdf" else "photo"))[:255],
+                            content_type=stored_type, size_bytes=len(stored_data),
+                            thumbnail_size_bytes=len(thumbnail), width=width, height=height,
                             phase=phase if kind == "washing" else None, slot=slot if kind == "washing" else None,
                             submission_id=submission_id, submission_index=index if submission_id else None))
-            del photo
+            if mime != "application/pdf":
+                del photo
+            del stored_data, thumbnail
         db.add_all(records)
         db.flush()
         issue_photo_count = None

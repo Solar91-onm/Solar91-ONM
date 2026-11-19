@@ -93,7 +93,7 @@ Scale: one render reuses its coverage, plant lookups and grouping instead of rec
 
 ## Portal PM overview and plant dashboard
 
-The portal's **Preventive Maintenance** view uses one lazy-loaded screen for both the portfolio overview and a selected plant. Overview cards default to active plants; selecting a plant or opening **Plants → Preventive Maintenance** shows that plant's monthly workload, equipment categories, upcoming/overdue work and searchable schedule. Search, plant, equipment, status, due-date and sort controls filter the displayed records.
+The portal's **Preventive Maintenance** view uses one lazy-loaded screen for both the portfolio overview and a selected plant. Overview cards default to active plants; selecting a plant or opening **Plants → Preventive Maintenance** shows that plant's monthly workload, equipment categories, upcoming/overdue work and searchable schedule. Single-plant metrics are requested for that plant only. The metrics and calendar load independently so a delayed schedule does not keep the whole page hidden; a request still pending after 20 seconds shows an error with a retry action. Search, plant, equipment, status, due-date and sort controls filter the displayed records.
 
 The screen reads role-scoped monthly compliance from `GET /api/portal/overview/range` and PM work orders from `GET /api/portal/calendar?kind=pm&month=YYYY-MM[&site_code=...]`. Compliance uses the existing portal calculation; cancelled work is excluded. An attention badge uses the established 80% PM compliance threshold. The response's `truncated` flag is surfaced rather than presenting a capped calendar response as complete.
 

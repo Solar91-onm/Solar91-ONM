@@ -54,7 +54,7 @@
     const PLANT_COLUMNS = [
       { key: "plant", label: "Plant", sort: (row) => row.plant.siteCode },
       { key: "inverter", label: typeConfig.unitLabel, sort: (row) => (row.config && row.config.maker) || "" },
-      { key: "running", label: "Running", align: "num", sort: (row) => row.running },
+      { key: "running", label: typeConfig.type === "string" ? "Working" : "Running", align: "num", sort: (row) => row.running },
       { key: "issuedesc", label: "Issue description", sort: (row) => row.issueDesc || "" },
       { key: "percent", label: "Health", align: "num", sort: (row) => row.percent },
       { key: "tickets", label: "Tickets", align: "num", sort: (row) => row.tickets }
@@ -227,7 +227,13 @@
       });
       const plantCounts = new Map();
       (panelState.summary && panelState.summary.plants || []).forEach((row) => {
-        if (!row.site_code || codes.has(row.site_code)) plantCounts.set(row.site_code, row);
+        if (!row.site_code || codes.has(row.site_code)) {
+          plantCounts.set(row.site_code, typeConfig.type === "string"
+            ? Object.assign({}, row, {
+              units: row.open_ticket_units == null ? row.units : row.open_ticket_units
+            })
+            : row);
+        }
       });
       const ticketCounts = new Map();
       panelState.tickets.forEach((ticket) => {
@@ -236,7 +242,7 @@
         if (!code || !codes.has(code)) return;
         const count = ticketCounts.get(code) || { open: 0, units: 0 };
         count.open += 1;
-        if (ticket.equipment_running === false) {
+        if (isDownTicket(ticket)) {
           count.units += ticket.unit_count == null ? 1 : Number(ticket.unit_count) || 0;
         }
         ticketCounts.set(code, count);
@@ -254,6 +260,10 @@
       let url = "/api/issues?vertical=" + typeConfig.vertical + "&status=open&limit=200";
       if (codes.length === 1) url += "&site_code=" + encodeURIComponent(codes[0]);
       return url;
+    }
+
+    function isDownTicket(ticket) {
+      return typeConfig.type === "string" || ticket.equipment_running === false;
     }
 
     function loadHealth() {
@@ -344,7 +354,7 @@
     function ticketsByPlant() {
       const byPlant = new Map();
       scopedTickets().forEach((ticket) => {
-        if (ticket.equipment_running !== false) return;
+        if (!isDownTicket(ticket)) return;
         const plant = detailsPlant(ticket);
         if (!plant) return;
         const list = byPlant.get(plant.siteCode);
@@ -362,7 +372,7 @@
     function plantRows(totals) {
       const descByPlant = new Map();
       panelState.tickets.forEach((ticket) => {
-        if (ticket.equipment_running !== false) return;
+        if (!isDownTicket(ticket)) return;
         const plant = detailsPlant(ticket);
         const code = plant ? plant.siteCode : "";
         if (!code) return;
@@ -597,15 +607,19 @@
             <div class="ep-ih__hero-lead">
               <div class="ep-ih__hero-text">
                 <strong>${hasCounts && totals.total
-                  ? fmt.formatNumber(totals.running) + " of " + fmt.formatNumber(totals.total) + " " + labelLower + "s running"
+                  ? fmt.formatNumber(totals.running) + " of " + fmt.formatNumber(totals.total) + " " +
+                    labelLower + (typeConfig.type === "string" ? "s working" : "s running")
+                  : typeConfig.type === "string"
+                    ? fmt.formatNumber(totals.down) + " strings not working"
                   : fmt.formatNumber(totals.tickets) + " open " + labelLower + " tickets"}</strong>
                 <span>${fmt.escape(scopeLabel())}</span>
               </div>
             </div>
             <div class="ep-ih__kpis">
               <div class="ep-ih__kpi">
-                <span class="ep-ih__kpi-label">Not running</span>
-                <strong class="${totals.down > 0 ? "ep-ih__red" : "ep-ih__muted"}">${hasCounts ? fmt.formatNumber(totals.down) : "—"}</strong>
+                <span class="ep-ih__kpi-label">${typeConfig.type === "string" ? "Not working" : "Not running"}</span>
+                <strong class="${totals.down > 0 ? "ep-ih__red" : "ep-ih__muted"}">${
+                  hasCounts || typeConfig.type === "string" ? fmt.formatNumber(totals.down) : "—"}</strong>
                 <small>${fmt.formatNumber(totals.affected)} plants affected</small>
               </div>
               <div class="ep-ih__kpi">
@@ -647,7 +661,7 @@
                 ? `<strong>Tickets unavailable</strong><span>Open ${labelLower} tickets could not be loaded.</span>`
                 : panelState.loading
                   ? `<strong>Loading open ${labelLower} tickets…</strong>`
-                  : `<strong>✓ All ${labelLower}s running</strong><span>No open ${labelLower} tickets in this scope.</span>`}</div></td></tr>`}</tbody></table></div>
+                  : `<strong>✓ All ${labelLower}s ${typeConfig.type === "string" ? "working" : "running"}</strong><span>No open ${labelLower} tickets in this scope.</span>`}</div></td></tr>`}</tbody></table></div>
           </section>
           ${panelState.unitsRestricted || panelState.unitsError ? "" : `<details class="ep-panel ep-ih__settings" ${host.querySelector(".ep-ih__settings[open]") ? "open" : ""}><summary>${fmt.escape(label)} unit configuration</summary>
               ${typeConfig.type === "string"
@@ -727,7 +741,9 @@
     function exportPlantCsv() {
       const label = typeConfig.label;
       const columns = ["Plant", "Site code", "Total " + label.toLowerCase() + "s", "Maker", "Capacity (kW)",
-        "Running", "Not running", "Issue description", "Running %", "Open tickets"];
+        typeConfig.type === "string" ? "Working" : "Running",
+        typeConfig.type === "string" ? "Not working" : "Not running",
+        "Issue description", typeConfig.type === "string" ? "Working %" : "Running %", "Open tickets"];
       const values = sortedPlantRows().map((row) => {
         const descList = row.issueDesc || [];
         const descText = descList.length ? descList.join("; ") : "";

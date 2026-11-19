@@ -61,6 +61,7 @@ def overview_range(
     start_date: date | None = Query(default=None),
     end_date: date | None = Query(default=None),
     period: str | None = Query(default=None),
+    site_code: str | None = Query(default=None),
 ):
     """Date-bounded Overview metrics, with Site Engineers restricted to assigned plants.
 
@@ -80,7 +81,8 @@ def overview_range(
         raise HTTPException(422, "End date cannot be in the future.")
     if (end_date - start_date).days > 3660:
         raise HTTPException(422, "Overview date ranges cannot exceed 10 years.")
-    return service.portfolio_for_range(db, user, start_date, end_date)
+    plant_id = _plant_or_404(db, user, site_code).id if site_code else None
+    return service.portfolio_for_range(db, user, start_date, end_date, plant_id=plant_id)
 
 
 @router.get("/overview/trend")

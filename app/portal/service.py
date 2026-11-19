@@ -687,9 +687,12 @@ def resolve_range_period(period: str, today: date | None = None) -> tuple[date, 
     raise ValueError("Unknown period")
 
 
-def portfolio_for_range(db: Session, user: User, start: date, end: date) -> dict[str, Any]:
+def portfolio_for_range(db: Session, user: User, start: date, end: date,
+                        plant_id: UUID | None = None) -> dict[str, Any]:
     """Portfolio metrics for records due/reported in an inclusive business-date range."""
     plants = overview_plants(db, user)
+    if plant_id is not None:
+        plants = [plant for plant in plants if plant.id == plant_id]
     plant_ids = _plant_ids(plants)
     if not plant_ids:
         return {"rows": [], "totals": aggregate([]), "startDate": start.isoformat(), "endDate": end.isoformat(),

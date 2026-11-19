@@ -113,14 +113,13 @@ def issues_pulse(db:Annotated[Session,Depends(get_db)],user:Annotated[User,Depen
 def equipment_summary(db:Annotated[Session,Depends(get_db)],user:Annotated[User,Depends(get_current_user)],vertical:str|None=None):
     """Open tickets per plant for one equipment category, as counts only (one grouped query).
 
-    The Overview's Inverters tile needs how many units are affected, not the tickets themselves; reading the ticket
+    The Overview's equipment tiles need per-plant counts, not the tickets themselves; reading the ticket
     list for that was ~126 KB on every sign-in.
 
     ``open`` counts EVERY open ticket in the category. ``units`` counts only the units of tickets whose equipment is
-    recorded as NOT running (``equipment_running IS FALSE``) -- a ticket that records no unit count counts as one
-    unit. A ticket raised while the inverter was still running, and every ticket raised before the form asked
-    (``equipment_running IS NULL``), contributes ZERO units: it is an open ticket, not a unit down. Counting those as
-    down marked units out of service that were turning, and dropped the fleet below 100% for no reason.
+    recorded as NOT running (``equipment_running IS FALSE``). ``open_ticket_units`` counts the reported units on all
+    open tickets, defaulting to one when the ticket has no unit count. The String Health view uses that count because
+    a reported String issue means that string is not working; the Inverter view continues to use ``units``.
 
     Scope is the caller's: a role without portfolio scope sees only its assigned plants, and a plant with no open
     ticket in this category is simply absent.
@@ -136,12 +135,17 @@ def equipment_summary(db:Annotated[Session,Depends(get_db)],user:Annotated[User,
     if not has_portfolio_scope(user):
         plant_scope=user_scoped_plant_ids(db,user)
         if not plant_scope:
-            return {"vertical":vertical,"plants":[],"open":0,"units":0,"plants_affected":0}
+            return {"vertical":vertical,"plants":[],"open":0,"units":0,
+                    "open_ticket_units":0,"plants_affected":0}
         stmt=stmt.where(Issue.plant_id.in_(plant_scope))
-    rows=[{"site_code":code,"open":int(count or 0),"units":int(unit_total or 0)}
-          for code,count,unit_total in db.execute(stmt).all()]
+    open_ticket_units=func.sum(func.coalesce(Issue.unit_count,1))
+    stmt=stmt.add_columns(open_ticket_units)
+    rows=[{"site_code":code,"open":int(count or 0),"units":int(unit_total or 0),
+           "open_ticket_units":int(ticket_units or 0)}
+          for code,count,unit_total,ticket_units in db.execute(stmt).all()]
     return {"vertical":vertical,"plants":sorted(rows,key=lambda row:row["site_code"]),
             "open":sum(row["open"] for row in rows),"units":sum(row["units"] for row in rows),
+            "open_ticket_units":sum(row["open_ticket_units"] for row in rows),
             "plants_affected":len(rows)}
 
 @router.get("",response_model=list[IssueOut])

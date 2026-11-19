@@ -82,6 +82,24 @@ def _post(client, plant, *, category="issue", link_type="", link_id="", count=1,
                               for i in range(count)])
 
 
+def _post_pdf(client, plant, report, data, *, phase="before", slot=1, category="washing"):
+    form = {
+        "plant_id": str(plant.id),
+        "category": category,
+        "tags": "[]",
+        "description": "module cleaning evidence",
+        "link_type": "washing" if category == "washing" else "",
+        "link_id": str(report.id) if category == "washing" else "",
+    }
+    if category == "washing":
+        form.update({"phase": phase, "slot": str(slot)})
+    return client.post(
+        "/api/photos",
+        data=form,
+        files=[("files", ("before.pdf", io.BytesIO(data), "application/pdf"))],
+    )
+
+
 def _issue(db, plant, ticket="BUD-1"):
     issue = Issue(ticket_no=ticket, plant_id=plant.id, vertical="Inverter",
                   description="Inverter stopped", severity="Medium", status="Open")
@@ -101,6 +119,65 @@ def _washing_day(db, plant, *, reported_by="Field Engineer"):
     db.commit()
     db.refresh(report)
     return report
+
+
+def test_module_cleaning_pdf_is_saved_unmodified_and_replaces_the_slot(client, db):
+    head = login_user(client, db, role="O&M Head", name="Budget Head",
+                      email="budget-pdf-head@example.com")
+    plant = _plant(db, "BUD-PDF", "PDF Evidence Plant")
+    report = _washing_day(db, plant, reported_by=head.display_name)
+    existing = _post(client, plant, category="washing", link_type="washing",
+                     link_id=str(report.id), phase="before", slot=1)
+    assert existing.status_code == 201, existing.text
+    old_photo = db.query(SitePhoto).one()
+    old_paths = {old_photo.storage_path, old_photo.thumbnail_path}
+
+    pdf = b"%PDF-1.7\n" + b"x" * (10 * 1024 * 1024 - len(b"%PDF-1.7\n"))
+    response = _post_pdf(client, plant, report, pdf)
+    assert response.status_code == 201, response.text
+    row = response.json()["records"][0]
+    saved = db.query(SitePhoto).one()
+    assert row["contentType"] == saved.content_type == "application/pdf"
+    assert saved.size_bytes == len(pdf) == 10 * 1024 * 1024
+    assert saved.storage_path.endswith(".pdf") and saved.phase == "before" and saved.slot == 1
+    assert StorageStub.objects[saved.storage_path] == (pdf, "application/pdf")
+    assert all(path not in StorageStub.objects for path in old_paths)
+
+    thumb = client.get(f"/api/photos/{saved.id}/image?size=thumb")
+    assert thumb.status_code == 200 and thumb.content[:4] == b"RIFF"
+    original = client.get(f"/api/photos/{saved.id}/image?size=original")
+    assert original.status_code == 200 and original.content == pdf
+    assert original.headers["content-type"] == "application/pdf"
+    assert original.headers["content-disposition"].startswith("attachment;")
+    assert original.headers["x-content-type-options"] == "nosniff"
+
+    from app.photos.retention import purge_photo_originals
+    _age(db, saved.id, 40)
+    retention = purge_photo_originals(db, dry_run=False)
+    assert retention["photos"] == 1
+    assert saved.storage_path not in StorageStub.objects
+    assert saved.thumbnail_path in StorageStub.objects
+    expired = client.get(f"/api/photos/{saved.id}/image?size=original")
+    assert expired.headers["x-photo-original-purged"] == "true"
+    assert expired.headers["content-type"] == "image/webp"
+
+
+def test_module_cleaning_pdf_rejects_oversize_bad_signature_and_non_slot_uploads(client, db):
+    head = login_user(client, db, role="O&M Head", name="Budget Head",
+                      email="budget-pdf-check-head@example.com")
+    plant = _plant(db, "BUD-PDF2", "PDF Limit Plant")
+    report = _washing_day(db, plant, reported_by=head.display_name)
+
+    oversized = b"%PDF-1.7\n" + b"x" * (10 * 1024 * 1024 - len(b"%PDF-1.7\n") + 1)
+    response = _post_pdf(client, plant, report, oversized, phase="after", slot=2)
+    assert response.status_code == 413
+    assert "10 MB" in response.json()["detail"]
+
+    invalid = _post_pdf(client, plant, report, b"not a PDF document", phase="after", slot=2)
+    assert invalid.status_code == 415
+    assert _post_pdf(client, plant, report, b"%PDF-1.7\ninvalid", category="safety").status_code == 415
+    assert db.query(SitePhoto).count() == 0
+    assert StorageStub.objects == {}
 
 
 # ── Thresholds ──────────────────────────────────────────────────────────────

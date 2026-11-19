@@ -177,15 +177,17 @@
     };
   }
 
-  function fetchPortfolioRange(startDate, endDate) {
+  function fetchPortfolioRange(startDate, endDate, siteCode) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(String(startDate)) ||
         !/^\d{4}-\d{2}-\d{2}$/.test(String(endDate))) {
       return Promise.reject(new Error("Overview date range requires valid start and end dates."));
     }
-    return cached("range:" + startDate + ":" + endDate, function () {
+    var scope = siteCode ? ":plant:" + siteCode : "";
+    return cached("range:" + startDate + ":" + endDate + scope, function () {
       return api().request(
         "/api/portal/overview/range?start_date=" + encodeURIComponent(startDate) +
-        "&end_date=" + encodeURIComponent(endDate)
+        "&end_date=" + encodeURIComponent(endDate) +
+        (siteCode ? "&site_code=" + encodeURIComponent(siteCode) : "")
       ).then(function (body) {
         return {
           rows: (body.rows || []).map(normalizeRow),

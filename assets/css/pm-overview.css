@@ -109,6 +109,7 @@
 }
 .ep-pm__notice { border-color: #F0D8A9; background: #FFFAF0; color: #7A4A08; }
 .ep-pm__error { border-color: #F0B7B2; background: var(--ep-red-soft); color: var(--ep-red); }
+.ep-pm__error button { margin-left: 10px; }
 .ep-pm__loading { color: var(--ep-text-muted); }
 .ep-pm__metrics {
   display: grid;

@@ -347,7 +347,7 @@
     (issueRows || []).forEach((row) => {
       if (row.site_code && !codes.has(row.site_code)) return;
       tickets += Number(row.open) || 0;
-      down += Number(row.units) || 0;
+      down += Number(row.open_ticket_units == null ? row.units : row.open_ticket_units) || 0;
       affected += 1;
     });
     if (total) down = Math.min(down, total);
@@ -643,7 +643,7 @@
       ? { dot: "", tag: "N/A" }
       : str.down > 0
         ? { dot: "red", tag: "Attention" }
-        : { dot: "green", tag: "All running" };
+        : { dot: "green", tag: "All working" };
 
     const pmP  = pill("PM", pmPct, totals.pmOverdue);
     const wshP = washingHasPlan ? pill("Module Cleaning", wshPct, totals.washingOverdue)
@@ -757,19 +757,21 @@
           : "No string units configured"),
         figure: str.total
           ? { value: fmt.formatNumber(str.running) + "/" + fmt.formatNumber(str.total),
-              unit: "", caption: "strings running out of total" }
-          : (str.tickets ? { value: fmt.formatNumber(str.tickets), unit: "", caption: "open string issues" } : null),
+              unit: "", caption: "strings working out of total" }
+          : (str.down ? { value: fmt.formatNumber(str.down), unit: "", caption: "strings not working" }
+            : (str.tickets ? { value: fmt.formatNumber(str.tickets), unit: "", caption: "open string issues" } : null)),
         meter: str.total ? [{ width: clamp(str.runningPercent), tone: "accent" }] : [],
         legend: str.total
           ? [
             { dot: "green", label: "Total strings", value: fmt.formatNumber(str.total) },
-            { dot: str.down > 0 ? "red" : "", label: "Not running", value: fmt.formatNumber(str.down), bad: str.down > 0 },
+            { dot: str.down > 0 ? "red" : "", label: "Not working", value: fmt.formatNumber(str.down), bad: str.down > 0 },
             { dot: str.tickets > 0 ? "red" : "", label: "Open tickets", value: fmt.formatNumber(str.tickets), bad: str.tickets > 0 }
           ]
           : [
+            { dot: str.down > 0 ? "red" : "", label: "Not working", value: fmt.formatNumber(str.down), bad: str.down > 0 },
             { dot: str.tickets > 0 ? "red" : "", label: "Open tickets", value: fmt.formatNumber(str.tickets), bad: str.tickets > 0 },
             { dot: "", label: "Plants affected", value: fmt.formatNumber(str.plants) },
-            { dot: "", label: "Units configured", value: fmt.formatNumber(str.total) }
+            { dot: "", label: "Total strings", value: fmt.formatNumber(str.total) }
           ]
       },
       {

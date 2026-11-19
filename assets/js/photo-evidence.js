@@ -134,16 +134,23 @@
   }
 
   function open(photo) {
+    var isPdf = photo.contentType === "application/pdf";
     var overlay = global.document.createElement("div");
     overlay.className = "ep-photo-viewer";
     overlay.innerHTML = '<div class="ep-photo-viewer__backdrop" data-photo-close></div>' +
-      '<section class="ep-photo-viewer__dialog" role="dialog" aria-modal="true" aria-label="Photo evidence">' +
-        '<button type="button" class="ep-photo-viewer__close" data-photo-close aria-label="Close photo">×</button>' +
-        '<p class="ep-photo-viewer__status" role="status">Loading photo…</p>' +
+      '<section class="ep-photo-viewer__dialog" role="dialog" aria-modal="true" aria-label="' +
+        (isPdf ? "PDF evidence" : "Photo evidence") + '">' +
+        '<button type="button" class="ep-photo-viewer__close" data-photo-close aria-label="Close evidence">×</button>' +
+        '<p class="ep-photo-viewer__status" role="status">' + (isPdf ? "Loading PDF…" : "Loading photo…") + '</p>' +
         '<img alt="Photo evidence" width="' + Math.max(1, Number(photo.width) || 480) +
           '" height="' + Math.max(1, Number(photo.height) || 360) + '" hidden />' +
+        (isPdf
+          ? '<div class="ep-photo-viewer__document" hidden><p></p><a class="ep-photo-viewer__download" download>Download PDF</a></div>'
+          : "") +
         (photo.originalPurgedAt
-          ? '<p class="ep-photo-viewer__notice">Full-resolution photo was removed after 30 days.</p>' : "") +
+          ? '<p class="ep-photo-viewer__notice">' +
+            (isPdf ? "The original PDF was removed after 30 days." : "Full-resolution photo was removed after 30 days.") +
+            '</p>' : "") +
       '</section>';
     global.document.body.appendChild(overlay);
     var image = overlay.querySelector("img");
@@ -161,10 +168,23 @@
       if (event.target.closest("[data-photo-close]")) close();
     });
     global.document.addEventListener("keydown", onKey);
+    if (isPdf && photo.originalPurgedAt) {
+      status.textContent = "The original PDF is no longer available.";
+      return;
+    }
     fetchBlob(photo.originalUrl).then(function (blob) {
       objectUrl = global.URL.createObjectURL(blob);
-      image.src = objectUrl;
-      image.hidden = false;
+      if (isPdf) {
+        var documentPreview = overlay.querySelector(".ep-photo-viewer__document");
+        var download = overlay.querySelector(".ep-photo-viewer__download");
+        documentPreview.querySelector("p").textContent = photo.fileName || "Module Cleaning evidence";
+        download.href = objectUrl;
+        download.download = photo.fileName || "evidence.pdf";
+        documentPreview.hidden = false;
+      } else {
+        image.src = objectUrl;
+        image.hidden = false;
+      }
       status.remove();
     }).catch(function (error) {
       status.textContent = error.message || "Photo could not be loaded.";

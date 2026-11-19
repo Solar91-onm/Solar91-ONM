@@ -68,7 +68,10 @@
 .ep-calendar__eyebrow--plant {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 12px;
+  margin-bottom: 8px;
+  font-size: 22px;
+  letter-spacing: 0.04em;
 }
 .ep-calendar__plant-name { color: var(--ep-text-strong); }
 .ep-calendar__plant-code { color: var(--ep-accent-strong); }

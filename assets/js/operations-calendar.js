@@ -1596,16 +1596,19 @@
       return '<div class="ep-calendar__photo-slot is-busy" role="status">Uploading…</div>';
     }
     if (photo) {
+      var isPdf = photo.contentType === "application/pdf";
       return '<div class="ep-calendar__photo-slot is-filled">' +
         '<button type="button" class="ep-calendar__photo-preview" data-washing-photo-open="' +
           escape(photo.id) + '" data-washing-report="' + escape(report.id) + '" aria-label="Open ' +
-          escape(phase) + ' photo slot ' + slot + '">' +
+          escape(phase) + (isPdf ? " PDF" : " photo") + ' slot ' + slot + '">' +
           '<img data-photo-src="' + escape(photo.thumbnailUrl) + '" loading="lazy" width="' +
             Math.max(1, Number(photo.width) || 480) + '" height="' +
-            Math.max(1, Number(photo.height) || 360) + '" alt="' + escape(phase) + ' photo ' + slot + '" />' +
+            Math.max(1, Number(photo.height) || 360) + '" alt="' + escape(phase) +
+            (isPdf ? " PDF file" : " photo") + ' ' + slot + '" />' +
         '</button>' +
+        (isPdf ? '<small class="ep-calendar__photo-file">PDF · ' + escape(photo.fileName || "evidence.pdf") + '</small>' : "") +
         (report.can_add_evidence
-            ? '<div class="ep-calendar__photo-actions"><label class="ep-calendar__photo-replace">Replace<input type="file" accept="image/jpeg,image/png,image/webp" capture="environment" data-washing-photo-file data-report-id="' +
+            ? '<div class="ep-calendar__photo-actions"><label class="ep-calendar__photo-replace">Replace<input type="file" accept="image/jpeg,image/png,image/webp,application/pdf,.pdf" data-washing-photo-file data-report-id="' +
               escape(report.id) + '" data-phase="' + phase + '" data-slot="' + slot + '" /></label>' +
               '<button type="button" class="ep-calendar__photo-remove" data-washing-photo-remove="' +
             escape(photo.id) + '" data-washing-report="' + escape(report.id) + '" aria-label="Remove ' +
@@ -1616,7 +1619,7 @@
     }
     return '<div class="ep-calendar__photo-slot">' +
       (report.can_add_evidence
-        ? '<label class="ep-calendar__photo-add">+ Add photo<input type="file" accept="image/jpeg,image/png,image/webp" capture="environment" data-washing-photo-file data-report-id="' +
+        ? '<label class="ep-calendar__photo-add">+ Add file<input type="file" accept="image/jpeg,image/png,image/webp,application/pdf,.pdf" data-washing-photo-file data-report-id="' +
           escape(report.id) + '" data-phase="' + phase + '" data-slot="' + slot + '" /></label>'
         : '<span class="ep-calendar__photo-empty">Not added</span>') +
       retryAction +
@@ -1628,7 +1631,7 @@
     var draftId = "draft:" + row.date;
     var opened = state.recordPhotoOpenId === draftId;
     return '<details class="ep-calendar__record-photos" data-record-draft-photos="' + escape(row.date) + '"' +
-      (opened ? " open" : "") + '><summary>Photos · selected photos upload when this entry is saved</summary>' +
+      (opened ? " open" : "") + '><summary>Evidence · images or PDFs up to 10 MB upload when this entry is saved</summary>' +
       '<div class="ep-calendar__photo-rows">' +
         ["before", "after"].map(function (phase) {
           return '<div class="ep-calendar__photo-row"><strong>' +
@@ -1642,7 +1645,7 @@
                     escape(file.name) + '</span><button type="button" class="ep-calendar__photo-remove" data-record-draft-photo-remove="' +
                     escape(row.date) + '" data-phase="' + phase + '" data-slot="' + slot + '">Remove</button>'
                   : '<label class="ep-calendar__photo-add">+ Add ' + (phase === "before" ? "before" : "after") +
-                    ' photo<input type="file" accept="image/jpeg,image/png,image/webp" capture="environment" ' +
+                    ' file<input type="file" accept="image/jpeg,image/png,image/webp,application/pdf,.pdf" ' +
                     'data-record-draft-photo data-date="' + escape(row.date) + '" data-phase="' + phase +
                     '" data-slot="' + slot + '" /></label>') +
               '</div>';

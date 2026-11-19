@@ -11,7 +11,9 @@
     rows: [],
     entries: [],
     loading: false,
+    calendarLoading: false,
     error: "",
+    calendarError: "",
     truncated: false,
     limit: null,
     requestId: 0,
@@ -87,6 +89,26 @@
     }).format(new Date(value.slice(0, 10) + "T12:00:00"));
   }
 
+  function withTimeout(promise, requestName) {
+    return new Promise(function (resolve, reject) {
+      var timer = global.setTimeout(function () {
+        reject(new Error(requestName + " timed out. Check your connection and retry."));
+      }, 20000);
+      promise.then(function (value) {
+        global.clearTimeout(timer);
+        resolve(value);
+      }, function (error) {
+        global.clearTimeout(timer);
+        reject(error);
+      });
+    });
+  }
+
+  function retryMessage(message, action) {
+    return '<div class="ep-pm__error" role="alert">' + escape(message) +
+      '<button type="button" data-pm-retry="' + action + '">Retry</button></div>';
+  }
+
   function plantName(plant) {
     return plant && (plant.displayName || plant.plantName || plant.siteCode) || "Plant";
   }
@@ -106,11 +128,11 @@
   function statusFor(row, entries) {
     var pm = pmBlock(row);
     var scheduled = entries.filter(function (entry) { return entry.status !== "Cancelled"; });
-    if (!scheduled.length) return "Not Started";
     if (countValue(pm.overdue) > 0) return "Overdue";
     if (pm.compliancePercent != null && Number(pm.compliancePercent) < 80) {
       return "Attention Required";
     }
+    if (!scheduled.length) return "Not Started";
     if (scheduled.every(function (entry) { return entry.status === "Completed"; })) {
       return "Completed";
     }
@@ -263,12 +285,21 @@
       "Due work completed to date", "green") +
       metric("Completed", number(totals.pmCompleted), "Due work completed to date", "blue") +
       metric("Overdue", number(totals.pmOverdue), "Open work past due", "red") +
-      metric("Scheduled", number(activities.length), "For visible plants and dates", "amber") +
-      '<span class="ep-pm__due-today">' + number(dueToday) + ' open due today</span>' +
+      metric("Scheduled", state.calendarLoading ? "Loading…" : number(activities.length),
+        "For visible plants and dates", "amber") +
+      '<span class="ep-pm__due-today">' +
+        (state.calendarLoading ? "Checking today’s schedule…" : number(dueToday) + " open due today") +
+      '</span>' +
     '</div>';
   }
 
   function categorySummary(rows) {
+    if (state.calendarLoading) {
+      return '<p class="ep-pm__empty-copy" role="status">Loading scheduled PM work…</p>';
+    }
+    if (state.calendarError) {
+      return '<p class="ep-pm__empty-copy">Scheduled PM work is unavailable. Use Retry above to try again.</p>';
+    }
     var entries = monthEntries(rows).filter(function (entry) { return entry.status !== "Cancelled"; });
     var totals = {};
     entries.forEach(function (entry) {
@@ -340,6 +371,8 @@
     var topCategories = Object.keys(categories).sort(function (a, b) {
       return categories[b] - categories[a] || a.localeCompare(b);
     }).slice(0, 4);
+    var nextDue = state.calendarLoading ? "Loading schedule…" :
+      state.calendarError ? "Schedule unavailable" : next ? dateLabel(next.date) : "No upcoming PM this month";
     return '<article class="ep-pm__plant-card">' +
       '<div class="ep-pm__plant-card-head"><div><p>' + escape(plant.siteCode) + '</p>' +
         '<h3>' + escape(plantName(plant)) + '</h3></div>' + statusBadge(status) + '</div>' +
@@ -348,11 +381,15 @@
         '</strong></div><div><span>Completed</span><strong>' + number(pm.completed) +
         '</strong></div><div><span>Overdue</span><strong>' + number(pm.overdue) + '</strong></div></div>' +
       '<div class="ep-pm__plant-card-meta"><span>Next due</span><strong>' +
-        (next ? escape(dateLabel(next.date)) : "No upcoming PM this month") +
+        escape(nextDue) +
         '</strong><span>Last completed</span><strong>' +
         (recent ? escape(dateLabel(recent.completedOn)) : "No completed PM this month") + '</strong></div>' +
       '<div class="ep-pm__plant-categories">' +
-        (topCategories.length
+        (state.calendarLoading
+          ? '<span>Loading schedule…</span>'
+          : state.calendarError
+            ? '<span>Schedule unavailable</span>'
+            : topCategories.length
           ? topCategories.map(function (name) {
             return '<span>' + escape(name) + ' <b>' + number(categories[name]) + '</b></span>';
           }).join("")
@@ -406,7 +443,8 @@
       (state.truncated
         ? '<p class="ep-pm__notice" role="status">The server returned the first ' + number(state.limit) +
           ' records for this month. Open a plant to view its own records.</p>' : "") +
-      (state.error ? '<div class="ep-pm__error" role="alert">' + escape(state.error) + '</div>' : "") +
+      (state.error ? retryMessage(state.error, "all") : "") +
+      (state.calendarError ? retryMessage(state.calendarError, "calendar") : "") +
       (state.loading
         ? '<div class="ep-pm__loading" role="status">Loading PM overview…</div>'
         : summaryMetrics(rows) +
@@ -463,6 +501,8 @@
   }
 
   function dayWorkload(entries) {
+    if (state.calendarLoading) return '<p class="ep-pm__empty-copy" role="status">Loading scheduled PM work…</p>';
+    if (state.calendarError) return '<p class="ep-pm__empty-copy">Scheduled PM work is unavailable.</p>';
     var period = monthBounds(state.month);
     var days = Number(period.end.slice(-2));
     var daily = {};
@@ -500,6 +540,8 @@
   }
 
   function plantCategories(entries) {
+    if (state.calendarLoading) return '<p class="ep-pm__empty-copy" role="status">Loading scheduled PM work…</p>';
+    if (state.calendarError) return '<p class="ep-pm__empty-copy">Scheduled PM work is unavailable.</p>';
     var groups = {};
     entries.filter(function (entry) { return entry.status !== "Cancelled"; }).forEach(function (entry) {
       var name = categoryName(entry);
@@ -521,6 +563,8 @@
   }
 
   function upcomingList(entries) {
+    if (state.calendarLoading) return '<p class="ep-pm__empty-copy" role="status">Loading scheduled PM work…</p>';
+    if (state.calendarError) return '<p class="ep-pm__empty-copy">Scheduled PM work is unavailable.</p>';
     var items = openEntries(entries).sort(function (a, b) {
       var aLate = a.status === "Overdue" ? 0 : 1;
       var bLate = b.status === "Overdue" ? 0 : 1;
@@ -538,6 +582,12 @@
   }
 
   function taskRows(entries) {
+    if (state.calendarLoading) {
+      return '<tr><td colspan="6" class="ep-pm__empty-cell">Loading scheduled PM work…</td></tr>';
+    }
+    if (state.calendarError) {
+      return '<tr><td colspan="6" class="ep-pm__empty-cell">Scheduled PM work is unavailable. Use Retry above.</td></tr>';
+    }
     if (!entries.length) {
       return '<tr><td colspan="6" class="ep-pm__empty-cell">No PM work orders match these filters.</td></tr>';
     }
@@ -598,32 +648,37 @@
       (state.truncated
         ? '<p class="ep-pm__notice" role="status">The server returned the first ' + number(state.limit) +
           ' records for this month. Change the month to narrow the results.</p>' : "") +
-      (state.error ? '<div class="ep-pm__error" role="alert">' + escape(state.error) + '</div>' : "") +
+      (state.error ? retryMessage(state.error, "all") : "") +
+      (state.calendarError ? retryMessage(state.calendarError, "calendar") : "") +
       (state.loading
         ? '<div class="ep-pm__loading" role="status">Loading PM work orders…</div>'
         : '<div class="ep-pm__metrics ep-pm__metrics--plant">' +
           metric("PM compliance", pm.compliancePercent == null
             ? "—" : Math.round(Number(pm.compliancePercent)) + "%", "For selected month to date", "green") +
-          metric("Scheduled", number(scheduled.length), "Work orders in this month", "blue") +
+          metric("Scheduled", state.calendarLoading ? "Loading…" : number(scheduled.length),
+            "Work orders in this month", "blue") +
           metric("Completed", number(pm.completed), "Due work completed", "green") +
           metric("Overdue", number(pm.overdue), "Open work past due", "red") +
           metric("Pending", number(pm.pending), "Scheduled or in progress", "amber") +
-          metric("Next due", next ? dateLabel(next.date) : "—",
-            next ? categoryName(next) : "No upcoming work this month", "blue") +
+          metric("Next due", state.calendarLoading ? "Loading…" : next ? dateLabel(next.date) : "—",
+            state.calendarLoading ? "Checking schedule" : next ? categoryName(next) : "No upcoming work this month", "blue") +
         '</div>' +
         '<section class="ep-pm__detail-grid"><article class="ep-pm__panel"><header><div>' +
           '<p class="ep-pm__eyebrow">Monthly workload</p><h2>Scheduled work by day</h2></div>' +
-          '<span>' + number(scheduled.length) + ' work orders</span></header>' +
+          '<span>' + (state.calendarLoading ? "Loading…" : number(scheduled.length)) + ' work orders</span></header>' +
           dayWorkload(allEntries) + '</article>' +
           '<article class="ep-pm__panel"><header><div><p class="ep-pm__eyebrow">Action list</p>' +
-            '<h2>Upcoming and overdue</h2></div><span>' + number(open.length) + ' open</span></header>' +
+            '<h2>Upcoming and overdue</h2></div><span>' +
+              (state.calendarLoading ? "Loading…" : number(open.length)) + ' open</span></header>' +
             upcomingList(allEntries) + '</article></section>' +
         '<section class="ep-pm__panel ep-pm__equipment-panel"><header><div><p class="ep-pm__eyebrow">' +
           'Equipment progress</p><h2>PM categories</h2></div><span>' +
-          number(Object.keys(categoryCount).length) + ' categories</span></header>' +
+          (state.calendarLoading ? "Loading…" : number(Object.keys(categoryCount).length)) +
+          ' categories</span></header>' +
           plantCategories(allEntries) + '</section>' +
         '<section class="ep-pm__board"><div class="ep-pm__board-head"><div><p class="ep-pm__eyebrow">' +
-          'Saved schedule</p><h2>PM work orders</h2></div><span>' + number(schedule.length) + ' shown</span></div>' +
+          'Saved schedule</p><h2>PM work orders</h2></div><span>' +
+          (state.calendarLoading ? "Loading…" : number(schedule.length)) + ' shown</span></div>' +
           '<div class="ep-pm__filters ep-pm__filters--detail">' +
             '<label class="ep-pm__search"><span class="ep-pm__sr-only">Search PM work orders</span>' +
               '<input type="search" data-pm-filter="query" value="' + escape(state.filters.query) +
@@ -670,7 +725,7 @@
           (state.month ? " · " + escape(monthLabel(state.month)) : "") + '</p></div></header>' +
           (state.loading
             ? '<div class="ep-pm__loading" role="status">Loading PM work orders…</div>'
-            : '<div class="ep-pm__error" role="alert">' + escape(state.error) + '</div>') +
+            : retryMessage(state.error || "PM data is unavailable.", "all")) +
           '</div>';
       }
       return;
@@ -683,6 +738,7 @@
         typeof data.fetchCalendarMonth !== "function") {
       state.error = "PM data services are not available.";
       state.loading = false;
+      state.calendarLoading = false;
       render();
       return;
     }
@@ -690,23 +746,27 @@
     if (!/^\d{4}-\d{2}$/.test(state.month) || state.month > currentMonth) {
       state.error = "Choose a valid month up to the current month.";
       state.loading = false;
+      state.calendarLoading = false;
       render();
       return;
     }
     var period = periodRange(state.month);
     var requestId = ++state.requestId;
     state.loading = true;
+    state.calendarLoading = true;
+    state.rows = [];
+    state.entries = [];
     state.error = "";
+    state.calendarError = "";
+    state.truncated = false;
+    state.limit = null;
     render();
-    Promise.all([
-      data.fetchPortfolioRange(period.start, period.end),
-      data.fetchCalendarMonth("pm", state.month, state.siteCode || "")
-    ]).then(function (results) {
+
+    withTimeout(Promise.resolve().then(function () {
+      return data.fetchPortfolioRange(period.start, period.end, state.siteCode || "");
+    }), "PM summary").then(function (result) {
       if (requestId !== state.requestId) return;
-      state.rows = results[0].rows || [];
-      state.entries = results[1].entries || [];
-      state.truncated = !!results[1].truncated;
-      state.limit = results[1].limit || null;
+      state.rows = result.rows || [];
       state.loading = false;
       state.error = "";
       render();
@@ -714,7 +774,25 @@
       if (requestId !== state.requestId) return;
       state.loading = false;
       state.error = error && error.message
-        ? error.message : "PM overview could not be loaded.";
+        ? error.message : "PM summary could not be loaded.";
+      render();
+    });
+
+    withTimeout(Promise.resolve().then(function () {
+      return data.fetchCalendarMonth("pm", state.month, state.siteCode || "");
+    }), "PM schedule").then(function (result) {
+      if (requestId !== state.requestId) return;
+      state.entries = result.entries || [];
+      state.truncated = !!result.truncated;
+      state.limit = result.limit || null;
+      state.calendarLoading = false;
+      state.calendarError = "";
+      render();
+    }).catch(function (error) {
+      if (requestId !== state.requestId) return;
+      state.calendarLoading = false;
+      state.calendarError = error && error.message
+        ? error.message : "PM schedule could not be loaded.";
       render();
     });
   }
@@ -736,6 +814,37 @@
     if (wiredHosts.has(host)) return;
     wiredHosts.add(host);
     host.addEventListener("click", function (event) {
+      var retryButton = event.target.closest("[data-pm-retry]");
+      if (retryButton) {
+        var retry = retryButton.getAttribute("data-pm-retry");
+        if (retry === "calendar" && !state.loading) {
+          state.calendarLoading = true;
+          state.calendarError = "";
+          state.entries = [];
+          render();
+          var requestId = ++state.requestId;
+          withTimeout(Promise.resolve().then(function () {
+            return data.fetchCalendarMonth("pm", state.month, state.siteCode || "");
+          }), "PM schedule").then(function (result) {
+            if (requestId !== state.requestId) return;
+            state.entries = result.entries || [];
+            state.truncated = !!result.truncated;
+            state.limit = result.limit || null;
+            state.calendarLoading = false;
+            state.calendarError = "";
+            render();
+          }).catch(function (error) {
+            if (requestId !== state.requestId) return;
+            state.calendarLoading = false;
+            state.calendarError = error && error.message
+              ? error.message : "PM schedule could not be loaded.";
+            render();
+          });
+        } else {
+          loadData();
+        }
+        return;
+      }
       var plantButton = event.target.closest("[data-pm-open-plant]");
       if (plantButton) {
         var siteCode = plantButton.getAttribute("data-pm-open-plant");

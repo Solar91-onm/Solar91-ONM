@@ -272,9 +272,10 @@ def test_equipment_summary_counts_open_tickets_per_plant(db, client):
     db.commit()
 
     body = client.get("/api/issues/equipment-summary?vertical=Inverter").json()
-    assert body["plants"] == [{"site_code": "EQ01", "open": 4, "units": 3},
-                              {"site_code": "EQ02", "open": 1, "units": 3}]
-    assert body["open"] == 5 and body["units"] == 6 and body["plants_affected"] == 2
+    assert body["plants"] == [{"site_code": "EQ01", "open": 4, "units": 3, "open_ticket_units": 12},
+                              {"site_code": "EQ02", "open": 1, "units": 3, "open_ticket_units": 3}]
+    assert body["open"] == 5 and body["units"] == 6
+    assert body["open_ticket_units"] == 15 and body["plants_affected"] == 2
 
     # Without a category it counts every open ticket.
     everything = client.get("/api/issues/equipment-summary").json()
@@ -349,6 +350,8 @@ def test_equipment_summary_filters_by_string_vertical(db, client):
     row = plants["STR01"]
     # Only the ticket with equipment_running=False counts as a unit down.
     assert row["units"] == 2
+    # String Health marks every string on an open issue as not working.
+    assert row["open_ticket_units"] == 3
     # Both open String tickets count as open.
     assert row["open"] == 2
     # The Inverter ticket must NOT appear in the String summary.
@@ -377,6 +380,7 @@ def test_string_units_down_rule_matches_equipment_running_false_only(db, client)
     row = {r["site_code"]: r for r in response.json()["plants"]}.get("STR02")
     assert row is not None
     assert row["units"] == 3   # only the equipment_running=False ticket
+    assert row["open_ticket_units"] == 12  # all strings on any open issue
     assert row["open"] == 3    # all three tickets are open
 
 
@@ -386,6 +390,39 @@ def test_string_tile_reads_counts_in_overview_js():
     assert '"/api/issues/equipment-summary?vertical=String"' in overview
     assert "/api/issues?vertical=String&limit=200" not in overview
     assert "strings.issues = (body && body.plants) || [];" in overview
+    assert "row.open_ticket_units == null ? row.units : row.open_ticket_units" in overview
+    assert '"strings working out of total"' in overview
+    assert '"strings not working"' in overview
+    assert 'label: "Not working"' in overview
+
+
+def test_string_health_treats_any_open_string_ticket_as_not_working():
+    overview = (PORTAL_ASSETS / "js" / "overview.js").read_text(encoding="utf-8")
+    health = (PORTAL_ASSETS / "js" / "inverter-health.js").read_text(encoding="utf-8")
+    assert 'label: typeConfig.type === "string" ? "Working" : "Running"' in health
+    assert 'units: row.open_ticket_units == null ? row.units : row.open_ticket_units' in health
+    assert 'return typeConfig.type === "string" || ticket.equipment_running === false;' in health
+    assert 'typeConfig.type === "string" ? "Not working" : "Not running"' in health
+    assert 'typeConfig.type === "string" ? "s working" : "s running"' in health
+
+    start = overview.index("  function calculateStringTotals(")
+    end = overview.index("\n\n  function stringUnitRows(", start)
+    calculation = overview[start:end]
+    script = f"""
+      const calculate = new Function("isString", {json.dumps(calculation)} +
+        "; return calculateStringTotals;")(
+        value => String(value || "").trim().toLowerCase() === "string");
+      const result = calculate(new Set(["STR01"]), [
+        {{site_code: "STR01", equipment_type: "String", total_units: 7}}
+      ], [
+        {{site_code: "STR01", open: 6, units: 0, open_ticket_units: 7}}
+      ]);
+      if (result.down !== 7 || result.running !== 0 || result.runningPercent !== 0) {{
+        throw new Error(JSON.stringify(result));
+      }}
+    """
+    result = subprocess.run(["node", "-e", script], cwd=ROOT, capture_output=True, text=True, timeout=30)
+    assert result.returncode == 0, result.stderr or result.stdout
 
 
 def test_string_health_falls_back_to_module_cleaning_table_counts():
