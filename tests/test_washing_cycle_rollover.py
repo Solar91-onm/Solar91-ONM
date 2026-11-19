@@ -1,7 +1,9 @@
 """The next washing cycle starts by itself the moment the recorded tables reach the plant's table count."""
 from __future__ import annotations
 
-from app.core.models import WashingDailyReport
+from datetime import datetime, timedelta, timezone
+
+from app.core.models import AppSetting, AuditLog, WashingConfig, WashingDailyReport
 from tests import conftest
 from tests.test_washing_cycles import BASE, _plant, _setup_cycle_users
 from tests.test_washing_sheet import _days, _done, _engineer, _sheet
@@ -108,6 +110,72 @@ def test_recount_fixes_a_month_saved_with_the_old_numbering(client, db):
     assert [c["confirmed"] for c in r.json()["cycles"]] == [4, 4, 3]
     _engineer(client, db, plant)
     assert client.post(f"{BASE}/plants/{plant.id}/recount", params={"month": month}).status_code == 403
+
+
+def test_startup_recount_splits_a_legacy_report_that_finishes_and_repeats_tables(client, db):
+    from app.scheduled.washing_cycles import CYCLE_RULE_SETTING, recount_all_months
+
+    plant = _plant(db)
+    head, _assignee = _setup_cycle_users(client, db, plant)
+    config = db.query(WashingConfig).filter_by(plant_id=plant.id).one()
+    config.tables_per_cycle = 154
+    days = _days(7, back=30)
+    ranges = [(35, 58), (59, 82), (83, 106), (107, 130), (131, 154), (1, 24), (25, 47)]
+    made_at = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    reports = []
+    for index, (day, (start, end)) in enumerate(zip(days, ranges)):
+        codes = [f"Table {number:03d}" for number in range(start, end + 1)]
+        reports.append(WashingDailyReport(
+            plant_id=plant.id,
+            cycle_month=day.strftime("%Y-%m"),
+            cycle_no=1,
+            report_date=day,
+            job_status="Done",
+            tables_cleaned=len(codes),
+            cleaned_table_codes=codes,
+            evidence=[{"id": "before-photo", "storage_path": "private/before.webp"}] if index == 6 else [],
+            reported_by_id=head.id,
+            reported_by=head.display_name,
+            review_status="Confirmed",
+            reviewed_by_id=head.id,
+            reviewed_by=head.display_name,
+            review_note="Confirmed",
+            created_at=made_at + timedelta(seconds=index),
+        ))
+    db.add_all(reports)
+    db.add(AppSetting(setting_key=CYCLE_RULE_SETTING, setting_value="distinct-table-completion-2"))
+    db.commit()
+    legacy_report_id = reports[-1].id
+    month = days[0].strftime("%Y-%m")
+
+    result = recount_all_months(db)
+
+    assert result["split_reports"] == 1
+    db.expire_all()
+    original = db.get(WashingDailyReport, legacy_report_id)
+    assert original is not None
+    assert original.tables_cleaned == 10
+    assert original.cleaned_table_codes == [f"Table {number:03d}" for number in range(25, 35)]
+    assert original.cycle_no == 1 and original.cycle_completed is True
+    assert original.evidence == [{"id": "before-photo", "storage_path": "private/before.webp"}]
+
+    split = db.query(WashingDailyReport).filter_by(
+        plant_id=plant.id, report_date=days[6], cycle_no=2,
+    ).one()
+    assert split.tables_cleaned == 13
+    assert split.cleaned_table_codes == [f"Table {number:03d}" for number in range(35, 48)]
+    assert split.review_status == "Confirmed" and split.evidence == []
+
+    audit = db.query(AuditLog).filter_by(action="Split legacy module cleaning rollover").one()
+    assert audit.entity_id == str(legacy_report_id)
+    assert audit.metadata_json["split_report_id"] == str(split.id)
+    month_result = client.get(f"{BASE}/plants/{plant.id}/cycles", params={"month": month})
+    assert month_result.status_code == 200, month_result.text
+    cycles = month_result.json()["cycles"]
+    assert cycles[0]["confirmed"] == 154
+    assert cycles[0]["completed_on"] == days[6].isoformat()
+    assert cycles[1]["confirmed"] == 13
+    assert recount_all_months(db) == {"skipped": True}
 
 
 def test_tables_above_the_count_carry_over_to_the_next_cycle(client, db):

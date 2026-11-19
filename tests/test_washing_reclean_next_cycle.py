@@ -71,6 +71,24 @@ def test_om_repeat_is_rejected_until_cycle_is_complete_then_next_cycle_starts(cl
     assert by_no[3]["state"] == "In progress"
 
 
+def test_single_report_api_cannot_save_a_repeat_on_the_cycle_completion_day(client, db):
+    plant, _head, _assignee = _team(client, db)
+    d1, d2 = _days(2, back=30)
+    assert _sheet(client, plant, [_picked(d1, [1, 2, 3])]).status_code == 200
+
+    response = client.post(f"{BASE}/daily-reports", json={
+        "plant_id": str(plant.id),
+        "job_status": "Done",
+        "tables_cleaned": 2,
+        "cleaned_table_codes": ["Table 003", "Table 004"],
+        "report_date": d2.isoformat(),
+    })
+
+    assert response.status_code == 409
+    assert "Table 3 is already recorded in cycle 1" in response.json()["detail"]
+    assert _cycles(db, plant)[0] == [1]
+
+
 def test_cycle_two_is_not_active_until_cycle_one_is_complete(client, db):
     plant, _head, _assignee = _team(client, db)
     d1, d2 = _days(2, back=30)

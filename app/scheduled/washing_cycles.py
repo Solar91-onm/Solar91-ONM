@@ -1521,6 +1521,210 @@ def _cycle_sequence(entries, total_tables: int) -> list[tuple[int, bool]]:
     return out
 
 
+def _plan_legacy_rollover_splits(rows, total_tables: int) -> list[dict]:
+    """Find unambiguous legacy reports that mixed cycle-completing tables with repeats.
+
+    The repair is conservative: it only splits a fully numbered report when its new tables
+    exactly finish the running cycle, all earlier counted work has table numbers, and no
+    other report shares that date. A simulated post-split pass also rejects a split if it
+    would create a duplicate in the destination cycle.
+    """
+    excluded: set[str] = set()
+    while True:
+        cycle, counted, used = 1, 0, set()
+        can_identify_tables = True
+        parts: list[dict] = []
+        candidates: dict[str, dict] = {}
+
+        def append_part(row, codes, *, is_extra=False, split_id=None):
+            numbers = [_code_number(code) for code in codes]
+            numbers = [number for number in numbers if number is not None]
+            parts.append({
+                "row": row,
+                "codes": list(codes),
+                "numbers": numbers,
+                "counts": row.review_status in ("Pending", "Confirmed"),
+                "is_extra": bool(is_extra),
+                "split_id": split_id,
+            })
+
+        def advance(numbers, tables, counts, is_extra):
+            nonlocal cycle, counted, used
+            if is_extra:
+                return
+            derived_extra = cycle == MONTHLY_CYCLE_TARGET and total_tables > 0 and counted >= total_tables
+            new_numbers = set(numbers) - used
+            cleaned = (len(numbers) if derived_extra else len(new_numbers)) if numbers else (tables or 0)
+            if counts:
+                counted += cleaned
+                used.update(numbers)
+                if total_tables > 0 and counted >= total_tables and cycle < MONTHLY_CYCLE_TARGET:
+                    cycle, counted, used = cycle + 1, counted - total_tables, set()
+
+        for index, row in enumerate(rows):
+            codes = list(row.cleaned_table_codes or [])
+            raw_numbers = [_code_number(code) for code in codes]
+            valid_codes = bool(codes) and all(
+                number is not None and 1 <= number <= total_tables for number in raw_numbers
+            ) and len(set(raw_numbers)) == len(raw_numbers)
+            active = row.review_status in ("Pending", "Confirmed")
+            derived_extra = cycle == MONTHLY_CYCLE_TARGET and total_tables > 0 and counted >= total_tables
+            row_id = str(row.id)
+            followers_same_day = any(
+                later.report_date == row.report_date for later in rows[index + 1:]
+            )
+            repeated = [
+                code for code, number in zip(codes, raw_numbers)
+                if number is not None and number in used
+            ]
+            fresh = [
+                code for code, number in zip(codes, raw_numbers)
+                if number is not None and number not in used
+            ]
+            remaining = total_tables - counted
+            eligible = (
+                row_id not in excluded
+                and active
+                and not row.is_extra
+                and not derived_extra
+                and can_identify_tables
+                and valid_codes
+                and row.tables_cleaned == len(codes)
+                and bool(repeated)
+                and len(fresh) == remaining
+                and not followers_same_day
+            )
+            if eligible:
+                spill_extra = cycle == MONTHLY_CYCLE_TARGET
+                append_part(row, fresh, split_id=row_id)
+                advance([_code_number(code) for code in fresh], len(fresh), active, False)
+                append_part(row, repeated, is_extra=spill_extra, split_id=row_id)
+                advance([_code_number(code) for code in repeated], len(repeated), active, spill_extra)
+                candidates[row_id] = {
+                    "row": row,
+                    "first_codes": fresh,
+                    "next_codes": repeated,
+                    "next_is_extra": spill_extra,
+                }
+                continue
+
+            append_part(row, codes, is_extra=bool(row.is_extra), split_id=None)
+            numbers = [number for number in raw_numbers if number is not None]
+            advance(numbers, row.tables_cleaned, active, bool(row.is_extra))
+            if active and row.tables_cleaned and not valid_codes:
+                can_identify_tables = False
+
+        sequence = _cycle_sequence([
+            _SeqEntry(
+                len(part["numbers"]) if part["numbers"] else int(part["row"].tables_cleaned or 0),
+                part["counts"],
+                frozenset(part["numbers"]),
+                part["is_extra"],
+            )
+            for part in parts
+        ], total_tables)
+        seen: dict[tuple[int, int], dict] = {}
+        conflicting_splits: set[str] = set()
+        for part, (cycle_no, extra) in zip(parts, sequence):
+            if extra or not part["counts"]:
+                continue
+            for number in part["numbers"]:
+                key = (cycle_no, number)
+                previous = seen.get(key)
+                if previous is not None:
+                    if previous["split_id"]:
+                        conflicting_splits.add(previous["split_id"])
+                    if part["split_id"]:
+                        conflicting_splits.add(part["split_id"])
+                else:
+                    seen[key] = part
+        new_exclusions = conflicting_splits - excluded
+        if not new_exclusions:
+            return list(candidates.values())
+        excluded.update(new_exclusions)
+
+
+def _split_legacy_rollover_reports(
+    db: Session, plant: Plant, month: str, total_tables: int, user: User | None,
+) -> tuple[list[dict], set[UUID]]:
+    rows = list(db.scalars(select(WashingDailyReport).where(
+        WashingDailyReport.plant_id == plant.id, WashingDailyReport.cycle_month == month,
+    ).order_by(WashingDailyReport.report_date, WashingDailyReport.created_at, WashingDailyReport.id)))
+    planned = _plan_legacy_rollover_splits(rows, total_tables)
+    splits, touched = [], set()
+    for candidate in planned:
+        report = candidate["row"]
+        before_codes = list(report.cleaned_table_codes or [])
+        before_count = report.tables_cleaned
+        report.cleaned_table_codes = candidate["first_codes"]
+        report.tables_cleaned = len(candidate["first_codes"])
+        report.cycle_completed = False
+        created_at = report.created_at or datetime.now(timezone.utc)
+        split_report = WashingDailyReport(
+            plant_id=report.plant_id,
+            cycle_month=report.cycle_month,
+            cycle_no=report.cycle_no,
+            report_date=report.report_date,
+            job_status=report.job_status,
+            tables_cleaned=len(candidate["next_codes"]),
+            cleaned_table_codes=candidate["next_codes"],
+            remarks=report.remarks,
+            exception_reason=report.exception_reason,
+            evidence=[],
+            reported_by_id=report.reported_by_id,
+            reported_by=report.reported_by,
+            review_status=report.review_status,
+            reviewed_by_id=report.reviewed_by_id,
+            reviewed_by=report.reviewed_by,
+            reviewed_at=report.reviewed_at,
+            review_note=report.review_note,
+            cycle_completed=False,
+            is_extra=candidate["next_is_extra"],
+            created_at=created_at + timedelta(microseconds=1),
+        )
+        db.add(split_report)
+        db.flush()
+        touched.update((report.id, split_report.id))
+        metadata = {
+            "plant": plant.site_code,
+            "month": month,
+            "report_date": report.report_date.isoformat(),
+            "source_report_id": str(report.id),
+            "split_report_id": str(split_report.id),
+            "first_entry_tables": candidate["first_codes"],
+            "next_cycle_tables": candidate["next_codes"],
+            "next_entry_is_extra": candidate["next_is_extra"],
+            "evidence_kept_on_report_id": str(report.id),
+        }
+        db.add(AuditLog(
+            user_id=user.id if user else None,
+            actor_name=user.display_name if user else "Solar91 (automatic)",
+            action="Split legacy module cleaning rollover",
+            module="Washing",
+            entity_type="washing_daily_report",
+            entity_id=str(report.id),
+            before_state={"tables_cleaned": before_count, "cleaned_table_codes": before_codes},
+            after_state={
+                "source_report_id": str(report.id),
+                "source_tables_cleaned": report.tables_cleaned,
+                "source_table_codes": candidate["first_codes"],
+                "split_report_id": str(split_report.id),
+                "split_tables_cleaned": split_report.tables_cleaned,
+                "split_table_codes": candidate["next_codes"],
+            },
+            metadata_json=metadata,
+        ))
+        splits.append({
+            "report_id": str(report.id),
+            "split_report_id": str(split_report.id),
+            "report_date": report.report_date.isoformat(),
+            "first_entry_tables": candidate["first_codes"],
+            "next_cycle_tables": candidate["next_codes"],
+            "next_entry_is_extra": candidate["next_is_extra"],
+        })
+    return splits, touched
+
+
 def _report_table_count(report) -> int:
     """Count distinct recorded table numbers, or the saved count for count-only reports."""
     numbers = {_code_number(code) for code in (report.cleaned_table_codes or [])}
@@ -1643,9 +1847,9 @@ def _audit_moves(db: Session, user: User | None, plant: Plant, month: str, moved
         ))
 
 
-# Bump when the cycle counting rule changes: every saved month is recounted once, automatically, on the next start.
+# Bump when the cycle counting rule changes. This version also splits unambiguous legacy rollover reports once.
 CYCLE_RULE_SETTING = "washing_cycle_rule"
-CYCLE_RULE_VERSION = "distinct-table-completion-2"
+CYCLE_RULE_VERSION = "distinct-table-completion-3-rollover-split"
 
 
 def recount_all_months(db: Session) -> dict:
@@ -1656,7 +1860,7 @@ def recount_all_months(db: Session) -> dict:
     marker = db.get(AppSetting, CYCLE_RULE_SETTING)
     if marker is not None and marker.setting_value == CYCLE_RULE_VERSION:
         return {"skipped": True}
-    plants = moved_days = months = 0
+    plants = moved_days = months = split_reports = 0
     for plant_id in list(db.scalars(select(WashingConfig.plant_id).order_by(WashingConfig.plant_id))):
         config = db.scalar(select(WashingConfig).where(WashingConfig.plant_id == plant_id).with_for_update())
         plant = db.get(Plant, plant_id)
@@ -1665,8 +1869,10 @@ def recount_all_months(db: Session) -> dict:
             continue
         total = _plant_table_count(db, plant_id, config)
         for month in sorted(set(db.scalars(select(WashingDailyReport.cycle_month).where(WashingDailyReport.plant_id == plant_id)))):
+            splits, _touched = _split_legacy_rollover_reports(db, plant, month, total, None)
             moved = _resequence_month(db, plant_id, month, total)
             _audit_moves(db, None, plant, month, moved, f"cycle rule {CYCLE_RULE_VERSION}")
+            split_reports += len(splits)
             moved_days += len(moved)
             months += 1
         db.commit()            # one plant per transaction: report saves for other plants never wait long
@@ -1678,7 +1884,7 @@ def recount_all_months(db: Session) -> dict:
         marker.setting_value = CYCLE_RULE_VERSION
     db.commit()
     invalidate_overview_cache()
-    return {"plants": plants, "months": months, "moved_days": moved_days}
+    return {"plants": plants, "months": months, "moved_days": moved_days, "split_reports": split_reports}
 
 
 def _ordered_codes(db: Session, plant_id: UUID) -> list[str]:
@@ -1779,6 +1985,7 @@ def create_daily_report(db: Session, user: User, payload: WashingDailyReportRequ
         remarks=payload.remarks, cleaned_codes=payload.cleaned_table_codes,
         is_extra=payload.is_extra,
     )
+    _assert_distinct_tables(db, plant.id, [report.cycle_month], total_tables, {report.id})
     cycle_no = report.cycle_no
     if report.review_status != "Confirmed":
         _notify_wash(
@@ -2307,10 +2514,16 @@ def recount_month(db: Session, user: User, plant_id: UUID, month: str) -> dict:
     if not config:
         raise HTTPException(409, "Washing has not been set up for this plant")
     _parse_month(month)
+    rollover_splits, touched = _split_legacy_rollover_reports(
+        db, plant, month, _plant_table_count(db, plant.id, config), user,
+    )
     moved = _resequence_month(db, plant.id, month, _plant_table_count(db, plant.id, config))
     _audit_moves(db, user, plant, month, moved, "recount")
+    if touched:
+        _assert_distinct_tables(db, plant.id, [month], _plant_table_count(db, plant.id, config), touched)
     db.commit()
-    return {**month_cycles(db, user, plant.id, month), "moved": moved}
+    invalidate_overview_cache()
+    return {**month_cycles(db, user, plant.id, month), "moved": moved, "rollover_splits": rollover_splits}
 
 
 def save_cycle_schedule(db: Session, user: User, plant_id: UUID, payload) -> dict:

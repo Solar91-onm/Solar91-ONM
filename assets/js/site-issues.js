@@ -37,20 +37,6 @@
     });
     return categoriesPromise;
   }
-  /**
-   * Quick templates are derived from the configured categories and their
-   * sub-problems: one button per category + sub-problem pair, so the list grows
-   * with yours instead of being hard-coded.
-   */
-  function templates() {
-    var out = [];
-    CATEGORIES.forEach(function (category) {
-      (category.sub_problems || []).slice(0, 3).forEach(function (sub) {
-        out.push({ label: category.name + " · " + sub, equipment: category.name, subpart: sub, problem: sub });
-      });
-    });
-    return out.slice(0, 8);
-  }
   // "inverter" check used in wizard step 2 (matches overview.js's own isInverter()).
   function isDraftInverter(equipment) {
     var lower = String(equipment || "").trim().toLowerCase();
@@ -923,10 +909,7 @@
   function renderWizardStepOne(context, draft) {
     return '<div class="ep-issues__wizard-step"><label class="ep-issues__wizard-field">Plant code' +
       renderWizardPlant(context, draft) + '</label>' +
-      '<div class="ep-issues__wizard-info"><strong>What you will add</strong>' +
-        '<span>Issue category and fault area</span><span>Issue priority and details</span>' +
-        '<span>Optional evidence photos and assignee</span>' +
-      '</div><div class="ep-issues__wizard-actions"><span></span>' +
+      '<div class="ep-issues__wizard-actions"><span></span>' +
         '<button type="button" class="ep-issues__button ep-issues__button--primary" data-wizard-action="next">Next</button>' +
       '</div></div>';
   }
@@ -1017,12 +1000,6 @@
           escape(draft.unitCount || "") + '" placeholder="How many units are affected" />' +
           '<small>How many units of this equipment the fault covers. Leave blank if it is not counted.</small>' +
         '</label>') +
-      (templates().length
-        ? '<div class="ep-issues__template-area"><strong>Quick templates — 1 click fills category, sub-problem and description</strong>' +
-          '<div>' + templates().map(function (template, index) {
-            return '<button type="button" data-issue-template="' + index + '">' + escape(template.label) + '</button>';
-          }).join("") + '</div></div>'
-        : "") +
       '<p class="ep-issues__wizard-error" data-wizard-step2-error role="alert" hidden></p>' +
       '<div class="ep-issues__wizard-actions"><button type="button" class="ep-issues__button" data-wizard-action="back">Back</button>' +
         '<button type="button" class="ep-issues__button ep-issues__button--primary" data-wizard-action="next">Next</button></div>' +
@@ -1085,9 +1062,6 @@
         : renderWizardStepThree(state.draft);
     return '<form class="ep-issues__wizard" data-issue-form data-issue-wizard novalidate>' +
       renderStepper() + stepContent +
-        '<p class="ep-issues__wizard-demo-note">' +
-          "This ticket will be saved against the selected plant." +
-        '</p>' +
       '</form>';
   }
 
@@ -1105,10 +1079,8 @@
     return '<div class="ep-issues__overlay" data-issue-overlay>' +
       '<button type="button" class="ep-issues__backdrop" data-issue-action="close" aria-label="Close issue details"></button>' +
       '<aside class="ep-issues__drawer" role="dialog" aria-modal="true" aria-labelledby="issue-drawer-title">' +
-        '<header class="ep-issues__drawer-head"><div><p>' +
-          (isWizard ? "Step-by-step issue capture · Ticket ID and timestamp are generated only when you submit" :
-            ticketSubtitle) +
-          '</p>' +
+        '<header class="ep-issues__drawer-head"><div>' +
+          (isWizard ? "" : '<p>' + ticketSubtitle + '</p>') +
           '<h2 id="issue-drawer-title">' + escape(title) + '</h2></div>' +
           '<button type="button" class="ep-issues__drawer-x" data-issue-action="close" aria-label="Close">×</button></header>' +
         (isWizard
@@ -1613,20 +1585,6 @@
         state.issueDateRangeMode = false;
         state.issueDateError = "";
         load();
-        return;
-      }
-      var templateButton = event.target.closest("[data-issue-template]");
-      if (templateButton && state.modalMode === "create" && state.draft) {
-        var template = templates()[Number(templateButton.dataset.issueTemplate)];
-        var wizardForm = host.querySelector("[data-issue-wizard]");
-        if (wizardForm) syncWizardDraft(wizardForm);
-        if (template) {
-          state.draft.equipment = template.equipment;
-          state.draft.subpart = template.subpart || "";
-          state.draft.problem = template.problem;
-          state.wizardStep = 2;
-          renderView();
-        }
         return;
       }
       var wizardAction = event.target.closest("[data-wizard-action]");

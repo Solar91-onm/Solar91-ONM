@@ -126,6 +126,21 @@ def test_issue_edit_form_fits_one_screen():
     assert ".ep-issues__edit-actions {\n  position: sticky;" in styles
 
 
+def test_raise_issue_overlay_omits_intro_and_plant_note():
+    issues = (PORTAL_ASSETS / "js" / "site-issues.js").read_text(encoding="utf-8")
+    styles = (PORTAL_ASSETS / "css" / "site-issues.css").read_text(encoding="utf-8")
+    assert "Step-by-step issue capture" not in issues
+    assert "What you will add" not in issues
+    assert "Issue category and fault area" not in issues
+    assert "Issue priority and details" not in issues
+    assert "Optional evidence photos and assignee" not in issues
+    assert "This ticket will be saved against the selected plant." not in issues
+    assert "Quick templates" not in issues
+    assert "data-issue-template" not in issues
+    assert ".ep-issues__wizard-info" not in styles
+    assert ".ep-issues__wizard-demo-note" not in styles
+
+
 def test_security_tab_label_and_header_count_people():
     navigation = (PORTAL_ASSETS / "js" / "navigation.js").read_text(encoding="utf-8")
     security = (PORTAL_ASSETS / "js" / "security.js").read_text(encoding="utf-8")
