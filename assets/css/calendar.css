@@ -65,6 +65,13 @@
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
+.ep-calendar__eyebrow--plant {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.ep-calendar__plant-name { color: var(--ep-text-strong); }
+.ep-calendar__plant-code { color: var(--ep-accent-strong); }
 
 .ep-calendar__head h1 {
   margin: 0;

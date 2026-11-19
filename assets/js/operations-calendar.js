@@ -79,17 +79,35 @@
     return context.type + ":" + (context.plantCode || "portfolio");
   }
 
+  function focusPMEvent(state, eventId) {
+    var index = state.events.findIndex(function (event) {
+      return String(event.id) === String(eventId);
+    });
+    if (index < 0) return false;
+    state.modalDate = state.events[index].date;
+    state.modalPlant = state.events[index].plantSiteCode || "";
+    state.modalStatus = "all";
+    state.modalEquipment = "";
+    state.modalSearch = "";
+    state.detailEventIndex = index;
+    return true;
+  }
+
   function getState(context) {
     var key = contextKey(context);
     if (!states[key]) {
+      var initialMonth = typeof context.initialMonth === "string" &&
+        /^\d{4}-\d{2}$/.test(context.initialMonth) ? context.initialMonth : "";
       states[key] = {
-        month: context.startDate
+        month: initialMonth || (context.startDate
           ? context.startDate.slice(0, 7)
-          : monthKey(new Date()),
+          : monthKey(new Date())),
         // Module Cleaning for one plant is read a week at a time — that is the span a
         // cleaning crew works to. The Month button shows the whole month.
         span: context.type === "washing" && context.plantCode ? "week" : "month",
-        weekStart: weekStartOf(context.startDate ? dateFromKey(context.startDate) : new Date()),
+        weekStart: weekStartOf(initialMonth
+          ? dateFromKey(initialMonth + "-01")
+          : context.startDate ? dateFromKey(context.startDate) : new Date()),
         rangeStart: context.startDate || "",
         rangeEnd: context.endDate || "",
         plants: [],
@@ -107,6 +125,7 @@
         modalEquipment: "",
         modalSearch: "",
         detailEventIndex: null,
+        pendingEventId: null,
         liveWashing: false,
         washingPlant: null,
         washingNotConfigured: false,
@@ -2010,11 +2029,20 @@
     var plant = context.plantCode && state.plants.find(function (item) {
       return item.siteCode === context.plantCode;
     });
-    var subtitle = context.plantCode
-      ? "Plant calendar for " + (plant ? plantLabel(plant) : context.plantCode) + "."
-      : "Portfolio calendar across all plants.";
-    if (state.rangeStart && state.rangeEnd) {
-      subtitle += " Showing records from " + state.rangeStart + " through " + state.rangeEnd + ".";
+    var headerEyebrow = context.type === "washing" && context.plantCode
+      ? '<p class="ep-calendar__eyebrow ep-calendar__eyebrow--plant">' +
+        '<span class="ep-calendar__plant-name">' +
+          escape(plant && (plant.plantName || plant.displayName) || context.plantCode) + '</span>' +
+        '<span class="ep-calendar__plant-code">' + escape(context.plantCode) + '</span></p>'
+      : '<p class="ep-calendar__eyebrow">' + (context.plantCode ? "Plant view" : "Views") + '</p>';
+    var subtitle = "";
+    if (context.type !== "washing") {
+      subtitle = context.plantCode
+        ? "Plant calendar for " + (plant ? plantLabel(plant) : context.plantCode) + "."
+        : "Portfolio calendar across all plants.";
+      if (state.rangeStart && state.rangeEnd) {
+        subtitle += " Showing records from " + state.rangeStart + " through " + state.rangeEnd + ".";
+      }
     }
     var events = visibleEvents(state);
     var statusCounts = events.length + (events.length === 1
@@ -2047,14 +2075,17 @@
     // throwing the user back up the day list after every entry. Keep the position across the swap.
     var recordBodyBefore = host.querySelector(".ep-calendar__record-body");
     var recordScrollTop = recordBodyBefore ? recordBodyBefore.scrollTop : null;
+    var subtitleMarkup = context.type === "washing" ? "" :
+      '<p class="ep-calendar__subtitle">' + escape(subtitle) +
+        " Entries are saved records on their scheduled date.</p>";
     host.innerHTML = '<div class="ep-calendar">' +
-      '<header class="ep-calendar__head"><div><p class="ep-calendar__eyebrow">' +
-        (context.plantCode ? "Plant view" : "Views") + '</p><h1>' + escape(typeLabel) +
-        '</h1><p class="ep-calendar__subtitle">' + escape(subtitle) +
-        (state.liveWashing
-          ? " Cycle progress and dates come from saved module cleaning records. Hover a date for its reports."
-          : " Entries are saved records on their scheduled date.") + '</p></div>' +
-        '<div class="ep-calendar__head-actions"><span class="ep-calendar__count">' + escape(statusCounts) + '</span>' +
+      '<header class="ep-calendar__head"><div>' + headerEyebrow +
+        '<h1>' + escape(typeLabel) + '</h1>' + subtitleMarkup + '</div>' +
+        '<div class="ep-calendar__head-actions">' +
+        (context.fromPmOverview
+          ? '<button type="button" class="ep-calendar__setup-button" data-calendar-action="return-to-pm-overview">Back to Preventive Maintenance</button>'
+          : "") +
+        '<span class="ep-calendar__count">' + escape(statusCounts) + '</span>' +
           (showRecordButton
             ? '<button type="button" class="ep-calendar__setup-button" data-calendar-action="open-record">Record module cleaning</button>'
             : "") +
@@ -2344,6 +2375,13 @@
           a.plantName.localeCompare(b.plantName) ||
           a.title.localeCompare(b.title);
       });
+      if (state.pendingEventId) {
+        var pendingEventId = state.pendingEventId;
+        state.pendingEventId = null;
+        if (!focusPMEvent(state, pendingEventId)) {
+          state.error = "The selected PM task is no longer available in this calendar.";
+        }
+      }
       state.loading = false;
       state.loaded = true;
       if (active && active.host === host && active.state === state) renderView(host, state, context);
@@ -2637,7 +2675,9 @@
       var state = active.state;
       var context = active.context;
 
-      if (action.dataset.calendarAction === "previous" || action.dataset.calendarAction === "next") {
+      if (action.dataset.calendarAction === "return-to-pm-overview") {
+        if (global.Solar91PortalNav) global.Solar91PortalNav.closePMCalendar();
+      } else if (action.dataset.calendarAction === "previous" || action.dataset.calendarAction === "next") {
         var shift = action.dataset.calendarAction === "previous" ? -1 : 1;
         if (state.span === "week") {
           state.weekStart = shiftDays(state.weekStart, shift * 7);
@@ -3217,6 +3257,13 @@
     if (active && active.state !== states[key]) active.state.modalDate = "";
     wire(host);
     var state = getState(context);
+    var initialMonth = typeof context.initialMonth === "string" &&
+      /^\d{4}-\d{2}$/.test(context.initialMonth) ? context.initialMonth : "";
+    if (initialMonth && state.month !== initialMonth) {
+      state.month = initialMonth;
+      state.weekStart = weekStartOf(dateFromKey(initialMonth + "-01"));
+      state.loaded = false;
+    }
     var rangeStart = context.startDate || "";
     var rangeEnd = context.endDate || "";
     if (state.rangeStart !== rangeStart || state.rangeEnd !== rangeEnd) {
@@ -3224,6 +3271,18 @@
       state.rangeEnd = rangeEnd;
       if (rangeStart) state.month = rangeStart.slice(0, 7);
       state.loaded = false;
+    }
+    if (context.eventId) {
+      if (state.loaded && !focusPMEvent(state, context.eventId)) {
+        state.loaded = false;
+        state.pendingEventId = context.eventId;
+      } else if (!state.loaded) {
+        state.pendingEventId = context.eventId;
+      }
+    } else {
+      state.pendingEventId = null;
+      state.modalDate = "";
+      state.detailEventIndex = null;
     }
     active = { host: host, state: state, context: context };
     if (state.loaded) {

@@ -231,7 +231,8 @@
   background: var(--ep-bg);
   font-family: var(--ep-font-mono, "JetBrains Mono", monospace);
   font-size: 10px;
-  color: var(--ep-text-muted);
+  color: var(--ep-text-strong);
+  font-weight: 700;
 }
 
 .ep-wb__date { color: var(--ep-text-muted); font-size: 12px; }

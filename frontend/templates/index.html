@@ -55,6 +55,7 @@
 <link rel="stylesheet" href="/assets/css/design.css"/>
 <link rel="stylesheet" href="/assets/css/liasoning.css"/>
 <link rel="stylesheet" href="/assets/css/washing-board.css"/>
+<link rel="stylesheet" href="/assets/css/pm-overview.css"/>
 <link rel="stylesheet" href="/assets/css/security.css"/>
 
 <link rel="manifest" href="/manifest.webmanifest"/>
@@ -334,6 +335,10 @@
             </section>
           </section>
 
+          <section class="ep-tab-view" data-tab-view="pm-overview">
+            <div data-pm-overview-host></div>
+          </section>
+
           <!-- ═════════════ PREVENTIVE MAINTENANCE / WASHING CALENDAR ═════════════ -->
           <!-- ═════════════ MODULE CLEANING BOARD (all plants) ═════════════ -->
           <section class="ep-tab-view" data-tab-view="washing-board">
@@ -440,6 +445,7 @@ window.S91_CONFIG = JSON.parse(document.getElementById("s91-config").textContent
   "design": "/assets/js/design.js",
   "liasoning": "/assets/js/liasoning.js",
   "operations-calendar": "/assets/js/operations-calendar.js",
+  "pm-overview": "/assets/js/pm-overview.js",
   "photo-evidence": "/assets/js/photo-evidence.js",
   "washing-board": "/assets/js/washing-board.js",
   "inverter-health": "/assets/js/inverter-health.js",

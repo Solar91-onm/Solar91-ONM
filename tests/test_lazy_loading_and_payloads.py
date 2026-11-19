@@ -36,7 +36,7 @@ SHELL_SCRIPTS = ["format.js", "portal-api.js", "data-adapter.js", "modules.js",
 LAZY_MODULES = ["table-sort", "table-column-filter", "register-io", "plant-details", "plants-table", "site-issues",
                 "movable-assets", "bom", "design", "liasoning", "operations-calendar",
                 "washing-board", "categories", "security", "requirements", "settings", "photo-evidence",
-                "inverter-health"]
+                "inverter-health", "pm-overview"]
 
 
 def _script_tags(page: str) -> list[str]:
@@ -126,7 +126,7 @@ def test_navigation_loads_a_pages_module_before_it_renders():
     nav = (PORTAL_ASSETS / "js" / "navigation.js").read_text(encoding="utf-8")
     # Every page names the module(s) it needs.
     for fragment in ('if (pageId === "health") return ["site-issues"];',
-                     'if (pageId === "pm") return ["operations-calendar"];',
+                     'if (pageId === "pm") return navState.pmCalendarOpen ? ["operations-calendar"] : ["pm-overview"];',
                      'if (pageId === "washing") return plantCode ? ["operations-calendar"] : ["washing-board"];',
                      'if (section === "liasoning") return ["plants-table", "liasoning"];'):
         assert fragment in nav, fragment
@@ -386,6 +386,51 @@ def test_string_tile_reads_counts_in_overview_js():
     assert '"/api/issues/equipment-summary?vertical=String"' in overview
     assert "/api/issues?vertical=String&limit=200" not in overview
     assert "strings.issues = (body && body.plants) || [];" in overview
+
+
+def test_string_health_falls_back_to_module_cleaning_table_counts():
+    """Unconfigured String totals follow the visible plant table count without saving a config."""
+    overview = (PORTAL_ASSETS / "js" / "overview.js").read_text(encoding="utf-8")
+    health = (PORTAL_ASSETS / "js" / "inverter-health.js").read_text(encoding="utf-8")
+
+    assert "function stringUnitRows(codes, unitRows, allowTableFallback)" in overview
+    assert "profile.washing && profile.washing.tableCount" in overview
+    assert "inferred_from_table_count: true" in overview
+    assert "getUnitRows: stringUnitRows" in overview
+    assert "getUnitRows(codes, panelState.units, !panelState.unitsRestricted)" in health
+    assert 'fmt.formatNumber(row.total) + " strings"' in health
+    assert "From Module Cleaning table count" in health
+    # The String panel uses the same searchable plant toolbar and searchable header filters.
+    assert 'data-ih-plant-search value="${fmt.escape(panelState.plantSearch)}"' in health
+    assert 'columnHeader(column, "plant", "data-ih-sort", panelState.plantSort)' in health
+    assert "global.Solar91PortalColumnFilter.headerHTML(header" in health
+
+    # Execute the production resolver: saved String config wins, missing counts stay unavailable,
+    # and counts outside the selected plant scope are not included.
+    start = overview.index("  function stringUnitRows(")
+    end = overview.index("\n\n  /**", start)
+    resolver = overview[start:end]
+    script = f"""
+      const source = {json.dumps(resolver)};
+      const state = {{ allRows: [
+        {{ plant: {{ siteCode: "P1" }}, profile: {{ washing: {{ tableCount: 12 }} }} }},
+        {{ plant: {{ siteCode: "P2" }}, profile: {{ washing: {{ tableCount: 18 }} }} }},
+        {{ plant: {{ siteCode: "P3" }}, profile: {{ washing: {{ tableCount: null }} }} }},
+        {{ plant: {{ siteCode: "P4" }}, profile: {{ washing: {{ tableCount: 9 }} }} }}
+      ] }};
+      const isString = (value) => String(value || "").trim().toLowerCase() === "string";
+      const resolve = new Function("state", "isString", source + "; return stringUnitRows;")(state, isString);
+      const units = resolve(new Set(["P1", "P2", "P3"]), [
+        {{ site_code: "P2", equipment_type: "String", total_units: 7 }}
+      ], true);
+      const fallback = units.find((row) => row.site_code === "P1");
+      if (!fallback || fallback.total_units !== 12 || !fallback.inferred_from_table_count) process.exit(1);
+      if (units.filter((row) => row.site_code === "P2").length !== 1 || units.find((row) => row.site_code === "P2").total_units !== 7) process.exit(2);
+      if (units.some((row) => row.site_code === "P3" || row.site_code === "P4")) process.exit(3);
+      if (resolve(new Set(["P1"]), [], false).length !== 0) process.exit(4);
+    """
+    result = subprocess.run(["node", "-e", script], cwd=ROOT, capture_output=True, text=True, timeout=30)
+    assert result.returncode == 0, result.stderr or result.stdout
 
 
 def test_equipment_health_module_is_parameterised_not_forked():

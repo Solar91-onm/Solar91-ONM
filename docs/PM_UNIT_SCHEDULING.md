@@ -90,3 +90,11 @@ Scale: one render reuses its coverage, plant lookups and grouping instead of rec
 - **30-day PM cycle panel** (Overview and Calendar): the order of work with each equipment's job count in the current scope; equipment without a PM job is marked with **+ Add job**. The calendar shows work orders only, so an equipment appears there once it has a job.
 - **Excel templates**: the general `PM_Task_Plan_Template.xlsx` lists ACDB and Miscellaneous (MCCB removed) in the equipment dropdown and Task ideas, and its notes give the new cycle order, the one-job-per-plant rule (ACCB Panel, Aux. Transformer, ACDB, Miscellaneous) and Remarks for the Miscellaneous items. The Plant side / GSS side templates are rebuilt from it with `python scripts/build_pm_side_templates.py`.
 - No database (Supabase) change is needed for the new types: equipment types are not constrained in the schema.
+
+## Portal PM overview and plant dashboard
+
+The portal's **Preventive Maintenance** view uses one lazy-loaded screen for both the portfolio overview and a selected plant. Overview cards default to active plants; selecting a plant or opening **Plants → Preventive Maintenance** shows that plant's monthly workload, equipment categories, upcoming/overdue work and searchable schedule. Search, plant, equipment, status, due-date and sort controls filter the displayed records.
+
+The screen reads role-scoped monthly compliance from `GET /api/portal/overview/range` and PM work orders from `GET /api/portal/calendar?kind=pm&month=YYYY-MM[&site_code=...]`. Compliance uses the existing portal calculation; cancelled work is excluded. An attention badge uses the established 80% PM compliance threshold. The response's `truncated` flag is surfaced rather than presenting a capped calendar response as complete.
+
+**Open PM calendar** reuses the existing operations calendar. Selecting a saved work order opens its date and existing detail view there; browser Back and the calendar's return button restore the same portfolio or plant PM page. The overview is read-only and does not create, edit or reschedule PM work.

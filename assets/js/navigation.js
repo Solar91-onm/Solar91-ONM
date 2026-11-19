@@ -91,6 +91,10 @@
     selectedViewPage: null,      // e.g. "details", "health"
     selectedDetailSection: "details",
     selectedRange: null,         // { startDate, endDate } when opened from Overview
+    pmParent: "overview",
+    pmCalendarOpen: false,
+    pmCalendarMonth: null,
+    pmCalendarEventId: null,
     expandedGroups: {},          // { plants: true/false, views: true/false }
     expandedPlants: {},          // { siteCode: true } plants whose sub-menu is open (user's choice)
     detailsOpen: { plant: {}, view: false }   // Details sub-sections dropdown: per plant ({siteCode: true}) and for Views; closed until the user opens it
@@ -109,7 +113,11 @@
       selectedRange: navState.selectedRange ? {
         startDate: navState.selectedRange.startDate,
         endDate: navState.selectedRange.endDate
-      } : null
+      } : null,
+      pmParent: navState.pmParent,
+      pmCalendarOpen: navState.pmCalendarOpen,
+      pmCalendarMonth: navState.pmCalendarMonth,
+      pmCalendarEventId: navState.pmCalendarEventId
     };
   }
 
@@ -142,7 +150,11 @@
         selectedSubPage: null,
         selectedViewPage: null,
         selectedDetailSection: "details",
-        selectedRange: null
+        selectedRange: null,
+        pmParent: "overview",
+        pmCalendarOpen: false,
+        pmCalendarMonth: null,
+        pmCalendarEventId: null
       };
     }
     var viewPage = snapshot.selectedViewPage === "health" ? "details" : snapshot.selectedViewPage;
@@ -160,7 +172,14 @@
           typeof snapshot.selectedRange.startDate === "string" &&
           typeof snapshot.selectedRange.endDate === "string"
           ? { startDate: snapshot.selectedRange.startDate, endDate: snapshot.selectedRange.endDate }
-          : null
+          : null,
+        pmParent: "overview",
+        pmCalendarOpen: viewPage === "pm" && snapshot.pmCalendarOpen === true,
+        pmCalendarMonth: viewPage === "pm" &&
+          typeof snapshot.pmCalendarMonth === "string" &&
+          /^\d{4}-\d{2}$/.test(snapshot.pmCalendarMonth) ? snapshot.pmCalendarMonth : null,
+        pmCalendarEventId: viewPage === "pm" && typeof snapshot.pmCalendarEventId === "string"
+          ? snapshot.pmCalendarEventId : null
       };
     }
     var plantSubPage = normalizePlantPage(snapshot.selectedSubPage);
@@ -176,7 +195,14 @@
           typeof snapshot.selectedRange.startDate === "string" &&
           typeof snapshot.selectedRange.endDate === "string"
           ? { startDate: snapshot.selectedRange.startDate, endDate: snapshot.selectedRange.endDate }
-          : null
+          : null,
+        pmParent: plantSubPage === "pm" && snapshot.pmParent === "overview" ? "overview" : "plants",
+        pmCalendarOpen: plantSubPage === "pm" && snapshot.pmCalendarOpen === true,
+        pmCalendarMonth: plantSubPage === "pm" &&
+          typeof snapshot.pmCalendarMonth === "string" &&
+          /^\d{4}-\d{2}$/.test(snapshot.pmCalendarMonth) ? snapshot.pmCalendarMonth : null,
+        pmCalendarEventId: plantSubPage === "pm" && typeof snapshot.pmCalendarEventId === "string"
+          ? snapshot.pmCalendarEventId : null
       };
     }
     return null;
@@ -189,6 +215,10 @@
     navState.selectedViewPage = snapshot.selectedViewPage;
     navState.selectedDetailSection = snapshot.selectedDetailSection;
     navState.selectedRange = snapshot.selectedRange;
+    navState.pmParent = snapshot.pmParent || "overview";
+    navState.pmCalendarOpen = snapshot.pmCalendarOpen === true;
+    navState.pmCalendarMonth = snapshot.pmCalendarMonth || null;
+    navState.pmCalendarEventId = snapshot.pmCalendarEventId || null;
     if (snapshot.activeView === "plant-sub") {
       navState.expandedPlants[snapshot.selectedPlant] = true;
       navState.detailsOpen.plant[snapshot.selectedPlant] = snapshot.selectedDetailSection !== "details";
@@ -207,6 +237,10 @@
     navState.selectedViewPage = null;
     navState.selectedDetailSection = "details";
     navState.selectedRange = null;
+    navState.pmParent = "overview";
+    navState.pmCalendarOpen = false;
+    navState.pmCalendarMonth = null;
+    navState.pmCalendarEventId = null;
   }
 
   function restoreNavigationHistory(state) {
@@ -414,6 +448,10 @@
     navState.selectedPlant = null;
     navState.selectedSubPage = null;
     navState.selectedRange = dateRange || null;
+    navState.pmParent = "overview";
+    navState.pmCalendarOpen = false;
+    navState.pmCalendarMonth = null;
+    navState.pmCalendarEventId = null;
 
     writeNavigationHistory(false);
     renderPlantList(document.querySelector("[data-plant-search]")?.value || "");
@@ -422,7 +460,7 @@
   }
 
   /** Open a plant's sub-page (details, health, pm, washing) programmatically. */
-  function selectPlantPage(siteCode, pageId, dateRange, plantRecord) {
+  function selectPlantPage(siteCode, pageId, dateRange, plantRecord, options) {
     pageId = normalizePlantPage(pageId);
     var plant = allPlants.find(function (p) { return p.siteCode === siteCode; }) ||
       (plantRecord && plantRecord.siteCode === siteCode ? plantRecord : null);
@@ -438,6 +476,11 @@
     navState.activeView = "plant-sub";
     navState.selectedViewPage = null;
     navState.selectedRange = dateRange || null;
+    navState.pmParent = pageId === "pm" && options && options.pmParent === "overview"
+      ? "overview" : "plants";
+    navState.pmCalendarOpen = false;
+    navState.pmCalendarMonth = null;
+    navState.pmCalendarEventId = null;
     setGroupExpanded("plants", true);
     writeNavigationHistory(false);
     renderPlantList(document.querySelector("[data-plant-search]")?.value || "");
@@ -448,6 +491,25 @@
   /** Re-render whatever page is showing (after a save). */
   function refresh() {
     updateContentArea();
+  }
+
+  function openPMCalendar(month, eventId) {
+    var isPMPage = navState.activeView === "plant-sub"
+      ? navState.selectedSubPage === "pm"
+      : navState.activeView === "view-sub" && navState.selectedViewPage === "pm";
+    if (!isPMPage) return;
+    navState.pmCalendarOpen = true;
+    navState.pmCalendarMonth = typeof month === "string" && /^\d{4}-\d{2}$/.test(month)
+      ? month : null;
+    navState.pmCalendarEventId = typeof eventId === "string" ? eventId : null;
+    writeNavigationHistory(false);
+    updateContentArea();
+    updateHighlights();
+  }
+
+  function closePMCalendar() {
+    if (!navState.pmCalendarOpen) return;
+    global.history.back();
   }
 
   // ─── Activate Overview ──────────────────────────────────────────────
@@ -486,7 +548,7 @@
     if (!pageId) return [];
 
     if (pageId === "washing") return plantCode ? ["operations-calendar"] : ["washing-board"];
-    if (pageId === "pm") return ["operations-calendar"];
+    if (pageId === "pm") return navState.pmCalendarOpen ? ["operations-calendar"] : ["pm-overview"];
     if (pageId === "health") return ["site-issues"];
     if (pageId === "movable-assets") return ["movable-assets"];
     if (pageId === "details") {
@@ -510,6 +572,9 @@
     var pageId = navState.activeView === "plant-sub" ? navState.selectedSubPage
       : navState.activeView === "view-sub" ? navState.selectedViewPage : null;
     if (pageId === "washing" && !plantCode) return document.querySelector("[data-washing-board-host]");
+    if (pageId === "pm" && !navState.pmCalendarOpen) {
+      return document.querySelector("[data-pm-overview-host]");
+    }
     if (pageId === "washing" || pageId === "pm") return document.querySelector("[data-calendar-host]");
     if (pageId === "health") return document.querySelector("[data-issues-host]");
     if (pageId === "details" && !plantCode && navState.selectedDetailSection === "health") {
@@ -612,6 +677,7 @@
     var infoHealthEl = document.querySelector('[data-tab-view="info-health"]');
     var calendarEl = document.querySelector('[data-tab-view="calendar"]');
     var washingBoardEl = document.querySelector('[data-tab-view="washing-board"]');
+    var pmOverviewEl = document.querySelector('[data-tab-view="pm-overview"]');
     var movableAssetsEl = document.querySelector('[data-tab-view="movable-assets"]');
     var detailsEl = document.querySelector('[data-tab-view="plant-details"]');
     var requirementsEl = document.querySelector('[data-tab-view="requirements"]');
@@ -627,7 +693,7 @@
     var viewHealthPanel = document.querySelector('[data-view-section-panel="health"]');
 
     function showOnly(el) {
-      [overviewEl, infoHealthEl, calendarEl, washingBoardEl, movableAssetsEl, detailsEl, requirementsEl, securityEl, settingsEl, placeholderEl].forEach(function (section) {
+      [overviewEl, infoHealthEl, pmOverviewEl, calendarEl, washingBoardEl, movableAssetsEl, detailsEl, requirementsEl, securityEl, settingsEl, placeholderEl].forEach(function (section) {
         if (section) section.classList.toggle("is-visible", section === el);
       });
       document.dispatchEvent(new CustomEvent("portal:route-changed"));
@@ -699,7 +765,9 @@
       pageId = navState.selectedSubPage;
       contextText = plant ? (plant.displayName || plant.plantName) + " · " + plant.displayCode : "";
       isDetails = navState.selectedSubPage === "details";
-      if (navState.selectedSubPage === "pm" || navState.selectedSubPage === "washing") {
+      if (navState.selectedSubPage === "pm" && navState.pmCalendarOpen) {
+        calendarType = "pm";
+      } else if (navState.selectedSubPage === "washing") {
         calendarType = navState.selectedSubPage;
       }
       plantCode = navState.selectedPlant;
@@ -715,7 +783,9 @@
       pageId = navState.selectedViewPage;
       contextText = "Portfolio-wide View";
       isDetails = navState.selectedViewPage === "details";
-      if (navState.selectedViewPage === "pm" || navState.selectedViewPage === "washing") {
+      if (navState.selectedViewPage === "pm" && navState.pmCalendarOpen) {
+        calendarType = "pm";
+      } else if (navState.selectedViewPage === "washing") {
         calendarType = navState.selectedViewPage;
       }
     }
@@ -731,7 +801,20 @@
       return;
     }
 
-    if (calendarType && global.Solar91PortalCalendar) {
+    if (pageId === "pm" && !navState.pmCalendarOpen) {
+      showOnly(pmOverviewEl);
+      if (titleEl) titleEl.textContent = "Preventive Maintenance";
+      if (global.Solar91PortalPMOverview) {
+        global.Solar91PortalPMOverview.show(
+          document.querySelector("[data-pm-overview-host]"),
+          {
+            siteCode: plantCode,
+            parent: navState.pmParent,
+            plant: plantCode && allPlants.find(function (item) { return item.siteCode === plantCode; })
+          }
+        );
+      }
+    } else if (calendarType && global.Solar91PortalCalendar) {
       showOnly(calendarEl);
       global.Solar91PortalCalendar.render(
         document.querySelector("[data-calendar-host]"),
@@ -739,7 +822,12 @@
           type: calendarType,
           plantCode: plantCode,
           startDate: navState.selectedRange && navState.selectedRange.startDate,
-          endDate: navState.selectedRange && navState.selectedRange.endDate
+          endDate: navState.selectedRange && navState.selectedRange.endDate,
+          fromPmOverview: calendarType === "pm" && navState.pmCalendarOpen,
+          initialMonth: calendarType === "pm" && navState.pmCalendarOpen
+            ? navState.pmCalendarMonth : null,
+          eventId: calendarType === "pm" && navState.pmCalendarOpen
+            ? navState.pmCalendarEventId : null
         }
       );
     } else if (isDetails) {
@@ -801,6 +889,8 @@
         document.querySelector("[data-movable-assets-host]"),
         { siteCode: plantCode }
       );
+    } else if (pageId === "pm") {
+      showOnly(pmOverviewEl);
     } else if (calendarType) {
       showOnly(calendarEl);                      // script still loading; the skeleton is already there
     } else if (isDetails) {
@@ -1107,6 +1197,8 @@
     selectPlant: selectPlant,
     selectView: selectView,
     selectPlantPage: selectPlantPage,
+    openPMCalendar: openPMCalendar,
+    closePMCalendar: closePMCalendar,
     refresh: refresh,
     setPlantAlerts: setPlantAlerts,
     getState: function () { return navState; }

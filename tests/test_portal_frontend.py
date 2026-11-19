@@ -821,6 +821,11 @@ def test_module_cleaning_board_shows_every_plant_and_opens_one_plants_calendar()
     assert "/assets/css/washing-board.css" in page
     assert 'data-tab-view="washing-board"' in page and "data-washing-board-host" in page
 
+    code_style = styles[styles.index(".ep-wb__code {"):styles.index("\n}", styles.index(".ep-wb__code {"))]
+    assert "font-size: 10px;" in code_style
+    assert "color: var(--ep-text-strong);" in code_style
+    assert "font-weight: 700;" in code_style
+
     # One read, the same figures the plant calendar uses.
     assert '"/api/scheduled/washing/overview?month="' in board
     assert "include_reports=false" in board
@@ -1069,7 +1074,8 @@ def test_overview_inverter_tile_counts_units_and_opens_standalone_health():
     assert overview.count("calculateInverterTotals(") == 2, "one definition and one use by the tile"
     assert "const totals = calculateInverterTotals(codes, inverters.units, inverters.issues);" in overview
     assert "calculateTotals: calculateInverterTotals," in overview, "the panel must reuse the tile's arithmetic"
-    assert "const counts = calculateTotals(codes, panelState.units, issueRows);" in inverter_health
+    assert "const counts = calculateTotals(codes, unitRows, issueRows);" in inverter_health
+    assert "const unitRows = getUnitRows(codes, panelState.units, !panelState.unitsRestricted);" in inverter_health
 
 
 def test_site_issue_register_places_id_before_action_and_labels_description():
@@ -1514,6 +1520,17 @@ def test_calendar_days_do_not_show_native_plain_text_hover_tooltips():
     assert 'aria-label="' in grid
 
 
+def test_module_cleaning_calendar_header_uses_plant_name_and_code_without_subtitle():
+    calendar = (PORTAL_ASSETS / "js" / "operations-calendar.js").read_text(encoding="utf-8")
+    styles = (PORTAL_ASSETS / "css" / "calendar.css").read_text(encoding="utf-8")
+    assert 'context.type === "washing" && context.plantCode' in calendar
+    assert 'class="ep-calendar__plant-name"' in calendar
+    assert 'class="ep-calendar__plant-code"' in calendar
+    assert 'var subtitleMarkup = context.type === "washing" ? ""' in calendar
+    assert ".ep-calendar__plant-name { color: var(--ep-text-strong); }" in styles
+    assert ".ep-calendar__plant-code { color: var(--ep-accent-strong); }" in styles
+
+
 def test_operations_calendar_month_dates_fit_one_responsive_frame():
     calendar = (PORTAL_ASSETS / "js" / "operations-calendar.js").read_text(encoding="utf-8")
     styles = (PORTAL_ASSETS / "css" / "calendar.css").read_text(encoding="utf-8")
@@ -1542,6 +1559,106 @@ def test_plant_pm_calendar_shows_job_hover_card_for_scheduled_dates():
     assert "ep-calendar__pm-tip-job" in styles
     assert "/assets/js/operations-calendar.js" in page
     assert "/assets/css/calendar.css" in page
+
+
+def test_pm_overview_routes_through_role_scoped_portal_data_and_existing_calendar():
+    page = TEMPLATE.read_text(encoding="utf-8")
+    overview = (PORTAL_ASSETS / "js" / "pm-overview.js").read_text(encoding="utf-8")
+    navigation = (PORTAL_ASSETS / "js" / "navigation.js").read_text(encoding="utf-8")
+    calendar = (PORTAL_ASSETS / "js" / "operations-calendar.js").read_text(encoding="utf-8")
+    styles = (PORTAL_ASSETS / "css" / "pm-overview.css").read_text(encoding="utf-8")
+
+    assert 'data-tab-view="pm-overview"' in page
+    assert '"pm-overview": "/assets/js/pm-overview.js"' in page
+    assert 'href="/assets/css/pm-overview.css"' in page
+    assert "data.fetchPortfolioRange(period.start, period.end)" in overview
+    assert 'data.fetchCalendarMonth("pm", state.month, state.siteCode || "")' in overview
+    assert "data.aggregatePortfolio(rows).totals" in overview
+    assert 'entry.status !== "Cancelled"' in overview
+    assert 'data-pm-open-plant="' in overview
+    assert 'data-pm-open-event="' in overview
+    assert 'navState.pmCalendarOpen ? ["operations-calendar"] : ["pm-overview"]' in navigation
+    assert 'initialMonth: calendarType === "pm" && navState.pmCalendarOpen' in navigation
+    assert "function focusPMEvent(state, eventId)" in calendar
+    assert 'data-calendar-action="return-to-pm-overview"' in calendar
+    assert ".ep-pm__plants-grid" in styles and ".ep-pm__detail-categories" in styles
+
+
+def test_pm_overview_renders_monthly_plants_and_opens_selected_saved_task():
+    script = r"""
+      const fs = require('fs');
+      const vm = require('vm');
+      const month = new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit'
+      }).format(new Date());
+      const plant = { siteCode: 'PM-NORTH', plantName: 'North Plant', status: 'Active' };
+      const row = { plant, profile: { pm: {
+        completed: 3, pending: 1, overdue: 1, compliancePercent: 60
+      }}};
+      const entry = {
+        id: 'saved-pm-task', plantSiteCode: 'PM-NORTH', plantName: 'North Plant',
+        title: 'Inspect inverter', reference: 'WO-1', equipmentType: 'Inverter',
+        frequency: 'Monthly', status: 'Scheduled', assignee: 'Engineer',
+        date: month + '-28', completedOn: null
+      };
+      const listeners = {};
+      const host = {
+        innerHTML: '',
+        addEventListener: (name, callback) => { listeners[name] = callback; },
+        querySelector: () => null
+      };
+      const calls = [];
+      global.window = global;
+      global.Solar91PortalFormat = { escape: value => String(value).replace(/[&<>"]/g, c =>
+        ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]) };
+      global.Solar91PortalData = {
+        fetchPortfolioRange: () => Promise.resolve({ rows: [row] }),
+        fetchCalendarMonth: () => Promise.resolve({ entries: [entry], truncated: false, limit: 4000 }),
+        aggregatePortfolio: rows => ({ totals: {
+          pmCompleted: rows.reduce((n, r) => n + r.profile.pm.completed, 0),
+          pmPending: rows.reduce((n, r) => n + r.profile.pm.pending, 0),
+          pmOverdue: rows.reduce((n, r) => n + r.profile.pm.overdue, 0),
+          pmCompliancePercent: 60
+        }})
+      };
+      global.Solar91PortalNav = {
+        selectPlantPage: (...args) => calls.push(['plant', ...args]),
+        openPMCalendar: (...args) => calls.push(['calendar', ...args]),
+        selectView: (...args) => calls.push(['view', ...args])
+      };
+      vm.runInThisContext(fs.readFileSync('assets/js/pm-overview.js', 'utf8'));
+
+      const tick = () => new Promise(resolve => setTimeout(resolve, 0));
+      (async () => {
+        Solar91PortalPMOverview.show(host, { parent: 'overview' });
+        await tick();
+        if (!host.innerHTML.includes('North Plant') || !host.innerHTML.includes('60%')) {
+          throw new Error('portfolio PM data was not rendered');
+        }
+        listeners.click({ target: { closest: selector => selector === '[data-pm-open-plant]'
+          ? { getAttribute: () => 'PM-NORTH' } : null } });
+        if (calls[0][0] !== 'plant' || calls[0][1] !== 'PM-NORTH' ||
+            calls[0][5].pmParent !== 'overview') {
+          throw new Error('plant card did not preserve the Overview parent');
+        }
+
+        Solar91PortalPMOverview.show(host, { siteCode: 'PM-NORTH', parent: 'overview', plant });
+        await tick();
+        if (!host.innerHTML.includes('PM work orders') || !host.innerHTML.includes('Inspect inverter')) {
+          throw new Error('plant PM schedule was not rendered');
+        }
+        listeners.click({ target: { closest: selector => selector === '[data-pm-open-event]'
+          ? { getAttribute: name => name === 'data-pm-open-event' ? 'saved-pm-task' : month + '-28' }
+          : null } });
+        const calendar = calls.find(call => call[0] === 'calendar');
+        if (!calendar || calendar[1] !== (month + '-28').slice(0, 7) ||
+            calendar[2] !== 'saved-pm-task') {
+          throw new Error('saved PM task did not open in its calendar month');
+        }
+      })().catch(error => { console.error(error.stack || error.message); process.exit(1); });
+    """
+    run = subprocess.run(["node", "-e", script], cwd=ROOT, capture_output=True, text=True, timeout=30)
+    assert run.returncode == 0, run.stderr or run.stdout
 
 
 def test_pm_calendar_setup_is_a_frontend_only_preview_for_plant_and_portfolio():
@@ -2612,8 +2729,8 @@ def test_inverter_health_shows_maker_and_capacity_after_the_unit_count():
     assert '{ key: "inverter", label: typeConfig.unitLabel, sort: (row) => (row.config && row.config.maker)' in block
     assert 'colspan="${PLANT_COLUMN_COUNT}"' in inverter_health
 
-    cells = inverter_health[inverter_health.index("const configuredCells ="):]
-    cells = cells[:cells.index("`;")]
+    cells = inverter_health[inverter_health.index("const unitCell ="):]
+    cells = cells[:cells.index("\n      const settingsCell")]
     assert cells.index("row.config.maker") < cells.index("row.config.capacity_kw") \
         < cells.index("fmt.formatNumber(row.running)")
 
@@ -2629,8 +2746,8 @@ def test_inverter_health_shows_maker_and_capacity_after_the_unit_count():
     # Editable in the settings panel, and saved in the same PUT as the two counts. All four
     # fields go through one cell helper, so they share the read-only-by-role behaviour.
     assert 'data-ih-${attr}="${fmt.escape(plant.siteCode)}"' in inverter_health
-    assert 'settingsCell(plant, config, "maker", `type="text" maxlength="120"' in inverter_health
-    assert 'settingsCell(plant, config, "capacity", `type="number" step="0.01" min="0.01"' in inverter_health
+    assert 'settingsCell(plant, savedConfig, "maker", `type="text" maxlength="120"' in inverter_health
+    assert 'settingsCell(plant, savedConfig, "capacity", `type="number" step="0.01" min="0.01"' in inverter_health
     assert '${panelState.canEdit ? "" : " readonly"}' in inverter_health
     assert "total_units: total, units_per_day: perDay,\n          maker: maker, capacity_kw: capacity" in inverter_health
     assert '<th>Units/day</th><th>Maker</th><th>Capacity (kW)</th>' in inverter_health

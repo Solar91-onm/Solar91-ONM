@@ -359,6 +359,30 @@
     };
   }
 
+  function stringUnitRows(codes, unitRows, allowTableFallback) {
+    const rows = (unitRows || []).slice();
+    if (!allowTableFallback || !state) return rows;
+
+    const configured = new Set(rows.filter((row) =>
+      isString(row.equipment_type) && codes.has(row.site_code)
+    ).map((row) => row.site_code));
+    state.allRows.forEach(({ plant, profile }) => {
+      if (!plant || !codes.has(plant.siteCode) || configured.has(plant.siteCode)) return;
+      const tableCount = Number(profile && profile.washing && profile.washing.tableCount);
+      if (!Number.isSafeInteger(tableCount) || tableCount < 1) return;
+      rows.push({
+        site_code: plant.siteCode,
+        equipment_type: "String",
+        total_units: tableCount,
+        units_per_day: tableCount,
+        maker: null,
+        capacity_kw: null,
+        inferred_from_table_count: true
+      });
+    });
+    return rows;
+  }
+
   /**
    * The inverter figures for whatever the filters currently select.
    *
@@ -417,6 +441,7 @@
           mountAttr: "data-string-health", destination: "strings", type: "string" },
         { state: () => state, filters, equipmentCache: strings, fmt,
           isEquipmentType: isString, calculateTotals: calculateStringTotals,
+          getUnitRows: stringUnitRows,
           reloadTile: () => { return loadStrings(true); } }
       );
       return stringPanel;
@@ -455,7 +480,8 @@
 
   function stringTotals() {
     const codes = new Set(state ? state.rows.map(({ plant }) => plant.siteCode) : []);
-    const totals = calculateStringTotals(codes, strings.units, strings.issues);
+    const unitRows = stringUnitRows(codes, strings.units, !strings.unitsRestricted);
+    const totals = calculateStringTotals(codes, unitRows, strings.issues);
     totals.restricted = strings.unitsRestricted;
     return totals;
   }

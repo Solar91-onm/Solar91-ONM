@@ -35,6 +35,7 @@
     const equipmentCache = ctx.equipmentCache;
     const isEquipmentType = ctx.isEquipmentType;
     const calculateTotals = ctx.calculateTotals;
+    const getUnitRows = ctx.getUnitRows || ((_codes, unitRows) => unitRows);
     const reloadTile = ctx.reloadTile;
     const S = ctx.state;
 
@@ -76,7 +77,9 @@
 
     const PLANT_COLUMN_VALUE = {
       plant: (row) => row.plant.displayName || row.plant.plantName,
-      inverter: (row) => (row.config && row.config.maker) || "Not configured",
+      inverter: (row) => typeConfig.type === "string"
+        ? (row.total === null ? "Not configured" : fmt.formatNumber(row.total) + " strings")
+        : (row.config && row.config.maker) || "Not configured",
       issuedesc: (row) => {
         const list = row.issueDesc || [];
         return list.length ? list[0] : "No issues";
@@ -216,8 +219,9 @@
     function healthTotals() {
       const plants = plantScope();
       const codes = new Set(plants.map((plant) => plant.siteCode));
+      const unitRows = getUnitRows(codes, panelState.units, !panelState.unitsRestricted);
       const configs = new Map();
-      panelState.units.forEach((config) => {
+      unitRows.forEach((config) => {
         if (!isEquipmentType(config.equipment_type) || !codes.has(config.site_code)) return;
         configs.set(config.site_code, config);
       });
@@ -241,7 +245,7 @@
       const issueRows = panelState.summary
         ? Array.from(plantCounts.entries()).map(([site_code, row]) => Object.assign({ site_code }, row))
         : Array.from(ticketCounts.entries()).map(([site_code, row]) => Object.assign({ site_code }, row));
-      const counts = calculateTotals(codes, panelState.units, issueRows);
+      const counts = calculateTotals(codes, unitRows, issueRows);
       return Object.assign({}, counts, { affected: counts.plants, configs, plantCounts, ticketCounts });
     }
 
@@ -374,7 +378,11 @@
         const running = total === null ? null : total - down;
         const percent = total ? Math.round(running / total * 100) : null;
         const descList = descByPlant.get(plant.siteCode) || [];
-        return { plant, config, total, down, running, percent, tickets: Number(count.open) || 0, issueDesc: descList };
+        return {
+          plant, config, total, down, running, percent,
+          derivedFromTableCount: !!(config && config.inferred_from_table_count),
+          tickets: Number(count.open) || 0, issueDesc: descList
+        };
       }).sort((a, b) => {
         if (a.percent === null && b.percent !== null) return 1;
         if (b.percent === null && a.percent !== null) return -1;
@@ -396,7 +404,8 @@
             (column) => (PLANT_COLUMN_VALUE[column.key] || (() => ""))(row))) return false;
         if (!query) return true;
         return [row.plant.displayName || row.plant.plantName, row.plant.siteCode,
-          row.plant.displayCode, (row.config && row.config.maker) || ""]
+          row.plant.displayCode, (row.config && row.config.maker) || "",
+          row.total === null ? "" : String(row.total)]
           .join(" ").toLowerCase().indexOf(query) !== -1;
       });
     }
@@ -495,9 +504,15 @@
               const full = descList.join("\n");
               return `<td><span class="ep-ih__issuedesc" title="${fmt.escape(full)}">${fmt.escape(first)}${more}</span></td>`;
             })();
+        const unitCell = typeConfig.type === "string"
+          ? `<td><span class="ep-ih__stack"><span class="ep-ih__stack-main">${fmt.formatNumber(row.total)} strings</span>
+              <span class="ep-ih__stack-sub">${row.derivedFromTableCount
+                ? "From Module Cleaning table count"
+                : fmt.escape((row.config && row.config.maker) || "Make not recorded")}</span></span></td>`
+          : `<td><span class="ep-ih__stack"><span class="ep-ih__stack-main">${factCell(row.config && row.config.maker)}</span>
+              <span class="ep-ih__stack-sub">${fmt.escape(fmt.decimalText(row.config && row.config.capacity_kw) || "—")} kW</span></span></td>`;
         const configuredCells = `
-          <td><span class="ep-ih__stack"><span class="ep-ih__stack-main">${factCell(row.config && row.config.maker)}</span>
-            <span class="ep-ih__stack-sub">${fmt.escape(fmt.decimalText(row.config && row.config.capacity_kw) || "—")} kW</span></span></td>
+          ${unitCell}
           <td class="num"><span class="ep-ih__ratio">${row.down ? `<span class="ep-hint-light ep-hint-light--red" aria-hidden="true"></span>` : ""}<b>${fmt.formatNumber(row.running)}</b><span>/ ${fmt.formatNumber(row.total)}</span></span></td>
           ${issueDescCell}
           <td class="num">${percentCell(row.percent)}</td>`;
@@ -548,19 +563,23 @@
       const settingsCell = (plant, config, attr, attrs, value, blank) => !config && !panelState.canEdit ? blank
         : `<input ${attrs} data-ih-${attr}="${fmt.escape(plant.siteCode)}" value="${fmt.escape(value)}"${panelState.canEdit ? "" : " readonly"}>`;
       const COUNT_ATTRS = `type="number" min="1" max="500" required`;
-      const settingsRows = plants.map(({ plant, config }) =>
-        `<tr><td>${fmt.escape(plant.displayName || plant.plantName)}</td>
-          <td>${settingsCell(plant, config, "total", COUNT_ATTRS, config ? config.total_units : 1,
-            `<span class="ep-text-faint">Not configured</span>`)}</td>
-          <td>${settingsCell(plant, config, "units-day", COUNT_ATTRS, config ? config.units_per_day : 1, "—")}</td>
-          <td>${settingsCell(plant, config, "maker", `type="text" maxlength="120" placeholder="Maker"`,
+      const settingsRows = plants.map(({ plant, config, derivedFromTableCount }) => {
+        const savedConfig = derivedFromTableCount ? null : config;
+        const totalCell = derivedFromTableCount && !panelState.canEdit
+          ? `<span>${fmt.formatNumber(config.total_units)} · from Module Cleaning tables</span>`
+          : settingsCell(plant, savedConfig, "total", COUNT_ATTRS,
+            config ? config.total_units : 1, `<span class="ep-text-faint">Not configured</span>`);
+        return `<tr><td>${fmt.escape(plant.displayName || plant.plantName)}</td>
+          <td>${totalCell}</td>
+          <td>${settingsCell(plant, savedConfig, "units-day", COUNT_ATTRS, config ? config.units_per_day : 1, "—")}</td>
+          <td>${settingsCell(plant, savedConfig, "maker", `type="text" maxlength="120" placeholder="Maker"`,
             (config && config.maker) || "", "—")}</td>
-          <td>${settingsCell(plant, config, "capacity", `type="number" step="0.01" min="0.01" placeholder="kW"`,
+          <td>${settingsCell(plant, savedConfig, "capacity", `type="number" step="0.01" min="0.01" placeholder="kW"`,
             fmt.decimalText(config && config.capacity_kw), "—")}</td>
           <td>${panelState.canEdit
-            ? `<button type="button" class="ep-ih__button" data-ih-save="${fmt.escape(plant.siteCode)}">${config ? "Save" : "Add"}</button>`
-            : ""}</td></tr>`
-      ).join("");
+            ? `<button type="button" class="ep-ih__button" data-ih-save="${fmt.escape(plant.siteCode)}">${savedConfig ? "Save" : "Add"}</button>`
+            : ""}</td></tr>`;
+      }).join("");
 
       host.innerHTML = `<section class="ep-ih" aria-labelledby="ep-ih-title">
         <header class="ep-ih__header"><div class="ep-ih__header-main">
@@ -607,7 +626,7 @@
             <div class="ep-ih__fleet-body">${fleetBar}</div></section>` : ""}
           <section class="ep-panel"><div class="ep-panel__head"><span class="ep-panel__title">Per-plant health</span></div>
             <div class="ep-ih__toolbar">
-              <input type="search" placeholder="Search plant, code or make" aria-label="Search plants" data-ih-plant-search value="${fmt.escape(panelState.plantSearch)}">
+              <input type="search" placeholder="${typeConfig.type === "string" ? "Search plant, code or string count" : "Search plant, code or make"}" aria-label="Search plants" data-ih-plant-search value="${fmt.escape(panelState.plantSearch)}">
               <label class="ep-ih__check"><input type="checkbox" data-ih-only-issues${panelState.onlyIssues ? " checked" : ""}> Only plants with issues</label>
               <button type="button" class="ep-ih__button ep-ih__toolbar-end" data-ih-export-plants>Export CSV</button>
             </div>
@@ -631,6 +650,9 @@
                   : `<strong>✓ All ${labelLower}s running</strong><span>No open ${labelLower} tickets in this scope.</span>`}</div></td></tr>`}</tbody></table></div>
           </section>
           ${panelState.unitsRestricted || panelState.unitsError ? "" : `<details class="ep-panel ep-ih__settings" ${host.querySelector(".ep-ih__settings[open]") ? "open" : ""}><summary>${fmt.escape(label)} unit configuration</summary>
+              ${typeConfig.type === "string"
+                ? `<p class="ep-ih__reason">For plants without a saved String count, the health total is derived from the Module Cleaning table count and is not saved as unit configuration.</p>`
+                : ""}
             <div class="ep-table-wrap"><table class="ep-table"><thead><tr><th>Plant</th><th>Total units</th><th>Units/day</th><th>Maker</th><th>Capacity (kW)</th><th></th></tr></thead><tbody>${settingsRows}</tbody></table></div>
             ${!panelState.canEdit ? `<p class="ep-ih__reason">Unit configuration is read-only for your role.</p>` : ""}
             <p class="ep-ih__save-status${panelState.saveError ? " is-error" : ""}" data-ih-save-status aria-live="polite">${fmt.escape(panelState.saveMessage)}</p>
