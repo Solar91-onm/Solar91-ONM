@@ -601,6 +601,7 @@
 
   function showCalendarHoverCard(host, state, context, day) {
     if (!day) return;
+    if (state.liveWashing && state.washingPlant) return;
     var isWashing = state.liveWashing && state.washingPlant;
     var isPlantPM = context.type === "pm" && !!context.plantCode;
     if (!isWashing && !isPlantPM) return;
@@ -669,11 +670,13 @@
           ? dayEvents.map(function (event) { return eventCellDescription(event, context); }).join("; ")
           : "No module cleaning report or cycle deadline recorded for this date."))
         : "";
+              var plainDay = !!(state.liveWashing && state.washingPlant);   // Module Cleaning plant calendar
+      
       var classes = "ep-calendar__day";
       if (!inMonth) classes += " ep-calendar__day--outside";
       if (isToday) classes += " ep-calendar__day--today";
       days += '<button type="button" class="' + classes + '"' +
-        (inMonth ? ' data-calendar-action="open-date" data-date="' + date + '"' : " disabled") +
+        (inMonth ? (plainDay ? "" : ' data-calendar-action="open-date"') + ' data-date="' + date + '"' : " disabled") +
         (inMonth
         ? (hoverEnabled ? ' aria-describedby="' + hoverId + '"' : "") +
           ' aria-label="' + escape(displayDate(date) + ", " + dayEvents.length +
@@ -682,10 +685,10 @@
         : ' aria-hidden="true"') +
         '><span class="ep-calendar__day-number">' + (inMonth ? dayNumber : "") + "</span>" +
         (dayEvents.length
-          ? '<span class="ep-calendar__day-events">' + dayEvents.slice(0, 2).map(function (event) {
+          ? '<span class="ep-calendar__day-events">' + (plainDay ? dayEvents : dayEvents.slice(0, 2)).map(function (event) {
               return renderCalendarEventChip(event, context);
             }).join("") +
-            (dayEvents.length > 2
+            (!plainDay && dayEvents.length > 2
               ? '<span class="ep-calendar__more">+' + (dayEvents.length - 2) + " more</span>"
               : "") +
             "</span>"

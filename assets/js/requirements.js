@@ -30,7 +30,7 @@
     submitError: "",
     editOpen: false,
     editRow: null,
-    editDemands: [""]
+    editDemands: [""],
     editPriority: "Medium",
     editStatus: "Open"
   };

@@ -1952,3 +1952,7 @@
 .ep-calendar__photo-message { color: var(--ep-text-faint); font-size: var(--ep-fs-xs); }
 .ep-calendar__photo-file { display: block; max-width: 180px; overflow: hidden; color: var(--ep-text-muted); font-size: var(--ep-fs-xs); text-overflow: ellipsis; white-space: nowrap; }
 .ep-calendar__photo-error { max-width: 220px; color: var(--ep-red); font-size: var(--ep-fs-xs); }
+.ep-calendar__day:not(:disabled):not([data-calendar-action]):hover {
+  background: var(--ep-bg);
+  box-shadow: none;
+}
