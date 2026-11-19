@@ -31,6 +31,8 @@
     editOpen: false,
     editRow: null,
     editDemands: [""]
+    editPriority: "Medium",
+    editStatus: "Open"
   };
 
   var COLUMNS = [
@@ -227,7 +229,7 @@
           '<label for="requirement-demand-' + index + '">Demand ' + (index + 1) + "</label>" +
           '<div><input id="requirement-demand-' + index + '" type="text" name="demand" maxlength="1000" ' +
             'value="' + escape(demand) + '" data-requirement-demand ' +
-            'placeholder="Enter demand ' + (index + 1) + '" required />' +
+            'placeholder="Enter demand ' + (index + 1) + '"  />' +
             (demandRows.length > 1
               ? '<button type="button" data-requirement-remove-demand="' + index +
                 '" aria-label="Remove Demand ' + (index + 1) + '">×</button>'
@@ -241,12 +243,12 @@
         '<label>Priority<select name="priority">' +
           ["Critical", "Medium", "Low"].map(function (priority) {
             return '<option value="' + priority + '"' +
-              (state.editRow.priority === priority ? " selected" : "") + ">" + priority + "</option>";
+              (state.editPriority === priority ? " selected" : "") + ">" + priority + "</option>";
           }).join("") + "</select></label>" +
         '<label>Status<select name="status">' +
           ["Open", "Completed"].map(function (status) {
             return '<option value="' + status + '"' +
-              (state.editRow.status === status ? " selected" : "") + ">" + status + "</option>";
+              (state.editStatus === status ? " selected" : "") + ">" + status + "</option>";
           }).join("") + "</select></label></div>"
       : "";
 
@@ -265,8 +267,8 @@
           (state.submitError ? '<p class="ep-issues__wizard-error" role="alert">' + escape(state.submitError) + "</p>" : "") +
           '<div class="ep-issues__wizard-actions"><button type="button" class="ep-issues__button" data-requirement-action="close-form">Cancel</button>' +
             '<button type="submit" class="ep-issues__button ep-issues__button--primary"' +
-              (state.submitting || state.plantsLoading || state.plantsError || !plants.length ? " disabled" : "") + ">" +
-              (state.submitting ? "Saving…" : "Create ticket") + "</button></div>" +
+             (state.submitting || (!isEdit && (state.plantsLoading || state.plantsError || !plants.length)) ? " disabled" : "") + ">" +
+(state.submitting ? "Saving…" : isEdit ? "Save changes" : "Create ticket") + "</button></div>" +
         "</form></div></aside></div>";
   }
 
@@ -440,7 +442,7 @@
       state.editRow = null;
       state.editDemands = [""];
       state.submitting = false;
-      state.status = "Open";
+      if (!wasEdit) state.status = "Open";
       state.offset = 0;
       state.notice = wasEdit ? "Requirement ticket updated." : "Requirement ticket created.";
       loadRows();
@@ -493,6 +495,9 @@
         var row = state.rows.find(function (item) { return item.id === rowId; });
         if (!row) return;
         state.editRow = row;
+        state.editRow = row;
+        state.editPriority = row.priority;
+        state.editStatus = row.status;
         state.editOpen = true;
         state.formOpen = true;
         state.submitError = "";
@@ -516,6 +521,8 @@
       var select = event.target.closest("[data-requirement-priority]");
       if (select) updateTicket(select.getAttribute("data-requirement-priority"), "priority", select.value);
       if (event.target.name === "plantId") state.selectedPlantId = event.target.value;
+      if (event.target.name === "priority") state.editPriority = event.target.value;
+      if (event.target.name === "status") state.editStatus = event.target.value;
     });
     hostElement.addEventListener("submit", function (event) {
       var form = event.target.closest("[data-requirement-form]");

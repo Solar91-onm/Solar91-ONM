@@ -408,11 +408,23 @@ def _cycle_work_scores(reports, table_count: int, today: date, overrides: dict |
     start_dates = _cycle_start_dates(today, overrides)
     due_dates = _cycle_due_dates(today, overrides)
     first_day = min(today.replace(day=1), start_dates[0])
+    this_month = _month_key(today)
+    # Mid-cycle re-cleaning is bonus work, so it raises the score only once the month's required work
+    # is done -- the same rule the month summary already applies to it. Counting it straight away made
+    # a plant that re-cleaned 4 of its 10 tables read 70% instead of 50% with one cycle finished,
+    # which let rework stand in for the cycles still owed.
+    all_cycles_done = len({
+        report.cycle_no for report in reports
+        if report.cycle_month == this_month and report.cycle_completed
+        and report.review_status == "Confirmed" and not getattr(report, "is_extra", False)
+    }) >= MONTHLY_CYCLE_TARGET
     month_done = 0
     for report in reports:
         if report.review_status != "Confirmed" or not report.tables_cleaned:
             continue
         if not first_day <= report.report_date <= today:
+            continue
+        if getattr(report, "is_extra", False) and not all_cycles_done:
             continue
         month_done += int(report.tables_cleaned)
 
@@ -577,6 +589,11 @@ def _is_backfilled(report: WashingDailyReport) -> bool:
 
 
 def _photos_required(report: WashingDailyReport, total_tables: int) -> bool:
+    # Extra cleaning is never required work, and blocking its confirmation on before/after photos
+    # would leave it Pending and uncounted -- which is the very thing that stopped it being recorded
+    # at all. The photo slots stay open on it, so evidence can still be attached.
+    if getattr(report, "is_extra", False):
+        return False
     return report.job_status == "Done" and report.tables_cleaned < total_tables and not _is_backfilled(report)
 
 
@@ -1057,6 +1074,15 @@ def _build_overview(db: Session, user: User, include_tables: bool = False, repor
             max(0, ledger[MONTHLY_CYCLE_TARGET]["confirmed"] - table_count)
             if len(completed_dates) >= MONTHLY_CYCLE_TARGET and table_count else 0
         )
+        # Mid-cycle re-cleaning (`is_extra`, migration 048) is held out of the ledger because it is
+        # not cycle progress, so it has to be added back here or it would never reach the score at
+        # all. Same rule as the month summary: it joins the total once all three cycles are complete.
+        if len(completed_dates) >= MONTHLY_CYCLE_TARGET and table_count:
+            extra_tables += sum(
+                report.tables_cleaned for report in reports
+                if report.cycle_month == month and report.review_status == "Confirmed"
+                and getattr(report, "is_extra", False)
+            )
         extra_cycles = extra_tables / table_count if table_count else 0
         # The counts stay whole activities: 2 of 3 cycles done reads as 2, not 2.4.
         activities = cleaning_activity_metrics(completed_cycles_month + extra_cycles, planned_cycles,
@@ -1530,7 +1556,15 @@ def _completing_rows(by_cycle, total_tables: int) -> list:
 def _cycle_ledger(reports, total_tables: int) -> dict[int, dict]:
     """Tables counted towards each cycle of one plant-month, with the tables carried over between cycles: cycles 1
     and 2 count up to the plant's table count and pass the rest on; cycle 3 keeps everything (above the count it is
-    extra washing). `confirmed` / `pending` are what each cycle shows; `carried_in` / `carried_out` explain them."""
+    extra washing). `confirmed` / `pending` are what each cycle shows; `carried_in` / `carried_out` explain them.
+
+    Entries MARKED extra (`is_extra`, migration 048) are re-cleaning, not cycle progress, so they are
+    left out entirely. Skipping them here is what keeps that true for every figure built on this
+    ledger: the cycle tables in `month_cycles`, the overview, `_closed_incomplete` and
+    `_cycle_work_scores`. Without it an extra entry naming a table the cycle had not reached yet
+    counted towards it, so re-cleaning could stand in for work still owed."""
+    reports = [r for r in reports if not getattr(r, "is_extra", False)]
+
     def walk(statuses: tuple[str, ...]) -> dict[int, tuple[int, int, int]]:
         carry, out = 0, {}
         for n in range(1, MONTHLY_CYCLE_TARGET + 1):

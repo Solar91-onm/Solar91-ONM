@@ -7,10 +7,10 @@ therefore splits such a day into two entries for the SAME date: the tables that 
 and the repeats, which the backend numbers as the next cycle (or, in the month's last cycle, as
 extra cleaning).
 
-``planDay`` in ``assets/js/operations-calendar.js`` decides that split, so these run the shipped
-function itself in node rather than asserting on its source text. It is a plain top-level function
-inside the module's IIFE, so it is sliced out by name together with the helpers it uses; the slicing
-fails loudly if the file stops defining them that way.
+The sheet's own functions decide all of this, so these load `assets/js/operations-calendar.js`
+in node with the browser globals stubbed and its one export line swapped for the internals under
+test -- the same harness `test_portal_frontend.py` uses. Nothing is asserted on source text
+except where a test says so.
 """
 from __future__ import annotations
 
@@ -24,58 +24,95 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 CALENDAR = ROOT / "assets" / "js" / "operations-calendar.js"
 
-# planDay and everything it calls. Order does not matter (function declarations hoist).
-NEEDED = ("parseTableList", "formatTableList", "nextCycleNo", "rollOverNote", "rowTableCount", "planDay")
+# The module is an IIFE that exports only `render`; this swaps that one line for the internals the
+# sheet's behaviour lives in. If any of them is renamed, node fails loudly here rather than silently
+# testing nothing.
+EXPORTS = ("recordRows", "planDay", "rollOverNote", "rowTableCount", "nextCycleNo",
+           "parseTableList", "formatTableList")
+EXPORT_LINE = "  global.Solar91PortalCalendar = { render: render };"
 
 
-def _function_source(source: str, name: str) -> str:
-    """One top-level function of the calendar module, from `  function name(` to its closing `  }`."""
-    start = source.index("\n  function " + name + "(") + 1
-    end = source.index("\n  }\n", start) + len("\n  }\n")
-    body = source[start:end]
-    assert body.count("function " + name + "(") == 1, name
-    return body
+def _run(body: str, payload: dict, role: str = "O&M Head"):
+    """Evaluate the calendar module in node with `body` run against its internals as `I`."""
+    source = CALENDAR.read_text(encoding="utf-8")
+    assert source.count(EXPORT_LINE) == 1, "the calendar module's export line moved"
+    script = """
+      global.window = global;
+      global.document = { querySelector: () => null, querySelectorAll: () => [], addEventListener: () => {} };
+      global.Solar91PortalFormat = { escape: (s) => String(s == null ? '' : s) };
+      global.Solar91PortalAPI = { request: () => Promise.resolve({}), can: () => true,
+                                  currentUser: () => ({ role: %s }) };
+      const fs = require('fs');
+      let src = fs.readFileSync('./assets/js/operations-calendar.js', 'utf8');
+      src = src.replace(%s, '  global.__i = { %s };');
+      eval(src);
+      const I = global.__i;
+      const one = JSON.parse(process.argv[1]);
+      %s
+    """ % (json.dumps(role), json.dumps(EXPORT_LINE), ", ".join(EXPORTS), body)
+    run = subprocess.run(
+        ["node", "-e", script, json.dumps(payload)],
+        # node writes UTF-8; without this Windows decodes it with the console codepage and the
+        # "·" and "–" in the sheet's messages come back as mojibake.
+        cwd=ROOT, capture_output=True, text=True, encoding="utf-8", timeout=30,
+    )
+    assert run.returncode == 0, run.stderr or run.stdout
+    return json.loads(run.stdout)
 
 
 @pytest.fixture(scope="module")
 def plan_day():
-    """Call planDay(cycleNo, lastCycle, tablesTotal, alreadyCleaned, typed) and get its plan back."""
-    source = CALENDAR.read_text(encoding="utf-8")
-    extracted = "\n".join(_function_source(source, name) for name in NEEDED)
+    """Plan one unsaved day against a set of tables the cycle has already taken."""
 
     def call(*cases):
-        script = (
-            "(function () {\n"
-            + extracted
-            + """
-            var out = JSON.parse(process.argv[1]).map(function (one) {
-              var state = {
-                recordCycle: one.cycle,
-                washingPlant: { cycles: [], table_count: one.total },
-                recordDrafts: {}
-              };
-              for (var n = 1; n <= one.lastCycle; n += 1) state.washingPlant.cycles.push({ cycle_no: n });
-              var used = {};
-              (one.cleaned || []).forEach(function (number) { used[number] = true; });
-              var plan = planDay(state, { list: one.typed, reason: one.reason || "" }, used, one.total);
-              return {
-                numbers: plan.numbers, nextNumbers: plan.nextNumbers, error: plan.error,
-                full: plan.full, zero: plan.zero,
-                count: rowTableCount(plan),
-                note: rollOverNote(state, plan)
-              };
-            });
-            process.stdout.write(JSON.stringify(out));
-            }());"""
-        )
-        run = subprocess.run(
-            ["node", "-e", script, json.dumps(list(cases))],
-            # node writes UTF-8; without this Windows decodes it with the console codepage and the
-            # "·" and "–" in the sheet's messages come back as mojibake.
-            cwd=ROOT, capture_output=True, text=True, encoding="utf-8", timeout=30,
-        )
-        assert run.returncode == 0, run.stderr or run.stdout
-        return json.loads(run.stdout)
+        return _run("""
+          const out = one.map(function (c) {
+            const state = { recordCycle: c.cycle, recordDrafts: {},
+                            washingPlant: { cycles: [], table_count: c.total } };
+            for (let n = 1; n <= c.lastCycle; n += 1) state.washingPlant.cycles.push({ cycle_no: n });
+            const used = {};
+            (c.cleaned || []).forEach((n) => { used[n] = true; });
+            const plan = I.planDay(state, { list: c.typed, reason: c.reason || "" }, used, c.total);
+            return { numbers: plan.numbers, nextNumbers: plan.nextNumbers, error: plan.error,
+                     full: plan.full, zero: plan.zero, count: I.rowTableCount(plan),
+                     note: I.rollOverNote(state, plan) };
+          });
+          process.stdout.write(JSON.stringify(out));
+        """, list(cases))
+
+    return call
+
+
+@pytest.fixture(scope="module")
+def record_rows():
+    """Build the sheet's day grid for one cycle tab and report one entry per row."""
+
+    def call(cycle_no, reports, *, today, month, total=35, cycles=3, role="O&M Head", drafts=None):
+        payload = {"cycle": cycle_no, "reports": reports, "today": today, "month": month,
+                   "total": total, "cycles": cycles, "drafts": drafts or {}}
+        return _run("""
+          const state = {
+            recordCycle: one.cycle, month: one.month, washingDataToday: one.today,
+            recordDrafts: one.drafts, washingReports: one.reports,
+            washingPlant: { table_count: one.total, cycles: [] }
+          };
+          for (let n = 1; n <= one.cycles; n += 1) {
+            state.washingPlant.cycles.push({ cycle_no: n, start_date: one.month + "-01",
+                                             due_date: one.month + "-28" });
+          }
+          const rows = I.recordRows(state);
+          process.stdout.write(JSON.stringify({
+            rows: rows.map((row) => ({
+              date: row.date, saved: !!row.report,
+              cycleNo: row.report ? row.report.cycle_no : null,
+              tables: row.report ? row.report.tables_cleaned : null,
+              numbers: row.report ? null : row.numbers,
+              nextNumbers: row.report ? null : row.nextNumbers,
+              error: row.report ? "" : row.error, note: row.report ? "" : row.note
+            })),
+            cleanedTables: rows.cleanedTables, openTables: rows.openTables
+          }));
+        """, payload, role=role)
 
     return call
 
@@ -181,60 +218,13 @@ def test_the_sheet_sends_the_roll_over_as_a_second_entry_for_the_same_date():
     assert 'if (row.report.is_extra === true) numbers += " (extra cleaning)";' in calendar
 
 
-# recordRows builds the sheet's day grid: which dates each cycle tab offers, and which saved entry
-# belongs on each row. These are its top-level dependencies inside the module's IIFE.
-GRID_NEEDED = NEEDED + ("pad2", "monthParts", "dateRange", "canManageWashing", "recordCycle",
-                        "tableNumber", "tableNumbersOf", "markUsed", "recordRows")
 
-
-@pytest.fixture(scope="module")
-def record_rows():
-    """Call recordRows for one plant-month and get back one entry per row of the sheet."""
-    source = CALENDAR.read_text(encoding="utf-8")
-    extracted = "\n".join(_function_source(source, name) for name in GRID_NEEDED)
-
-    def call(cycle_no, reports, *, today, month, total=35, cycles=3, role="O&M Head"):
-        script = (
-            "(function (global) {\n"
-            + extracted
-            + """
-            var one = JSON.parse(process.argv[1]);
-            global.Solar91PortalAPI = { currentUser: function () { return { role: one.role }; } };
-            var state = {
-              recordCycle: one.cycle, month: one.month, washingDataToday: one.today,
-              recordDrafts: {}, washingReports: one.reports,
-              washingPlant: { table_count: one.total, cycles: [] }
-            };
-            for (var n = 1; n <= one.cycles; n += 1) {
-              state.washingPlant.cycles.push({ cycle_no: n, start_date: one.month + "-01", due_date: one.month + "-28" });
-            }
-            var rows = recordRows(state);
-            process.stdout.write(JSON.stringify({
-              rows: rows.map(function (row) {
-                return { date: row.date, saved: !!row.report, cycleNo: row.report ? row.report.cycle_no : null,
-                         tables: row.report ? row.report.tables_cleaned : null };
-              }),
-              cleanedTables: rows.cleanedTables, openTables: rows.openTables
-            }));
-            }(globalThis));"""
-        )
-        payload = {"cycle": cycle_no, "reports": reports, "today": today, "month": month,
-                   "total": total, "cycles": cycles, "role": role}
-        run = subprocess.run(
-            ["node", "-e", script, json.dumps(payload)],
-            cwd=ROOT, capture_output=True, text=True, encoding="utf-8", timeout=30,
-        )
-        assert run.returncode == 0, run.stderr or run.stdout
-        return json.loads(run.stdout)
-
-    return call
-
-
-def _saved(date, cycle_no, numbers, *, completed=False, status="Confirmed"):
+def _saved(date, cycle_no, numbers, *, completed=False, status="Confirmed", extra=False):
+    numbers = list(numbers)
     return {"report_date": date, "cycle_no": cycle_no, "review_status": status,
             "job_status": "Done", "tables_cleaned": len(numbers), "cycle_completed": completed,
             "cleaned_table_codes": ["Table " + str(n).rjust(3, "0") for n in numbers],
-            "id": date + "#" + str(cycle_no), "is_extra": False}
+            "id": date + "#" + str(cycle_no) + ("#x" if extra else ""), "is_extra": extra}
 
 
 # Cycle 1 ran 10-19 Nov; on the 19th it was filled (1-25) and the next round started (26-35).
@@ -263,7 +253,9 @@ def test_the_next_cycle_shows_its_entry_on_that_same_date(record_rows):
     """Cycle 2's tab carries the same date, with cycle 2's entry on it -- not cycle 1's."""
     grid = record_rows(2, ROLLED_OVER, today=TODAY, month=MONTH)
 
-    assert grid["rows"][0] == {"date": "2026-11-19", "saved": True, "cycleNo": 2, "tables": 10}
+    first = grid["rows"][0]
+    assert {key: first[key] for key in ("date", "saved", "cycleNo", "tables")} == \
+        {"date": "2026-11-19", "saved": True, "cycleNo": 2, "tables": 10}
     assert [row["date"] for row in grid["rows"]] == [
         "2026-11-19", "2026-11-20", "2026-11-21", "2026-11-22",
     ], "the days after it are open for entry up to today"
@@ -283,6 +275,48 @@ def test_the_next_cycle_can_be_recorded_on_the_completion_date_afterwards(record
     assert [row["date"] for row in grid["rows"]][0] == "2026-11-19"
     assert all(not row["saved"] for row in grid["rows"])
     assert grid["openTables"] == list(range(1, 36)), "cycle 2 starts with every table open"
+
+
+def test_a_back_filled_day_sees_tables_saved_on_a_later_date(record_rows):
+    """Reported from the portal: cycle 3 had 1-46 saved on 17 Nov, and 1-46 typed again on the 16th
+    was accepted by the sheet and then refused by the server ("Table 1 is already recorded in cycle
+    3 on 16 Nov"). The sheet only counted the days ABOVE a row; the server checks the whole cycle.
+    The row must say so itself, before anyone presses Save."""
+    saved = [_saved("2026-11-17", 1, range(1, 47))]
+
+    grid = record_rows(1, saved, today=TODAY, month=MONTH, total=352,
+                       drafts={"2026-11-16": {"list": "1-46"}})
+
+    row = next(r for r in grid["rows"] if r["date"] == "2026-11-16")
+    assert "Table 1 is already cleaned in this cycle" in row["error"]
+    assert row["numbers"] == [] and row["nextNumbers"] == []
+    assert grid["cleanedTables"] == list(range(1, 47))
+
+
+def test_a_back_filled_day_can_still_take_the_tables_the_cycle_needs(record_rows):
+    """The same back-filled row accepts work the cycle has not had yet, on either side of a saved day."""
+    saved = [_saved("2026-11-17", 1, range(1, 47))]
+
+    grid = record_rows(1, saved, today=TODAY, month=MONTH, total=352,
+                       drafts={"2026-11-16": {"list": "47-60"}})
+
+    row = next(r for r in grid["rows"] if r["date"] == "2026-11-16")
+    assert not row["error"] and row["numbers"] == list(range(47, 61))
+
+
+def test_extra_cleaning_reserves_no_table_of_the_cycle(record_rows):
+    """An extra entry is work done, not cycle progress, so the tables it names stay open for the
+    cycle -- otherwise re-cleaning table 9 would leave no way to record table 9 as real cycle work."""
+    reports = [_saved("2026-11-10", 1, [1, 2]), _saved("2026-11-12", 1, [9], extra=True)]
+
+    grid = record_rows(1, reports, today=TODAY, month=MONTH, total=10,
+                       drafts={"2026-11-14": {"list": "9, 10"}})
+
+    assert grid["cleanedTables"] == [1, 2], "extra cleaning adds nothing to the cycle"
+    assert 9 in grid["openTables"]
+    row = next(r for r in grid["rows"] if r["date"] == "2026-11-14")
+    assert not row["error"] and row["numbers"] == [9, 10]
+    assert [r["cycleNo"] for r in grid["rows"] if r["saved"]] == [1, 1], "both days still show"
 
 
 def test_a_rejected_entry_leaves_the_day_open_again(record_rows):

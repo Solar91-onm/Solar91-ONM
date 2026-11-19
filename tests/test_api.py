@@ -527,7 +527,7 @@ def test_bootstrap_contains_authenticated_scope_permissions_and_identity(client,
 def test_administration_bootstrap_exposes_only_command_centre_and_calendar(client, db):
     login_user(client, db, role='Administration', name='Executive', email='exec-modules@example.com')
     body = client.get('/api/bootstrap').json()
-    assert body['modules'] == ['Command Center', 'Operations Calendar']
+    assert body['modules'] == ['Command Center', 'Operations Calendar', 'Requirements']
     assert 'tasks.create' not in body['permissions']
 
 

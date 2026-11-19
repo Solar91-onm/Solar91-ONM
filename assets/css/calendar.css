@@ -692,17 +692,20 @@
   color: #76201b;
 }
 
-/* Extra cleaning: work done that is NOT cycle progress. Same saturated blue and dotted edge as
-   the day chip, so the two views agree, and deliberately unlike the lavender that means "nothing
-   recorded" — an absence of work and bonus work must never look alike. Wins over the status
-   colour it would otherwise take, because "extra" is the thing the reader must not miss. */
+/* Extra cleaning: work done that is NOT cycle progress. A SOLID purple, matching the day chip so
+   the two views agree. Purple is also the family used for "nothing recorded", so the two are kept
+   apart by weight rather than hue: that one is a pale wash (#f1e7f6) and this one is solid with
+   white text, ~60 dE apart, which no pair of pale tints could manage. An absence of work and bonus
+   work must never look alike. The dotted edge repeats the message without colour, for anyone who
+   cannot use hue. Wins over the status colour it would otherwise take, because "extra" is the
+   thing the reader must not miss. */
 .ep-calendar__event--extra {
-  border-left-color: #14407a;
-  border-top: 1px dotted #14407a;
-  border-right: 1px dotted #14407a;
-  border-bottom: 1px dotted #14407a;
-  background: #a8cdf7;
-  color: #14407a;
+  border-left-color: #4c1d6f;
+  border-top: 1px dotted #e9d5f5;
+  border-right: 1px dotted #e9d5f5;
+  border-bottom: 1px dotted #e9d5f5;
+  background: #6b2f8f;
+  color: #ffffff;
 }
 
 .ep-calendar__event--deadline:not(.ep-calendar__event--overdue) {
@@ -1277,6 +1280,83 @@
   border-bottom: 1px solid var(--ep-border-soft);
 }
 
+/* The record sheet's header carries an action beside its close button. */
+.ep-calendar__dialog-head-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: var(--ep-s-2, 8px);
+}
+
+/* Extra cleaning is the one purple action in the portal, so the button says what it records
+   before it is opened, and matches the chip the entry becomes. */
+.ep-calendar__extra-open {
+  padding: 6px 12px;
+  border: 1px solid #6b2f8f;
+  border-radius: var(--ep-radius-md, 8px);
+  background: #f1e7f6;
+  color: #55246f;
+  font-size: var(--ep-fs-sm, 13px);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.ep-calendar__extra-open:hover { background: #e4d2ee; }
+.ep-calendar__extra-open:focus-visible { outline: 2px solid #6b2f8f; outline-offset: 2px; }
+
+.ep-calendar__extra-dialog { max-width: 520px; }
+
+.ep-calendar__extra-body {
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow: auto;
+  padding: 16px;
+}
+
+.ep-calendar__extra-lead {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border-left: 3px solid #6b2f8f;
+  border-radius: var(--ep-radius-sm, 6px);
+  background: #f8f2fb;
+  color: #55246f;
+  font-size: var(--ep-fs-sm, 13px);
+  line-height: 1.5;
+}
+
+.ep-calendar__extra-form {
+  display: grid;
+  gap: 12px;
+}
+
+.ep-calendar__extra-form label {
+  display: grid;
+  gap: 4px;
+}
+
+.ep-calendar__extra-form label > span {
+  color: var(--ep-text-strong);
+  font-size: var(--ep-fs-sm, 13px);
+  font-weight: 600;
+}
+
+.ep-calendar__extra-form input {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--ep-border-soft);
+  border-radius: var(--ep-radius-md, 8px);
+  background: var(--ep-surface, #fff);
+  color: var(--ep-text-strong);
+  font: inherit;
+}
+
+.ep-calendar__extra-form input:focus-visible { outline: 2px solid #6b2f8f; outline-offset: 1px; }
+
+.ep-calendar__extra-form small {
+  color: var(--ep-text-muted);
+  font-size: var(--ep-fs-xs, 12px);
+}
+
 .ep-calendar__dialog-head p {
   margin: 0 0 4px;
   color: var(--ep-text-muted);
@@ -1692,6 +1772,12 @@
   .ep-calendar__record-range,
   .ep-calendar__record-row [data-record-error],
   .ep-calendar__record-row [data-record-note] { grid-column: 1 / -1; }
+  /* Stacked rows lose the column headings, so each field names itself again here. */
+  .ep-calendar__record-mobile-label {
+    display: block;
+    color: var(--ep-text-muted);
+    font-size: var(--ep-fs-xs, 12px);
+  }
   .ep-calendar__record-range { max-width: 220px; }
   .ep-calendar__record-footer { padding-right: 14px; padding-left: 14px; }
 
@@ -1780,16 +1866,62 @@
 .ep-calendar__day-chip--not_reported { background: #f1e7f6; color: #6b2f8f; }
 .ep-calendar__day-chip--rejected     { background: #fde8e4; color: #9a3412; }
 /* Extra cleaning: re-cleaning that is NOT part of a cycle's progress.
-   Deliberately a saturated blue, not another pale tint. Every other chip here is a pale wash,
-   and pale washes sit within ~8 CIELAB of one another — far too close to tell apart at chip
-   size. Measured: this background is 23.6 dE from not_reported's lavender (and 30+ from the
-   rest), text contrast 6.2:1. An absence of work and bonus work must never look alike.
-   The dotted edge repeats the message without colour, for anyone who cannot use hue. */
+   Deliberately SOLID, not another pale tint. Every other chip here is a pale wash, and pale washes
+   sit within ~8 CIELAB of one another — far too close to tell apart at chip size. It shares the
+   purple family with not_reported on purpose (the same meaning carries in the calendar), and the
+   two are separated by weight instead: pale #f1e7f6 against solid #6b2f8f is ~60 dE, well beyond
+   anything two tints could reach, with white text at 7.1:1. An absence of work and bonus work must
+   never look alike. The dotted edge repeats the message without colour, for anyone who cannot use hue. */
 .ep-calendar__day-chip--extra {
-  background: #a8cdf7;
-  color: #14407a;
-  border: 1px dotted #14407a;
+  background: #6b2f8f;
+  color: #ffffff;
+  border: 1px dotted #e9d5f5;
 }
+
+/* Extra cleaning, wherever a day is opened. The grid chip is a solid purple box; these keep the
+   same identity at the larger sizes a panel allows, where a solid fill would be overbearing: a
+   purple edge and wash, with the word "Extra" carrying the meaning for anyone who cannot use hue. */
+.ep-calendar__extra-badge {
+  flex: 0 0 auto;
+  padding: 1px 8px;
+  border: 1px solid #6b2f8f;
+  border-radius: 99px;
+  background: #6b2f8f;
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .03em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.ep-calendar__event-card--extra {
+  border-color: #6b2f8f;
+  background: #f8f2fb;
+}
+
+.ep-calendar__event-card-extra-note {
+  color: #55246f;
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+.ep-calendar__pm-summary-item--extra { background: #f8f2fb; box-shadow: inset 3px 0 0 #6b2f8f; }
+.ep-calendar__pm-summary-badge--extra { background: #6b2f8f; color: #ffffff; }
+
+.ep-calendar__detail-extra-note {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border-left: 3px solid #6b2f8f;
+  border-radius: var(--ep-radius-sm, 6px);
+  background: #f8f2fb;
+  color: #55246f;
+  font-size: var(--ep-fs-sm, 13px);
+  line-height: 1.5;
+}
+
+/* Column captions for the stacked phone layout only; on the grid the column headings say it. */
+.ep-calendar__record-mobile-label { display: none; }
 
 @media (max-width: 720px) {
   .ep-calendar__day-row { grid-template-columns: minmax(0, 1fr) auto; }
