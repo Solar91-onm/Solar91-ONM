@@ -369,11 +369,9 @@ def cleaning_activity_metrics(completed: float, planned: int, overdue: int = 0,
     Overdue is a subset of pending, never a second item in the denominator, and no planned
     activities gives 0% rather than a division by zero.
 
-    The score is capped at 100% except for ONE plant with `allow_extra`: a single plant that
-    washes every table again after its three cycles are complete has done more than the month
-    asked for, so its own score reads above 100%. That extra may be fractional (half a wash of
-    the plant = 0.5). Across several plants the score is always capped, so one plant's extra
-    work can never paper over another plant's shortfall.
+    The score is capped at 100% except for ONE plant with `allow_extra`: confirmed extra cleaning
+    is work beyond the planned cycle progress, so its own score may read above 100%. Across several
+    plants the score is always capped, so one plant's extra work cannot paper over another plant's shortfall.
     """
     def tidy(value: float) -> int | float:
         """Whole counts stay ints; only genuine part-cycles are fractional."""
@@ -409,22 +407,11 @@ def _cycle_work_scores(reports, table_count: int, today: date, overrides: dict |
     due_dates = _cycle_due_dates(today, overrides)
     first_day = min(today.replace(day=1), start_dates[0])
     this_month = _month_key(today)
-    # Mid-cycle re-cleaning is bonus work, so it raises the score only once the month's required work
-    # is done -- the same rule the month summary already applies to it. Counting it straight away made
-    # a plant that re-cleaned 4 of its 10 tables read 70% instead of 50% with one cycle finished,
-    # which let rework stand in for the cycles still owed.
-    all_cycles_done = len({
-        report.cycle_no for report in reports
-        if report.cycle_month == this_month and report.cycle_completed
-        and report.review_status == "Confirmed" and not getattr(report, "is_extra", False)
-    }) >= MONTHLY_CYCLE_TARGET
     month_done = 0
     for report in reports:
         if report.review_status != "Confirmed" or not report.tables_cleaned:
             continue
         if not first_day <= report.report_date <= today:
-            continue
-        if getattr(report, "is_extra", False) and not all_cycles_done:
             continue
         month_done += int(report.tables_cleaned)
 
@@ -641,8 +628,14 @@ def _report_out(report: WashingDailyReport, plant: Plant, viewer: User, config: 
         "cycle_completed": report.cycle_completed,
         "can_review": can_review,
         "can_add_evidence": _can_add_washing_evidence(viewer, report, config),
-        "can_edit": manager or (report.reported_by_id == viewer.id and report.review_status in ("Pending", "Rejected")),
-        "can_delete": manager or (report.reported_by_id == viewer.id and report.review_status in ("Pending", "Rejected")),
+        "can_edit": manager or (
+            not report.is_extra and report.reported_by_id == viewer.id
+            and report.review_status in ("Pending", "Rejected")
+        ),
+        "can_delete": manager or (
+            not report.is_extra and report.reported_by_id == viewer.id
+            and report.review_status in ("Pending", "Rejected")
+        ),
         "has_before": any(e.get("kind") == "before" for e in (report.evidence or []) if isinstance(e, dict)),
         "has_after": any(e.get("kind") == "after" for e in (report.evidence or []) if isinstance(e, dict)),
         "backfilled": backfilled,
@@ -1068,29 +1061,26 @@ def _build_overview(db: Session, user: User, include_tables: bool = False, repor
             and cycle_no not in completed_dates
         )
         # Washing done after all three cycles were complete (recorded on cycle 3) counts towards
-        # the month as the fraction of a whole extra wash it represents, so an extra cycle raises
-        # compliance past 100% instead of disappearing.
+        # the month as the fraction of a whole extra wash it represents.
         extra_tables = (
             max(0, ledger[MONTHLY_CYCLE_TARGET]["confirmed"] - table_count)
             if len(completed_dates) >= MONTHLY_CYCLE_TARGET and table_count else 0
         )
-        # Mid-cycle re-cleaning (`is_extra`, migration 048) is held out of the ledger because it is
-        # not cycle progress, so it has to be added back here or it would never reach the score at
-        # all. Same rule as the month summary: it joins the total once all three cycles are complete.
-        if len(completed_dates) >= MONTHLY_CYCLE_TARGET and table_count:
-            extra_tables += sum(
-                report.tables_cleaned for report in reports
-                if report.cycle_month == month and report.review_status == "Confirmed"
-                and getattr(report, "is_extra", False)
-            )
+        # Mid-cycle re-cleaning (`is_extra`, migration 048) is not cycle progress, but confirmed
+        # work contributes to compliance immediately, like cleaning beyond the third cycle.
+        extra_tables += sum(
+            report.tables_cleaned for report in reports
+            if report.cycle_month == month and report.review_status == "Confirmed"
+            and getattr(report, "is_extra", False)
+        )
         extra_cycles = extra_tables / table_count if table_count else 0
         # The counts stay whole activities: 2 of 3 cycles done reads as 2, not 2.4.
         activities = cleaning_activity_metrics(completed_cycles_month + extra_cycles, planned_cycles,
                                                overdue_cycles, allow_extra=True)
         # Monthly compliance is the WORK done this month: confirmed tables cleaned on this month's
         # dates (whichever month a catch-up day is tagged to) against the tables due so far -- each
-        # started cycle's due, the open one on pace up to today. Uncapped, so extra washing and
-        # catching up a shortfall both raise it (_cycle_work_scores).
+        # started cycle's due, the open one on pace up to today. Confirmed extra cleaning also raises
+        # the plant's score without changing cycle progress (_cycle_work_scores).
         work = _cycle_work_scores(reports, table_count, today, config.cycle_overrides, excused_dates)
         month_confirmed_tables = work["month"]["tables_done"]
         monthly_tables_due = work["month"]["tables_due"]
@@ -1414,13 +1404,13 @@ def _plant_table_count(db: Session, plant_id: UUID, config: WashingConfig | None
 def _month_wash_summary(reports, table_count: int) -> dict:
     """How much washing a plant did in one month, for records and the monthly sheet.
 
-    `times_washed` counts full washes of every table (confirmed tables ÷ tables per cycle), so robot cleaning that
-    goes past the three cycles shows e.g. 4.5. `extra_times` is the part done after all three cycles were complete
-    (that work is recorded on cycle 3); it is a count for the record, never an extra cycle."""
+    `times_washed` counts confirmed unmarked cleaning (tables ÷ tables per cycle), including work
+    after the third cycle. `extra_times` separately counts confirmed mid-cycle re-cleaning and that
+    post-cycle surplus; neither advances a cycle."""
     active = [r for r in reports if r.review_status in ("Pending", "Confirmed")]
     confirmed = [r for r in active if r.review_status == "Confirmed"]
-    # Entries marked extra (mid-cycle re-cleaning) are held apart from the cycle figures: they are
-    # not cycle work, so they must not reach the ledger, the counts or the compliance behind them.
+    # Entries marked extra (mid-cycle re-cleaning) are held apart from cycle figures and added to
+    # extra_tables below, so they contribute to compliance without changing cycle progress.
     marked_extra = [r for r in confirmed if getattr(r, "is_extra", False)]
     confirmed = [r for r in confirmed if not getattr(r, "is_extra", False)]
     completed_on = {r.cycle_no: r.report_date for r in sorted(confirmed, key=lambda r: r.report_date) if r.cycle_completed}
@@ -1429,11 +1419,7 @@ def _month_wash_summary(reports, table_count: int) -> dict:
     last_cycle_tables = _cycle_ledger(confirmed, table_count)[MONTHLY_CYCLE_TARGET]["confirmed"]   # with tables carried in
     all_cycles_done = cycles_completed >= MONTHLY_CYCLE_TARGET
     extra_tables = max(0, last_cycle_tables - table_count) if all_cycles_done and table_count else 0
-    # A month still in progress does not advertise bonus work before the required work is done, so
-    # mid-cycle re-cleaning joins the total only once all three cycles are complete. The entry
-    # itself is saved and visible in the register and the calendar either way.
-    if all_cycles_done:
-        extra_tables += sum(r.tables_cleaned for r in marked_extra)
+    extra_tables += sum(r.tables_cleaned for r in marked_extra)
     return {
         "tables_per_cycle": table_count,
         "cycles_completed": min(cycles_completed, MONTHLY_CYCLE_TARGET),
@@ -1493,10 +1479,10 @@ def _cycle_sequence(entries, total_tables: int) -> list[tuple[int, bool]]:
 
     An entry may also be MARKED extra (`is_extra`, migration 048) for re-cleaning done while a cycle
     is still running. That cannot be derived from counts, so it is stored. A marked entry is reported
-    against the cycle that was running when it happened, but contributes nothing: it does not add to
-    the accumulated count, does not consume table numbers, and can never be the entry that completes
-    a cycle. That keeps repeated tables legal (via `_assert_distinct_tables`, which skips `extra`)
-    without letting rework stand in for required work."""
+    against the cycle that was running when it happened, but contributes nothing to cycle progress:
+    it does not add to the accumulated count, consume table numbers, or complete a cycle. That keeps
+    repeated tables legal (via `_assert_distinct_tables`, which skips `extra`) without letting rework
+    stand in for required work."""
     out: list[tuple[int, bool]] = []
     cycle, counted, used = 1, 0, set()
     for entry in entries:
@@ -2082,6 +2068,10 @@ def _load_report_for_change(db: Session, user: User, report_id: UUID):
     if not config:
         raise HTTPException(409, "Washing has not been set up for this plant")
     manager = _is_washing_manager(db, user)
+    if report.is_extra and not manager:
+        raise HTTPException(
+            403, "Only the O&M Head or a washing Assignee can edit or remove extra cleaning"
+        )
     owner = report.reported_by_id == user.id and report.review_status in ("Pending", "Rejected")
     if not manager and not owner:
         raise HTTPException(403, "Only the O&M team can change a report after it has been reviewed; a Site Engineer can change their own report until it is confirmed")

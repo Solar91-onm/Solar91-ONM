@@ -57,6 +57,15 @@
   cursor: not-allowed;
 }
 
+.ep-calendar__setup-submit--danger {
+  border-color: #b42318;
+  background: #b42318;
+}
+
+.ep-calendar__setup-submit--danger:not(:disabled):hover {
+  background: #8f1d13;
+}
+
 .ep-calendar__eyebrow {
   margin: 0 0 3px;
   color: var(--ep-accent-strong);
@@ -1571,6 +1580,20 @@
   margin: 10px;
   color: var(--ep-text-faint);
   font-size: var(--ep-fs-xs);
+}
+
+.ep-calendar__extra-detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 12px 10px;
+}
+
+.ep-calendar__extra-delete-warning {
+  margin: 12px 10px 6px;
+  color: #b42318;
+  font-size: var(--ep-fs-sm);
+  font-weight: 700;
 }
 
 .ep-calendar__drawer-footer {

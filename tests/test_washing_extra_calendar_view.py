@@ -38,6 +38,7 @@ def _event(**over):
         "tablesList": "310–352", "reviewStatus": "Confirmed", "jobStatus": "Done",
         "reportedBy": "Nikhil Sharma", "remarks": "", "exceptionReason": "",
         "kind": "washing.done", "equipmentType": "", "reference": "",
+        "reportId": "", "canEdit": False, "canDelete": False,
     }
     event.update(over)
     return event
@@ -63,7 +64,9 @@ def render():
           const events = JSON.parse(process.argv[1]);
           const context = { type: 'washing', plantCode: 'ABH01' };
           const state = { events: events, modalDate: events[0].date, detailEventIndex: 0,
-                          modalSearch: '', modalPlant: '', modalStatus: 'all', modalEquipment: '' };
+                          modalSearch: '', modalPlant: '', modalStatus: 'all', modalEquipment: '',
+                          extraDeleteConfirmId: events[0].confirmDelete ? events[0].reportId : '',
+                          extraDeleting: false, extraDeleteError: '' };
           process.stdout.write(JSON.stringify({
             chips: events.map((e) => I.renderCalendarEventChip(e, context)),
             cards: I.renderEventCards(events, context, state),
@@ -94,6 +97,20 @@ def test_the_date_box_chip_marks_extra_cleaning(render):
     # it keeps the detail layout, so the table range still shows under the title
     assert "ep-calendar__event--washing-detail" in extra
     assert "1–10" in extra
+
+
+def test_calendar_chip_distinguishes_same_table_range_across_cycles(render):
+    out = render([
+        _event(date="2026-11-01", title="14 tables cleaned", cycleNo=1, cycleCompleted=False,
+               tablesCleaned=14, tablesList="14–1", kind="report"),
+        _event(date="2026-11-08", title="14 tables cleaned", cycleNo=2, cycleCompleted=False,
+               tablesCleaned=14, tablesList="14–1", kind="report"),
+    ])
+
+    first, next_cycle = out["chips"]
+    assert "Cycle 1 · 14 tables cleaned" in first
+    assert "Cycle 2 · 14 tables cleaned" in next_cycle
+    assert "Tables: 14–1" in first and "Tables: 14–1" in next_cycle
 
 
 def test_the_date_box_chip_colour_is_not_overridden_by_a_later_rule():
@@ -155,8 +172,32 @@ def test_the_detail_panel_explains_what_extra_cleaning_is(render):
     assert "ep-calendar__extra-badge" in detail
     assert "ep-calendar__detail-extra-note" in detail
     assert "counts towards no cycle" in detail
-    assert "once all three cycles are complete" in detail
+    assert "confirmed extra cleaning contributes to monthly compliance" in detail
     assert "During cycle 3" in detail, "the Cycle field must not read as this cycle's work"
+
+
+def test_managers_can_edit_or_remove_extra_cleaning_from_its_detail(render):
+    detail = render([_event(isExtra=True, reportId="report-1", canEdit=True, canDelete=True)])["detail"]
+
+    assert 'data-calendar-action="edit-extra"' in detail
+    assert 'data-calendar-action="request-extra-delete"' in detail
+    assert "Remove extra cleaning" in detail
+
+
+def test_removing_extra_cleaning_requires_a_second_confirmation(render):
+    detail = render([_event(isExtra=True, reportId="report-1", canEdit=True, canDelete=True,
+                            confirmDelete=True)])["detail"]
+
+    assert "This cannot be undone." in detail
+    assert 'data-calendar-action="confirm-extra-delete"' in detail
+    assert 'data-calendar-action="cancel-extra-delete"' in detail
+
+
+def test_extra_cleaning_detail_hides_management_actions_from_other_roles(render):
+    detail = render([_event(isExtra=True, reportId="report-1")])["detail"]
+
+    assert "Edit extra cleaning" not in detail
+    assert "Remove extra cleaning" not in detail
 
 
 def test_every_purple_class_the_renderers_emit_is_styled():

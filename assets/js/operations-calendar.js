@@ -161,6 +161,10 @@
         // Extra cleaning: re-cleaning during a running cycle (dust, fog), recorded from the record
         // sheet's header. It is work done on its date, never progress of the cycle it happened in.
         extraOpen: false,
+        extraEditId: "",
+        extraDeleteConfirmId: "",
+        extraDeleting: false,
+        extraDeleteError: "",
         extraDate: "",
         extraList: "",
         extraRemarks: "",
@@ -195,8 +199,12 @@
     return event.kind === "washing.done" && event.status === "Confirmed";
   }
 
-  function eventChipTitle(event) {
-    return String(event.title || "");
+  function eventChipTitle(event, context) {
+    var title = String(event.title || "");
+    if (context.type !== "washing" || !event.cycleNo) return title;
+    return (event.isExtra
+      ? "Extra · During cycle " + event.cycleNo
+      : "Cycle " + event.cycleNo) + " · " + title;
   }
 
   function cycleCompletionTitle(event) {
@@ -221,7 +229,7 @@
   }
 
   function eventCellDescription(event, context) {
-    var title = eventChipTitle(event);
+    var title = eventChipTitle(event, context);
     var tables = washingTablesLabel(event, context);
     var description = tables ? title + " · " + tables : title;
     return isWashingCycleComplete(event, context)
@@ -233,7 +241,7 @@
     var tables = washingTablesLabel(event, context);
     var cycleComplete = isWashingCycleComplete(event, context);
     var deadline = event.kind === "deadline";
-    var title = eventChipTitle(event);
+    var title = eventChipTitle(event, context);
     var reportChip = '<span class="ep-calendar__event ' + statusClass(event.status) +
       (deadline ? " ep-calendar__event--deadline" : "") +
       // Extra cleaning gets its own colour: it is work done, but it is not cycle progress, so it
@@ -850,6 +858,34 @@
     ].filter(function (field) {
       return field[1] !== "" && field[1] !== null && field[1] !== undefined;
     });
+    var extraActions = "";
+    if (event.isExtra && event.reportId && event.canEdit) {
+      if (state.extraDeleteConfirmId === event.reportId) {
+        extraActions = '<p class="ep-calendar__extra-delete-warning" role="alert">Remove this extra cleaning record? This cannot be undone.</p>' +
+          '<div class="ep-calendar__extra-detail-actions">' +
+            '<button type="button" class="ep-calendar__close-button" data-calendar-action="cancel-extra-delete"' +
+              (state.extraDeleting ? " disabled" : "") + '>Keep entry</button>' +
+            '<button type="button" class="ep-calendar__setup-submit ep-calendar__setup-submit--danger" ' +
+              'data-calendar-action="confirm-extra-delete" data-report-id="' + escape(event.reportId) + '"' +
+              (state.extraDeleting ? " disabled" : "") + '>' +
+              (state.extraDeleting ? "Removing\u2026" : "Remove extra cleaning") + '</button>' +
+          '</div>' +
+          (state.extraDeleteError ? '<p class="ep-calendar__setup-error" role="alert">' +
+            escape(state.extraDeleteError) + '</p>' : "");
+      } else {
+        extraActions = '<div class="ep-calendar__extra-detail-actions">' +
+          '<button type="button" class="ep-calendar__setup-submit" data-calendar-action="edit-extra" data-report-id="' +
+            escape(event.reportId) + '">Edit extra cleaning</button>' +
+          (event.canDelete
+            ? '<button type="button" class="ep-calendar__setup-submit ep-calendar__setup-submit--danger" ' +
+              'data-calendar-action="request-extra-delete" data-report-id="' + escape(event.reportId) +
+              '">Remove extra cleaning</button>'
+            : "") +
+          '</div>';
+      }
+    } else {
+      extraActions = '<p class="ep-calendar__detail-note">Saved record, shown read-only.</p>';
+    }
     return '<div class="ep-calendar__modal ep-calendar__event-detail-modal' +
       (event.isExtra ? " ep-calendar__event-detail-modal--extra" : "") + '" data-calendar-event-detail>' +
       '<button class="ep-calendar__backdrop" type="button" data-calendar-action="close-event-detail" aria-label="Close activity details"></button>' +
@@ -867,8 +903,8 @@
               '<span>' + escape(event.status) + '</span></div>' +
             (event.isExtra
               ? '<p class="ep-calendar__detail-extra-note">Tables cleaned again while this cycle was still ' +
-                'running. It is kept as a record on this date but counts towards no cycle; it joins the ' +
-                'month’s extra cleaning once all three cycles are complete.</p>'
+                'running. It counts towards no cycle’s progress, but confirmed extra cleaning contributes ' +
+                'to monthly compliance.</p>'
               : "") +
             '<dl class="ep-calendar__detail-fields">' +
               fields.map(function (field) {
@@ -881,7 +917,8 @@
                   : escape(field[1]);
                 return "<div><dt>" + escape(field[0]) + "</dt><dd>" + value + "</dd></div>";
               }).join("") +
-            '</dl><p class="ep-calendar__detail-note">Saved record, shown read-only.</p>' +
+            '</dl>' +
+            extraActions +
           '</div>' +
         '</div>' +
       '</section>' +
@@ -1796,17 +1833,14 @@
     var cycle = recordCycle(state);
     var rows = recordRows(state);
     var summary = state.washingSummary || {};
-    var isLast = Number(state.recordCycle) >= (cycles.length || 3);
-    var extraTables = isLast ? Number(summary.extra_tables) || 0 : 0;
+    var extraTables = Number(summary.extra_tables) || 0;
     var days = rows.map(function (row) {
       var dateLabel = new Intl.DateTimeFormat("en-IN", {
         weekday: "short", day: "2-digit", month: "short"
       }).format(new Date(row.date + "T12:00:00"));
       if (row.report) {
         var numbers = row.numbers && row.numbers.length ? formatTableList(row.numbers) : "\u2014";
-        // Re-cleaning saved in the month's last cycle is tagged extra (migration 048): it is work done
-        // on that date, but not that cycle's progress, so the sheet says so rather than letting it read
-        // as cycle work beside the entry that completed the cycle on the very same date.
+        // Extra cleaning is not cycle progress, so keep its label visible beside the table numbers.
         if (row.report.is_extra === true) numbers += " (extra cleaning)";
         var edit = state.recordEdit;
         if (edit && edit.id === row.report.id) return renderRecordEditRow(state, row, dateLabel);
@@ -1868,10 +1902,8 @@
         '<div class="ep-calendar__record-progress"><strong>Cycle ' + Number(state.recordCycle) + '</strong>' +
           '<span>' + escape(cycle ? cycle.confirmed : 0) + " of " + escape(state.washingPlant.table_count) +
           " tables · due " + (cycle && cycle.due_date ? escape(displayDate(cycle.due_date)) : "—") +
-          // Washing done after all three cycles were complete is recorded on the last cycle and
-          // counted by the API (summary.extra_tables). Showing it stops that work looking lost.
           (extraTables ? " · " + escape(extraTables) + " extra table" + (extraTables === 1 ? "" : "s") +
-            " cleaned after cycle " + ((state.washingPlant.cycles || []).length || 3) : "") + '</span>' +
+            " cleaned this month" : "") + '</span>' +
           '<i><span style="width:' + (cycle && state.washingPlant.table_count
             ? Math.min(100, Math.round(100 * Number(cycle.confirmed || 0) / Number(state.washingPlant.table_count)))
             : 0) + '%"></span></i></div>' +
@@ -1894,7 +1926,7 @@
             ? '<div class="ep-calendar__record-table"><div class="ep-calendar__record-head"><span>Day</span><span>Tables</span><span>Table numbers</span><span>Remarks</span></div>' +
               days + '</div>'
             : '<p class="ep-calendar__empty">No reportable days for this cycle yet.</p>') +
-          '<p class="ep-calendar__record-help">Type the tables cleaned that day as numbers or ranges, e.g. 1, 2, 4, 7-8, 13 or 100-91. Each table counts once per cycle. The next cycle starts only after all configured tables are cleaned. When nothing was cleaned, choose the not-done reason for that day and add the details in Remarks.' +
+          '<p class="ep-calendar__record-help">Type the tables cleaned that day as numbers or ranges, e.g. 1, 2, 4, 7-8, 13 or 100-91. Each table counts once per cycle. The next cycle starts only after all configured tables are cleaned. Confirmed extra cleaning contributes to compliance but not cycle progress. When nothing was cleaned, choose the not-done reason for that day and add the details in Remarks.' +
             ' If the same day finishes this cycle and the next round is started too, type everything cleaned that day in one go, e.g. 1-25, 26-35: the tables this cycle still needs complete it and the rest are saved separately on the same date as the next cycle' +
             (nextCycleNo(state) ? "" : " (extra washing in the month's last cycle)") + '.' +
             (canManageWashing() ? " Apart from that, tables already cleaned in an incomplete cycle cannot be selected again." : "") + '</p>' +
@@ -1935,19 +1967,19 @@
     var plan = planExtra(state, total);
     var disabled = state.extraSaving ? " disabled" : "";
     var manager = canManageWashing();
+    var editing = !!state.extraEditId;
     var ready = !!state.extraDate && !plan.error && plan.numbers.length > 0;
     return '<div class="ep-calendar__modal ep-calendar__extra-modal" data-calendar-extra-modal>' +
       '<button class="ep-calendar__backdrop" type="button" data-calendar-action="close-extra" aria-label="Close extra cleaning"></button>' +
       '<section class="ep-calendar__dialog ep-calendar__extra-dialog" role="dialog" aria-modal="true" aria-labelledby="washing-extra-title">' +
         '<header class="ep-calendar__dialog-head"><div>' +
-          '<h2 id="washing-extra-title">Extra cleaning</h2>' +
+          '<h2 id="washing-extra-title">' + (editing ? "Edit extra cleaning" : "Extra cleaning") + '</h2>' +
           '<p>' + escape(state.washingPlant.plant) + " \u00b7 " + escape(total) + ' tables per cycle</p>' +
         '</div><button type="button" class="ep-calendar__close" data-calendar-action="close-extra" aria-label="Close">\u00d7</button></header>' +
         '<div class="ep-calendar__extra-body">' +
           '<p class="ep-calendar__extra-lead">Tables cleaned again during a running cycle \u2014 dust, fog or anything else. ' +
             'It does <strong>not</strong> count towards this cycle or the next one: those tables are already cleaned. ' +
-            'It is kept as a record on its date and joins the month\u2019s extra cleaning once all three cycles are complete, ' +
-            'which is where it lifts the compliance score.</p>' +
+            'Once confirmed, it contributes to monthly compliance without changing cycle progress.</p>' +
           (manager
             ? ""
             : '<p class="ep-calendar__extra-lead">Your entry is saved as awaiting review; the O&amp;M Head or the plant\u2019s ' +
@@ -1975,7 +2007,7 @@
           '<button type="button" class="ep-calendar__close-button" data-calendar-action="close-extra"' + disabled + '>Cancel</button>' +
           '<button type="button" class="ep-calendar__setup-submit" data-calendar-action="save-extra"' +
             (ready && !state.extraSaving ? "" : " disabled") + '>' +
-            (state.extraSaving ? "Saving\u2026" : "Save extra cleaning") + '</button></footer>' +
+            (state.extraSaving ? "Saving\u2026" : editing ? "Save changes" : "Save extra cleaning") + '</button></footer>' +
       '</section>' +
     '</div>';
   }
@@ -2255,6 +2287,9 @@
                 : "No module cleaning reported",
             status: status,
             isExtra: report.is_extra === true,
+            reportId: report.id,
+            canEdit: report.can_edit === true,
+            canDelete: report.can_delete === true,
             plantSiteCode: selected.siteCode,
             plantName: selected.plantName,
             cycleNo: report.cycle_no,
@@ -2285,7 +2320,7 @@
           });
           var detail = noCleaning
             ? (event.remarks || "").trim() || (event.exceptionReason || "").trim()
-            : eventCellDescription(event, context) + " · Cycle " + event.cycleNo + " · " + event.status;
+            : eventCellDescription(event, context) + " · " + event.status;
           if (!detail) {
             if (noCleaning && !state.tooltips[event.date]) state.tooltips[event.date] = [];
             return;
@@ -2331,6 +2366,11 @@
     state.washingNotConfigured = false;
     state.washingReports = [];
     state.washingSetup = null;
+    state.extraOpen = false;
+    state.extraEditId = "";
+    state.extraDeleteConfirmId = "";
+    state.extraDeleting = false;
+    state.extraDeleteError = "";
     state.setupOpen = false;
     state.setupLoading = false;
     state.setupSaving = false;
@@ -2807,6 +2847,7 @@
       } else if (action.dataset.calendarAction === "open-extra") {
         if (!canRecordWashing() || !state.washingPlant) return;
         state.extraOpen = true;
+        state.extraEditId = "";
         state.extraDate = state.washingDataToday || "";
         state.extraList = "";
         state.extraRemarks = "";
@@ -2814,13 +2855,82 @@
         renderView(host, state, context);
         var extraList = host.querySelector("[data-extra-list]");
         if (extraList) extraList.focus();
+      } else if (action.dataset.calendarAction === "edit-extra") {
+        if (!canManageWashing() || !state.washingPlant || !state.washingSetup) return;
+        var savedExtra = (state.washingReports || []).find(function (report) {
+          return report.id === action.dataset.reportId && report.is_extra === true && report.can_edit === true;
+        });
+        if (!savedExtra) return;
+        state.extraOpen = true;
+        state.extraEditId = savedExtra.id;
+        state.extraDate = savedExtra.report_date || "";
+        state.extraList = formatTableList(tableNumbersOf(savedExtra));
+        state.extraRemarks = savedExtra.remarks || "";
+        state.extraError = "";
+        state.detailEventIndex = null;
+        renderView(host, state, context);
+        var editExtraDate = host.querySelector("[data-extra-date]");
+        if (editExtraDate) editExtraDate.focus();
+      } else if (action.dataset.calendarAction === "request-extra-delete") {
+        if (!canManageWashing()) return;
+        var deletableExtra = (state.washingReports || []).find(function (report) {
+          return report.id === action.dataset.reportId && report.is_extra === true && report.can_delete === true;
+        });
+        if (!deletableExtra) return;
+        state.extraDeleteConfirmId = deletableExtra.id;
+        state.extraDeleteError = "";
+        renderView(host, state, context);
+      } else if (action.dataset.calendarAction === "cancel-extra-delete") {
+        if (state.extraDeleting) return;
+        state.extraDeleteConfirmId = "";
+        state.extraDeleteError = "";
+        renderView(host, state, context);
+      } else if (action.dataset.calendarAction === "confirm-extra-delete") {
+        if (state.extraDeleting || !canManageWashing()) return;
+        var deleteId = action.dataset.reportId;
+        var deletableRecord = (state.washingReports || []).find(function (report) {
+          return report.id === deleteId && report.is_extra === true && report.can_delete === true;
+        });
+        if (!deletableRecord || state.extraDeleteConfirmId !== deleteId) return;
+        state.extraDeleting = true;
+        state.extraDeleteError = "";
+        renderView(host, state, context);
+        global.Solar91PortalAPI.request(
+          "/api/scheduled/washing/daily-reports/" + encodeURIComponent(deleteId),
+          { method: "DELETE" }
+        ).then(function () {
+          if (!active || active.host !== host || active.state !== state) return;
+          if (data && data.invalidate) data.invalidate(true);
+          state.washingReports = (state.washingReports || []).filter(function (report) {
+            return report.id !== deleteId;
+          });
+          state.events = (state.events || []).filter(function (event) {
+            return event.reportId !== deleteId;
+          });
+          state.detailEventIndex = null;
+          state.extraDeleteConfirmId = "";
+          state.extraDeleting = false;
+          state.extraDeleteError = "";
+          renderView(host, state, active.context);
+          loadEvents(host, state, active.context, true);
+        }).catch(function (error) {
+          if (!active || active.host !== host || active.state !== state) return;
+          state.extraDeleting = false;
+          state.extraDeleteError = "Extra cleaning was not removed. " +
+            (error && error.message ? error.message : "Please retry.");
+          renderView(host, state, active.context);
+        });
       } else if (action.dataset.calendarAction === "close-extra") {
         if (state.extraSaving) return;
         state.extraOpen = false;
+        state.extraEditId = "";
+        state.extraDeleteConfirmId = "";
+        state.extraDeleteError = "";
         state.extraError = "";
         renderView(host, state, context);
       } else if (action.dataset.calendarAction === "save-extra") {
-        if (state.extraSaving || !canRecordWashing() || !state.washingSetup) return;
+        var editingExtra = !!state.extraEditId;
+        if (state.extraSaving || (editingExtra ? !canManageWashing() : !canRecordWashing()) || !state.washingSetup) return;
         syncExtraForm(host, state);
         var extraTotal = Number(state.washingPlant && state.washingPlant.table_count) || 0;
         var extraPlan = planExtra(state, extraTotal);
@@ -2833,45 +2943,57 @@
         state.extraSaving = true;
         state.extraError = "";
         renderView(host, state, context);
-        // The cycle sheet's own endpoint, with one entry flagged as extra: it already validates the
-        // table numbers against the plant, applies the role's review rules and leaves extra entries
-        // out of the once-per-cycle check, so re-cleaning is accepted (app/scheduled/washing_cycles.py).
-        global.Solar91PortalAPI.request("/api/scheduled/washing/daily-reports/sheet", {
-          method: "POST",
-          body: {
-            plant_id: state.washingSetup.plantId,
-            entries: [{
-              report_date: state.extraDate,
-              job_status: "Done",
-              tables_cleaned: extraPlan.numbers.length,
-              table_numbers: extraPlan.numbers,
-              remarks: state.extraRemarks || null,
-              is_extra: true
-            }]
-          }
-        }).then(function (result) {
+        var extraRequest = editingExtra
+          ? global.Solar91PortalAPI.request(
+            "/api/scheduled/washing/daily-reports/" + encodeURIComponent(state.extraEditId), {
+              method: "PATCH",
+              body: {
+                report_date: state.extraDate,
+                table_numbers: extraPlan.numbers,
+                remarks: state.extraRemarks || ""
+              }
+            })
+          : global.Solar91PortalAPI.request("/api/scheduled/washing/daily-reports/sheet", {
+            method: "POST",
+            body: {
+              plant_id: state.washingSetup.plantId,
+              entries: [{
+                report_date: state.extraDate,
+                job_status: "Done",
+                tables_cleaned: extraPlan.numbers.length,
+                table_numbers: extraPlan.numbers,
+                remarks: state.extraRemarks || null,
+                is_extra: true
+              }]
+            }
+          });
+        extraRequest.then(function (result) {
           if (!active || active.host !== host || active.state !== state) return;
           if (data && data.invalidate) data.invalidate(true);
-          var saved = (Array.isArray(result.reports) ? result.reports : [])[0];
+          var saved = editingExtra ? result : (Array.isArray(result.reports) ? result.reports : [])[0];
           state.extraSaving = false;
           state.extraOpen = false;
+          state.extraEditId = "";
           if (saved) {
             state.washingReports = (state.washingReports || []).filter(function (item) {
               return item.id !== saved.id;
             });
             state.washingReports.push(saved);
-            state.recordPhotos[saved.id] = [];
-            state.recordPhotosLoaded[saved.id] = true;
+            if (!editingExtra) {
+              state.recordPhotos[saved.id] = [];
+              state.recordPhotosLoaded[saved.id] = true;
+            }
           }
-          state.recordNotice = "Extra cleaning saved: " + extraPlan.numbers.length + " table" +
-            (extraPlan.numbers.length === 1 ? "" : "s") + " on " + displayDate(state.extraDate) +
+          state.recordNotice = (editingExtra ? "Extra cleaning updated: " : "Extra cleaning saved: ") +
+            extraPlan.numbers.length + " table" + (extraPlan.numbers.length === 1 ? "" : "s") +
+            " on " + displayDate(state.extraDate) +
             (saved && saved.review_status === "Pending" ? ", awaiting review." : ".");
           renderView(host, state, active.context);
           loadEvents(host, state, active.context, true);
         }).catch(function (error) {
           if (!active || active.host !== host || active.state !== state) return;
           state.extraSaving = false;
-          state.extraError = "Extra cleaning was not saved. " +
+          state.extraError = (editingExtra ? "Extra cleaning was not updated. " : "Extra cleaning was not saved. ") +
             (error && error.message ? error.message : "Please retry.");
           renderView(host, state, active.context);
         });

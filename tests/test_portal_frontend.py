@@ -189,6 +189,8 @@ def test_requirements_register_uses_portal_navigation_and_shared_table_controls(
     assert 'class="ep-issues__table-wrap"' in requirements
     assert 'class="ep-issues__table ep-requirements__table"' in requirements
     assert ".ep-requirements__table th:nth-child(2)" in styles
+    assert ".ep-requirements__hero .ep-issues__eyebrow" in styles
+    assert "font-size: 15px" in styles
 
 
 def test_inverter_issue_description_and_refresh_are_wired():

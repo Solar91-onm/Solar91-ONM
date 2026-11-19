@@ -948,17 +948,17 @@ def test_extra_cleaning_leaves_the_month_figures_identical():
         assert with_extra[key] == without[key], key
 
 
-def test_extra_total_waits_until_all_three_cycles_are_complete():
-    """Saved and visible throughout, but out of the extra total while a cycle is still open."""
+def test_extra_total_includes_confirmed_cleaning_before_three_cycles_are_complete():
+    """Confirmed extra cleaning is counted immediately but remains outside cycle progress."""
     extra = _Row(1, 4, range(1, 5), is_extra=True, day=4)
 
     open_month = _month_wash_summary([_Row(1, 5, range(1, 6), day=1), extra], 10)
     assert open_month["cycles_completed"] < 3
-    assert open_month["extra_tables"] == 0, "a month in progress does not advertise bonus work"
+    assert open_month["extra_tables"] == 4
 
     done_month = _month_wash_summary(_full_month_rows() + [extra], 10)
     assert done_month["cycles_completed"] == 3
-    assert done_month["extra_tables"] == 4, "it joins the total once the required work is done"
+    assert done_month["extra_tables"] == 4, "the extra cleaning is counted once"
     assert done_month["extra_times"] == 0.4
 
 

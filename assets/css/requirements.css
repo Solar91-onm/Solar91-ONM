@@ -6,6 +6,11 @@
   min-height: 132px;
 }
 
+.ep-requirements__hero .ep-issues__eyebrow {
+  font-size: 15px;
+  letter-spacing: .1em;
+}
+
 .ep-requirements__panel {
   display: grid;
   min-width: 0;
