@@ -57,8 +57,14 @@ def test_sidebar_order_and_overview_metric_grid(client):
 def test_security_register_supports_multiple_contacts_and_edit_overlay():
     security = (PORTAL_ASSETS / "js" / "security.js").read_text(encoding="utf-8")
     styles = (PORTAL_ASSETS / "css" / "security.css").read_text(encoding="utf-8")
-    for label in ("Site Engineer", "Site Engineer No.", "Security Name", "Mobile No.", "Guard Shift"):
+    for label in ("Site Engineer", "Site Engineer No.", "Security Guard", "Mobile No.", "Guard Shift"):
         assert label in security
+    assert '"Site Code (" + plants.length + ")"' in security
+    assert '"Site Engineer (" + counts.engineers + ")"' in security
+    assert '"Security Guard (" + counts.guards + ")"' in security
+    assert '<p class="ep-pt__sub">' not in security
+    assert "function updateRegisterHeadings(container)" in security
+    assert ".ep-pt__table.ep-security__table thead th" in styles
     # The engineer's duty shift is not tracked in the register; only guards keep a shift.
     assert "Engineer Shift" not in security
     assert "<th>Guard Name</th>" not in security
@@ -1180,8 +1186,10 @@ def test_portfolio_info_health_uses_two_sections_and_keeps_health_deep_links():
     assert 'data-tab-view="info-health"' in page
     assert 'data-view-section-item="info"' in page
     assert 'data-view-section-item="health"' in page
-    assert 'aria-expanded="true" data-view-section="info"' in page
+    assert 'aria-expanded="false" data-view-section="info"' in page
     assert 'aria-expanded="false" data-view-section="health"' in page
+    assert 'data-view-section-panel="info" hidden' in page
+    assert 'infoHealthOpen: { info: false, health: false }' in nav
     assert page.count('class="ep-view-section-switcher__chevron"') == 2
     disclosure_styles = styles[
         styles.index(".ep-view-section-switcher {"):styles.index(".ep-view-section-panel[hidden]")]
@@ -1359,7 +1367,7 @@ def test_plant_and_portfolio_details_sections_are_in_left_navigation():
     assert 'if (!selectedDetailSubpage)' in plant_subnav
     assert 'navId + ":" + section.id' in plant_subnav
     assert 'data-nav-details-row="view"' in page
-    assert 'viewDetailsRow.hidden = navState.activeView === "view-sub"' in navigation
+    assert 'if (viewDetailsRow) viewDetailsRow.hidden = false;' in navigation
     assert 'return !allowed || allowed.indexOf("details") !== -1;' in navigation
     assert "(parts.length === 3 || parts.length === 4)" in navigation
     assert 'section: navState.selectedDetailSection' in navigation
@@ -2929,6 +2937,7 @@ def test_dashboard_tiles_are_buttons_with_state_coloured_figures_and_meters():
     assert ".ep-metric--red    .ep-metric__chip { background: var(--ep-red-soft); color: var(--ep-red); }" in styles
 
     # Nothing scheduled reads as a sentence, not as a bare dash that looks like a broken tile.
+    assert 'title: "Preventive Maintenance"' in overview
     assert 'empty: pmEmpty ? "No activities this month" : ""' in overview
     assert "const pmEmpty = pmPct === null || pmScheduled === 0;" in overview
     assert 'class="ep-metric__empty"' in overview

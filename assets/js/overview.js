@@ -667,7 +667,7 @@
 
     const cards = [
       {
-        title: "PM Compliance",
+        title: "Preventive Maintenance",
         destination: "pm",
         icon: ICON_PM,
         tone: pmEmpty ? "neutral" : toneOfPill(pmP),

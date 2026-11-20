@@ -269,7 +269,7 @@
         contactCell(contacts.engineers, "engineer", "name", editingRow, plant.siteCode) + "</td>" +
       '<td data-label="Site Engineer No.">' +
         contactCell(contacts.engineers, "engineer", "mobile", editingRow, plant.siteCode) + "</td>" +
-      '<td data-security-sort-value="' + fmt.escape(guardNames) + '" data-label="Security Name">' +
+      '<td data-security-sort-value="' + fmt.escape(guardNames) + '" data-label="Security Guard">' +
         contactCell(contacts.guards, "guard", "name", editingRow, plant.siteCode) + "</td>" +
       '<td data-label="Mobile No.">' +
         contactCell(contacts.guards, "guard", "mobile", editingRow, plant.siteCode) + "</td>" +
@@ -290,11 +290,23 @@
       "</button></th>";
   }
 
-  function tableHTML(editingRows) {
+  function registerHeadings(counts) {
+    return [
+      "Site Code (" + plants.length + ")",
+      "Site Engineer (" + counts.engineers + ")",
+      "Site Engineer No.",
+      "Security Guard (" + counts.guards + ")",
+      "Mobile No.",
+      "Guard Shift"
+    ];
+  }
+
+  function tableHTML(editingRows, counts) {
     var headings = [
       "Site Code", "Site Engineer", "Site Engineer No.",
-      "Security Name", "Mobile No.", "Guard Shift"
+      "Security Guard", "Mobile No.", "Guard Shift"
     ];
+    if (!editingRows) headings = registerHeadings(counts);
     return '<div class="ep-pt__table-wrap"><div class="ep-pt__scroll ep-security__scroll" data-security-table="' +
       (editingRows ? "editor" : "register") + '" tabindex="0" role="region" aria-label="Site security contact table">' +
       '<table class="ep-pt__table ep-security__table"><thead><tr>' +
@@ -399,14 +411,10 @@
     if (button) button.disabled = saving || !Object.keys(dirty).length;
   }
 
-  function countLabel(count, singular) {
-    return count + " " + singular + (count === 1 ? "" : "s");
-  }
-
   /**
    * How many PEOPLE are on the register, not how many plants have someone. A person listed at two
    * plants counts twice, which is the honest reading of a register kept per plant. Counted from the
-   * same lists the table renders (`contactsFor`), so the sub-line and the rows can never disagree.
+   * same lists used to render the columns and rows, so their totals cannot disagree.
    */
   function registerCounts() {
     var engineers = 0;
@@ -425,10 +433,7 @@
     var counts = registerCounts();
     container.innerHTML = "" +
       '<div class="ep-pt">' +
-        '<div class="ep-pt__head"><div><h1 class="ep-pt__title">Site Engineer and Security</h1>' +
-          '<p class="ep-pt__sub">' + countLabel(plants.length, "plant") + " · " +
-          countLabel(counts.engineers, "site engineer") + " · " +
-          countLabel(counts.guards, "security guard") + "</p></div>" +
+        '<div class="ep-pt__head"><h1 class="ep-pt__title">Site Engineer and Security</h1>' +
           (editable || canMove() ? '<button type="button" class="ep-pt__edit ep-security__open" data-security-open-edit' +
             '>Edit register</button>' : "") +
         "</div>" +
@@ -439,7 +444,7 @@
           '<div class="ep-security__notice' + (noticeIsError ? " is-error" : "") +
             '" role="' + (noticeIsError ? "alert" : "status") + '"' +
             (!editing && notice ? "" : " hidden") + ">" + fmt.escape(notice) + "</div>" +
-          tableHTML(false) +
+          tableHTML(false, counts) +
         "</div>" +
         (editing ? editorHTML() : "") +
       "</div>";
@@ -603,13 +608,23 @@
     if (editing) applyEditorFilters(container);
   }
 
-  function updateHeaderCounts(container) {
-    var sub = container.querySelector(".ep-pt__sub");
-    if (!sub) return;
+  function updateRegisterHeadings(container) {
     var counts = registerCounts();
-    sub.textContent = countLabel(plants.length, "plant") + " · " +
-      countLabel(counts.engineers, "site engineer") + " · " +
-      countLabel(counts.guards, "security guard");
+    var headings = registerHeadings(counts);
+    var cells = container.querySelectorAll('[data-security-table="register"] thead th');
+    headings.forEach(function (label, index) {
+      var cell = cells[index];
+      if (!cell) return;
+      var sort = cell.querySelector("[data-security-sort]");
+      var text = sort && sort.querySelector("span");
+      if (text) {
+        text.textContent = label;
+        var direction = cell.getAttribute("aria-sort") === "ascending" ? "descending" : "ascending";
+        sort.setAttribute("aria-label", "Sort by " + label + " " + direction);
+      } else {
+        cell.textContent = label;
+      }
+    });
   }
 
   function showNotice(container, message, isError) {
@@ -664,7 +679,7 @@
       // The source row loses the person and the destination row gains them; nothing else moves.
       refreshRow(container, request.from_site_code);
       refreshRow(container, request.to_site_code);
-      updateHeaderCounts(container);
+      updateRegisterHeadings(container);
       showNotice(container, (person.name || "The person") + " moved from " + request.from_site_code +
         " to " + request.to_site_code + ".", false);
       // The move is stored; the cached plant list the rest of the portal reads must not stay stale.

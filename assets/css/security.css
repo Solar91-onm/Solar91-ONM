@@ -29,6 +29,11 @@
 }
 .ep-security__scroll { max-height: none; overflow-x: hidden; overflow-y: visible; }
 .ep-security__table { width: 100%; min-width: 0; table-layout: fixed; }
+.ep-pt__table.ep-security__table thead th {
+  color: var(--ep-text-strong);
+  font-size: var(--ep-fs-sm);
+  font-weight: 700;
+}
 .ep-security__sort {
   display: flex;
   align-items: center;

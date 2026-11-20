@@ -90,7 +90,7 @@
     selectedSubPage: null,       // e.g. "details", "health"
     selectedViewPage: null,      // e.g. "details", "health"
     selectedDetailSection: "details",
-    infoHealthOpen: { info: true, health: false },
+    infoHealthOpen: { info: false, health: false },
     selectedRange: null,         // { startDate, endDate } when opened from Overview
     pmParent: "overview",
     pmCalendarOpen: false,
@@ -155,7 +155,7 @@
         selectedSubPage: null,
         selectedViewPage: null,
         selectedDetailSection: "details",
-        infoHealthOpen: { info: true, health: false },
+        infoHealthOpen: { info: false, health: false },
         selectedRange: null,
         pmParent: "overview",
         pmCalendarOpen: false,
@@ -181,7 +181,7 @@
             info: snapshot.infoHealthOpen.info,
             health: snapshot.infoHealthOpen.health
           }
-          : details === "health" ? { info: false, health: true } : { info: true, health: false },
+          : details === "health" ? { info: false, health: true } : { info: false, health: false },
         selectedRange: snapshot.selectedRange &&
           typeof snapshot.selectedRange.startDate === "string" &&
           typeof snapshot.selectedRange.endDate === "string"
@@ -229,7 +229,7 @@
     navState.selectedSubPage = snapshot.selectedSubPage;
     navState.selectedViewPage = snapshot.selectedViewPage;
     navState.selectedDetailSection = snapshot.selectedDetailSection;
-    navState.infoHealthOpen = snapshot.infoHealthOpen || { info: true, health: false };
+    navState.infoHealthOpen = snapshot.infoHealthOpen || { info: false, health: false };
     navState.selectedRange = snapshot.selectedRange;
     navState.pmParent = snapshot.pmParent || "overview";
     navState.pmCalendarOpen = snapshot.pmCalendarOpen === true;
@@ -466,9 +466,7 @@
     navState.infoHealthOpen = pageId === "details"
       ? detailSection === "health"
         ? { info: false, health: true }
-        : DETAIL_SECTIONS.some(function (item) { return item.id === detailSection; })
-          ? { info: false, health: false }
-          : { info: true, health: false }
+        : { info: false, health: false }
       : { info: true, health: false };
     navState.selectedPlant = null;
     navState.selectedSubPage = null;
@@ -1008,11 +1006,7 @@
     });
 
     var viewDetailsRow = document.querySelector('[data-nav-details-row="view"]');
-    if (viewDetailsRow) {
-      viewDetailsRow.hidden = navState.activeView === "view-sub" &&
-        navState.selectedViewPage === "details" &&
-        DETAIL_SECTIONS.some(function (section) { return section.id === navState.selectedDetailSection; });
-    }
+    if (viewDetailsRow) viewDetailsRow.hidden = false;
 
     // Plants group header highlight when a plant sub-page is active
     var plantsToggle = document.querySelector('[data-nav-group="plants"] .ep-nav-group__toggle');
