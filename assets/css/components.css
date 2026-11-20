@@ -1617,8 +1617,9 @@
 .ep-ih__settings input { width: 100px; }
 .ep-ih__save-status { min-height: 18px; margin: 10px 18px; color: var(--ep-accent-strong); font-size: var(--ep-fs-sm); }
 .ep-view-section-switcher {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: var(--ep-s-3);
   margin-bottom: var(--ep-s-4);
 }
 .ep-view-section-item {
@@ -1661,6 +1662,9 @@
   outline-offset: -2px;
 }
 .ep-view-section-panel[hidden] { display: none !important; }
+@media (max-width: 760px) {
+  .ep-view-section-switcher { grid-template-columns: minmax(0, 1fr); }
+}
 @media (max-width: 1100px) {
   .ep-ih__summary { grid-template-columns: repeat(3, minmax(130px, 1fr)); }
   .ep-ih__severity { grid-column: span 2; }

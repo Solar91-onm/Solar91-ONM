@@ -1206,10 +1206,13 @@ def test_portfolio_info_health_uses_two_sections_and_keeps_health_deep_links():
     assert page.count('class="ep-view-section-switcher__chevron"') == 2
     disclosure_styles = styles[
         styles.index(".ep-view-section-switcher {"):styles.index(".ep-view-section-panel[hidden]")]
-    assert "flex-direction: column;" in disclosure_styles
+    assert "display: grid;" in disclosure_styles
+    assert "grid-template-columns: repeat(2, minmax(0, 1fr));" in disclosure_styles
     assert ".ep-view-section-switcher button {" not in disclosure_styles
     assert ".ep-view-section-switcher button[data-view-section]" in disclosure_styles
     assert ".ep-view-section-switcher button[data-view-section][hidden]" in disclosure_styles
+    assert "@media (max-width: 760px)" in styles
+    assert ".ep-view-section-switcher { grid-template-columns: minmax(0, 1fr); }" in styles
     assert "button.hidden = !showSections;" in nav
     assert 'navState.infoHealthOpen[section] = !navState.infoHealthOpen[section];' in nav
     assert 'return ["plants-table", "site-issues"];' in nav
@@ -1777,7 +1780,9 @@ def test_pm_calendar_setup_is_a_frontend_only_preview_for_plant_and_portfolio():
     # list, so their attribute is assembled at runtime — see the picker test below.
     for field in ("equipment", "part", "task"):
         assert 'picker("' + field + '"' in calendar
-    assert 'field("partNumber"' in calendar
+    assert 'field("numberOfParts"' in calendar
+    assert 'field("supervisor", "Supervisor", "text", false)' in calendar
+    assert 'key === "supervisor" ? \' placeholder="Name (optional)"\'' in calendar
     assert 'field("startDate"' in calendar
     assert 'data-pm-setup-field="frequency"' in calendar
     assert 'data-pm-setup-field="remarks"' in calendar
@@ -1796,8 +1801,7 @@ def test_pm_setup_equipment_part_and_task_are_pickers_driven_by_work_categories(
     Equipment is the category, Part comes from that category's pm_parts, and the
     Maintenance task comes from the chosen part. Each is a datalist-backed input,
     so it drops down, filters as you type, and still accepts a value that is not
-    on the list yet. Part number is free text: it belongs to the unit on site,
-    not to the category.
+    on the list yet. Number of parts is a required positive whole-number count.
     """
     calendar = (PORTAL_ASSETS / "js" / "operations-calendar.js").read_text(encoding="utf-8")
     styles = (PORTAL_ASSETS / "css" / "calendar.css").read_text(encoding="utf-8")
@@ -1806,18 +1810,22 @@ def test_pm_setup_equipment_part_and_task_are_pickers_driven_by_work_categories(
     assert "function pmPartsFor(equipment)" in calendar
     assert "function pmTasksFor(equipment, part)" in calendar
 
-    # the three cascading pickers, and part number left as a plain field
+    # the three cascading pickers and the required positive part count
     assert 'picker("equipment", "Equipment"' in calendar
     assert 'picker("part", "Part"' in calendar
     assert 'picker("task", "Maintenance task"' in calendar
-    assert 'field("partNumber", "Part number (optional)", "text", false)' in calendar
+    assert 'field("numberOfParts", "Number of parts", "number", true)' in calendar
+    assert 'key === "numberOfParts" ? \' min="1" step="1" inputmode="numeric"\'' in calendar
+    assert 'item.numberOfParts && "Number of parts: " + item.numberOfParts' in calendar
+    assert "(item.supervisor ? '<p>Supervisor: ' + escape(item.supervisor) + '</p>' : \"\")" in calendar
+    assert "Part number (optional)" not in calendar
 
     # a datalist, not a <select>: typing a value that is not listed still works
     assert '<datalist id="' in calendar
     assert 'list="' + "' + listId + '" in calendar
 
-    # changing the equipment clears the part and task below it
-    assert 'if (field === "equipment") { item.part = ""; item.partNumber = ""; }' in calendar
+    # changing equipment clears the cascading part/task but preserves the independent count
+    assert 'if (field === "equipment") { item.part = ""; }' in calendar
     assert ".ep-calendar__pm-setup-hint" in styles
 
     # "subpart" was a fault field borrowed from Site Issues; PM uses parts instead
