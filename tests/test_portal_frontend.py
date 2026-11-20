@@ -1202,6 +1202,8 @@ def test_portfolio_info_health_uses_two_sections_and_keeps_health_deep_links():
     assert 'aria-expanded="false" data-view-section="info"' in page
     assert 'aria-expanded="false" data-view-section="health"' in page
     assert 'data-view-section-panel="info" hidden' in page
+    assert '</div>\n            <section class="ep-view-section-panel" role="region" id="view-info-panel"' in page
+    assert '</section>\n            <section class="ep-view-section-panel" role="region" id="view-health-panel"' in page
     assert 'infoHealthOpen: { info: false, health: false }' in nav
     assert page.count('class="ep-view-section-switcher__chevron"') == 2
     disclosure_styles = styles[
