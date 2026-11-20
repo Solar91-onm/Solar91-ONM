@@ -546,6 +546,34 @@
     });
   }
 
+  function refreshCompactCells(container) {
+    if (!container || !global.getComputedStyle) return;
+    var cells = Array.prototype.slice.call(container.querySelectorAll("[data-compact-cell]"));
+    cells.forEach(function (cell) {
+      var content = cell.querySelector("[data-compact-content]");
+      if (content) content.classList.remove("is-collapsed");
+    });
+    cells.forEach(function (cell) {
+      var content = cell.querySelector("[data-compact-content]");
+      var button = cell.querySelector("[data-compact-cell-toggle]");
+      if (!content || !button) return;
+      var lineHeight = parseFloat(global.getComputedStyle(content).lineHeight);
+      var hasMore = lineHeight > 0 && content.scrollHeight > lineHeight * 2 + 1;
+      var expanded = hasMore && button.getAttribute("aria-expanded") === "true";
+      button.hidden = !hasMore;
+      content.classList.toggle("is-collapsed", !expanded);
+      button.textContent = expanded ? "Less" : "More";
+      button.setAttribute("aria-expanded", String(expanded));
+    });
+  }
+
+  document.addEventListener("portal:info-health-panel-opened", function (event) {
+    if (event.detail && event.detail.section === "health" && active &&
+        !active.context.plantCode && active.host.isConnected) {
+      refreshCompactCells(active.host);
+    }
+  });
+
   function occurrenceDateCell(value) {
     if (!value) return '<span class="ep-issues__unassigned">Not recorded</span>';
     var days = elapsedDays(value, localDate(new Date()));
@@ -584,7 +612,10 @@
           '<td data-label="' + labels[2] + '">' + (issue.subpart
             ? escape(issue.subpart)
             : '<span class="ep-issues__unassigned">Not recorded</span>') + '</td>' +
-          '<td data-label="' + labels[3] + '" class="ep-issues__problem">' + escape(issue.problem) + '</td>' +
+          '<td data-label="' + labels[3] + '" class="ep-issues__problem"><div class="ep-compact-cell" data-compact-cell>' +
+            '<div class="ep-compact-cell__content is-collapsed" data-compact-content>' + escape(issue.problem) + '</div>' +
+            '<button type="button" class="ep-compact-cell__toggle" data-compact-cell-toggle ' +
+              'aria-expanded="false" hidden>More</button></div></td>' +
           '<td data-label="' + labels[4] + '">' + (issue.supplierMaker
             ? '<strong>' + escape(issue.supplierMaker) + '</strong>' +
               (issue.serialNo ? "<small>S/N " + escape(issue.serialNo) + "</small>" : "")
@@ -1279,6 +1310,7 @@
         headerControls +
       '</header>' + issuesMarkup + '</section>'
     : issuesMarkup;
+    refreshCompactCells(host);
     wireColumnFilterMenus(host);
     var fullDetails = host.querySelector("[data-issue-full-details]");
     if (fullDetails) {
@@ -1632,6 +1664,17 @@
     });
     host.addEventListener("click", function (event) {
       if (!active || active.host !== host) return;
+      var compactToggle = event.target.closest("[data-compact-cell-toggle]");
+      if (compactToggle) {
+        var cell = compactToggle.closest("[data-compact-cell]");
+        var content = cell && cell.querySelector("[data-compact-content]");
+        if (!content) return;
+        var expanded = compactToggle.getAttribute("aria-expanded") !== "true";
+        content.classList.toggle("is-collapsed", !expanded);
+        compactToggle.setAttribute("aria-expanded", String(expanded));
+        compactToggle.textContent = expanded ? "Less" : "More";
+        return;
+      }
       var plantRow = event.target.closest("[data-issue-plant]");
       if (plantRow && !event.target.closest("button, a, input, select, textarea")) {
         if (plantRow.dataset.issuePlant) {

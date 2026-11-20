@@ -1170,9 +1170,18 @@
 }
 .ep-pt__spv { font-weight: 700; color: var(--ep-text-strong); }
 .ep-pt__engcell { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; line-height: 1.35; }
-.ep-pt__eng { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; }
+.ep-pt__engcell-lines > span { display: block; }
 .ep-pt__eng-name { font-size: var(--ep-fs-sm); color: var(--ep-text-strong); }
 .ep-pt__eng-no { font-size: var(--ep-fs-xs); color: var(--ep-text-muted); }
+.ep-compact-cell { min-width: 0; }
+.ep-compact-cell__content { width: 100%; line-height: 1.4; overflow-wrap: anywhere; }
+.ep-compact-cell__content.is-collapsed { max-height: 1.4em; overflow: hidden; }
+.ep-compact-cell__toggle {
+  display: inline-flex; margin-top: 3px; padding: 0; border: 0;
+  background: transparent; color: var(--ep-accent-strong); font: inherit;
+  font-size: var(--ep-fs-xs); line-height: 1.2; text-decoration: underline; cursor: pointer;
+}
+.ep-compact-cell__toggle[hidden] { display: none !important; }
 .ep-pt__cctv-placeholder { color: var(--ep-text-faint); font-size: var(--ep-fs-xs); }
 .ep-pt__dash { color: var(--ep-text-faint); }
 .ep-pt__loc {

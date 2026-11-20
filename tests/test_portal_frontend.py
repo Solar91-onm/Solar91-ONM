@@ -1202,6 +1202,20 @@ def test_portfolio_info_health_uses_two_sections_and_keeps_health_deep_links():
     assert 'document.querySelector("[data-issues-host]")' in nav
 
 
+def test_long_site_engineer_and_issue_description_cells_start_collapsed():
+    plants = (PORTAL_ASSETS / "js" / "plants-table.js").read_text(encoding="utf-8")
+    issues = (PORTAL_ASSETS / "js" / "site-issues.js").read_text(encoding="utf-8")
+    styles = (PORTAL_ASSETS / "css" / "components.css").read_text(encoding="utf-8")
+    assert 'class="ep-compact-cell__content ep-pt__engcell-lines is-collapsed"' in plants
+    assert 'class="ep-compact-cell__content is-collapsed" data-compact-content' in issues
+    assert "content.scrollHeight > lineHeight * 2 + 1" in plants
+    assert "content.scrollHeight > lineHeight * 2 + 1" in issues
+    assert 'container.querySelectorAll("[data-compact-cell-toggle]")' in plants
+    assert 'event.target.closest("[data-compact-cell-toggle]")' in issues
+    assert 'document.addEventListener("portal:info-health-panel-opened"' in issues
+    assert ".ep-compact-cell__content.is-collapsed { max-height: 1.4em; overflow: hidden; }" in styles
+
+
 def test_module_cleaning_photo_slot_reads_are_bounded_and_update_only_the_open_day():
     calendar = (PORTAL_ASSETS / "js" / "operations-calendar.js").read_text(encoding="utf-8")
     start = calendar.index("function loadRecordPhotos")

@@ -9,6 +9,7 @@
   var loadPromise = null;
   var loaded = false;
   var searchTimer = null;
+  var activeContainer = null;
   var mode = { kind: "all", siteCode: null, merged: false };
   var detailSection = "details";
   var ui = { search: "", spv: "__all", district: "__all", sort: { key: "code", dir: "asc" }, columnFilters: {} };
@@ -81,17 +82,46 @@
   function engineerCell(plant) {
     var contacts = engineerContacts(plant);
     if (!contacts.length) return dash("No Site Engineer assigned");
-    var html = contacts.map(function (contact) {
+    var lines = [];
+    contacts.forEach(function (contact) {
       var name = (contact.name || "").trim();
       var mobile = (contact.mobile || "").trim();
-      var block = '<div class="ep-pt__eng">';
-      if (name) block += '<span class="ep-pt__eng-name">' + fmt.escape(name) + "</span>";
-      if (mobile) block += '<span class="ep-pt__eng-no">' + fmt.escape(mobile) + "</span>";
-      block += "</div>";
-      return block;
-    }).join("");
-    return '<div class="ep-pt__engcell">' + html + "</div>";
+      if (name) lines.push('<span class="ep-pt__eng-name">' + fmt.escape(name) + "</span>");
+      if (mobile) lines.push('<span class="ep-pt__eng-no">' + fmt.escape(mobile) + "</span>");
+    });
+    return '<div class="ep-pt__engcell ep-compact-cell" data-compact-cell>' +
+      '<div class="ep-compact-cell__content ep-pt__engcell-lines is-collapsed" data-compact-content>' +
+        lines.join("") +
+      '</div><button type="button" class="ep-compact-cell__toggle" data-compact-cell-toggle ' +
+        'aria-expanded="false" hidden>More</button></div>';
   }
+
+  function refreshCompactCells(container) {
+    if (!container || !global.getComputedStyle) return;
+    var cells = Array.prototype.slice.call(container.querySelectorAll("[data-compact-cell]"));
+    cells.forEach(function (cell) {
+      var content = cell.querySelector("[data-compact-content]");
+      if (content) content.classList.remove("is-collapsed");
+    });
+    cells.forEach(function (cell) {
+      var content = cell.querySelector("[data-compact-content]");
+      var button = cell.querySelector("[data-compact-cell-toggle]");
+      if (!content || !button) return;
+      var lineHeight = parseFloat(global.getComputedStyle(content).lineHeight);
+      var hasMore = lineHeight > 0 && content.scrollHeight > lineHeight * 2 + 1;
+      var expanded = hasMore && button.getAttribute("aria-expanded") === "true";
+      button.hidden = !hasMore;
+      content.classList.toggle("is-collapsed", !expanded);
+      button.textContent = expanded ? "Less" : "More";
+      button.setAttribute("aria-expanded", String(expanded));
+    });
+  }
+
+  document.addEventListener("portal:info-health-panel-opened", function (event) {
+    if (event.detail && event.detail.section === "info" && activeContainer && activeContainer.isConnected) {
+      refreshCompactCells(activeContainer);
+    }
+  });
 
   function visibleRows() {
     if (mode.kind === "single") {
@@ -556,6 +586,7 @@
   // ─── Wiring ──────────────────────────────────────────────────────────
   function wire(container) {
     wireColumnFilterMenus(container);
+    refreshCompactCells(container);
 
     container.querySelectorAll("[data-plant-details-toggle]").forEach(function (button) {
       button.addEventListener("click", function () {
@@ -568,6 +599,18 @@
         try {
           global.localStorage.setItem(detailsCollapseKey(plant), String(!expanded));
         } catch (error) {}
+      });
+    });
+
+    container.querySelectorAll("[data-compact-cell-toggle]").forEach(function (button) {
+      button.addEventListener("click", function () {
+        var cell = button.closest("[data-compact-cell]");
+        var content = cell && cell.querySelector("[data-compact-content]");
+        if (!content) return;
+        var expanded = button.getAttribute("aria-expanded") !== "true";
+        content.classList.toggle("is-collapsed", !expanded);
+        button.setAttribute("aria-expanded", String(expanded));
+        button.textContent = expanded ? "Less" : "More";
       });
     });
 
@@ -630,6 +673,7 @@
 
   function show(container, opts) {
     if (!container) return;
+    activeContainer = container;
     detailSection = opts && DETAIL_SECTIONS.indexOf(opts.section) !== -1
       ? opts.section : "details";
     mode = {

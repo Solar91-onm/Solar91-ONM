@@ -495,6 +495,9 @@
     var panel = document.querySelector('[data-view-section-panel="' + section + '"]');
     if (button) button.setAttribute("aria-expanded", String(navState.infoHealthOpen[section]));
     if (panel) panel.hidden = !navState.infoHealthOpen[section];
+    if (navState.infoHealthOpen[section]) {
+      document.dispatchEvent(new CustomEvent("portal:info-health-panel-opened", { detail: { section: section } }));
+    }
     writeNavigationHistory(false);
     try { sessionStorage.setItem("solar91Portal.navState", JSON.stringify(navState)); } catch (_) {}
     updateHighlights();
