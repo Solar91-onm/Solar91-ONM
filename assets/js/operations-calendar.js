@@ -1123,7 +1123,8 @@
     return {
       equipment: "",
       part: "",
-      numberOfParts: "",
+      numberOfUnits: "",
+      unitName: "",
       supervisor: "",
       task: "",
       startDate: "",
@@ -1139,8 +1140,9 @@
           '" data-pm-setup-index="' + index + '" data-pm-setup-field="' + key + '"' +
           (required ? " required" : "") + ' value="' + escape(item[key]) + '"' +
           (type === "text" ? ' maxlength="255"' : "") +
+          (key === "unitName" ? ' placeholder="e.g. INV-1, INV-2"' : "") +
           (key === "supervisor" ? ' placeholder="Name (optional)"' : "") +
-          (key === "numberOfParts" ? ' min="1" step="1" inputmode="numeric"' : "") +
+          (key === "numberOfUnits" ? ' min="1" step="1" inputmode="numeric"' : "") +
           ' /></label>';
       };
       // A datalist-backed input: it drops down the full list, filters as you type,
@@ -1181,7 +1183,8 @@
           picker("equipment", "Equipment", PM_CATEGORIES.map(function (row) { return row.name; }),
                  true, equipmentHint) +
           picker("part", "Part", [ALL_PARTS].concat(partOptions), false, partHint) +
-          field("numberOfParts", "Number of parts", "number", true) +
+          field("numberOfUnits", "Number of units", "number", true) +
+          field("unitName", "Unit name(s) (optional)", "text", false) +
           field("supervisor", "Supervisor", "text", false) +
           picker("task", "Maintenance task", [ALL_TASKS].concat(taskOptions), true, "") +
           field("startDate", "First scheduled date", "date", true) +
@@ -1236,7 +1239,8 @@
               '<div class="ep-calendar__pm-setup-preview-items">' +
                 state.pmSetupItems.map(function (item) {
                   return '<article><h3>' + escape(item.equipment) + ' · ' + escape(item.task) + '</h3>' +
-                   '<p>' + escape([item.part, item.numberOfParts && "Number of parts: " + item.numberOfParts]
+                  '<p>' + escape([item.part, item.numberOfUnits && "Number of units: " + item.numberOfUnits,
+                    item.unitName && "Unit name(s): " + item.unitName]
                       .filter(Boolean).join(" · ") || "No part specified") + '</p>' +
                     (item.supervisor ? '<p>Supervisor: ' + escape(item.supervisor) + '</p>' : "") +
                     '<p>' + escape(item.startDate) + ' · ' + escape(item.frequency) + '</p>' +
@@ -3411,7 +3415,7 @@
           syncPMSetupForm(host, active.state);
           var item = active.state.pmSetupItems[Number(event.target.dataset.pmSetupIndex)];
           if (item) {
-            if (field === "equipment") { item.part = ""; }
+            if (field === "equipment") { item.part = ""; item.unitName = ""; }
             item.task = "";
           }
           refreshKeepingFocus(host, active.state, active.context,

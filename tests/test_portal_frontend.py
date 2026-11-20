@@ -1782,7 +1782,9 @@ def test_pm_calendar_setup_is_a_frontend_only_preview_for_plant_and_portfolio():
     # list, so their attribute is assembled at runtime — see the picker test below.
     for field in ("equipment", "part", "task"):
         assert 'picker("' + field + '"' in calendar
-    assert 'field("numberOfParts"' in calendar
+    assert 'field("numberOfUnits"' in calendar
+    assert 'field("unitName", "Unit name(s) (optional)", "text", false)' in calendar
+    assert 'key === "unitName" ? \' placeholder="e.g. INV-1, INV-2"\'' in calendar
     assert 'field("supervisor", "Supervisor", "text", false)' in calendar
     assert 'key === "supervisor" ? \' placeholder="Name (optional)"\'' in calendar
     assert 'field("startDate"' in calendar
@@ -1803,7 +1805,8 @@ def test_pm_setup_equipment_part_and_task_are_pickers_driven_by_work_categories(
     Equipment is the category, Part comes from that category's pm_parts, and the
     Maintenance task comes from the chosen part. Each is a datalist-backed input,
     so it drops down, filters as you type, and still accepts a value that is not
-    on the list yet. Number of parts is a required positive whole-number count.
+    on the list yet. Number of units is a required positive whole-number count,
+    and unit labels such as INV-1 / INV-2 are optional.
     """
     calendar = (PORTAL_ASSETS / "js" / "operations-calendar.js").read_text(encoding="utf-8")
     styles = (PORTAL_ASSETS / "css" / "calendar.css").read_text(encoding="utf-8")
@@ -1812,13 +1815,14 @@ def test_pm_setup_equipment_part_and_task_are_pickers_driven_by_work_categories(
     assert "function pmPartsFor(equipment)" in calendar
     assert "function pmTasksFor(equipment, part)" in calendar
 
-    # the three cascading pickers and the required positive part count
+    # the cascading pickers, a required unit count, and optional unit labels
     assert 'picker("equipment", "Equipment"' in calendar
     assert 'picker("part", "Part"' in calendar
     assert 'picker("task", "Maintenance task"' in calendar
-    assert 'field("numberOfParts", "Number of parts", "number", true)' in calendar
-    assert 'key === "numberOfParts" ? \' min="1" step="1" inputmode="numeric"\'' in calendar
-    assert 'item.numberOfParts && "Number of parts: " + item.numberOfParts' in calendar
+    assert 'field("numberOfUnits", "Number of units", "number", true)' in calendar
+    assert 'key === "numberOfUnits" ? \' min="1" step="1" inputmode="numeric"\'' in calendar
+    assert 'item.numberOfUnits && "Number of units: " + item.numberOfUnits' in calendar
+    assert 'item.unitName && "Unit name(s): " + item.unitName' in calendar
     assert "(item.supervisor ? '<p>Supervisor: ' + escape(item.supervisor) + '</p>' : \"\")" in calendar
     assert "Part number (optional)" not in calendar
 
@@ -1826,8 +1830,8 @@ def test_pm_setup_equipment_part_and_task_are_pickers_driven_by_work_categories(
     assert '<datalist id="' in calendar
     assert 'list="' + "' + listId + '" in calendar
 
-    # changing equipment clears the cascading part/task but preserves the independent count
-    assert 'if (field === "equipment") { item.part = ""; }' in calendar
+    # changing equipment clears the cascading part/task and any name tied to the old equipment
+    assert 'if (field === "equipment") { item.part = ""; item.unitName = ""; }' in calendar
     assert ".ep-calendar__pm-setup-hint" in styles
 
     # "subpart" was a fault field borrowed from Site Issues; PM uses parts instead
