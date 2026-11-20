@@ -1186,7 +1186,9 @@ def test_portfolio_info_health_uses_two_sections_and_keeps_health_deep_links():
     disclosure_styles = styles[
         styles.index(".ep-view-section-switcher {"):styles.index(".ep-view-section-panel[hidden]")]
     assert "flex-direction: column;" in disclosure_styles
-    assert ".ep-view-section-switcher button[hidden]" in disclosure_styles
+    assert ".ep-view-section-switcher button {" not in disclosure_styles
+    assert ".ep-view-section-switcher button[data-view-section]" in disclosure_styles
+    assert ".ep-view-section-switcher button[data-view-section][hidden]" in disclosure_styles
     assert "button.hidden = !showSections;" in nav
     assert 'navState.infoHealthOpen[section] = !navState.infoHealthOpen[section];' in nav
     assert 'return ["plants-table", "site-issues"];' in nav
