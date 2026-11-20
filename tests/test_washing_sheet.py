@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import timedelta
 from pathlib import Path
+from uuid import UUID
 
 from app.core.models import Notification, UserPlantAssignment, WashingDailyReport
 from app.core.timeutil import business_today
@@ -173,6 +174,97 @@ def test_om_sheet_is_saved_confirmed_and_rolls_into_the_next_cycle(client, db):
     month = client.get(f"{BASE}/plants/{plant.id}/cycles", params={"month": d1.strftime("%Y-%m")}).json()
     assert [c["state"] for c in month["cycles"][:2]] == ["Completed", "In progress"]
     assert sorted(r["report_date"] for r in month["reports"]) == [d.isoformat() for d in (d1, d2, d3)]
+
+
+def test_same_day_next_cycle_is_explicit_and_waits_for_site_engineer_review(client, db):
+    plant = _plant(db)
+    _head, assignee = _setup_cycle_users(client, db, plant)
+    engineer = _engineer(client, db, plant)
+    (day,) = _days(1, back=20)
+
+    not_completed = _sheet(client, plant, [{
+        **_done(day, 1), "table_start": 1, "table_end": 1, "same_day_next_cycle": True,
+    }])
+    assert not_completed.status_code == 409
+    assert "confirmed cycle" in not_completed.json()["detail"]
+
+    completed = _sheet(client, plant, [{
+        **_done(day, 4), "table_start": 1, "table_end": 4,
+    }])
+    assert completed.status_code == 200, completed.text
+    first_cycle_report = completed.json()["reports"][0]
+    conftest._CURRENT_USER = assignee
+    confirmed = client.post(
+        f"{BASE}/daily-reports/confirm",
+        json={"plant_id": str(plant.id), "report_ids": [first_cycle_report["id"]]},
+    )
+    assert confirmed.status_code == 200, confirmed.text
+
+    conftest._CURRENT_USER = engineer
+    rollover = _sheet(client, plant, [{
+        **_done(day, 2), "table_start": 1, "table_end": 2, "same_day_next_cycle": True,
+    }])
+    assert rollover.status_code == 200, rollover.text
+    second_cycle_report = rollover.json()["reports"][0]
+    assert second_cycle_report["cycle_no"] == 2
+    assert second_cycle_report["review_status"] == "Pending"
+    assert second_cycle_report["cycle_completed"] is False
+
+    duplicate = _sheet(client, plant, [{
+        **_done(day, 1), "table_start": 3, "table_end": 3, "same_day_next_cycle": True,
+    }])
+    assert duplicate.status_code == 409
+
+    conftest._CURRENT_USER = assignee
+    confirmed_rollover = client.post(
+        f"{BASE}/daily-reports/confirm",
+        json={"plant_id": str(plant.id), "report_ids": [second_cycle_report["id"]]},
+    )
+    assert confirmed_rollover.status_code == 200, confirmed_rollover.text
+    saved = db.query(WashingDailyReport).filter_by(id=UUID(second_cycle_report["id"])).one()
+    assert saved.review_status == "Confirmed" and saved.cycle_no == 2
+
+
+def test_om_head_same_day_next_cycle_entry_saves_confirmed(client, db):
+    plant = _plant(db)
+    head, _assignee = _setup_cycle_users(client, db, plant)
+    _engineer(client, db, plant)
+    (day,) = _days(1, back=20)
+    conftest._CURRENT_USER = head
+
+    completed = _sheet(client, plant, [{
+        **_done(day, 4), "table_start": 1, "table_end": 4,
+    }])
+    assert completed.status_code == 200, completed.text
+    rollover = _sheet(client, plant, [{
+        **_done(day, 2), "table_start": 1, "table_end": 2, "same_day_next_cycle": True,
+    }])
+    assert rollover.status_code == 200, rollover.text
+    assert rollover.json()["reports"][0]["cycle_no"] == 2
+    assert rollover.json()["reports"][0]["review_status"] == "Confirmed"
+
+
+def test_same_day_next_cycle_requires_the_next_cycle_not_to_have_started_later(client, db):
+    plant = _plant(db)
+    head, _assignee = _setup_cycle_users(client, db, plant)
+    engineer = _engineer(client, db, plant)
+    day, later = _days(2, back=20)
+    conftest._CURRENT_USER = head
+    completed = _sheet(client, plant, [{
+        **_done(day, 4), "table_start": 1, "table_end": 4,
+    }])
+    assert completed.status_code == 200, completed.text
+
+    conftest._CURRENT_USER = engineer
+    started = _sheet(client, plant, [{
+        **_done(later, 1), "table_start": 1, "table_end": 1,
+    }])
+    assert started.status_code == 200, started.text
+    rollover = _sheet(client, plant, [{
+        **_done(day, 1), "table_start": 1, "table_end": 1, "same_day_next_cycle": True,
+    }])
+    assert rollover.status_code == 409
+    assert "already started" in rollover.json()["detail"]
 
 
 def test_bulk_confirm_checks_reviewer_photos_and_completes_the_cycle(client, db, monkeypatch):

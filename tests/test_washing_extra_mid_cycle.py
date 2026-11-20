@@ -1,12 +1,8 @@
-"""Extra cleaning recorded WHILE a cycle is still running (dust, fog, anything else).
+"""Extra cleaning remains in the calendar, but only post-cycle-three work affects compliance.
 
-Those tables are already clean for this cycle, so re-cleaning them is not progress of this cycle
-and cannot open the next one either. Confirmed entries contribute to monthly compliance immediately
-without changing cycle progress. `is_extra` (migration 048) stores the distinction because no count
-can tell rework from fresh work.
-
-These tests keep marked extras out of cycle progress while including confirmed extra work in the
-compliance total immediately.
+Re-cleaning during an incomplete cycle cannot stand in for work owed or raise the plant's score.
+`is_extra` (migration 048) stores the distinction; entries after all three cycles are confirmed
+still count toward the monthly score without advancing cycle progress.
 """
 from __future__ import annotations
 
@@ -70,14 +66,14 @@ def test_extra_cleaning_never_counts_as_cycle_progress():
     assert _cycle_ledger(fresh, TOTAL)[1]["confirmed"] == 2, "rework cannot stand in for work owed"
 
 
-def test_extra_cleaning_lifts_monthly_compliance_without_changing_cycle_progress():
+def test_mid_cycle_extra_cleaning_is_calendar_only_until_all_three_cycles_are_complete():
     today = date(2026, 11, 28)
     one_cycle = [_R(date(2026, 11, 5), 4, 1, completed=True, numbers=range(1, 5))]
     mid = one_cycle + [_R(date(2026, 11, 8), 2, 1, extra=True, numbers=(1, 2))]
 
     before = _cycle_work_scores(one_cycle, TOTAL, today, None, set())["month"]["tables_done"]
     after = _cycle_work_scores(mid, TOTAL, today, None, set())["month"]["tables_done"]
-    assert after == before + 2, "confirmed re-cleaning contributes to compliance immediately"
+    assert after == before, "mid-cycle re-cleaning is not compliance work"
     assert _month_wash_summary(mid, TOTAL)["extra_tables"] == 2
 
     all_three = [
@@ -85,17 +81,20 @@ def test_extra_cleaning_lifts_monthly_compliance_without_changing_cycle_progress
         _R(date(2026, 11, 14), 4, 2, completed=True, numbers=range(1, 5)),
         _R(date(2026, 11, 24), 4, 3, completed=True, numbers=range(1, 5)),
     ]
-    done = all_three + [_R(date(2026, 11, 8), 2, 1, extra=True, numbers=(1, 2))]
+    mid_and_done = all_three + [
+        _R(date(2026, 11, 8), 2, 1, extra=True, numbers=(1, 2)),
+        _R(date(2026, 11, 25), 2, 3, extra=True, numbers=(1, 2)),
+    ]
 
     before = _cycle_work_scores(all_three, TOTAL, today, None, set())["month"]["tables_done"]
-    after = _cycle_work_scores(done, TOTAL, today, None, set())["month"]["tables_done"]
-    assert after == before + 2, "the same extra work is counted once after all cycles too"
-    summary = _month_wash_summary(done, TOTAL)
-    assert (summary["extra_tables"], summary["extra_times"]) == (2, 0.5)
+    after = _cycle_work_scores(mid_and_done, TOTAL, today, None, set())["month"]["tables_done"]
+    assert after == before + 2, "only extra cleaning after Cycle 3 contributes to compliance"
+    summary = _month_wash_summary(mid_and_done, TOTAL)
+    assert (summary["extra_tables"], summary["extra_times"]) == (4, 1.0)
     assert summary["times_washed"] == 3.0, "extra washing is reported apart from the cycles"
     # and it still never passes for cycle work
     assert all(cycle["tables_done"] == TOTAL for cycle in
-               _cycle_work_scores(done, TOTAL, today, None, set())["cycles"].values())
+               _cycle_work_scores(mid_and_done, TOTAL, today, None, set())["cycles"].values())
 
 
 def test_assignee_can_edit_and_remove_extra_cleaning(client, db):
@@ -158,14 +157,14 @@ def test_the_om_team_records_extra_cleaning_during_a_running_cycle(client, db):
     month = client.get(f"{BASE}/plants/{plant.id}/cycles", params={"month": d1.strftime("%Y-%m")}).json()
     assert month["cycles"][0]["confirmed"] == 2, "the cycle still needs its other 2 tables"
     assert month["cycles"][0]["state"] == "In progress"
-    assert month["summary"]["extra_tables"] == 2, "confirmed mid-cycle extras count immediately"
+    assert month["summary"]["extra_tables"] == 2, "the monthly record still lists mid-cycle extra work"
     overview = client.get(f"{BASE}/overview", params={
         "month": d1.strftime("%Y-%m"), "include_reports": "false", "summary": "true",
     })
     assert overview.status_code == 200, overview.text
     plant_score = next(row for row in overview.json()["plants"] if row["plant_id"] == str(plant.id))
-    assert plant_score["monthly_tables_confirmed"] == 4
-    assert plant_score["monthly_compliance_percent"] == 33.3
+    assert plant_score["monthly_tables_confirmed"] == 2
+    assert plant_score["monthly_compliance_percent"] == 16.7
 
 
 def test_extra_cleaning_does_not_consume_a_table_the_cycle_still_needs(client, db):

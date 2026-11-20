@@ -179,11 +179,14 @@ class WashingSheetEntry(BaseModel):
     # Explicit extra cleaning (migration 048). Between-cycle re-cleaning uses this flag through
     # the Extra Cleaning action; the sheet also uses it for work after Cycle 3 completes that day.
     is_extra: bool = False
+    same_day_next_cycle: bool = False
 
     @model_validator(mode="after")
     def validate_entry(self):
         if self.is_extra and self.job_status != "Done":
             raise ValueError("Extra cleaning records work that was done")
+        if self.same_day_next_cycle and (self.is_extra or self.job_status != "Done"):
+            raise ValueError("A same-day next-cycle entry must record tables cleaned")
         if self.table_numbers is not None:
             if self.table_start is not None or self.table_end is not None:
                 raise ValueError("Send either a table range or a list of table numbers, not both")

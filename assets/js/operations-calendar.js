@@ -146,6 +146,8 @@
         dayFilterError: "",
         recordOpen: false,
         recordCycle: 1,
+        recordSameDayDate: "",
+        recordSameDayCycle: 0,
         recordDrafts: {},
         recordPhotos: {},
         recordPhotosLoaded: {},
@@ -902,9 +904,9 @@
               '</span>' + (event.isExtra ? '<span class="ep-calendar__extra-badge">Extra cleaning</span>' : "") +
               '<span>' + escape(event.status) + '</span></div>' +
             (event.isExtra
-              ? '<p class="ep-calendar__detail-extra-note">Tables cleaned again while this cycle was still ' +
-                'running. It counts towards no cycle’s progress, but confirmed extra cleaning contributes ' +
-                'to monthly compliance.</p>'
+              ? '<p class="ep-calendar__detail-extra-note">Extra cleaning recorded before all three cycles are ' +
+                'complete is a calendar entry only; it does not count towards cycle progress or plant compliance. ' +
+                'Only extra cleaning after all three cycles are complete increases monthly compliance.</p>'
               : "") +
             '<dl class="ep-calendar__detail-fields">' +
               fields.map(function (field) {
@@ -1282,6 +1284,39 @@
     return cycles.find(function (cycle) { return Number(cycle.cycle_no) === Number(state.recordCycle); });
   }
 
+  function sameDayNextCycleCandidate(state) {
+    var cycleCount = (state.washingPlant && state.washingPlant.cycles || []).length || 3;
+    var reports = state.washingReports || [];
+    var completions = reports.filter(function (report) {
+      return report.review_status === "Confirmed" && report.cycle_completed &&
+        Number(report.cycle_no) > 0 && Number(report.cycle_no) < cycleCount;
+    }).sort(function (a, b) {
+      return Number(b.cycle_no) - Number(a.cycle_no) ||
+        (a.report_date < b.report_date ? 1 : a.report_date > b.report_date ? -1 : 0);
+    });
+    for (var i = 0; i < completions.length; i += 1) {
+      var completion = completions[i];
+      var previousCycle = Number(completion.cycle_no);
+      var nextCycle = previousCycle + 1;
+      if (!canManageWashing() && completion.report_date < earliestRecordDate(state)) continue;
+      var nextWorkExists = reports.some(function (report) {
+        return !isExtraReport(report) &&
+          report.job_status === "Done" &&
+          (report.review_status === "Pending" || report.review_status === "Confirmed") &&
+          Number(report.cycle_no) > previousCycle &&
+          report.report_date >= completion.report_date;
+      });
+      if (!nextWorkExists) {
+        return {
+          date: completion.report_date,
+          previousCycle: previousCycle,
+          nextCycle: nextCycle
+        };
+      }
+    }
+    return null;
+  }
+
   function recordRows(state) {
     var cycle = recordCycle(state);
     if (!cycle || !state.washingPlant) return [];
@@ -1359,9 +1394,15 @@
         "-" + pad2(firstAllowed.getDate());
       if (startDate < allowedDate) startDate = allowedDate;
     }
-    if (startDate > lastDate) return [];
+    var isSameDayNextCycle = state.recordSameDayDate &&
+      Number(state.recordCycle) === Number(state.recordSameDayCycle);
+    if (startDate > lastDate && !isSameDayNextCycle) return [];
 
     var dates = dateRange(startDate, lastDate);
+    if (isSameDayNextCycle && dates.indexOf(state.recordSameDayDate) === -1) {
+      dates.push(state.recordSameDayDate);
+      dates.sort();
+    }
     // Saved days of the SELECTED cycle only, by date, keeping the order the API sent them in
     // (report_date, created_at). A date can have regular and extra entries, and historical data may
     // include entries from multiple cycles, so keep every saved report on its own row.
@@ -1404,7 +1445,7 @@
         });
         return;
       }
-      if (regularReportByDate[date]) return;
+      if (regularReportByDate[date] && !(isSameDayNextCycle && date === state.recordSameDayDate)) return;
       var draft = state.recordDrafts[date] || {};
       var plan = planDay(state, draft, used, total);
       plan.numbers.forEach(function (number) { used[number] = true; });
@@ -1412,7 +1453,8 @@
         date: date, report: null, draft: draft, numbers: plan.numbers,
         nextNumbers: plan.nextNumbers || [],
         error: plan.error, full: plan.full, zero: plan.zero,
-        note: rollOverNote(state, plan)
+        note: rollOverNote(state, plan),
+        sameDayNextCycle: !!(isSameDayNextCycle && date === state.recordSameDayDate)
       });
     });
     rows.cleanedTables = [];
@@ -1812,6 +1854,9 @@
     var rows = recordRows(state);
     var summary = state.washingSummary || {};
     var extraTables = Number(summary.extra_tables) || 0;
+    var rolloverCandidate = !state.recordSameDayDate && canRecordWashing()
+      ? sameDayNextCycleCandidate(state)
+      : null;
     var days = rows.map(function (row) {
       var dateLabel = new Intl.DateTimeFormat("en-IN", {
         weekday: "short", day: "2-digit", month: "short"
@@ -1849,6 +1894,9 @@
         '<optgroup label="Not done">' + NOT_DONE_REASONS.map(function (item) {
           return '<option value="' + escape(item) + '"' + (reason === item ? " selected" : "") + '>' + escape(item) + '</option>';
         }).join("") + '</optgroup></select>';
+      if (row.sameDayNextCycle) {
+        notDone = '<span class="ep-calendar__record-cycle-start">Next cycle starts</span>';
+      }
       return '<div class="ep-calendar__record-row" data-record-date="' + row.date + '">' +
         '<label><span class="ep-calendar__record-mobile-label">Day</span><strong>' + escape(dateLabel) + '</strong></label>' +
         '<span class="ep-calendar__record-count" data-record-count>' +
@@ -1871,6 +1919,14 @@
           escape(state.washingPlant.table_count) + " tables · " +
           escape(state.washingPlant.assignee_name || "No Assignee") + '</p></div>' +
           '<div class="ep-calendar__dialog-head-actions">' +
+            (rolloverCandidate
+              ? '<button type="button" class="ep-calendar__extra-open" data-calendar-action="open-same-day-next-cycle">' +
+                'Start Cycle ' + rolloverCandidate.nextCycle + ' on ' +
+                escape(displayDate(rolloverCandidate.date)) + '</button>'
+              : state.recordSameDayDate
+                ? '<button type="button" class="ep-calendar__extra-open" data-calendar-action="cancel-same-day-next-cycle">' +
+                  'Cancel same-day entry</button>'
+                : "") +
             (canRecordWashing()
               ? '<button type="button" class="ep-calendar__extra-open" data-calendar-action="open-extra">' +
                 '+ Extra cleaning</button>'
@@ -1904,7 +1960,7 @@
             ? '<div class="ep-calendar__record-table"><div class="ep-calendar__record-head"><span>Day</span><span>Tables</span><span>Table numbers</span><span>Remarks</span></div>' +
               days + '</div>'
             : '<p class="ep-calendar__empty">No reportable days for this cycle yet.</p>') +
-          '<p class="ep-calendar__record-help">Type the tables cleaned that day as numbers or ranges, e.g. 1, 2, 4, 7-8, 13 or 100-91. Each table counts once per cycle. The next cycle starts only after all configured tables are cleaned. Use + Extra cleaning for re-cleaning between cycles; confirmed extra cleaning contributes to compliance but not cycle progress. After Cycle 3 is complete, further cleaning is counted as extra cleaning. When nothing was cleaned, choose the not-done reason for that day and add the details in Remarks.' +
+          '<p class="ep-calendar__record-help">Type the tables cleaned that day as numbers or ranges, e.g. 1, 2, 4, 7-8, 13 or 100-91. Each table counts once per cycle. The next cycle starts only after all configured tables are cleaned. Use + Extra cleaning for re-cleaning between cycles; it stays on the calendar and does not increase compliance. Only extra cleaning after all three cycles are complete increases compliance. When nothing was cleaned, choose the not-done reason for that day and add the details in Remarks.' +
             (canManageWashing() ? " Apart from that, tables already cleaned in an incomplete cycle cannot be selected again." : "") + '</p>' +
         '</div>' +
         '<footer class="ep-calendar__record-footer"><button type="button" class="ep-calendar__close-button" data-calendar-action="close-record"' +
@@ -1953,9 +2009,9 @@
           '<p>' + escape(state.washingPlant.plant) + " \u00b7 " + escape(total) + ' tables per cycle</p>' +
         '</div><button type="button" class="ep-calendar__close" data-calendar-action="close-extra" aria-label="Close">\u00d7</button></header>' +
         '<div class="ep-calendar__extra-body">' +
-          '<p class="ep-calendar__extra-lead">Tables cleaned again during a running cycle \u2014 dust, fog or anything else. ' +
-            'It does <strong>not</strong> count towards this cycle or the next one: those tables are already cleaned. ' +
-            'Once confirmed, it contributes to monthly compliance without changing cycle progress.</p>' +
+          '<p class="ep-calendar__extra-lead">Record tables cleaned again during a running cycle \u2014 dust, fog or anything else. ' +
+            'Before all three cycles are complete, this is a calendar entry only and does <strong>not</strong> count towards ' +
+            'cycle progress or plant compliance. Extra cleaning after all three cycles are complete increases monthly compliance.</p>' +
           (manager
             ? ""
             : '<p class="ep-calendar__extra-lead">Your entry is saved as awaiting review; the O&amp;M Head or the plant\u2019s ' +
@@ -1968,7 +2024,7 @@
             '<label><span>Table numbers</span>' +
               '<input type="text" data-extra-list placeholder="e.g. 26-35, 40 or 100-91" value="' +
                 escape(state.extraList) + '" autocomplete="off"' + disabled + ' />' +
-              '<small>' + (plan.numbers.length
+              '<small data-extra-preview>' + (plan.numbers.length
                   ? escape(plan.numbers.length + " table" + (plan.numbers.length === 1 ? "" : "s") +
                     ": " + formatTableList(plan.numbers))
                   : escape("Tables 1 to " + total)) + '</small></label>' +
@@ -1976,8 +2032,10 @@
               '<input type="text" data-extra-remarks maxlength="4000" placeholder="e.g. heavy dust after harvest" value="' +
                 escape(state.extraRemarks) + '"' + disabled + ' /></label>' +
           '</form>' +
-          (plan.error ? '<p class="ep-calendar__setup-error" role="alert">' + escape(plan.error) + '</p>' : "") +
-          (state.extraError ? '<p class="ep-calendar__setup-error" role="alert">' + escape(state.extraError) + '</p>' : "") +
+          '<p class="ep-calendar__setup-error" data-extra-plan-error role="alert"' +
+            (plan.error ? "" : " hidden") + '>' + escape(plan.error) + '</p>' +
+          '<p class="ep-calendar__setup-error" data-extra-error role="alert"' +
+            (state.extraError ? "" : " hidden") + '>' + escape(state.extraError) + '</p>' +
         '</div>' +
         '<footer class="ep-calendar__record-footer">' +
           '<button type="button" class="ep-calendar__close-button" data-calendar-action="close-extra"' + disabled + '>Cancel</button>' +
@@ -2474,6 +2532,32 @@
     if (remarks) state.extraRemarks = remarks.value;
   }
 
+  function refreshExtraPreview(host, state) {
+    syncExtraForm(host, state);
+    state.extraError = "";
+    var total = Number(state.washingPlant && state.washingPlant.table_count) || 0;
+    var plan = planExtra(state, total);
+    var preview = host.querySelector("[data-extra-preview]");
+    if (preview) {
+      preview.textContent = plan.numbers.length
+        ? plan.numbers.length + " table" + (plan.numbers.length === 1 ? "" : "s") +
+          ": " + formatTableList(plan.numbers)
+        : "Tables 1 to " + total;
+    }
+    var planError = host.querySelector("[data-extra-plan-error]");
+    if (planError) {
+      planError.textContent = plan.error;
+      planError.hidden = !plan.error;
+    }
+    var save = host.querySelector('[data-calendar-action="save-extra"]');
+    if (save) save.disabled = state.extraSaving || !state.extraDate || !!plan.error || !plan.numbers.length;
+    var saveError = host.querySelector("[data-extra-error]");
+    if (saveError) {
+      saveError.textContent = "";
+      saveError.hidden = true;
+    }
+  }
+
   function syncRecordRangeInputs(host, state) {
     host.querySelectorAll("[data-record-date]").forEach(function (row) {
       var date = row.dataset.recordDate;
@@ -2606,6 +2690,8 @@
       var cycleTab = event.target.closest("[data-record-cycle]");
       if (cycleTab && active.state.recordOpen) {
         active.state.recordCycle = Number(cycleTab.dataset.recordCycle);
+        active.state.recordSameDayDate = "";
+        active.state.recordSameDayCycle = 0;
         active.state.recordDrafts = {};
         active.state.recordEdit = null;
         active.state.recordError = "";
@@ -2815,10 +2901,33 @@
           cycles.find(function (cycle) { return cycle.state === "Missed"; }) || cycles[0];
         state.recordCycle = selectedCycle ? Number(selectedCycle.cycle_no) : 1;
         state.recordOpen = true;
+        state.recordSameDayDate = "";
+        state.recordSameDayCycle = 0;
         state.recordEdit = null;
         state.recordDrafts = {};
         state.recordError = "";
         state.recordNotice = "";
+        renderView(host, state, context);
+      } else if (action.dataset.calendarAction === "open-same-day-next-cycle") {
+        var sameDayCandidate = sameDayNextCycleCandidate(state);
+        if (!canRecordWashing() || !state.recordOpen || !sameDayCandidate) return;
+        state.recordCycle = sameDayCandidate.nextCycle;
+        state.recordSameDayDate = sameDayCandidate.date;
+        state.recordSameDayCycle = sameDayCandidate.nextCycle;
+        state.recordDrafts = {};
+        state.recordEdit = null;
+        state.recordError = "";
+        state.recordNotice = "";
+        renderView(host, state, context);
+        var sameDayTableInput = host.querySelector('[data-record-date="' +
+          state.recordSameDayDate + '"] [data-record-list]');
+        if (sameDayTableInput) sameDayTableInput.focus();
+      } else if (action.dataset.calendarAction === "cancel-same-day-next-cycle") {
+        if (state.recordSaving) return;
+        state.recordSameDayDate = "";
+        state.recordSameDayCycle = 0;
+        state.recordDrafts = {};
+        state.recordError = "";
         renderView(host, state, context);
       } else if (action.dataset.calendarAction === "open-extra") {
         if (!canRecordWashing() || !state.washingPlant) return;
@@ -2977,6 +3086,8 @@
         if (state.recordSaving || (state.recordEdit && state.recordEdit.saving)) return;
         clearDraftRecordPhotos(state);
         state.recordOpen = false;
+        state.recordSameDayDate = "";
+        state.recordSameDayCycle = 0;
         state.recordEdit = null;
         state.recordError = "";
         state.recordNotice = "";
@@ -2990,6 +3101,7 @@
         rows.forEach(function (row) {
           if (row.report) return;
           if (row.zero) {
+            if (row.sameDayNextCycle) { invalidRange = true; return; }
             // A day with nothing cleaned is saved as not done with the reason chosen for it, and the
             // details go in Remarks. It never takes a table number.
             entries.push({
@@ -3008,7 +3120,8 @@
             job_status: "Done",
             tables_cleaned: row.numbers.length,
             table_numbers: row.numbers,
-            remarks: row.draft.remarks || null
+            remarks: row.draft.remarks || null,
+            same_day_next_cycle: !!row.sameDayNextCycle
           });
           // Once Cycle 3 is complete, any further tables cleaned that day are extra cleaning.
           if (row.nextNumbers && row.nextNumbers.length) {
@@ -3043,6 +3156,8 @@
           if (data && data.invalidate) data.invalidate(true);
           state.recordSaving = false;
           state.recordDrafts = {};
+          state.recordSameDayDate = "";
+          state.recordSameDayCycle = 0;
           var reports = Array.isArray(result.reports) ? result.reports : [];
           // Replace by id, not by date. A date can now hold more than one entry -- the day a cycle
           // fills and the next round starts carries one entry per cycle -- and dropping every entry
@@ -3256,10 +3371,7 @@
         syncRecordRangeInputs(host, active.state);
       } else if (event.target.matches("[data-extra-list], [data-extra-remarks], [data-extra-date]") &&
                  active.state.extraOpen) {
-        syncExtraForm(host, active.state);
-        refreshKeepingFocus(host, active.state, active.context,
-          event.target.matches("[data-extra-list]") ? "[data-extra-list]"
-            : event.target.matches("[data-extra-remarks]") ? "[data-extra-remarks]" : "[data-extra-date]");
+        refreshExtraPreview(host, active.state);
       }
     });
 
@@ -3267,8 +3379,7 @@
       if (!active || active.host !== host) return;
       if (active.state.extraOpen &&
           event.target.matches("[data-extra-date], [data-extra-list], [data-extra-remarks]")) {
-        syncExtraForm(host, active.state);
-        renderView(host, active.state, active.context);
+        refreshExtraPreview(host, active.state);
         return;
       }
       var filter = event.target.dataset.calendarFilter;
@@ -3335,6 +3446,8 @@
           active.state.modalDate = "";
           active.state.setupOpen = false;
           active.state.recordOpen = false;
+          active.state.recordSameDayDate = "";
+          active.state.recordSameDayCycle = 0;
           active.state.pmSetupOpen = false;
           active.state.pmSetupPreview = false;
         }

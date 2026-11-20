@@ -45,7 +45,8 @@ _SUMMARY_REPORT_COLUMNS = (
     WashingDailyReport.report_date, WashingDailyReport.job_status, WashingDailyReport.tables_cleaned,
     WashingDailyReport.cleaned_table_codes,
     WashingDailyReport.remarks, WashingDailyReport.exception_reason, WashingDailyReport.reported_by,
-    WashingDailyReport.review_status, WashingDailyReport.cycle_completed, WashingDailyReport.created_at,
+    WashingDailyReport.review_status, WashingDailyReport.cycle_completed, WashingDailyReport.is_extra,
+    WashingDailyReport.created_at,
 )
 
 
@@ -362,6 +363,36 @@ def _cycle_grade_summary(grades: list[dict]) -> dict:
     }
 
 
+def _post_cycle_three_extra_ids(reports) -> set[int]:
+    """IDs of confirmed extra entries recorded after all three cycles were completed.
+
+    Explicit re-cleaning between cycles remains a calendar record only. Additional cleaning
+    after the final cycle is the only marked extra work that contributes to monthly compliance.
+    """
+    by_month: dict[str, list] = {}
+    for report in reports:
+        if report.review_status == "Confirmed":
+            by_month.setdefault(report.cycle_month, []).append(report)
+
+    eligible: set[int] = set()
+    for month_reports in by_month.values():
+        completed_cycles: set[int] = set()
+        ordered = sorted(
+            month_reports,
+            key=lambda report: (
+                report.report_date,
+                str(getattr(report, "created_at", "") or ""),
+            ),
+        )
+        for report in ordered:
+            if getattr(report, "is_extra", False):
+                if len(completed_cycles) >= MONTHLY_CYCLE_TARGET:
+                    eligible.add(id(report))
+            elif report.cycle_completed:
+                completed_cycles.add(int(report.cycle_no))
+    return eligible
+
+
 def cleaning_activity_metrics(completed: float, planned: int, overdue: int = 0,
                               *, allow_extra: bool = False) -> dict[str, int | float]:
     """Cleaning compliance = completed / planned x 100, to one decimal place.
@@ -407,9 +438,12 @@ def _cycle_work_scores(reports, table_count: int, today: date, overrides: dict |
     due_dates = _cycle_due_dates(today, overrides)
     first_day = min(today.replace(day=1), start_dates[0])
     this_month = _month_key(today)
+    post_cycle_three_extras = _post_cycle_three_extra_ids(reports)
     month_done = 0
     for report in reports:
         if report.review_status != "Confirmed" or not report.tables_cleaned:
+            continue
+        if getattr(report, "is_extra", False) and id(report) not in post_cycle_three_extras:
             continue
         if not first_day <= report.report_date <= today:
             continue
@@ -1066,12 +1100,13 @@ def _build_overview(db: Session, user: User, include_tables: bool = False, repor
             max(0, ledger[MONTHLY_CYCLE_TARGET]["confirmed"] - table_count)
             if len(completed_dates) >= MONTHLY_CYCLE_TARGET and table_count else 0
         )
-        # Mid-cycle re-cleaning (`is_extra`, migration 048) is not cycle progress, but confirmed
-        # work contributes to compliance immediately, like cleaning beyond the third cycle.
+        # Mid-cycle re-cleaning is a calendar record only. Only extra cleaning after all three
+        # cycles are confirmed contributes to compliance.
+        post_cycle_three_extras = _post_cycle_three_extra_ids(month_reports)
         extra_tables += sum(
             report.tables_cleaned for report in reports
             if report.cycle_month == month and report.review_status == "Confirmed"
-            and getattr(report, "is_extra", False)
+            and id(report) in post_cycle_three_extras
         )
         extra_cycles = extra_tables / table_count if table_count else 0
         # The counts stay whole activities: 2 of 3 cycles done reads as 2, not 2.4.
@@ -1079,8 +1114,8 @@ def _build_overview(db: Session, user: User, include_tables: bool = False, repor
                                                overdue_cycles, allow_extra=True)
         # Monthly compliance is the WORK done this month: confirmed tables cleaned on this month's
         # dates (whichever month a catch-up day is tagged to) against the tables due so far -- each
-        # started cycle's due, the open one on pace up to today. Confirmed extra cleaning also raises
-        # the plant's score without changing cycle progress (_cycle_work_scores).
+        # started cycle's due, the open one on pace up to today. Only extra cleaning after all
+        # three cycles are confirmed raises the plant's score (_cycle_work_scores).
         work = _cycle_work_scores(reports, table_count, today, config.cycle_overrides, excused_dates)
         month_confirmed_tables = work["month"]["tables_done"]
         monthly_tables_due = work["month"]["tables_due"]
@@ -1406,11 +1441,11 @@ def _month_wash_summary(reports, table_count: int) -> dict:
 
     `times_washed` counts confirmed unmarked cleaning (tables ÷ tables per cycle), including work
     after the third cycle. `extra_times` separately counts confirmed mid-cycle re-cleaning and that
-    post-cycle surplus; neither advances a cycle."""
+    post-cycle surplus for recordkeeping; only the post-cycle surplus contributes to compliance."""
     active = [r for r in reports if r.review_status in ("Pending", "Confirmed")]
     confirmed = [r for r in active if r.review_status == "Confirmed"]
-    # Entries marked extra (mid-cycle re-cleaning) are held apart from cycle figures and added to
-    # extra_tables below, so they contribute to compliance without changing cycle progress.
+    # Entries marked extra stay separate in this activity summary; compliance uses only those
+    # recorded after all three cycles are complete.
     marked_extra = [r for r in confirmed if getattr(r, "is_extra", False)]
     confirmed = [r for r in confirmed if not getattr(r, "is_extra", False)]
     completed_on = {r.cycle_no: r.report_date for r in sorted(confirmed, key=lambda r: r.report_date) if r.cycle_completed}
@@ -2006,6 +2041,42 @@ def _assert_single_sheet_report_date(db: Session, plant_id: UUID, report_date: d
         )
 
 
+def _assert_same_day_next_cycle_allowed(db: Session, plant_id: UUID, report_date: date) -> None:
+    """Only allow a same-day rollover immediately after a confirmed cycle completion."""
+    rows = list(db.scalars(
+        select(WashingDailyReport).where(
+            WashingDailyReport.plant_id == plant_id,
+            WashingDailyReport.cycle_month == _month_key(report_date),
+            WashingDailyReport.report_date == report_date,
+            WashingDailyReport.review_status.in_(("Pending", "Confirmed")),
+        ).order_by(WashingDailyReport.created_at)
+    ))
+    completions = [
+        row for row in rows
+        if not row.is_extra and row.review_status == "Confirmed" and
+        row.cycle_completed and row.cycle_no < MONTHLY_CYCLE_TARGET
+    ]
+    regular_rows = [row for row in rows if not row.is_extra]
+    if len(completions) != 1 or len(regular_rows) != 1:
+        raise HTTPException(409, "A next-cycle entry is allowed only on the date a confirmed cycle was completed.")
+    previous_cycle = max(row.cycle_no for row in completions)
+    if any(
+        not row.is_extra and row.cycle_no != previous_cycle
+        for row in rows
+    ):
+        raise HTTPException(409, "A next-cycle entry already exists for that date.")
+    if db.scalar(select(WashingDailyReport.id).where(
+        WashingDailyReport.plant_id == plant_id,
+        WashingDailyReport.cycle_month == _month_key(report_date),
+        WashingDailyReport.cycle_no > previous_cycle,
+        WashingDailyReport.report_date > report_date,
+        WashingDailyReport.job_status == "Done",
+        WashingDailyReport.review_status.in_(("Pending", "Confirmed")),
+        WashingDailyReport.is_extra.is_(False),
+    ).limit(1)) is not None:
+        raise HTTPException(409, "The next cycle has already started on a later date.")
+
+
 def create_sheet_reports(db: Session, user: User, payload: WashingSheetRequest) -> dict:
     """Save several days of one plant's cycle sheet in one go. All days are saved or none is.
     A Site Engineer's days wait for O&M confirmation and raise ONE review notification for the whole sheet;
@@ -2019,6 +2090,12 @@ def create_sheet_reports(db: Session, user: User, payload: WashingSheetRequest) 
     for entry in entries:
         _validate_report_date(user, manager, entry.report_date)
         if entry.is_extra:
+            continue
+        if entry.same_day_next_cycle:
+            if entry.report_date in regular_dates:
+                raise HTTPException(409, "A date can contain only one regular module cleaning entry.")
+            regular_dates.add(entry.report_date)
+            _assert_same_day_next_cycle_allowed(db, plant.id, entry.report_date)
             continue
         if entry.report_date in regular_dates:
             raise HTTPException(

@@ -1,7 +1,8 @@
-"""Record module cleaning: one ordinary entry per plant/date and explicit extra-cleaning behavior.
+"""Record module cleaning: one ordinary entry per plant/date and explicit same-day cycle starts.
 
 Between-cycle re-cleaning uses the Extra Cleaning action rather than splitting an ordinary entry
-into the next cycle on the same date. Cycle 3's same-day post-completion work remains extra cleaning.
+into the next cycle on the same date by default. A separate action allows the next cycle to start
+on the confirmed completion date. Cycle 3's same-day post-completion work remains extra cleaning.
 
 The sheet's own functions decide all of this, so these load `assets/js/operations-calendar.js`
 in node with the browser globals stubbed and its one export line swapped for the internals under
@@ -24,6 +25,7 @@ CALENDAR = ROOT / "assets" / "js" / "operations-calendar.js"
 # sheet's behaviour lives in. If any of them is renamed, node fails loudly here rather than silently
 # testing nothing.
 EXPORTS = ("recordRows", "planDay", "rollOverNote", "rowTableCount", "nextCycleNo",
+           "sameDayNextCycleCandidate",
            "parseTableList", "formatTableList")
 EXPORT_LINE = "  global.Solar91PortalCalendar = { render: render };"
 
@@ -190,15 +192,17 @@ def test_a_full_cycle_still_blocks_the_row(plan_day):
     assert plan["numbers"] == [] and plan["nextNumbers"] == []
 
 
-def test_only_cycle_three_sends_same_date_repeats_as_extra_cleaning():
-    """Mid-cycle rollover is gone, while post-Cycle-3 same-day work remains explicitly extra."""
+def test_same_day_next_cycle_uses_a_separate_explicit_entry():
+    """Same-day rollover is explicitly marked; Cycle 3's surplus stays extra."""
     calendar = CALENDAR.read_text(encoding="utf-8")
     save = calendar[calendar.index("if (row.error) { invalidRange = true; return; }"):]
     save = save[:save.index("if (invalidRange")]
     assert "is_extra: !nextCycleNo(state)" in save
+    assert "same_day_next_cycle: !!row.sameDayNextCycle" in save
+    assert 'data-calendar-action="open-same-day-next-cycle"' in calendar
     assert "Use + Extra cleaning to record additional cleaning." in calendar
     assert "If the same day finishes this cycle and the next round" not in calendar
-    assert "if (regularReportByDate[date]) return;" in calendar
+    assert "regularReportByDate[date] && !(isSameDayNextCycle && date === state.recordSameDayDate)" in calendar
     # Saved reports are replaced by id: a date can now hold more than one entry.
     assert "savedIds.indexOf(item.id) === -1" in calendar
     assert not re.search(r"return item\.report_date !== report\.report_date;", calendar), \
@@ -206,6 +210,74 @@ def test_only_cycle_three_sends_same_date_repeats_as_extra_cleaning():
     # A saved extra-cleaning entry sits beside the entry that completed the cycle on the same date,
     # so the sheet must not let it read as that cycle's progress.
     assert 'if (row.report.is_extra === true) numbers += " (extra cleaning)";' in calendar
+
+
+def test_same_day_candidate_requires_confirmation_and_an_unstarted_next_cycle():
+    candidate = _run("""
+      const state = {
+        washingPlant: { cycles: [{ cycle_no: 1 }, { cycle_no: 2 }, { cycle_no: 3 }] },
+        washingReports: one
+      };
+      process.stdout.write(JSON.stringify(I.sameDayNextCycleCandidate(state)));
+    """, [_saved("2026-11-19", 1, range(1, 4), completed=True)])
+    assert candidate == {"date": "2026-11-19", "previousCycle": 1, "nextCycle": 2}
+
+    pending = _run("""
+      const state = {
+        washingPlant: { cycles: [{ cycle_no: 1 }, { cycle_no: 2 }, { cycle_no: 3 }] },
+        washingReports: one
+      };
+      process.stdout.write(JSON.stringify(I.sameDayNextCycleCandidate(state)));
+    """, [_saved("2026-11-19", 1, range(1, 4), completed=True, status="Pending")])
+    assert pending is None
+
+    started = _run("""
+      const state = {
+        washingPlant: { cycles: [{ cycle_no: 1 }, { cycle_no: 2 }, { cycle_no: 3 }] },
+        washingReports: one
+      };
+      process.stdout.write(JSON.stringify(I.sameDayNextCycleCandidate(state)));
+    """, [
+        _saved("2026-11-19", 1, range(1, 4), completed=True),
+        _saved("2026-11-20", 2, [1]),
+    ])
+    assert started is None
+
+    too_old = _run("""
+      const state = {
+        month: "2026-11", washingDataToday: "2026-11-20",
+        washingPlant: { cycles: [{ cycle_no: 1 }, { cycle_no: 2 }, { cycle_no: 3 }] },
+        washingReports: one
+      };
+      process.stdout.write(JSON.stringify(I.sameDayNextCycleCandidate(state)));
+    """, [_saved("2026-10-01", 1, range(1, 4), completed=True)], role="Site Engineer")
+    assert too_old is None
+
+
+def test_same_day_next_cycle_opens_an_entry_on_the_prior_completion_date(record_rows):
+    reports = [_saved("2026-11-19", 1, range(1, 36), completed=True)]
+    grid = record_rows(2, reports, today=TODAY, month=MONTH, total=35)
+    state = {
+        "cycle": 2, "reports": reports, "today": TODAY, "month": MONTH, "total": 35, "cycles": 3,
+    }
+    special = _run("""
+      const state = {
+        recordCycle: 2, recordSameDayDate: "2026-11-19", recordSameDayCycle: 2,
+        month: one.month, washingDataToday: one.today, recordDrafts: {},
+        washingReports: one.reports,
+        washingPlant: { table_count: one.total, cycles: [] }
+      };
+      for (let n = 1; n <= one.cycles; n += 1) {
+        state.washingPlant.cycles.push({ cycle_no: n, start_date: one.month + "-01",
+                                         due_date: one.month + "-28" });
+      }
+      const rows = I.recordRows(state);
+      process.stdout.write(JSON.stringify(rows.map((row) => ({
+        date: row.date, saved: !!row.report, sameDayNextCycle: !!row.sameDayNextCycle
+      }))));
+    """, state)
+    assert {"date": "2026-11-19", "saved": False, "sameDayNextCycle": True} in special
+    assert grid["rows"][0]["date"] == "2026-11-20", "normal cycle entry remains blocked for that date"
 
 
 

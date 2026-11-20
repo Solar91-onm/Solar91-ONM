@@ -949,7 +949,7 @@ def test_extra_cleaning_leaves_the_month_figures_identical():
 
 
 def test_extra_total_includes_confirmed_cleaning_before_three_cycles_are_complete():
-    """Confirmed extra cleaning is counted immediately but remains outside cycle progress."""
+    """The month-sheet activity summary includes mid-cycle extras as recorded work."""
     extra = _Row(1, 4, range(1, 5), is_extra=True, day=4)
 
     open_month = _month_wash_summary([_Row(1, 5, range(1, 6), day=1), extra], 10)

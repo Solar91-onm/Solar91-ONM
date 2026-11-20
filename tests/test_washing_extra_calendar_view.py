@@ -171,9 +171,39 @@ def test_the_detail_panel_explains_what_extra_cleaning_is(render):
     assert "ep-calendar__event-detail-modal--extra" in detail
     assert "ep-calendar__extra-badge" in detail
     assert "ep-calendar__detail-extra-note" in detail
-    assert "counts towards no cycle" in detail
-    assert "confirmed extra cleaning contributes to monthly compliance" in detail
+    assert "does not count towards cycle progress" in detail
+    assert "does not count towards cycle progress or plant compliance" in detail
+    assert "Only extra cleaning after all three cycles are complete increases monthly compliance" in detail
     assert "During cycle 3" in detail, "the Cycle field must not read as this cycle's work"
+
+
+def test_extra_cleaning_inputs_update_without_replacing_the_focused_field():
+    source = CALENDAR.read_text(encoding="utf-8")
+    input_start = source.index('host.addEventListener("input", function (event) {')
+    input_end = source.index('host.addEventListener("change", function (event) {', input_start)
+    input_handler = source[
+        input_start:input_end
+    ]
+    change_start = source.index('host.addEventListener("change", function (event) {', input_end)
+    change_end = source.index('host.addEventListener("change", function (event) {', change_start + 1)
+    change_handler = source[change_start:change_end]
+    input_extra_start = input_handler.index(
+        'event.target.matches("[data-extra-list], [data-extra-remarks], [data-extra-date]")'
+    )
+    input_extra = input_handler[input_extra_start:]
+    change_extra_start = change_handler.index("if (active.state.extraOpen &&")
+    change_extra_end = change_handler.index("var filter = event.target.dataset.calendarFilter;")
+    change_extra = change_handler[change_extra_start:change_extra_end]
+    preview_start = source.index("function refreshExtraPreview")
+    preview_end = source.index("function syncRecordRangeInputs", preview_start)
+    preview = source[preview_start:preview_end]
+
+    assert "refreshExtraPreview(host, active.state);" in input_handler
+    assert "refreshKeepingFocus" not in input_extra
+    assert "refreshExtraPreview(host, active.state);" in change_extra
+    assert "renderView(" not in change_extra
+    assert "save.disabled =" in preview
+    assert "renderView(" not in preview
 
 
 def test_managers_can_edit_or_remove_extra_cleaning_from_its_detail(render):

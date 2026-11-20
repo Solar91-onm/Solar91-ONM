@@ -1783,6 +1783,11 @@
   font: inherit;
   font-size: var(--ep-fs-xs);
 }
+.ep-calendar__record-cycle-start {
+  color: var(--ep-accent-strong);
+  font-size: var(--ep-fs-xs);
+  font-weight: 700;
+}
 .ep-calendar__record-edit-actions { grid-column: 1 / -1; display: flex; justify-content: flex-end; gap: 8px; }
 .ep-calendar__record-row--editing [role="alert"] { grid-column: 1 / -1; }
 .ep-calendar__record-notice { margin: 0 0 10px; color: var(--ep-accent-strong); font-size: var(--ep-fs-sm); }
