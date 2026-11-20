@@ -1176,11 +1176,18 @@ def test_plant_and_view_sub_pages_are_the_live_pages_only():
 def test_portfolio_info_health_uses_two_sections_and_keeps_health_deep_links():
     nav = (PORTAL_ASSETS / "js" / "navigation.js").read_text(encoding="utf-8")
     page = TEMPLATE.read_text(encoding="utf-8")
+    styles = (PORTAL_ASSETS / "css" / "components.css").read_text(encoding="utf-8")
     assert 'data-tab-view="info-health"' in page
-    assert 'data-view-section="info">Info</button>' in page
-    assert 'data-view-section="health">Health</button>' in page
+    assert 'data-view-section-item="info"' in page
+    assert 'data-view-section-item="health"' in page
     assert 'aria-expanded="true" data-view-section="info"' in page
     assert 'aria-expanded="false" data-view-section="health"' in page
+    assert page.count('class="ep-view-section-switcher__chevron"') == 2
+    disclosure_styles = styles[
+        styles.index(".ep-view-section-switcher {"):styles.index(".ep-view-section-panel[hidden]")]
+    assert "flex-direction: column;" in disclosure_styles
+    assert ".ep-view-section-switcher button[hidden]" in disclosure_styles
+    assert "button.hidden = !showSections;" in nav
     assert 'navState.infoHealthOpen[section] = !navState.infoHealthOpen[section];' in nav
     assert 'return ["plants-table", "site-issues"];' in nav
     assert 'data-nav="view:health"' not in page

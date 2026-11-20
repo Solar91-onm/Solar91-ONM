@@ -320,19 +320,33 @@
           <!-- ═════════════ PORTFOLIO INFO & HEALTH ═════════════ -->
           <section class="ep-tab-view" data-tab-view="info-health">
             <div class="ep-view-section-switcher" role="group" aria-label="Info and Health sections" data-view-section-tabs>
-              <button type="button" id="view-info-tab" aria-controls="view-info-panel"
-                aria-expanded="true" data-view-section="info">Info</button>
-              <button type="button" id="view-health-tab" aria-controls="view-health-panel"
-                aria-expanded="false" data-view-section="health">Health</button>
+              <div class="ep-view-section-item" data-view-section-item="info">
+                <button type="button" id="view-info-tab" aria-controls="view-info-panel"
+                  aria-expanded="true" data-view-section="info">
+                  <span>Info</span>
+                  <svg class="ep-view-section-switcher__chevron" width="16" height="16" viewBox="0 0 24 24"
+                    fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                    stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg>
+                </button>
+                <section class="ep-view-section-panel" role="region" id="view-info-panel"
+                  aria-labelledby="view-info-tab" data-view-section-panel="info">
+                  <div data-plants-table-host></div>
+                </section>
+              </div>
+              <div class="ep-view-section-item" data-view-section-item="health">
+                <button type="button" id="view-health-tab" aria-controls="view-health-panel"
+                  aria-expanded="false" data-view-section="health">
+                  <span>Health</span>
+                  <svg class="ep-view-section-switcher__chevron" width="16" height="16" viewBox="0 0 24 24"
+                    fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                    stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg>
+                </button>
+                <section class="ep-view-section-panel" role="region" id="view-health-panel"
+                  aria-labelledby="view-health-tab" data-view-section-panel="health" hidden>
+                  <div data-issues-host></div>
+                </section>
+              </div>
             </div>
-            <section class="ep-view-section-panel" role="region" id="view-info-panel"
-              aria-labelledby="view-info-tab" data-view-section-panel="info">
-              <div data-plants-table-host></div>
-            </section>
-            <section class="ep-view-section-panel" role="region" id="view-health-panel"
-              aria-labelledby="view-health-tab" data-view-section-panel="health" hidden>
-              <div data-issues-host></div>
-            </section>
           </section>
 
           <section class="ep-tab-view" data-tab-view="pm-overview">

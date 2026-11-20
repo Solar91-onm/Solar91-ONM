@@ -1609,25 +1609,43 @@
 .ep-ih__save-status { min-height: 18px; margin: 10px 18px; color: var(--ep-accent-strong); font-size: var(--ep-fs-sm); }
 .ep-view-section-switcher {
   display: flex;
-  gap: 8px;
+  flex-direction: column;
   margin-bottom: var(--ep-s-4);
+}
+.ep-view-section-item {
   border-bottom: 1px solid var(--ep-border);
 }
+.ep-view-section-item[hidden] {
+  display: none !important;
+}
 .ep-view-section-switcher button {
-  padding: 12px 16px 10px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 14px 12px;
   border: 0;
-  border-bottom: 2px solid transparent;
   background: transparent;
   color: var(--ep-text-strong);
   font: inherit;
   font-size: 18px;
   font-weight: 700;
+  text-align: left;
   cursor: pointer;
 }
+.ep-view-section-switcher button[hidden] {
+  display: none !important;
+}
 .ep-view-section-switcher button[aria-expanded="true"] {
-  border-bottom-color: var(--ep-accent);
   color: var(--ep-accent-strong);
   font-weight: 800;
+}
+.ep-view-section-switcher__chevron {
+  flex: 0 0 auto;
+  transition: transform 140ms ease;
+}
+.ep-view-section-switcher button[aria-expanded="true"] .ep-view-section-switcher__chevron {
+  transform: rotate(180deg);
 }
 .ep-view-section-switcher button:focus-visible {
   outline: 2px solid var(--ep-accent);

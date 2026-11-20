@@ -732,7 +732,6 @@
     var phTitle = document.querySelector("[data-placeholder-title]");
     var phSubtitle = document.querySelector("[data-placeholder-subtitle]");
     var phContext = document.querySelector("[data-placeholder-context]");
-    var viewSectionTabs = document.querySelector("[data-view-section-tabs]");
     var viewInfoPanel = document.querySelector('[data-view-section-panel="info"]');
     var viewHealthPanel = document.querySelector('[data-view-section-panel="health"]');
 
@@ -744,15 +743,17 @@
     }
 
     function showViewInfoHealthSection(showSections) {
-      if (viewSectionTabs) viewSectionTabs.hidden = !showSections;
       var infoOpen = showSections ? navState.infoHealthOpen.info : true;
       var healthOpen = showSections && navState.infoHealthOpen.health;
       if (viewInfoPanel) viewInfoPanel.hidden = !infoOpen;
       if (viewHealthPanel) viewHealthPanel.hidden = !healthOpen;
       document.querySelectorAll("[data-view-section]").forEach(function (button) {
         var section = button.getAttribute("data-view-section");
+        button.hidden = !showSections;
         button.setAttribute("aria-expanded", String(section === "health" ? healthOpen : infoOpen));
       });
+      var healthItem = document.querySelector('[data-view-section-item="health"]');
+      if (healthItem) healthItem.hidden = !showSections;
     }
 
     if (navState.activeView === "overview") {
