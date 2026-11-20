@@ -14,7 +14,7 @@ per-collection revisions so unrelated edits do not conflict with one another.
 
 ## Raising a Site Issue
 
-On a plant's Health page, **Raise issue** opens a three-step form: Plant, Classification, and Priority & details. The plant is fixed when opened from a plant page; the portfolio issue page allows choosing an authorized plant. Classification uses the configured issue category and optional sub-problem. The final step captures severity, occurrence date, issue details, optional deadline, up to 10 evidence photos, and an optional Assignee. Creation and photo uploads use the existing authenticated issue APIs; fields unsupported by the current issue schema are not collected.
+On a plant's Health page, **Raise issue** opens a three-step form: Plant, Classification, and Priority & details. The plant is fixed when opened from a plant page; the portfolio issue page allows choosing an authorized plant. Classification uses the configured issue category and optional sub-problem. The final step captures severity, occurrence date, issue details, optional deadline, up to 10 evidence photos, and an optional Assignee. A ticket created by an Assignee is automatically assigned to that user and cannot be assigned to another Assignee. Creation and photo uploads use the existing authenticated issue APIs; fields unsupported by the current issue schema are not collected.
 
 ## Who can create planned work
 

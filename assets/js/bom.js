@@ -14,13 +14,12 @@
  * the order the API returns them (section order, BOQ line order, item name).
  *
  * The Section cell is MERGED: consecutive rows of one section share a single cell with a rowspan,
- * so the heading is read once against the whole block. In portfolio mode plant groups start
- * collapsed; expanding a plant shows its item rows and renders its Plant cell once with a rowspan.
- * Both spans are recomputed from the rows on every render.
+ * so the heading is read once against the whole block. In portfolio mode every scoped plant stays
+ * in a fixed first column; expanding it loads that plant's filtered BOM lines into the columns to
+ * the right. Section spans are recomputed from the rows on every render.
  *
- *   Views -> Details -> BOM    every plant's lines (search, plant, SPV, maker, supplier and section
- *                              filters), grouped by an expandable Plant cell; plant cells span only
- *                              that plant's visible item rows
+ *   Views -> Details -> BOM    every visible plant stays in the fixed first column; expanding a
+ *                              plant shows its filtered BOM lines across the remaining columns
  *   Plant -> Details -> BOM    that plant's lines only, plus "Reorder sections" for editors
  *
  * Same look as the Details and Movable Assets tables (ep-pt__ classes). Data comes from GET /api/bom,
@@ -40,7 +39,7 @@
   var MAX_SORT_ORDER = 1000000;
   // `w` is the column's share of the table width (see colgroupHTML): the columns that hold
   // long BOQ text get more of the frame than Quantity or Unit, so nothing has to scroll sideways.
-  var PLANT_COL = { key: "siteCode", label: "Plant", w: 1.1 };
+  var PLANT_COL = { key: "siteCode", label: "Plant", w: 1.5 };
   var COLS = [
     { key: "section", label: "Section", w: 1.15 },
     { key: "itemName", label: "Item Description", w: 2 },
@@ -61,6 +60,7 @@
   var st = { items: [], total: 0, makers: [], suppliers: [], sections: [], plants: [], loading: false, error: "", more: false };
   var token = 0, searchTimer = null, busy = false;
   var expandedPlants = Object.create(null);
+  var plantDetails = Object.create(null);
 
   function api() { return global.Solar91PortalAPI; }
   function canEdit() { return !!(api() && api().can("plants.manage")); }
@@ -69,12 +69,13 @@
   function columns() { return single() ? COLS : [PLANT_COL].concat(COLS); }
 
   // --- Data -----------------------------------------------------------
-  function query(offset, limit) {
+  function query(offset, limit, plantOverride) {
     var q = ["limit=" + limit, "offset=" + offset];
     if (single()) q.push("site_code=" + encodeURIComponent(mode.siteCode));
     else {
-      if (ui.plant !== "__all") q.push("site_code=" + encodeURIComponent(ui.plant));
-      if (ui.spv !== "__all") q.push("spv=" + encodeURIComponent(ui.spv));
+      if (plantOverride) q.push("site_code=" + encodeURIComponent(plantOverride));
+      else if (ui.plant !== "__all") q.push("site_code=" + encodeURIComponent(ui.plant));
+      if (!plantOverride && ui.spv !== "__all") q.push("spv=" + encodeURIComponent(ui.spv));
     }
     if (ui.maker !== "__all") q.push("maker=" + encodeURIComponent(ui.maker));
     if (ui.supplier !== "__all") q.push("supplier=" + encodeURIComponent(ui.supplier));
@@ -101,12 +102,65 @@
       st.suppliers = res.suppliers || [];
       st.sections = res.sections || [];
       st.loading = false;
-      st.more = st.items.length < st.total;
+      st.more = single() && st.items.length < st.total;
     }).catch(function (err) {
       if (mine !== token) return;
       st.loading = false;
       st.error = (err && err.message) ? err.message : "Please retry.";
     }).then(function () { if (mine === token && container.isConnected) render(container, true); });
+  }
+
+  function loadPlantDetails(container, siteCode, append) {
+    var entry = plantDetails[siteCode];
+    if (!entry) {
+      entry = { items: [], total: 0, loading: false, error: "", more: false, request: 0 };
+      plantDetails[siteCode] = entry;
+    }
+    var mine = ++entry.request;
+    var offset = append ? entry.items.length : 0;
+    if (!append) {
+      entry.items = [];
+      entry.total = 0;
+      entry.more = false;
+    }
+    entry.loading = true;
+    entry.error = "";
+    render(container, true);
+    return api().request(query(offset, PAGE, siteCode)).then(function (res) {
+      if (plantDetails[siteCode] !== entry || mine !== entry.request) return;
+      entry.items = append ? entry.items.concat(res.items || []) : (res.items || []);
+      entry.total = res.total || 0;
+      entry.more = entry.items.length < entry.total;
+      entry.loading = false;
+    }).catch(function (err) {
+      if (plantDetails[siteCode] !== entry || mine !== entry.request) return;
+      entry.loading = false;
+      entry.error = (err && err.message) ? err.message : "Please retry.";
+    }).then(function () {
+      if (plantDetails[siteCode] === entry && mine === entry.request && container.isConnected) {
+        render(container, true);
+      }
+    });
+  }
+
+  function resetPlantDetails() {
+    expandedPlants = Object.create(null);
+    plantDetails = Object.create(null);
+  }
+
+  function reloadAfterMutation(container, siteCode) {
+    return load(container, false).then(function () {
+      if (st.error) return "The change was saved, but the BOM list could not be refreshed: " + st.error;
+      if (!single() && expandedPlants[siteCode]) {
+        return loadPlantDetails(container, siteCode, false).then(function () {
+          var entry = plantDetails[siteCode];
+          return entry && entry.error
+            ? "The change was saved, but this plant's BOM lines could not be refreshed: " + entry.error
+            : "";
+        });
+      }
+      return "";
+    });
   }
 
   // --- Rendering ------------------------------------------------------
@@ -174,8 +228,9 @@
 
   // Every column gets a share of the frame proportional to how much text it holds, so the whole
   // table fits without scrolling sideways and a 500-character spec still wraps readably.
-  function colgroupHTML(editor) {
-    var shares = columns().map(function (c) { return c.w || 1; });
+  function colgroupHTML(editor, detailColumns) {
+    var defs = detailColumns ? COLS : columns();
+    var shares = defs.map(function (c) { return c.w || 1; });
     if (editor) shares.push(0.9);                          // Edit
     var total = shares.reduce(function (a, b) { return a + b; }, 0);
     return "<colgroup>" + shares.map(function (w) {
@@ -223,20 +278,6 @@
     return byRow;
   }
 
-  function plantBlocks(items) {
-    var groups = [], byRow = [], last = null;
-    items.forEach(function (item, index) {
-      var siteCode = String(item.siteCode || "");
-      if (last && last.siteCode === siteCode) last.span += 1;
-      else {
-        last = { siteCode: siteCode, start: index, span: 1 };
-        groups.push(last);
-      }
-      byRow[index] = last;
-    });
-    return { groups: groups, byRow: byRow };
-  }
-
   // The merged Section cell: written once per block, never on the rows it spans.
   function sectionCell(block) {
     return '<td class="ep-bom__section' + (block.alt ? " is-alt" : "") + '"' +
@@ -244,11 +285,11 @@
       (block.label ? fmt.escape(block.label) : '<span class="ep-pt__dash">—</span>') + "</td>";
   }
 
-  function plantCell(item, block, expanded) {
-    var siteCode = String(item.siteCode || "");
-    var rowSpan = expanded && block.span > 1 ? ' rowspan="' + block.span + '"' : "";
+  function plantCell(row, expanded) {
+    var plant = row.plant || row;
+    var siteCode = String(plant.siteCode || "");
     var action = expanded ? "Collapse" : "Expand";
-    return '<td class="ep-bom__plant"' + rowSpan + '><button type="button" class="ep-bom__plant-toggle" ' +
+    return '<td class="ep-bom__plant"><button type="button" class="ep-bom__plant-toggle" ' +
       'data-bom-plant-toggle="' + fmt.escape(siteCode) + '" aria-expanded="' + String(expanded) +
       '" aria-label="' + action + ' BOM items for ' + fmt.escape(siteCode) + '">' +
       '<span class="ep-bom__plant-label"><span class="ep-pt__code">' + fmt.escape(siteCode) +
@@ -259,21 +300,9 @@
       "</button></td>";
   }
 
-  function plantGroupRow(block, colCount) {
-    var item = st.items[block.start];
-    var lineLabel = block.span === 1 ? "loaded BOM line" : "loaded BOM lines";
-    return '<tr class="ep-bom__plant-summary ep-bom__block-start">' +
-      plantCell(item, block, false) +
-      '<td class="ep-bom__plant-summary-cell" colspan="' + (colCount - 1) + '">' +
-      block.span + " " + lineLabel + ' · Click the plant code to view items</td></tr>';
-  }
-
-  function rowHTML(item, editor, index, sectionsByRow, plantsByRow) {
+  function itemRowHTML(item, editor, index, sectionsByRow) {
     var sectionBlock = sectionsByRow[index], starts = !!sectionBlock && sectionBlock.start === index;
-    var plantBlock = plantsByRow && plantsByRow[index];
-    var startsPlant = !!plantBlock && plantBlock.start === index;
     return '<tr' + (starts ? ' class="ep-bom__block-start"' : "") + ">" +
-      (single() || !startsPlant ? "" : plantCell(item, plantBlock, true)) +
       (starts ? sectionCell(sectionBlock) : "") +
       '<td class="ep-bom__item">' + fmt.escape(item.itemName) + "</td>" +
       cell(item.specs, "ep-bom__specs") +
@@ -287,11 +316,77 @@
       "</tr>";
   }
 
+  function visiblePlants() {
+    return st.plants.filter(function (row) {
+      var plant = row.plant || {};
+      return (ui.plant === "__all" || plant.siteCode === ui.plant) &&
+        (ui.spv === "__all" || plant.projectCompany === ui.spv);
+    }).slice().sort(function (a, b) {
+      var left = a.plant || {}, right = b.plant || {};
+      return String(left.siteCode || "").localeCompare(String(right.siteCode || ""));
+    });
+  }
+
+  function plantItemsHTML(siteCode, entry, editor) {
+    if (!entry) return '<div class="ep-pt__empty">Loading BOM items…</div>';
+    if (entry.error && !entry.items.length) {
+      return '<div class="ep-pt__empty is-error" role="alert">Could not load BOM items. ' +
+        fmt.escape(entry.error) + ' <button class="ep-pt__export" type="button" data-bom-plant-retry="' +
+        fmt.escape(siteCode) + '">Try again</button></div>';
+    }
+    if (!entry.items.length && !entry.loading) {
+      return '<div class="ep-pt__empty">' +
+        (filtersActive() ? "No BOM lines match these filters." : "No BOM lines are recorded for this plant.") +
+        "</div>";
+    }
+    var rows = "";
+    if (entry.items.length) {
+      var sectionsByRow = sectionBlocks(entry.items);
+      rows = entry.items.map(function (item, index) {
+        return itemRowHTML(item, editor, index, sectionsByRow);
+      }).join("");
+    } else {
+      rows = '<tr><td colspan="' + (COLS.length + (editor ? 1 : 0)) +
+        '" class="ep-pt__empty">Loading BOM items…</td></tr>';
+    }
+    var table = '<table class="ep-pt__table ep-bom__table ep-bom__detail-table' +
+      (editor ? " has-actions" : "") + '" aria-label="BOM items for ' + fmt.escape(siteCode) + '">' +
+      colgroupHTML(editor, true) + "<tbody>" + rows + "</tbody></table>";
+    var footer = "";
+    if (entry.error) {
+      footer = '<div class="ep-bom__plant-load-status is-error" role="alert">' + fmt.escape(entry.error) +
+        ' <button class="ep-pt__export" type="button" data-bom-plant-retry="' +
+        fmt.escape(siteCode) + '">Retry</button></div>';
+    } else if (entry.loading || entry.more) {
+      footer = '<div class="ep-bom__plant-load-status">' +
+        (entry.loading ? "Loading…" : "") +
+        '<button class="ep-pt__export" type="button" data-bom-plant-more="' + fmt.escape(siteCode) + '"' +
+        (entry.loading ? " disabled" : "") + ">" +
+        (entry.loading ? "Loading…" : "Load more (" + (entry.total - entry.items.length) + " left)") +
+        "</button></div>";
+    }
+    return table + footer;
+  }
+
+  function plantRowHTML(row, colCount, editor) {
+    var siteCode = row.plant.siteCode;
+    var expanded = expandedPlants[siteCode] === true;
+    var details = expanded
+      ? plantItemsHTML(siteCode, plantDetails[siteCode], editor)
+      : '<div class="ep-bom__plant-summary">Click the plant code to expand its BOM details.</div>';
+    return '<tr class="ep-bom__plant-row' + (expanded ? " is-expanded" : "") + '">' +
+      plantCell(row, expanded) +
+      '<td class="ep-bom__plant-details" colspan="' + (colCount - 1) + '">' + details + "</td></tr>";
+  }
+
   function render(container, keepScroll) {
     var old = keepScroll ? container.querySelector(".ep-bom__scroll") : null;
     var keepTop = old ? old.scrollTop : 0, keepLeft = old ? old.scrollLeft : 0;
-    var focusSearch = document.activeElement && document.activeElement.hasAttribute && document.activeElement.hasAttribute("data-bom-search");
+    var activeElement = document.activeElement;
+    var focusSearch = activeElement && activeElement.hasAttribute && activeElement.hasAttribute("data-bom-search");
     var pos = focusSearch ? document.activeElement.selectionStart : 0;
+    var focusPlantCode = activeElement && activeElement.getAttribute
+      ? activeElement.getAttribute("data-bom-plant-toggle") : "";
     var editor = canEdit();
     var plant = single() ? st.plants.filter(function (r) { return r.plant.siteCode === mode.siteCode; })[0] : null;
     plant = plant ? plant.plant : null;
@@ -301,34 +396,40 @@
     var head = cols.map(function (c) { return "<th>" + c.label + "</th>"; }).join("") +
       (editor ? "<th>Edit</th>" : "");
     var body;
-    if (st.error) body = '<tr><td colspan="' + colCount + '" class="ep-pt__empty is-error">Could not load BOM lines. ' + fmt.escape(st.error) + "</td></tr>";
-    else if (st.loading && !st.items.length) body = '<tr><td colspan="' + colCount + '" class="ep-pt__empty">Loading BOM…</td></tr>';
-    else if (!st.items.length) body = '<tr><td colspan="' + colCount + '" class="ep-pt__empty">' +
-      (filtersActive() ? "No BOM lines match these filters." :
-        (editor ? 'No BOM lines yet. Use "+ Add item" to list the first part.' : "No BOM lines have been added yet.")) + "</td></tr>";
-    else {
-      // Spans are derived from the rows being rendered now, so a filter or a new page never
-      // leaves a merged cell reaching over rows that are no longer there.
-      var sectionsByRow = sectionBlocks(st.items);
-      if (single()) {
+    if (single()) {
+      if (st.error) body = '<tr><td colspan="' + colCount + '" class="ep-pt__empty is-error">Could not load BOM lines. ' + fmt.escape(st.error) + "</td></tr>";
+      else if (st.loading && !st.items.length) body = '<tr><td colspan="' + colCount + '" class="ep-pt__empty">Loading BOM…</td></tr>';
+      else if (!st.items.length) body = '<tr><td colspan="' + colCount + '" class="ep-pt__empty">' +
+        (filtersActive() ? "No BOM lines match these filters." :
+          (editor ? 'No BOM lines yet. Use "+ Add item" to list the first part.' : "No BOM lines have been added yet.")) + "</td></tr>";
+      else {
+        var sectionsByRow = sectionBlocks(st.items);
         body = st.items.map(function (item, index) {
-          return rowHTML(item, editor, index, sectionsByRow, null);
+          return itemRowHTML(item, editor, index, sectionsByRow);
         }).join("");
+      }
+    } else {
+      var availablePlants = visiblePlants();
+      var globalError = st.error
+        ? '<tr><td colspan="' + colCount + '" class="ep-pt__empty is-error" role="alert">' +
+          "Could not refresh BOM filters. " + fmt.escape(st.error) +
+          ' <button class="ep-pt__export" type="button" data-bom-retry>Try again</button></td></tr>'
+        : "";
+      if (!availablePlants.length) {
+        body = globalError + '<tr><td colspan="' + colCount + '" class="ep-pt__empty">No plants are available for these filters.</td></tr>';
       } else {
-        var plantsByRow = plantBlocks(st.items).byRow;
-        body = st.items.map(function (item, index) {
-          var block = plantsByRow[index];
-          if (expandedPlants[block.siteCode] !== true) {
-            return block.start === index ? plantGroupRow(block, colCount) : "";
-          }
-          return rowHTML(item, editor, index, sectionsByRow, plantsByRow);
-        }).join("");
+        body = globalError + availablePlants.map(function (row) {
+            return plantRowHTML(row, colCount, editor);
+          }).join("");
       }
     }
 
-    var count = st.loading && !st.items.length ? "" :
-      (st.items.length < st.total ? "Showing " + st.items.length + " of " + st.total + " lines" :
-        st.total + (st.total === 1 ? " line" : " lines"));
+    var count = single()
+      ? st.loading && !st.items.length ? "" :
+        (st.items.length < st.total ? "Showing " + st.items.length + " of " + st.total + " lines" :
+          st.total + (st.total === 1 ? " line" : " lines"))
+      : st.loading && !st.items.length ? "" :
+        st.total + (filtersActive() ? " matching BOM lines" : " BOM lines");
 
     container.innerHTML = '<div class="ep-pt ep-bom">' +
       '<div class="ep-pt__head">' + (single() && plant ? '<h1 class="ep-pt__title">' + fmt.escape(plant.displayName || plant.plantName) + " · BOM</h1>" : (single() ? "" : '<h1 class="ep-pt__title">BOM</h1>')) +
@@ -342,8 +443,8 @@
           '<button class="ep-pt__export" type="button" data-bom-export="csv">CSV</button>' +
           '<button class="ep-pt__export" type="button" data-bom-export="excel">Excel</button></div>' +
         '<div class="ep-pt__table-wrap"><div class="ep-pt__scroll ep-bom__scroll" tabindex="0" role="region" aria-label="BOM table">' +
-          '<table class="ep-pt__table ep-bom__table' + (single() ? " is-single" : "") + (editor ? " has-actions" : "") + '">' + colgroupHTML(editor) + "<thead><tr>" + head + "</tr></thead><tbody>" + body + "</tbody></table></div></div>" +
-        (st.more && !st.error ? '<div class="ep-bom__more"><button type="button" class="ep-pt__export" data-bom-more' + (st.loading ? " disabled" : "") + ">" +
+          '<table class="ep-pt__table ep-bom__table' + (single() ? " is-single" : " is-portfolio") + (editor ? " has-actions" : "") + '">' + colgroupHTML(editor) + "<thead><tr>" + head + "</tr></thead><tbody>" + body + "</tbody></table></div></div>" +
+        (single() && st.more && !st.error ? '<div class="ep-bom__more"><button type="button" class="ep-pt__export" data-bom-more' + (st.loading ? " disabled" : "") + ">" +
           (st.loading ? "Loading…" : "Load more (" + (st.total - st.items.length) + " left)") + "</button></div>" : "") +
       "</div></div>";
     wire(container);
@@ -352,6 +453,11 @@
     if (focusSearch) {
       var again = container.querySelector("[data-bom-search]");
       if (again) { again.focus(); try { again.setSelectionRange(pos, pos); } catch (_) {} }
+    }
+    if (focusPlantCode) {
+      container.querySelectorAll("[data-bom-plant-toggle]").forEach(function (button) {
+        if (button.getAttribute("data-bom-plant-toggle") === focusPlantCode && button.focus) button.focus();
+      });
     }
   }
 
@@ -363,7 +469,16 @@
     el.classList.toggle("is-error", !!isError);
   }
 
-  function findItem(id) { return st.items.filter(function (i) { return i.id === id; })[0]; }
+  function findItem(id) {
+    var item = st.items.filter(function (i) { return i.id === id; })[0];
+    if (item) return item;
+    var codes = Object.keys(plantDetails);
+    for (var index = 0; index < codes.length; index++) {
+      item = plantDetails[codes[index]].items.filter(function (i) { return i.id === id; })[0];
+      if (item) return item;
+    }
+    return null;
+  }
 
   // One dialog for add and edit. `item` is null when adding.
   function openEditor(container, item, trigger) {
@@ -423,6 +538,7 @@
       errorEl.textContent = "";
       var code = siteCode || val("site_code");
       if (!code) { errorEl.textContent = "Choose a plant."; return; }
+      siteCode = code;
       if (!val("item_name")) { errorEl.textContent = "Item Description is required."; return; }
       var qty = val("quantity");
       if (qty !== "" && (!/^\d+(\.\d{1,3})?$/.test(qty) || Number(qty) > MAX_QUANTITY)) {
@@ -446,7 +562,9 @@
       }).then(function () {
         saving = false; close();
         // Re-read from the server so the table shows exactly what was stored, in its sorted place.
-        return load(container, false).then(function () { setStatus(container, item ? "Saved." : "Item added."); });
+        return reloadAfterMutation(container, siteCode).then(function (refreshError) {
+          setStatus(container, refreshError || (item ? "Saved." : "Item added."), !!refreshError);
+        });
       }).catch(function (err) {
         saving = false; submit.disabled = false; submit.textContent = item ? "Save changes" : "Add item";
         errorEl.textContent = "Not saved. " + (err && err.message ? err.message : "Please retry.");
@@ -521,7 +639,9 @@
         api().request("/api/bom/" + encodeURIComponent(item.id) + "?version=" + item.version, { method: "DELETE" })
           .then(function () {
             removing = false; busy = false; close();
-            return load(container, false).then(function () { setStatus(container, "Line removed."); });
+            return reloadAfterMutation(container, item.siteCode).then(function (refreshError) {
+              setStatus(container, refreshError || "Line removed.", !!refreshError);
+            });
           })
           .catch(function (err) {
             removing = false; busy = false;
@@ -696,25 +816,37 @@
     if (search) search.addEventListener("input", function () {
       ui.search = search.value;
       if (searchTimer) clearTimeout(searchTimer);
-      searchTimer = setTimeout(function () { searchTimer = null; if (container.isConnected) load(container, false); }, 250);
+      searchTimer = setTimeout(function () {
+        searchTimer = null;
+        if (container.isConnected) {
+          resetPlantDetails();
+          load(container, false);
+        }
+      }, 250);
     });
     container.querySelectorAll("[data-bom-filter]").forEach(function (sel) {
       sel.addEventListener("change", function () {
         var key = sel.getAttribute("data-bom-filter");
         ui[key] = sel.value;
         if (key === "spv") ui.plant = "__all";             // a plant outside the chosen SPV would match nothing
+        resetPlantDetails();
         load(container, false);
       });
     });
     var clear = container.querySelector("[data-bom-clear]");
-    if (clear) clear.addEventListener("click", function () { ui = Object.assign({}, BLANK_UI); load(container, false); });
+    if (clear) clear.addEventListener("click", function () {
+      ui = Object.assign({}, BLANK_UI);
+      resetPlantDetails();
+      load(container, false);
+    });
     var more = container.querySelector("[data-bom-more]");
     if (more) more.addEventListener("click", function () { if (!st.loading) load(container, true); });
     container.querySelectorAll("[data-bom-plant-toggle]").forEach(function (button) {
       button.addEventListener("click", function () {
         var siteCode = button.getAttribute("data-bom-plant-toggle");
         expandedPlants[siteCode] = expandedPlants[siteCode] !== true;
-        render(container, true);
+        if (expandedPlants[siteCode] && !plantDetails[siteCode]) loadPlantDetails(container, siteCode, false);
+        else render(container, true);
         container.querySelectorAll("[data-bom-plant-toggle]").forEach(function (nextButton) {
           if (nextButton.getAttribute("data-bom-plant-toggle") === siteCode && nextButton.focus) {
             nextButton.focus();
@@ -722,6 +854,22 @@
         });
       });
     });
+    container.querySelectorAll("[data-bom-plant-more]").forEach(function (button) {
+      button.addEventListener("click", function () {
+        var siteCode = button.getAttribute("data-bom-plant-more");
+        var entry = plantDetails[siteCode];
+        if (entry && !entry.loading && entry.more) loadPlantDetails(container, siteCode, true);
+      });
+    });
+    container.querySelectorAll("[data-bom-plant-retry]").forEach(function (button) {
+      button.addEventListener("click", function () {
+        var siteCode = button.getAttribute("data-bom-plant-retry");
+        var entry = plantDetails[siteCode];
+        if (entry && !entry.loading) loadPlantDetails(container, siteCode, !!entry.items.length);
+      });
+    });
+    var retry = container.querySelector("[data-bom-retry]");
+    if (retry) retry.addEventListener("click", function () { if (!st.loading) load(container, false); });
     var add = container.querySelector("[data-bom-add]");
     if (add) add.addEventListener("click", function () { openEditor(container, null, add); });
     var reorder = container.querySelector("[data-bom-reorder]");
@@ -741,7 +889,7 @@
   function show(container, opts) {
     if (!container) return;
     mode = { kind: (opts && opts.siteCode) ? "single" : "all", siteCode: opts ? opts.siteCode : null };
-    expandedPlants = Object.create(null);
+    resetPlantDetails();
     ui = Object.assign({}, BLANK_UI);
     st = { items: [], total: 0, makers: [], suppliers: [], sections: [], plants: st.plants, loading: true, error: "", more: false };
     container.innerHTML = '<div class="ep-pt__loading">Loading BOM…</div>';

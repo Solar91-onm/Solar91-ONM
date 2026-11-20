@@ -94,12 +94,12 @@
       if (!state.draft || state.modalMode !== "create" ||
           state.draft.plantCode !== siteCode || state.draft.equipment !== equipment) return;
       state.unitConfigError = "";
-      renderView();
+      renderWizardView();
     }).catch(function (error) {
       if (!state.draft || state.modalMode !== "create" ||
           state.draft.plantCode !== siteCode || state.draft.equipment !== equipment) return;
       state.unitConfigError = (error && error.message) || "Please retry.";
-      renderView();
+      renderWizardView();
     });
   }
 
@@ -155,6 +155,10 @@
     columnFilters: {},
     categoryLoading: false,
     categoryError: "",
+    assigneesLoaded: false,
+    assigneesLoading: false,
+    assigneesError: "",
+    isAssignee: false,
     unitConfigError: "",
     modalId: "",
     modalMode: "",
@@ -701,6 +705,20 @@
     });
   }
 
+  function eligibleAssignees(siteCode) {
+    return state.assignees.filter(function (person) {
+      return state.isHead || !siteCode || (person.plants || []).indexOf(siteCode) !== -1;
+    });
+  }
+
+  function assigneeOptions(siteCode, selectedId) {
+    return eligibleAssignees(siteCode).map(function (person) {
+      return '<option value="' + escape(person.id) + '"' +
+        (String(selectedId || "") === String(person.id) ? " selected" : "") + ">" +
+        escape(person.name) + "</option>";
+    }).join("");
+  }
+
   /** Today as YYYY-MM-DD, so a fix cannot be dated in the future. */
   function todayISO() {
     var now = new Date();
@@ -756,12 +774,14 @@
         ? '<label class="ep-issues__wizard-field">Assigned to' +
             '<select name="assignedTo">' +
               '<option value="">Unassigned</option>' +
-              state.assignees.map(function (person) {
-                return '<option value="' + escape(person.id) + '"' +
-                  (value("assignedTo", issue.assignedTo) === String(person.id) ? " selected" : "") + ">" +
-                  escape(person.name) + "</option>";
-              }).join("") +
-            '</select></label>'
+              (state.assigneesLoading ? '<option value="" disabled>Loading assignees…</option>' : "") +
+              assigneeOptions(issue.plantCode, value("assignedTo", issue.assignedTo)) +
+            '</select>' +
+            (state.assigneesError
+              ? '<small class="ep-issues__inline-error" role="alert">Could not load assignees: ' +
+                escape(state.assigneesError) +
+                ' <button type="button" class="ep-issues__button ep-issues__button--small" data-issue-action="retry-assignees">Retry</button></small>'
+              : "") + '</label>'
         : '<div class="ep-issues__wizard-field">Assigned to' +
             '<span class="ep-issues__readonly" title="Only the O&amp;M Head can change this">' +
             escape(issue.assignee || "Unassigned") + '</span></div>') +
@@ -1094,6 +1114,22 @@
   }
 
   function renderWizardStepThree(draft) {
+    var assignees = assigneeOptions(draft.plantCode, draft.assignee);
+    var assignmentField = state.isAssignee
+      ? '<div class="ep-issues__wizard-field">Assigned to' +
+          '<span class="ep-issues__readonly">You — assigned automatically</span></div>'
+      : '<label class="ep-issues__wizard-field">Assign to assignee (optional)' +
+          '<select name="assignee"><option value="">Leave unassigned</option>' +
+            (state.assigneesLoading ? '<option value="" disabled>Loading assignees…</option>' : "") +
+            (state.liveMode ? assignees : ASSIGNEES.map(function (person) {
+              return '<option value="' + escape(person) + '"' +
+                (draft.assignee === person ? " selected" : "") + ">" + escape(person) + "</option>";
+            }).join("")) + '</select>' +
+          (state.assigneesError
+            ? '<small class="ep-issues__inline-error" role="alert">Could not load assignees: ' +
+              escape(state.assigneesError) +
+              ' <button type="button" class="ep-issues__button ep-issues__button--small" data-issue-action="retry-assignees">Retry</button></small>'
+            : "") + '</label>';
     return '<div class="ep-issues__wizard-step">' +
       '<div class="ep-issues__wizard-fields ep-issues__wizard-fields--two">' +
         '<label class="ep-issues__wizard-field">Expected time to close (optional)' +
@@ -1113,15 +1149,7 @@
           '<small>' + (draft.evidenceFiles.length
             ? draft.evidenceFiles.length + " photo" + (draft.evidenceFiles.length === 1 ? "" : "s") + " selected"
             : "No photos selected") + '</small></label>' +
-        '<label class="ep-issues__wizard-field">Assign to assignee (optional)' +
-          '<select name="assignee"><option value="">Leave unassigned</option>' +
-            (state.liveMode ? state.assignees.map(function (person) {
-              return '<option value="' + escape(person.id) + '"' +
-                (draft.assignee === person.id ? " selected" : "") + ">" + escape(person.name) + "</option>";
-            }).join("") : ASSIGNEES.map(function (person) {
-              return '<option value="' + escape(person) + '"' +
-                (draft.assignee === person ? " selected" : "") + ">" + escape(person) + "</option>";
-            }).join("")) + '</select></label>' +
+        assignmentField +
       '</div>' +
       '<p class="ep-issues__wizard-error" data-wizard-error role="alert"' +
         (state.submitError ? "" : " hidden") + '>' + escape(state.submitError) + '</p>' +
@@ -1132,9 +1160,6 @@
   }
 
   function renderRaiseWizard(context) {
-    if (state.categoryLoading) {
-      return '<div class="ep-issues__message" role="status">Loading issue categories…</div>';
-    }
     if (state.categoryError) {
       return '<div class="ep-issues__message ep-issues__message--error" role="alert">' +
         "Issue categories could not be loaded: " + escape(state.categoryError) +
@@ -1249,6 +1274,74 @@
     renderIssuesView();
   }
 
+  function renderDrawerOnly() {
+    if (!active) return;
+    var host = active.host;
+    var oldOverlay = host.querySelector("[data-issue-overlay]");
+    if (!state.modalMode) {
+      if (oldOverlay) {
+        oldOverlay.remove();
+        var raiseButton = host.querySelector('[data-issue-action="raise"]');
+        if (raiseButton) raiseButton.focus();
+      }
+      return;
+    }
+
+    var focused = global.document && global.document.activeElement;
+    var restoreFocus = oldOverlay && focused && oldOverlay.contains(focused);
+    var focusName = restoreFocus && focused.getAttribute ? focused.getAttribute("name") : null;
+    var focusValue = restoreFocus && focused.getAttribute ? focused.getAttribute("value") : null;
+    var focusAction = restoreFocus && focused.getAttribute
+      ? focused.getAttribute("data-wizard-action") || focused.getAttribute("data-issue-action")
+      : null;
+    var content = oldOverlay && oldOverlay.querySelector(".ep-issues__drawer-content");
+    var scrollTop = content ? content.scrollTop : 0;
+    var markup = renderDrawer(active.context);
+    if (oldOverlay) {
+      oldOverlay.outerHTML = markup;
+    } else {
+      var root = host.querySelector(".ep-issues");
+      if (!root) return renderView();
+      root.insertAdjacentHTML("beforeend", markup);
+    }
+
+    var overlay = host.querySelector("[data-issue-overlay]");
+    if (!overlay) return;
+    var nextContent = overlay.querySelector(".ep-issues__drawer-content");
+    if (nextContent) nextContent.scrollTop = scrollTop;
+    if (!restoreFocus) {
+      if (!oldOverlay) {
+        var firstField = overlay.querySelector('select[name="plantCode"]') ||
+          overlay.querySelector('[data-wizard-action="next"]') || overlay.querySelector("button");
+        if (firstField) firstField.focus();
+      }
+      return;
+    }
+    var candidates = focusName ? overlay.querySelectorAll("[name]") : [];
+    for (var index = 0; index < candidates.length; index++) {
+      if (candidates[index].getAttribute("name") === focusName &&
+          (focusValue === null || candidates[index].getAttribute("value") === focusValue)) {
+        candidates[index].focus();
+        return;
+      }
+    }
+    if (focusAction) {
+      var actions = overlay.querySelectorAll("[data-wizard-action], [data-issue-action]");
+      for (var actionIndex = 0; actionIndex < actions.length; actionIndex++) {
+        if (actions[actionIndex].getAttribute("data-wizard-action") === focusAction ||
+            actions[actionIndex].getAttribute("data-issue-action") === focusAction) {
+          actions[actionIndex].focus();
+          return;
+        }
+      }
+    }
+  }
+
+  function renderWizardView() {
+    if (state.modalMode === "create") renderDrawerOnly();
+    else renderView();
+  }
+
   function renderIssuesView() {
     if (!active) return;
     var host = active.host;
@@ -1345,16 +1438,32 @@
   function loadCategoriesForWizard(host) {
     state.categoryLoading = true;
     state.categoryError = "";
-    renderView();
+    renderWizardView();
     loadCategories().then(function () {
       if (!active || active.host !== host || state.modalMode !== "create") return;
       state.categoryLoading = false;
-      renderView();
+      renderWizardView();
     }).catch(function (error) {
       if (!active || active.host !== host || state.modalMode !== "create") return;
       state.categoryLoading = false;
       state.categoryError = error.message || "Please try again.";
-      renderView();
+      renderWizardView();
+    });
+  }
+
+  function loadAssigneesForDrawer(host) {
+    if (state.assigneesLoaded || state.assigneesLoading) return;
+    state.assigneesLoading = true;
+    state.assigneesError = "";
+    renderDrawerOnly();
+    global.Solar91PortalAPI.request("/api/issues/assignees").then(function (rows) {
+      state.assignees = Array.isArray(rows) ? rows : [];
+      state.assigneesLoaded = true;
+    }).catch(function (error) {
+      state.assigneesError = (error && error.message) || "Please retry.";
+    }).then(function () {
+      state.assigneesLoading = false;
+      if (active && active.host === host && state.modalMode) renderDrawerOnly();
     });
   }
 
@@ -1362,16 +1471,16 @@
     if (state.categoryLoading) return;
     state.categoryLoading = true;
     state.categoryError = "";
-    renderView();
+    renderDrawerOnly();
     loadCategories().then(function () {
       if (!active || active.host !== host || state.modalMode !== "edit" || state.modalId !== issueId) return;
       state.categoryLoading = false;
-      renderView();
+      renderDrawerOnly();
     }).catch(function (error) {
       if (!active || active.host !== host || state.modalMode !== "edit" || state.modalId !== issueId) return;
       state.categoryLoading = false;
       state.categoryError = error.message || "Configured categories could not be loaded.";
-      renderView();
+      renderDrawerOnly();
     });
   }
 
@@ -1420,14 +1529,12 @@
     var api = global.Solar91PortalAPI;
     api.session().then(function (session) {
       var role = session.user && session.user.role;
-      var canRaise = ["O&M Head", "Assignee", "Site Engineer"].indexOf(role) !== -1;
       var requests = [
         api.plants(),
-        api.request(issuesUrl(0)),
-        canRaise ? api.request("/api/issues/assignees") : Promise.resolve([])
+        api.request(issuesUrl(0))
       ];
       return Promise.all(requests).then(function (result) {
-        return { role: role, plants: result[0], issues: result[1], assignees: result[2] };
+        return { role: role, plants: result[0], issues: result[1] };
       });
     }).then(function (result) {
       if (requestId !== state.requestId) return;
@@ -1436,11 +1543,11 @@
       state.plants.forEach(function (plant) { plantsById[plant.dbId] = plant; });
       state.rows = result.issues.map(function (issue) { return mapApiIssue(issue, plantsById); });
       state.hasMore = result.issues.length >= state.pageSize;
-      state.assignees = result.assignees || [];
       state.canRaise = ["O&M Head", "Assignee", "Site Engineer"].indexOf(result.role) !== -1 &&
         state.plants.length > 0;
       state.canEdit = ["O&M Head", "Assignee"].indexOf(result.role) !== -1;
       state.isHead = result.role === "O&M Head";
+      state.isAssignee = result.role === "Assignee";
       state.liveMode = true;
       state.loaded = true;
       state.loading = false;
@@ -1610,10 +1717,20 @@
         state.draft.serialNo = "";
         state.draft.unitCount = "";
         state.unitConfigError = "";
+        var currentAssignee = state.assignees.find(function (person) {
+          return String(person.id) === String(state.draft.assignee);
+        });
+        if (currentAssignee && !state.isHead &&
+            (currentAssignee.plants || []).indexOf(state.draft.plantCode) === -1) {
+          state.draft.assignee = "";
+        }
         if (hasEquipmentRunningStatus(state.draft.equipment) && state.draft.plantCode) {
           requestUnitConfigForDraft(state.draft.plantCode, state.draft.equipment);
         }
-        renderView();
+        renderWizardView();
+        if (state.wizardStep === 3 && direction === "next" && !state.isAssignee) {
+          loadAssigneesForDrawer(host);
+        }
         return;
       }
       if (event.target.name === "equipment" && state.modalMode === "create" && state.draft) {
@@ -1629,13 +1746,13 @@
         if (hasEquipmentRunningStatus(state.draft.equipment) && state.draft.plantCode) {
           requestUnitConfigForDraft(state.draft.plantCode, state.draft.equipment);
         }
-        renderView();
+        renderWizardView();
         return;
       }
       if (event.target.name === "equipmentRunning" && state.modalMode === "create" && state.draft) {
         var runWizard = host.querySelector("[data-issue-wizard]");
         if (runWizard) syncWizardDraft(runWizard);
-        renderView();
+        renderWizardView();
         return;
       }
       if (event.target.name === "evidence" && state.modalMode === "create" && state.draft) {
@@ -1653,7 +1770,7 @@
           return;
         }
         state.draft.evidenceFiles = files;
-        renderView();
+        renderWizardView();
         return;
       }
       var filter = event.target.dataset.issueFilter;
@@ -1770,7 +1887,7 @@
           }
           state.wizardStep = Math.min(3, state.wizardStep + 1);
         }
-        renderView();
+        renderWizardView();
         return;
       }
       var status = event.target.closest("[data-issue-status]");
@@ -1787,8 +1904,9 @@
         state.submitError = "";
         state.categoryError = "";
         state.categoryLoading = false;
-        renderView();
+        renderDrawerOnly();
         loadCategoriesForEdit(host, state.modalId);
+        if (state.isHead) loadAssigneesForDrawer(host);
         return;
       }
       var open = event.target.closest("[data-issue-open]");
@@ -1862,10 +1980,14 @@
         if (state.modalMode === "edit") loadCategoriesForEdit(host, state.modalId);
         return;
       }
+      if (action === "retry-assignees") {
+        if (state.modalMode === "create" || state.modalMode === "edit") loadAssigneesForDrawer(host);
+        return;
+      }
       if (action === "retry-unit-config") {
         if (state.modalMode !== "create" || !state.draft) return;
         requestUnitConfigForDraft(state.draft.plantCode, state.draft.equipment);
-        renderView();
+        renderWizardView();
         return;
       }
       if (action === "more") {
@@ -1911,6 +2033,7 @@
         return;
       } else if (action === "close") {
         if (state.submitting) return;
+        var wasCreating = state.modalMode === "create";
         state.modalId = "";
         state.modalMode = "";
         state.submitNotice = "";
@@ -1919,6 +2042,10 @@
         state.wizardStep = 1;
         state.categoryLoading = false;
         state.categoryError = "";
+        if (wasCreating) {
+          renderDrawerOnly();
+          return;
+        }
       } else if (action === "retry") {
         state.loaded = false;
         load();
@@ -1926,6 +2053,10 @@
       } else if (action === "edit-current") {
         state.modalMode = "edit";
         state.editDraft = null;
+        renderDrawerOnly();
+        loadCategoriesForEdit(host, state.modalId);
+        if (state.isHead) loadAssigneesForDrawer(host);
+        return;
       } else if (action === "progress" || action === "solve") {
         var current = state.rows.find(function (row) { return row.id === state.modalId; });
         if (current) current.status = action === "progress" ? "In Progress" : "Solved";
@@ -2018,7 +2149,7 @@
         state.draft = null;
         state.editDraft = null;
         state.wizardStep = 1;
-        renderView();
+        renderDrawerOnly();
       }
     });
   }
@@ -2488,13 +2619,13 @@
     var plant = state.plants.find(function (item) { return item.siteCode === draft.plantCode; });
     if (!plant || !plant.dbId) {
       state.submitError = "The selected plant is not available in your authorized plant list.";
-      renderView();
+      renderWizardView();
       return;
     }
 
     state.submitting = true;
     state.submitError = "";
-    renderView();
+    renderWizardView();
     var equipmentDetails = issueEquipmentDetails(draft);
     var isBreakdown = hasEquipmentRunningStatus(draft.equipment) && draft.equipmentRunning === false;
     var payload = {
@@ -2550,7 +2681,7 @@
     }).catch(function (error) {
       state.submitting = false;
       state.submitError = error.message || "Could not save this issue ticket.";
-      renderView();
+      renderWizardView();
     });
   }
 

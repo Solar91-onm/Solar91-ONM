@@ -144,6 +144,10 @@ class IssueService:
     def create(self,data:IssueCreate,user:User):
         payload = data.model_dump()
         assigned_to = payload.pop("assigned_to", None)
+        if user.role == "Assignee":
+            if assigned_to is not None and assigned_to != user.id:
+                raise HTTPException(403, "Assignees can only assign new issues to themselves")
+            assigned_to = user.id
         assignee_id = assigned_to
         ticket_no = (payload.pop("ticket_no", None) or "").strip()
         auto_number = not ticket_no

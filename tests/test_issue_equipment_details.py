@@ -10,8 +10,8 @@ import io
 
 from openpyxl import load_workbook
 
-from app.core.models import Issue, PMUnitConfig, Plant, UserPlantAssignment, WashingConfig
-from tests.conftest import login_user, seed_work_categories
+from app.core.models import Issue, PMUnitConfig, Plant, User, UserPlantAssignment, WashingConfig
+from tests.conftest import grant_assignee_plants, login_user, seed_work_categories
 
 
 def _plant(db):
@@ -86,6 +86,51 @@ def test_string_breakdown_requires_and_persists_selected_units(client, db):
     })
     assert running.status_code == 201, running.text
     assert running.json()["equipment_running"] is True
+
+
+def test_assignee_can_create_a_string_breakdown_for_a_scoped_plant(client, db):
+    plant = _plant(db)
+    assignee = login_user(
+        client, db, role="Assignee", email="string-assignee-create@example.com",
+    )
+    grant_assignee_plants(db, assignee.id, plant.id)
+    other = User(
+        auth_provider="test", external_subject="string-other-assignee",
+        email="string-other-assignee@example.com", display_name="Other Assignee",
+        role="Assignee", is_active=True,
+    )
+    db.add(other)
+    db.flush()
+    grant_assignee_plants(db, other.id, plant.id)
+
+    assigned_to_other = client.post("/api/issues", json={
+        "plant_id": str(plant.id),
+        "vertical": "String",
+        "description": "Should not be assignable to another assignee",
+        "equipment_running": False,
+        "serial_no": "String 4",
+        "unit_count": 1,
+        "assigned_to": str(other.id),
+    })
+    assert assigned_to_other.status_code == 403, assigned_to_other.text
+
+    created = client.post("/api/issues", json={
+        "plant_id": str(plant.id),
+        "vertical": "String",
+        "description": "String breakdown reported by the assignee",
+        "equipment_running": False,
+        "serial_no": "String 3",
+        "unit_count": 1,
+    })
+
+    assert created.status_code == 201, created.text
+    body = created.json()
+    assert body["status"] == "Assigned"
+    assert body["assigned_to"] == str(assignee.id)
+    assert body["assignee_text"] == assignee.display_name
+    assert body["serial_no"] == "String 3"
+    saved = db.query(Issue).filter_by(ticket_no=body["ticket_no"]).one()
+    assert saved.created_by == assignee.id
 
 
 def test_issue_unit_count_endpoint_is_plant_scoped_and_uses_string_fallback(client, db):

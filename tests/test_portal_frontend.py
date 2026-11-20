@@ -112,6 +112,19 @@ def test_issue_register_input_handler_never_reads_an_undefined_action():
     assert 'if (action === "retry-unit-config") {' in issues   # handled where `action` exists (click)
 
 
+def test_raise_issue_keeps_the_register_mounted_and_loads_assignees_on_demand():
+    issues = (PORTAL_ASSETS / "js" / "site-issues.js").read_text(encoding="utf-8")
+    load_live = issues[issues.index("function loadLiveIssues"):issues.index("function loadIssuePhotos")]
+    drawer = issues[issues.index("function renderDrawerOnly"):issues.index("function renderWizardView")]
+
+    assert '"/api/issues/assignees"' not in load_live
+    assert 'if (state.wizardStep === 3 && direction === "next" && !state.isAssignee)' in issues
+    assert "You — assigned automatically" in issues
+    assert "oldOverlay.outerHTML = markup;" in drawer
+    assert 'root.insertAdjacentHTML("beforeend", markup);' in drawer
+    assert "host.innerHTML" not in drawer
+
+
 def test_page_modules_are_prefetched_when_the_browser_is_idle():
     """Opening a page must not wait for its script: the modules are prefetched (downloaded, not
     run) once the first screen is usable, and never on Data Saver or 2G connections."""
@@ -2320,13 +2333,16 @@ def test_bom_table_merges_sections_splits_maker_and_supplier_and_keeps_boq_order
     assert module.index('{ key: "maker"') < module.index('{ key: "supplier"') < module.index('{ key: "quantity"')
     assert module.index('{ key: "quantity"') < module.index('{ key: "unit"') < module.index('{ key: "testReport"')
     assert "Maker/Supplier" not in module and "makerSupplier" not in module
-    # Portfolio mode starts with one expandable summary row per plant; expanded plant cells share
-    # a rowspan across that plant's line rows. The single-plant table remains unchanged.
+    # Portfolio mode keeps a plant row and code visible at all times; its detail table expands in
+    # the remaining columns. The single-plant table remains unchanged.
     assert "ep-pt__table ep-bom__table" in module
-    assert "function plantBlocks(items)" in module
-    assert "function plantGroupRow(block, colCount)" in module
+    assert "function visiblePlants()" in module
+    assert "function plantRowHTML(row, colCount, editor)" in module
+    assert "function loadPlantDetails(container, siteCode, append)" in module
+    assert "ep-bom__detail-table" in module
     assert 'data-bom-plant-toggle="' in module
-    assert "expandedPlants[block.siteCode] !== true" in module
+    assert "expandedPlants[siteCode] === true" in module
+    assert 'data-bom-plant-more="' in module and 'data-bom-plant-retry="' in module
     assert 'rowspan="' in module and "function sectionBlocks(items)" in module
     # The quantity cell is the only one that drops fmt.formatNumber.
     assert "function qtyText(value)" in module and "fmt.formatNumber(" not in module
@@ -2380,10 +2396,15 @@ def test_bom_table_merges_sections_splits_maker_and_supplier_and_keeps_boq_order
         request: (url, opts) => {
           urls.push(url);
           if (opts && opts.method === 'PATCH') { patched = JSON.parse(opts.body); return Promise.resolve({ sections: patched.sections }); }
-          // The server filters; this stands in for it, so the table re-renders over fewer rows.
+          // The server filters by plant and section; this stands in for it.
+          const siteCode = (url.match(/[?&]site_code=([^&]*)/) || [])[1];
           const want = (url.match(/[?&]section=([^&]*)/) || [])[1];
-          const shown = want ? items.filter(i => i.section === decodeURIComponent(want)) : items;
-          return Promise.resolve({ items: shown, total: shown.length, makers: ['Adani', 'Polycab'],
+          let shown = siteCode ? items.filter(i => i.siteCode === decodeURIComponent(siteCode)) : items;
+          if (want) shown = shown.filter(i => i.section === decodeURIComponent(want));
+          const total = shown.length;
+          const offset = Number((url.match(/[?&]offset=(\d+)/) || [])[1] || 0);
+          const limit = Number((url.match(/[?&]limit=(\d+)/) || [])[1] || 200);
+          return Promise.resolve({ items: shown.slice(offset, offset + limit), total: total, makers: ['Adani', 'Polycab'],
             suppliers: ['Shakti Traders'], sections: sections, limit: 200, offset: 0 });
         }
       };
@@ -2506,32 +2527,54 @@ def test_bom_table_merges_sections_splits_maker_and_supplier_and_keeps_boq_order
         html = el.html;
         if (html.indexOf('<th>Plant</th><th>Section</th><th>Item Description</th>') === -1) fail('Plant must lead across plants: ' + html.slice(at(html, '<thead>'), at(html, '</thead>')));
         if (html.indexOf('data-bom-reorder') !== -1) fail('reordering must not be offered across plants');
-        // Portfolio view starts collapsed with one summary per plant, then reveals only the
-        // selected plant's BOM lines. Expanding another plant keeps the first one open.
+        // Every plant remains visible. Expanding one fetches only its BOM lines into the details
+        // region to the right; additional plants can remain expanded independently.
         if (count(html, /data-bom-plant-toggle="/g) !== 2) fail('each plant needs an expandable row');
-        if (count(html, /class="ep-bom__plant-summary ep-bom__block-start"/g) !== 2) fail('plants should start collapsed');
+        if (count(html, /class="ep-bom__plant-summary"/g) !== 2) fail('plants should start collapsed');
+        if (count(html, /class="ep-bom__plant-row/g) !== 2) fail('every plant must have one stable row');
         if (html.indexOf('Solar PV Modules</td>') !== -1) fail('BOM lines should start collapsed');
         const abhToggle = el.nodes['data-bom-plant-toggle=ABH01'];
         if (!abhToggle || !abhToggle.on.click) fail('first plant toggle is not wired');
         abhToggle.click();
+        await settle();
         html = el.html;
-        if (count(html, /class="ep-bom__plant-summary ep-bom__block-start"/g) !== 1) fail('expanding one plant changed another');
+        if (count(html, /class="ep-bom__plant-summary"/g) !== 1) fail('expanding one plant changed another');
         if (count(html, /class="ep-bom__section/g) !== 1) fail('the expanded plant needs its section block');
-        if (count(html, /rowspan="2"/g) !== 2) fail('plant and section cells should span their line rows');
+        if (count(html, /rowspan="2"/g) !== 1) fail('only the section cell should span its line rows');
         if (count(html, /data-bom-plant-toggle="ABH01"/g) !== 1) fail('expanded plant code should appear once');
         if (count(html, /Solar PV Modules<\/td>/g) !== 1) fail('first plant lines were not expanded');
         const bgrToggle = el.nodes['data-bom-plant-toggle=BGR02'];
         if (!bgrToggle || !bgrToggle.on.click) fail('second plant toggle is not wired');
         bgrToggle.click();
+        await settle();
         html = el.html;
-        if (count(html, /class="ep-bom__plant-summary ep-bom__block-start"/g) !== 0) fail('both plants should remain expanded');
+        if (count(html, /class="ep-bom__plant-summary"/g) !== 0) fail('both plants should remain expanded');
         if (count(html, /class="ep-bom__section/g) !== 2) fail('same-named sections from two plants must stay separate');
-        if (count(html, /rowspan="2"/g) !== 4) fail('each plant and section cell should span only its own rows');
+        if (count(html, /rowspan="2"/g) !== 2) fail('each plant section must span only its own rows');
         if (count(html, /Solar PV Modules<\/td>/g) !== 2) fail('both plants should show their BOM lines');
         abhToggle.click();
         html = el.html;
-        if (count(html, /class="ep-bom__plant-summary ep-bom__block-start"/g) !== 1) fail('collapsing one plant should leave the other open');
+        if (count(html, /class="ep-bom__plant-summary"/g) !== 1) fail('collapsing one plant should leave the other open');
         if (count(html, /Solar PV Modules<\/td>/g) !== 1) fail('collapsing first plant hid or kept the wrong rows');
+
+        // Per-plant pagination must append the next page without hiding the fixed plant list.
+        items = Array.from({ length: 201 }, (_, i) => row({ id: 'page-' + i, siteCode: 'ABH01',
+          itemName: 'Paginated item ' + i, section: 'PV Section', sectionOrder: 1, sortOrder: i }));
+        sections = ['PV Section'];
+        el = container();
+        Solar91PortalBom.show(el, {});
+        await settle();
+        el.nodes['data-bom-plant-toggle=ABH01'].click();
+        await settle();
+        if (el.html.indexOf('Paginated item 199</td>') === -1 ||
+            el.html.indexOf('Paginated item 200</td>') !== -1) fail('the first plant page should contain only 200 lines');
+        const plantMore = el.nodes['data-bom-plant-more=ABH01'];
+        if (!plantMore || !plantMore.on.click) fail('plant-specific load more is not wired');
+        plantMore.click();
+        await settle();
+        if (el.html.indexOf('Paginated item 200</td>') === -1) fail('the next plant page was not appended');
+        if (count(el.html, /data-bom-plant-toggle="/g) !== 2) fail('pagination must keep every plant visible');
+        if (el.html.indexOf('data-bom-plant-more=') !== -1) fail('the load-more control should disappear after the final page');
       })().catch(e => { console.error(e.message); process.exit(1); });
     """
     run = subprocess.run(["node", "-e", script], cwd=ROOT, capture_output=True, text=True, timeout=30)
