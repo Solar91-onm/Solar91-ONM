@@ -178,7 +178,7 @@
 .ep-pt__table.ep-bom__table td.ep-bom__plant { padding: 0; background: var(--ep-bg-subtle); }
 .ep-bom__plant-toggle {
   display: flex; align-items: center; justify-content: space-between; gap: 6px;
-  width: 100%; min-height: 100%; padding: 8px 10px;
+  width: 100%; padding: 8px 10px;
   border: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer;
 }
 .ep-bom__plant-toggle:hover { color: var(--ep-accent-strong); }
@@ -196,10 +196,13 @@
 .ep-bom__plant-load-status.is-error { color: #b42318; }
 .ep-bom__table.ep-bom__detail-table { width: 100%; min-width: 0; }
 .ep-bom__table.is-portfolio thead th:first-child,
-.ep-bom__table.is-portfolio tbody td.ep-bom__plant {
+.ep-bom__table.is-portfolio tbody td.ep-bom__plant,
+.ep-bom__table.is-portfolio tbody td.ep-bom__plant-spacer {
   position: sticky; left: 0; box-shadow: 1px 0 0 var(--ep-border);
 }
-.ep-bom__table.is-portfolio tbody td.ep-bom__plant { z-index: 1; }
+.ep-bom__table.is-portfolio tbody td.ep-bom__plant,
+.ep-bom__table.is-portfolio tbody td.ep-bom__plant-spacer { z-index: 1; }
+.ep-bom__table.is-portfolio tbody td.ep-bom__plant-spacer { background: var(--ep-bg); }
 .ep-bom__table.is-portfolio thead th:first-child { z-index: 3; }
 .ep-bom__table.is-portfolio tbody tr:hover td.ep-bom__plant { background: var(--ep-bg-subtle); }
 .ep-pt__table.ep-bom__table td.ep-bom__specs { white-space: pre-line; color: var(--ep-text-muted); }

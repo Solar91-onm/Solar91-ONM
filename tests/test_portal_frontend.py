@@ -2350,6 +2350,7 @@ def test_bom_table_merges_sections_splits_maker_and_supplier_and_keeps_boq_order
     assert "function plantRowHTML(row, colCount, editor)" in module
     assert "function loadPlantDetails(container, siteCode, append)" in module
     assert "ep-bom__detail-table" in module
+    assert 'class="ep-bom__plant-detail-row"' in module and 'class="ep-bom__plant-spacer"' in module
     assert 'data-bom-plant-toggle="' in module
     assert "expandedPlants[siteCode] === true" in module
     assert 'data-bom-plant-more="' in module and 'data-bom-plant-retry="' in module
@@ -2552,6 +2553,14 @@ def test_bom_table_merges_sections_splits_maker_and_supplier_and_keeps_boq_order
         if (count(html, /class="ep-bom__section/g) !== 1) fail('the expanded plant needs its section block');
         if (count(html, /rowspan="2"/g) !== 1) fail('only the section cell should span its line rows');
         if (count(html, /data-bom-plant-toggle="ABH01"/g) !== 1) fail('expanded plant code should appear once');
+        const abhParentRow = html.indexOf('data-bom-plant-toggle="ABH01"');
+        const abhParentEnd = html.indexOf('</tr>', abhParentRow);
+        const abhDetailsRow = html.indexOf('<tr class="ep-bom__plant-detail-row">', abhParentEnd);
+        const abhDetailTable = html.indexOf('ep-bom__detail-table', abhParentRow);
+        if (abhParentEnd < 0 || abhDetailsRow < 0 ||
+            abhDetailTable < abhDetailsRow) {
+          fail('expanded plant details must be in a separate row so its plant-code cell stays compact');
+        }
         if (count(html, /Solar PV Modules<\/td>/g) !== 1) fail('first plant lines were not expanded');
         const bgrToggle = el.nodes['data-bom-plant-toggle=BGR02'];
         if (!bgrToggle || !bgrToggle.on.click) fail('second plant toggle is not wired');
