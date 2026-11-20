@@ -371,17 +371,12 @@
   function plantRowHTML(row, colCount, editor) {
     var siteCode = row.plant.siteCode;
     var expanded = expandedPlants[siteCode] === true;
-    var html = '<tr class="ep-bom__plant-row' + (expanded ? " is-expanded" : "") + '">' +
+    var details = expanded
+      ? plantItemsHTML(siteCode, plantDetails[siteCode], editor)
+      : '<div class="ep-bom__plant-summary">Click the plant code to expand its BOM details.</div>';
+    return '<tr class="ep-bom__plant-row' + (expanded ? " is-expanded" : "") + '">' +
       plantCell(row, expanded) +
-      '<td class="ep-bom__plant-details" colspan="' + (colCount - 1) + '">' +
-      (expanded ? "" : '<div class="ep-bom__plant-summary">Click the plant code to expand its BOM details.</div>') +
-      "</td></tr>";
-    if (expanded) {
-      html += '<tr class="ep-bom__plant-detail-row"><td class="ep-bom__plant-spacer" aria-hidden="true"></td>' +
-        '<td class="ep-bom__plant-details" colspan="' + (colCount - 1) + '">' +
-        plantItemsHTML(siteCode, plantDetails[siteCode], editor) + "</td></tr>";
-    }
-    return html;
+      '<td class="ep-bom__plant-details" colspan="' + (colCount - 1) + '">' + details + "</td></tr>";
   }
 
   function render(container, keepScroll) {
