@@ -175,6 +175,20 @@
 .ep-bom__scroll { overflow-x: hidden; }
 .ep-bom__table thead th, .ep-bom__table tbody td { text-align: center; vertical-align: middle; padding: 10px 8px; overflow-wrap: anywhere; word-break: break-word; line-height: 1.35; }
 .ep-pt__table.ep-bom__table th:nth-child(n), .ep-pt__table.ep-bom__table td:nth-child(n) { padding: 10px 8px; white-space: normal; overflow: visible; text-overflow: clip; text-align: center; }
+.ep-pt__table.ep-bom__table td.ep-bom__plant { padding: 0; background: var(--ep-bg-subtle); }
+.ep-bom__plant-toggle {
+  display: flex; align-items: center; justify-content: center; gap: 3px;
+  width: 100%; min-height: 100%; padding: 8px 3px;
+  border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer;
+}
+.ep-bom__plant-toggle:hover { color: var(--ep-accent-strong); }
+.ep-bom__plant-toggle:focus-visible { outline: 2px solid var(--ep-accent); outline-offset: -2px; }
+.ep-bom__plant-label { min-width: 0; }
+.ep-bom__plant-chevron { flex: 0 0 14px; transition: transform 140ms ease; }
+.ep-bom__plant-chevron.is-expanded { transform: rotate(180deg); }
+.ep-pt__table.ep-bom__table td.ep-bom__plant-summary-cell {
+  background: var(--ep-bg-subtle); color: var(--ep-text-muted); text-align: left;
+}
 .ep-pt__table.ep-bom__table td.ep-bom__specs { white-space: pre-line; color: var(--ep-text-muted); }
 .ep-bom__table .ep-pt__code, .ep-bom__table .ep-pt__name { display: block; }
 .ep-bom__actions { white-space: normal; }

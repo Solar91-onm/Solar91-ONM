@@ -2320,9 +2320,13 @@ def test_bom_table_merges_sections_splits_maker_and_supplier_and_keeps_boq_order
     assert module.index('{ key: "maker"') < module.index('{ key: "supplier"') < module.index('{ key: "quantity"')
     assert module.index('{ key: "quantity"') < module.index('{ key: "unit"') < module.index('{ key: "testReport"')
     assert "Maker/Supplier" not in module and "makerSupplier" not in module
-    # Still one table: a merged cell, not grouped header rows, cards or accordions.
+    # Portfolio mode starts with one expandable summary row per plant; expanded plant cells share
+    # a rowspan across that plant's line rows. The single-plant table remains unchanged.
     assert "ep-pt__table ep-bom__table" in module
-    assert "ep-bom__group" not in module
+    assert "function plantBlocks(items)" in module
+    assert "function plantGroupRow(block, colCount)" in module
+    assert 'data-bom-plant-toggle="' in module
+    assert "expandedPlants[block.siteCode] !== true" in module
     assert 'rowspan="' in module and "function sectionBlocks(items)" in module
     # The quantity cell is the only one that drops fmt.formatNumber.
     assert "function qtyText(value)" in module and "fmt.formatNumber(" not in module
@@ -2502,11 +2506,32 @@ def test_bom_table_merges_sections_splits_maker_and_supplier_and_keeps_boq_order
         html = el.html;
         if (html.indexOf('<th>Plant</th><th>Section</th><th>Item Description</th>') === -1) fail('Plant must lead across plants: ' + html.slice(at(html, '<thead>'), at(html, '</thead>')));
         if (html.indexOf('data-bom-reorder') !== -1) fail('reordering must not be offered across plants');
-        // Same section name, two plants: two blocks of two, never one block of four.
-        if (count(html, /class="ep-bom__section/g) !== 2) fail('plants were merged into one block');
-        if (count(html, /rowspan="2"/g) !== 2) fail('expected a rowspan="2" per plant');
-        if (html.indexOf('rowspan="4"') !== -1) fail('one plant\'s block ran into the next plant\'s');
-        if (count(html, />PV Section<\/td>/g) !== 2) fail('each plant names its section once');
+        // Portfolio view starts collapsed with one summary per plant, then reveals only the
+        // selected plant's BOM lines. Expanding another plant keeps the first one open.
+        if (count(html, /data-bom-plant-toggle="/g) !== 2) fail('each plant needs an expandable row');
+        if (count(html, /class="ep-bom__plant-summary ep-bom__block-start"/g) !== 2) fail('plants should start collapsed');
+        if (html.indexOf('Solar PV Modules</td>') !== -1) fail('BOM lines should start collapsed');
+        const abhToggle = el.nodes['data-bom-plant-toggle=ABH01'];
+        if (!abhToggle || !abhToggle.on.click) fail('first plant toggle is not wired');
+        abhToggle.click();
+        html = el.html;
+        if (count(html, /class="ep-bom__plant-summary ep-bom__block-start"/g) !== 1) fail('expanding one plant changed another');
+        if (count(html, /class="ep-bom__section/g) !== 1) fail('the expanded plant needs its section block');
+        if (count(html, /rowspan="2"/g) !== 2) fail('plant and section cells should span their line rows');
+        if (count(html, /data-bom-plant-toggle="ABH01"/g) !== 1) fail('expanded plant code should appear once');
+        if (count(html, /Solar PV Modules<\/td>/g) !== 1) fail('first plant lines were not expanded');
+        const bgrToggle = el.nodes['data-bom-plant-toggle=BGR02'];
+        if (!bgrToggle || !bgrToggle.on.click) fail('second plant toggle is not wired');
+        bgrToggle.click();
+        html = el.html;
+        if (count(html, /class="ep-bom__plant-summary ep-bom__block-start"/g) !== 0) fail('both plants should remain expanded');
+        if (count(html, /class="ep-bom__section/g) !== 2) fail('same-named sections from two plants must stay separate');
+        if (count(html, /rowspan="2"/g) !== 4) fail('each plant and section cell should span only its own rows');
+        if (count(html, /Solar PV Modules<\/td>/g) !== 2) fail('both plants should show their BOM lines');
+        abhToggle.click();
+        html = el.html;
+        if (count(html, /class="ep-bom__plant-summary ep-bom__block-start"/g) !== 1) fail('collapsing one plant should leave the other open');
+        if (count(html, /Solar PV Modules<\/td>/g) !== 1) fail('collapsing first plant hid or kept the wrong rows');
       })().catch(e => { console.error(e.message); process.exit(1); });
     """
     run = subprocess.run(["node", "-e", script], cwd=ROOT, capture_output=True, text=True, timeout=30)

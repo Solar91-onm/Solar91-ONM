@@ -14,11 +14,13 @@
  * the order the API returns them (section order, BOQ line order, item name).
  *
  * The Section cell is MERGED: consecutive rows of one section share a single cell with a rowspan,
- * so the heading is read once against the whole block. The spans are recomputed from the rows on
- * every render, so filtering, searching and paging never leave a stale span behind.
+ * so the heading is read once against the whole block. In portfolio mode plant groups start
+ * collapsed; expanding a plant shows its item rows and renders its Plant cell once with a rowspan.
+ * Both spans are recomputed from the rows on every render.
  *
  *   Views -> Details -> BOM    every plant's lines (search, plant, SPV, maker, supplier and section
- *                              filters), a leading Plant column; plants never merge into each other
+ *                              filters), grouped by an expandable Plant cell; plant cells span only
+ *                              that plant's visible item rows
  *   Plant -> Details -> BOM    that plant's lines only, plus "Reorder sections" for editors
  *
  * Same look as the Details and Movable Assets tables (ep-pt__ classes). Data comes from GET /api/bom,
@@ -58,6 +60,7 @@
   var ui = Object.assign({}, BLANK_UI);
   var st = { items: [], total: 0, makers: [], suppliers: [], sections: [], plants: [], loading: false, error: "", more: false };
   var token = 0, searchTimer = null, busy = false;
+  var expandedPlants = Object.create(null);
 
   function api() { return global.Solar91PortalAPI; }
   function canEdit() { return !!(api() && api().can("plants.manage")); }
@@ -220,6 +223,20 @@
     return byRow;
   }
 
+  function plantBlocks(items) {
+    var groups = [], byRow = [], last = null;
+    items.forEach(function (item, index) {
+      var siteCode = String(item.siteCode || "");
+      if (last && last.siteCode === siteCode) last.span += 1;
+      else {
+        last = { siteCode: siteCode, start: index, span: 1 };
+        groups.push(last);
+      }
+      byRow[index] = last;
+    });
+    return { groups: groups, byRow: byRow };
+  }
+
   // The merged Section cell: written once per block, never on the rows it spans.
   function sectionCell(block) {
     return '<td class="ep-bom__section' + (block.alt ? " is-alt" : "") + '"' +
@@ -227,16 +244,37 @@
       (block.label ? fmt.escape(block.label) : '<span class="ep-pt__dash">—</span>') + "</td>";
   }
 
-  function plantCell(item) {
-    return '<td><span class="ep-pt__code">' + fmt.escape(item.siteCode) +
-      '</span><span class="ep-pt__name">' + fmt.escape(plantName(item.siteCode)) + "</span></td>";
+  function plantCell(item, block, expanded) {
+    var siteCode = String(item.siteCode || "");
+    var rowSpan = expanded && block.span > 1 ? ' rowspan="' + block.span + '"' : "";
+    var action = expanded ? "Collapse" : "Expand";
+    return '<td class="ep-bom__plant"' + rowSpan + '><button type="button" class="ep-bom__plant-toggle" ' +
+      'data-bom-plant-toggle="' + fmt.escape(siteCode) + '" aria-expanded="' + String(expanded) +
+      '" aria-label="' + action + ' BOM items for ' + fmt.escape(siteCode) + '">' +
+      '<span class="ep-bom__plant-label"><span class="ep-pt__code">' + fmt.escape(siteCode) +
+      '</span><span class="ep-pt__name">' + fmt.escape(plantName(siteCode)) + "</span></span>" +
+      '<svg class="ep-bom__plant-chevron' + (expanded ? " is-expanded" : "") +
+      '" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" ' +
+      'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg>' +
+      "</button></td>";
   }
 
-  function rowHTML(item, editor, index, byRow) {
-    var block = byRow[index], starts = !!block && block.start === index;
+  function plantGroupRow(block, colCount) {
+    var item = st.items[block.start];
+    var lineLabel = block.span === 1 ? "loaded BOM line" : "loaded BOM lines";
+    return '<tr class="ep-bom__plant-summary ep-bom__block-start">' +
+      plantCell(item, block, false) +
+      '<td class="ep-bom__plant-summary-cell" colspan="' + (colCount - 1) + '">' +
+      block.span + " " + lineLabel + ' · Click the plant code to view items</td></tr>';
+  }
+
+  function rowHTML(item, editor, index, sectionsByRow, plantsByRow) {
+    var sectionBlock = sectionsByRow[index], starts = !!sectionBlock && sectionBlock.start === index;
+    var plantBlock = plantsByRow && plantsByRow[index];
+    var startsPlant = !!plantBlock && plantBlock.start === index;
     return '<tr' + (starts ? ' class="ep-bom__block-start"' : "") + ">" +
-      (single() ? "" : plantCell(item)) +
-      (starts ? sectionCell(block) : "") +
+      (single() || !startsPlant ? "" : plantCell(item, plantBlock, true)) +
+      (starts ? sectionCell(sectionBlock) : "") +
       '<td class="ep-bom__item">' + fmt.escape(item.itemName) + "</td>" +
       cell(item.specs, "ep-bom__specs") +
       cell(item.maker) + cell(item.supplier) +
@@ -271,8 +309,21 @@
     else {
       // Spans are derived from the rows being rendered now, so a filter or a new page never
       // leaves a merged cell reaching over rows that are no longer there.
-      var byRow = sectionBlocks(st.items);
-      body = st.items.map(function (i, index) { return rowHTML(i, editor, index, byRow); }).join("");
+      var sectionsByRow = sectionBlocks(st.items);
+      if (single()) {
+        body = st.items.map(function (item, index) {
+          return rowHTML(item, editor, index, sectionsByRow, null);
+        }).join("");
+      } else {
+        var plantsByRow = plantBlocks(st.items).byRow;
+        body = st.items.map(function (item, index) {
+          var block = plantsByRow[index];
+          if (expandedPlants[block.siteCode] !== true) {
+            return block.start === index ? plantGroupRow(block, colCount) : "";
+          }
+          return rowHTML(item, editor, index, sectionsByRow, plantsByRow);
+        }).join("");
+      }
     }
 
     var count = st.loading && !st.items.length ? "" :
@@ -659,6 +710,18 @@
     if (clear) clear.addEventListener("click", function () { ui = Object.assign({}, BLANK_UI); load(container, false); });
     var more = container.querySelector("[data-bom-more]");
     if (more) more.addEventListener("click", function () { if (!st.loading) load(container, true); });
+    container.querySelectorAll("[data-bom-plant-toggle]").forEach(function (button) {
+      button.addEventListener("click", function () {
+        var siteCode = button.getAttribute("data-bom-plant-toggle");
+        expandedPlants[siteCode] = expandedPlants[siteCode] !== true;
+        render(container, true);
+        container.querySelectorAll("[data-bom-plant-toggle]").forEach(function (nextButton) {
+          if (nextButton.getAttribute("data-bom-plant-toggle") === siteCode && nextButton.focus) {
+            nextButton.focus();
+          }
+        });
+      });
+    });
     var add = container.querySelector("[data-bom-add]");
     if (add) add.addEventListener("click", function () { openEditor(container, null, add); });
     var reorder = container.querySelector("[data-bom-reorder]");
@@ -678,6 +741,7 @@
   function show(container, opts) {
     if (!container) return;
     mode = { kind: (opts && opts.siteCode) ? "single" : "all", siteCode: opts ? opts.siteCode : null };
+    expandedPlants = Object.create(null);
     ui = Object.assign({}, BLANK_UI);
     st = { items: [], total: 0, makers: [], suppliers: [], sections: [], plants: st.plants, loading: true, error: "", more: false };
     container.innerHTML = '<div class="ep-pt__loading">Loading BOM…</div>';
