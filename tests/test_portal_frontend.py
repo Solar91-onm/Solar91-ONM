@@ -201,7 +201,7 @@ def test_inverter_issue_description_and_refresh_are_wired():
 
     assert '{ key: "issuedesc", label: "Issue description"' in inverter_health
     assert '"Issue description", typeConfig.type === "string" ? "Working %" : "Running %", "Open tickets"' in inverter_health
-    assert 'return typeConfig.type === "string" || ticket.equipment_running === false;' in inverter_health
+    assert 'return ticket.equipment_running === false;' in inverter_health
     assert 'title="${fmt.escape(full)}"' in inverter_health
     assert ">No issues</span>" in inverter_health
     assert "refreshInverterHealth()" in overview
@@ -753,10 +753,13 @@ def test_plant_links_open_the_matching_module_or_default_plant_page():
     assert "Solar91PortalNav.selectPlantPage(openBtn.getAttribute(\"data-open-plant\"), pageId)" in app
     assert "Solar91PortalNav.selectPlant(openBtn.getAttribute(\"data-open-plant\"))" in app
 
-    for module in ("plants-table.js", "liasoning.js", "site-issues.js", "bom.js", "design.js"):
+    for module in ("plants-table.js", "site-issues.js"):
         source = (PORTAL_ASSETS / "js" / module).read_text(encoding="utf-8")
         assert 'class="ep-plantlink"' in source or 'ep-plantlink ep-plantlink--name' in source, module
         assert "data-open-plant=" in source, module
+    for module in ("liasoning.js", "bom.js", "design.js"):
+        source = (PORTAL_ASSETS / "js" / module).read_text(encoding="utf-8")
+        assert "data-open-plant=" not in source, module
 
     issues = (PORTAL_ASSETS / "js" / "site-issues.js").read_text(encoding="utf-8")
     calendar = (PORTAL_ASSETS / "js" / "operations-calendar.js").read_text(encoding="utf-8")
@@ -1176,12 +1179,16 @@ def test_portfolio_info_health_uses_two_sections_and_keeps_health_deep_links():
     assert 'data-tab-view="info-health"' in page
     assert 'data-view-section="info">Info</button>' in page
     assert 'data-view-section="health">Health</button>' in page
+    assert 'aria-expanded="true" data-view-section="info"' in page
+    assert 'aria-expanded="false" data-view-section="health"' in page
+    assert 'navState.infoHealthOpen[section] = !navState.infoHealthOpen[section];' in nav
+    assert 'return ["plants-table", "site-issues"];' in nav
     assert 'data-nav="view:health"' not in page
     assert 'if (pageId === "health") {' in nav
     assert 'pageId = "details";' in nav
     assert 'detailSection = "health";' in nav
     assert 'snapshot.selectedViewPage === "health" ? "details" : snapshot.selectedViewPage' in nav
-    assert 'if (!plantCode && section === "health") return ["site-issues"];' in nav
+    assert '(section === "details" || section === "health")) {' in nav
     assert 'navState.selectedDetailSection === "health"' in nav
     assert 'document.querySelector("[data-issues-host]")' in nav
 
@@ -1325,7 +1332,11 @@ def test_plant_and_portfolio_details_sections_are_in_left_navigation():
     assert 'if (page.id === "details" && canShowPlantDetailSections())' in plant_subnav
     assert 'detailsToggleHTML("plant", siteCode)' in plant_subnav
     assert "DETAIL_SECTIONS.map(function (section)" in plant_subnav
+    assert "selectedDetailSubpage" in plant_subnav
+    assert 'if (!selectedDetailSubpage)' in plant_subnav
     assert 'navId + ":" + section.id' in plant_subnav
+    assert 'data-nav-details-row="view"' in page
+    assert 'viewDetailsRow.hidden = navState.activeView === "view-sub"' in navigation
     assert 'return !allowed || allowed.indexOf("details") !== -1;' in navigation
     assert "(parts.length === 3 || parts.length === 4)" in navigation
     assert 'section: navState.selectedDetailSection' in navigation

@@ -113,7 +113,7 @@
             </svg>
           </button>
           <div class="ep-nav-group__body">
-            <div class="ep-nav-details-row">
+            <div class="ep-nav-details-row" data-nav-details-row="view">
               <button class="ep-nav-item ep-nav-item--sub" type="button" data-nav="view:details">
                 <span class="ep-nav-item__label">Info &amp; Health</span>
               </button>
@@ -319,17 +319,17 @@
 
           <!-- ═════════════ PORTFOLIO INFO & HEALTH ═════════════ -->
           <section class="ep-tab-view" data-tab-view="info-health">
-            <div class="ep-view-section-switcher" role="tablist" aria-label="Info and Health sections" data-view-section-tabs>
-              <button type="button" role="tab" id="view-info-tab" aria-controls="view-info-panel"
-                aria-selected="true" data-view-section="info">Info</button>
-              <button type="button" role="tab" id="view-health-tab" aria-controls="view-health-panel"
-                aria-selected="false" tabindex="-1" data-view-section="health">Health</button>
+            <div class="ep-view-section-switcher" role="group" aria-label="Info and Health sections" data-view-section-tabs>
+              <button type="button" id="view-info-tab" aria-controls="view-info-panel"
+                aria-expanded="true" data-view-section="info">Info</button>
+              <button type="button" id="view-health-tab" aria-controls="view-health-panel"
+                aria-expanded="false" data-view-section="health">Health</button>
             </div>
-            <section class="ep-view-section-panel" role="tabpanel" id="view-info-panel"
+            <section class="ep-view-section-panel" role="region" id="view-info-panel"
               aria-labelledby="view-info-tab" data-view-section-panel="info">
               <div data-plants-table-host></div>
             </section>
-            <section class="ep-view-section-panel" role="tabpanel" id="view-health-panel"
+            <section class="ep-view-section-panel" role="region" id="view-health-panel"
               aria-labelledby="view-health-tab" data-view-section-panel="health" hidden>
               <div data-issues-host></div>
             </section>

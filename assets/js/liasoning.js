@@ -88,10 +88,7 @@
     var codeInner = '<span class="ep-pt__code">' + fmt.escape(p.siteCode) + '</span><span class="ep-pt__name">' +
       fmt.escape(p.displayName || p.plantName) + "</span>";
     return "<tr>" +
-      '<td class="ep-pt__codecell">' + (single()
-        ? codeInner
-        : '<button type="button" class="ep-plantlink" data-open-plant="' + fmt.escape(p.siteCode) +
-          '" title="Open ' + fmt.escape(p.displayName || p.plantName) + ' in the Plants tab">' + codeInner + "</button>") + "</td>" +
+      '<td class="ep-pt__codecell">' + codeInner + "</td>" +
       '<td class="num mono">' + (isoDate(r.loa_date) ? fmt.escape(showDate(r.loa_date)) : placeholder()) + "</td>" +
       '<td class="num mono">' + (isoDate(r.ppa_date) ? fmt.escape(showDate(r.ppa_date)) : placeholder()) + "</td>" +
       '<td class="num mono">' + (tariff === null ? placeholder() : fmt.escape(showTariff(tariff))) + "</td>" +

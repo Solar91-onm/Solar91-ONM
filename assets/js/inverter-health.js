@@ -228,11 +228,7 @@
       const plantCounts = new Map();
       (panelState.summary && panelState.summary.plants || []).forEach((row) => {
         if (!row.site_code || codes.has(row.site_code)) {
-          plantCounts.set(row.site_code, typeConfig.type === "string"
-            ? Object.assign({}, row, {
-              units: row.open_ticket_units == null ? row.units : row.open_ticket_units
-            })
-            : row);
+          plantCounts.set(row.site_code, row);
         }
       });
       const ticketCounts = new Map();
@@ -263,7 +259,7 @@
     }
 
     function isDownTicket(ticket) {
-      return typeConfig.type === "string" || ticket.equipment_running === false;
+      return ticket.equipment_running === false;
     }
 
     function loadHealth() {

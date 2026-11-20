@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.core.database import get_db, release_connection
-from app.core.models import Issue, IssueHistory, OMTask, Plant, SitePhoto, User, UserPlantAssignment
+from app.core.models import Issue, IssueHistory, OMTask, Plant, PMUnitConfig, SitePhoto, User, UserPlantAssignment, WashingConfig, WashingTable
 from app.core.security import ensure_plant_scope, has_portfolio_scope, get_current_user, is_head, require_csrf, require_permission, text_is_current_user, user_scoped_plant_ids
 from app.issues import importer as issue_importer
 from app.issues.deadlines import deadline_settings, save_deadline_hours
@@ -117,9 +117,8 @@ def equipment_summary(db:Annotated[Session,Depends(get_db)],user:Annotated[User,
     list for that was ~126 KB on every sign-in.
 
     ``open`` counts EVERY open ticket in the category. ``units`` counts only the units of tickets whose equipment is
-    recorded as NOT running (``equipment_running IS FALSE``). ``open_ticket_units`` counts the reported units on all
-    open tickets, defaulting to one when the ticket has no unit count. The String Health view uses that count because
-    a reported String issue means that string is not working; the Inverter view continues to use ``units``.
+    recorded as NOT running (``equipment_running IS FALSE``). A Running or unanswered issue remains an open ticket,
+    but does not reduce running/working units for either Inverters or Strings.
 
     Scope is the caller's: a role without portfolio scope sees only its assigned plants, and a plant with no open
     ticket in this category is simply absent.
@@ -135,18 +134,44 @@ def equipment_summary(db:Annotated[Session,Depends(get_db)],user:Annotated[User,
     if not has_portfolio_scope(user):
         plant_scope=user_scoped_plant_ids(db,user)
         if not plant_scope:
-            return {"vertical":vertical,"plants":[],"open":0,"units":0,
-                    "open_ticket_units":0,"plants_affected":0}
+            return {"vertical":vertical,"plants":[],"open":0,"units":0,"plants_affected":0}
         stmt=stmt.where(Issue.plant_id.in_(plant_scope))
-    open_ticket_units=func.sum(func.coalesce(Issue.unit_count,1))
-    stmt=stmt.add_columns(open_ticket_units)
-    rows=[{"site_code":code,"open":int(count or 0),"units":int(unit_total or 0),
-           "open_ticket_units":int(ticket_units or 0)}
-          for code,count,unit_total,ticket_units in db.execute(stmt).all()]
+    rows=[{"site_code":code,"open":int(count or 0),"units":int(unit_total or 0)}
+          for code,count,unit_total in db.execute(stmt).all()]
     return {"vertical":vertical,"plants":sorted(rows,key=lambda row:row["site_code"]),
             "open":sum(row["open"] for row in rows),"units":sum(row["units"] for row in rows),
-            "open_ticket_units":sum(row["open_ticket_units"] for row in rows),
             "plants_affected":len(rows)}
+
+@router.get("/equipment-units")
+def issue_equipment_units(
+    plant_id: UUID,
+    vertical: str,
+    db: Annotated[Session, Depends(get_db)],
+    user: Annotated[User, Depends(require_permission("issues.create"))],
+):
+    """Return only the selected plant's unit count for the issue Breakdown picker."""
+    equipment_type = vertical.strip().casefold()
+    if equipment_type not in {"inverter", "string"}:
+        raise HTTPException(422, "Choose Inverter or String")
+    plant = db.get(Plant, plant_id)
+    if plant is None:
+        raise HTTPException(404, "Plant not found")
+    ensure_plant_scope(db, user, plant_id)
+    total = db.scalar(select(PMUnitConfig.total_units).where(
+        PMUnitConfig.plant_id == plant_id,
+        func.lower(PMUnitConfig.equipment_type) == equipment_type,
+    ))
+    inferred = False
+    if total is None and equipment_type == "string":
+        washing = db.get(WashingConfig, plant_id)
+        total = washing.tables_per_cycle if washing and washing.tables_per_cycle else db.scalar(
+            select(func.count(WashingTable.id)).where(WashingTable.plant_id == plant_id)
+        )
+        inferred = bool(total)
+    return {
+        "total_units": int(total or 0),
+        "inferred_from_module_cleaning": inferred,
+    }
 
 @router.get("",response_model=list[IssueOut])
 def list_issues(db:Annotated[Session,Depends(get_db)],user:Annotated[User,Depends(get_current_user)],plant_id:UUID|None=None,status:str|None=None,severity:str|None=None,assignee:str|None=None,vertical:str|None=None,site_code:str|None=None,project_number:str|None=None,occurred_from:datetime|None=None,occurred_to:datetime|None=None,q:str|None=None,offset:int=0,limit:int=Query(50,le=200)):

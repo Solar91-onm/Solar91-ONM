@@ -134,7 +134,7 @@ class Issue(Base):
     unit_count: Mapped[int | None] = mapped_column(Integer)
     # Was the equipment still running when the ticket was raised? (migration 045)
     #   False -> breakdown: its `unit_count` units are down, and ONLY these tickets count
-    #            towards the Inverter Health "not running" figure.
+    #            towards the Inverter and String Health "not running" figures.
     #   True  -> a fault on equipment that is still running; it contributes zero units down.
     #   None  -> not asked (every ticket raised before the question existed). Also zero.
     equipment_running: Mapped[bool | None] = mapped_column(Boolean)

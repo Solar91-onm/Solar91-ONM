@@ -37,38 +37,96 @@
     });
     return categoriesPromise;
   }
-  // "inverter" check used in wizard step 2 (matches overview.js's own isInverter()).
-  function isDraftInverter(equipment) {
+  function isStringEquipment(equipment) {
+    var lower = String(equipment || "").trim().toLowerCase();
+    return lower === "string";
+  }
+
+  function hasEquipmentRunningStatus(equipment) {
     var lower = String(equipment || "").trim().toLowerCase();
     return lower === "inverter" || lower === "string";
   }
 
-  // Per-session cache of unit config keyed by site code, loaded lazily in the wizard.
+  // Per-session caches of unit counts keyed by site code, loaded lazily in the wizard.
   var unitConfigCache = {};
   var stringUnitConfigCache = {};
-  var unitConfigLoading = null;
+  var unitConfigLoading = {};
 
-  function loadUnitConfigFor(siteCode) {
-    if (unitConfigCache[siteCode] !== undefined) return Promise.resolve(unitConfigCache[siteCode]);
-    if (!unitConfigLoading) {
-      unitConfigLoading = global.Solar91PortalAPI.request("/api/pm-plan/unit-config")
-      .then(function (body) {
-        var configs = (body && body.configs) || [];
-        state.plants.forEach(function (plant) { unitConfigCache[plant.siteCode] = 0; });
-        configs.forEach(function (config) {
-          var eqType = String(config.equipment_type || "").trim().toLowerCase();
-          if (eqType === "inverter") {
-            unitConfigCache[config.site_code] = Number(config.total_units) || 0;
-          } else if (eqType === "string") {
-            stringUnitConfigCache[config.site_code] = Number(config.total_units) || 0;
-          }
-        });
+  function unitCacheFor(equipment) {
+    return isStringEquipment(equipment) ? stringUnitConfigCache : unitConfigCache;
+  }
+
+  function unitConfigKey(siteCode, equipment) {
+    return String(siteCode || "") + "|" + (isStringEquipment(equipment) ? "string" : "inverter");
+  }
+
+  function unitConfigIsLoading(siteCode, equipment) {
+    return !!unitConfigLoading[unitConfigKey(siteCode, equipment)];
+  }
+
+  function loadUnitConfigFor(siteCode, equipment) {
+    var cache = unitCacheFor(equipment);
+    if (cache[siteCode] !== undefined) return Promise.resolve(cache[siteCode]);
+    var key = unitConfigKey(siteCode, equipment);
+    if (!unitConfigLoading[key]) {
+      var plant = state.plants.find(function (item) { return item.siteCode === siteCode; });
+      if (!plant || !plant.dbId) return Promise.reject(new Error("The selected plant is not available in your authorized plant list."));
+      var url = "/api/issues/equipment-units?plant_id=" + encodeURIComponent(plant.dbId) +
+        "&vertical=" + encodeURIComponent(isStringEquipment(equipment) ? "String" : "Inverter");
+      unitConfigLoading[key] = global.Solar91PortalAPI.request(url).then(function (body) {
+        var totalUnits = Number(body && body.total_units);
+        if (!Number.isInteger(totalUnits) || totalUnits < 0) {
+          throw new Error("The equipment unit count response was invalid.");
+        }
+        cache[siteCode] = totalUnits;
+        return totalUnits;
       }).catch(function (error) {
-        unitConfigLoading = null;
+        delete unitConfigLoading[key];
         throw error;
       });
     }
-    return unitConfigLoading.then(function () { return unitConfigCache[siteCode] || 0; });
+    return unitConfigLoading[key];
+  }
+
+  function requestUnitConfigForDraft(siteCode, equipment) {
+    state.unitConfigError = "";
+    return loadUnitConfigFor(siteCode, equipment).then(function () {
+      if (!state.draft || state.modalMode !== "create" ||
+          state.draft.plantCode !== siteCode || state.draft.equipment !== equipment) return;
+      state.unitConfigError = "";
+      renderView();
+    }).catch(function (error) {
+      if (!state.draft || state.modalMode !== "create" ||
+          state.draft.plantCode !== siteCode || state.draft.equipment !== equipment) return;
+      state.unitConfigError = (error && error.message) || "Please retry.";
+      renderView();
+    });
+  }
+
+  function configuredUnitCount(siteCode, equipment) {
+    var count = unitCacheFor(equipment)[siteCode];
+    return count === undefined ? 0 : count;
+  }
+
+  function issueEquipmentDetails(draft) {
+    var tracked = hasEquipmentRunningStatus(draft.equipment);
+    var isBreakdown = tracked && draft.equipmentRunning === false;
+    var configuredUnits = configuredUnitCount(draft.plantCode, draft.equipment);
+    var units = parseInt(draft.unitCount, 10);
+    var serial = (draft.serialNo || "").trim() || null;
+    var unitCount = isNaN(units) ? null : units;
+    if (isBreakdown && configuredUnits > 0) {
+      var prefix = isStringEquipment(draft.equipment) ? "String " : "Unit ";
+      serial = (draft.selectedUnits || []).map(function (number) { return prefix + number; }).join(", ") || null;
+      unitCount = (draft.selectedUnits || []).length;
+    } else if (isBreakdown) {
+      unitCount = 1;
+    }
+    return {
+      serial_no: serial,
+      unit_count: unitCount,
+      equipment_running: tracked && draft.equipmentRunning !== null ? draft.equipmentRunning : undefined
+    };
   }
 
   var pendingEquipment = null;
@@ -915,16 +973,15 @@
   }
 
   function renderInverterRunningBlock(draft) {
-    // Shown for Inverter and String categories (any equipment type handled by isDraftInverter).
-    if (!isDraftInverter(draft.equipment)) return "";
+    if (!hasEquipmentRunningStatus(draft.equipment)) return "";
     var equipLabel = String(draft.equipment || "Inverter").trim();
-    var isStringEquip = equipLabel.toLowerCase() === "string";
+    var unitLabel = isStringEquipment(draft.equipment) ? "String" : "Unit";
+    var unitPlural = isStringEquipment(draft.equipment) ? "strings" : "inverters";
     var isRunning = draft.equipmentRunning === true;
     var isBreakdown = draft.equipmentRunning === false;
-    // Unit select for Breakdown: pick the right cache for this equipment type.
-    var cache = isStringEquip ? stringUnitConfigCache : unitConfigCache;
-    var totalUnits = cache[draft.plantCode] || 0;
-    var configPending = cache[draft.plantCode] === undefined && !!unitConfigLoading;
+    var totalUnits = configuredUnitCount(draft.plantCode, draft.equipment);
+    var configPending = unitCacheFor(draft.equipment)[draft.plantCode] === undefined &&
+      unitConfigIsLoading(draft.plantCode, draft.equipment);
     var unitSelectHtml = "";
     if (isBreakdown) {
       if (state.unitConfigError) {
@@ -938,23 +995,22 @@
         var options = "";
         for (var i = 1; i <= totalUnits; i++) {
           var sel = draft.selectedUnits.indexOf(i) !== -1 ? " selected" : "";
-          options += '<option value="' + i + '"' + sel + '>Unit ' + i + '</option>';
+          options += '<option value="' + i + '"' + sel + '>' + unitLabel + ' ' + i + '</option>';
         }
         unitSelectHtml =
           '<label class="ep-issues__wizard-field ep-issues__wizard-field--required">' +
-          'Which unit(s) are down? (select one or more)' +
+          'Which ' + unitPlural + ' are down? (select one or more)' +
           '<select name="breakdownUnits" multiple required size="' + Math.min(totalUnits, 6) + '">' +
           options + '</select>' +
-          '<small>Hold Ctrl / ⌘ to select multiple. ' + totalUnits + ' units configured for this plant.</small>' +
+          '<small>Hold Ctrl / ⌘ to select multiple. ' + totalUnits + ' ' + unitPlural + ' available for this plant.</small>' +
           '<small class="ep-issues__inline-error" data-breakdown-unit-error role="alert" hidden></small></label>';
       } else {
-        // No unit config — require free-text serial number.
         unitSelectHtml =
           '<label class="ep-issues__wizard-field ep-issues__wizard-field--required">' +
-          'Serial number of broken unit (required for Breakdown)' +
+          'Serial number of broken ' + equipLabel.toLowerCase() + ' (required for Breakdown)' +
           '<input name="serialNo" type="text" maxlength="120" required value="' + escape(draft.serialNo || "") +
-          '" placeholder="e.g. INV-2023-004517" />' +
-          '<small>No unit count is configured for this plant; enter the serial number instead.</small>' +
+          '" placeholder="Enter the affected equipment serial number" />' +
+          '<small>No unit count is available for this plant; enter the serial number instead.</small>' +
           '<small class="ep-issues__inline-error" data-breakdown-serial-error role="alert" hidden></small></label>';
       }
     }
@@ -970,9 +1026,9 @@
   }
 
   function renderWizardStepTwo(draft) {
-    var isInverter = isDraftInverter(draft.equipment);
-    var isBreakdown = isInverter && draft.equipmentRunning === false;
-    // For non-inverter categories the serial/unitCount fields remain optional as before.
+    var hasRunningStatus = hasEquipmentRunningStatus(draft.equipment);
+    var isBreakdown = hasRunningStatus && draft.equipmentRunning === false;
+    // For other categories the serial/unitCount fields remain optional as before.
     // For Breakdown with unit config, serial is hidden (units are chosen via multi-select).
     // For Breakdown without unit config, serial is rendered inside renderInverterRunningBlock.
     var showLegacySerial = !isBreakdown;
@@ -1515,6 +1571,19 @@
         }
         return;
       }
+      if (event.target.name === "plantCode" && state.modalMode === "create" && state.draft) {
+        var plantWizard = host.querySelector("[data-issue-wizard]");
+        if (plantWizard) syncWizardDraft(plantWizard);
+        state.draft.selectedUnits = [];
+        state.draft.serialNo = "";
+        state.draft.unitCount = "";
+        state.unitConfigError = "";
+        if (hasEquipmentRunningStatus(state.draft.equipment) && state.draft.plantCode) {
+          requestUnitConfigForDraft(state.draft.plantCode, state.draft.equipment);
+        }
+        renderView();
+        return;
+      }
       if (event.target.name === "equipment" && state.modalMode === "create" && state.draft) {
         var currentWizard = host.querySelector("[data-issue-wizard]");
         if (currentWizard) syncWizardDraft(currentWizard);
@@ -1522,16 +1591,11 @@
         state.draft.subpart = "";
         state.draft.equipmentRunning = null;
         state.draft.selectedUnits = [];
+        state.draft.serialNo = "";
+        state.draft.unitCount = "";
         state.unitConfigError = "";
-        // Pre-load unit config for this plant if the category is now Inverter.
-        if (isDraftInverter(state.draft.equipment) && state.draft.plantCode) {
-          loadUnitConfigFor(state.draft.plantCode).then(function () {
-            state.unitConfigError = "";
-            renderView();
-          }).catch(function (error) {
-            state.unitConfigError = (error && error.message) || "Please retry.";
-            renderView();
-          });
+        if (hasEquipmentRunningStatus(state.draft.equipment) && state.draft.plantCode) {
+          requestUnitConfigForDraft(state.draft.plantCode, state.draft.equipment);
         }
         renderView();
         return;
@@ -1595,7 +1659,8 @@
         if (direction === "back") {
           state.wizardStep = Math.max(1, state.wizardStep - 1);
         } else if (direction === "next") {
-          if (state.wizardStep === 2 && isDraftInverter(state.draft.equipment)) {
+          if (state.wizardStep === 2 && hasEquipmentRunningStatus(state.draft.equipment)) {
+            var equipmentLabel = isStringEquipment(state.draft.equipment) ? "string" : "inverter";
             var runningError = host.querySelector("[data-breakdown-running-error]");
             var unitError = host.querySelector("[data-breakdown-unit-error]");
             var serialError = host.querySelector("[data-breakdown-serial-error]");
@@ -1604,23 +1669,34 @@
             if (serialError) serialError.hidden = true;
             if (state.draft.equipmentRunning === null) {
               if (runningError) {
-                runningError.textContent = "Choose Running or Breakdown.";
+                runningError.textContent = "Choose whether the " + equipmentLabel + " is Running or in Breakdown.";
                 runningError.hidden = false;
               }
               return;
             }
             if (state.draft.equipmentRunning === false) {
-              var configuredUnits = unitConfigCache[state.draft.plantCode] || 0;
-              if (configuredUnits && !state.draft.selectedUnits.length) {
+              var cache = unitCacheFor(state.draft.equipment);
+              var configuredUnits = cache[state.draft.plantCode];
+              if (configuredUnits === undefined) {
+                var configError = host.querySelector("[data-wizard-step2-error]") || host.querySelector("[data-wizard-error]");
+                if (configError) {
+                  configError.textContent = state.unitConfigError
+                    ? "Retry loading this plant's " + equipmentLabel + " unit count."
+                    : "Wait for this plant's " + equipmentLabel + " unit count to finish loading.";
+                  configError.hidden = false;
+                }
+                return;
+              }
+              if (configuredUnits > 0 && !state.draft.selectedUnits.length) {
                 if (unitError) {
-                  unitError.textContent = "Select at least one inverter unit.";
+                  unitError.textContent = "Select at least one " + equipmentLabel + ".";
                   unitError.hidden = false;
                 }
                 return;
               }
-              if (!configuredUnits && !(state.draft.serialNo || "").trim()) {
+              if (configuredUnits === 0 && !(state.draft.serialNo || "").trim()) {
                 if (serialError) {
-                  serialError.textContent = "Enter the serial number of the broken inverter.";
+                  serialError.textContent = "Enter the serial number of the broken " + equipmentLabel + ".";
                   serialError.hidden = false;
                 }
                 return;
@@ -1648,35 +1724,6 @@
               equipmentError.hidden = false;
             }
             return;
-          }
-          if (state.wizardStep === 2 && isDraftInverter(state.draft.equipment)) {
-            // "Is the inverter running?" is required for Inverter tickets.
-            var step2Err = host.querySelector("[data-wizard-step2-error]") || host.querySelector("[data-wizard-error]");
-            if (state.draft.equipmentRunning === null) {
-              if (step2Err) { step2Err.textContent = "Select whether the inverter is Running or Breakdown."; step2Err.hidden = false; }
-              return;
-            }
-            if (state.draft.equipmentRunning === false) {
-              // Breakdown: need units chosen (or serial if no config).
-              var totalUnitsForPlant = unitConfigCache[state.draft.plantCode] || 0;
-              if (unitConfigCache[state.draft.plantCode] === undefined) {
-                if (step2Err) {
-                  step2Err.textContent = state.unitConfigError
-                    ? "Retry loading this plant's inverter unit configuration."
-                    : "Wait for this plant's inverter unit configuration to finish loading.";
-                  step2Err.hidden = false;
-                }
-                return;
-              }
-              if (totalUnitsForPlant > 0 && state.draft.selectedUnits.length === 0) {
-                if (step2Err) { step2Err.textContent = "Select the unit(s) that are down."; step2Err.hidden = false; }
-                return;
-              }
-              if (totalUnitsForPlant === 0 && !(state.draft.serialNo || "").trim()) {
-                if (step2Err) { step2Err.textContent = "Enter the serial number of the broken unit."; step2Err.hidden = false; }
-                return;
-              }
-            }
           }
           state.wizardStep = Math.min(3, state.wizardStep + 1);
         }
@@ -1774,14 +1821,8 @@
       }
       if (action === "retry-unit-config") {
         if (state.modalMode !== "create" || !state.draft) return;
-        state.unitConfigError = "";
+        requestUnitConfigForDraft(state.draft.plantCode, state.draft.equipment);
         renderView();
-        loadUnitConfigFor(state.draft.plantCode).then(function () {
-          renderView();
-        }).catch(function (error) {
-          state.unitConfigError = (error && error.message) || "Please retry.";
-          renderView();
-        });
         return;
       }
       if (action === "more") {
@@ -1880,7 +1921,7 @@
       if (form.hasAttribute("data-issue-wizard")) {
         syncWizardDraft(form);
         if (state.wizardStep !== 3) return;
-        var breakdown = isDraftInverter(state.draft.equipment) && state.draft.equipmentRunning === false;
+        var breakdown = hasEquipmentRunningStatus(state.draft.equipment) && state.draft.equipmentRunning === false;
         if (breakdown && !state.draft.problem.trim()) {
           var remarkError = form.querySelector("[data-breakdown-remark-error]");
           if (remarkError) {
@@ -2411,30 +2452,15 @@
     state.submitting = true;
     state.submitError = "";
     renderView();
-    var units = parseInt(draft.unitCount, 10);
-    // Equipment running/breakdown mapping (Inverter and String):
-    // equipment_running=false (Breakdown) → serial_no = chosen unit labels, unit_count = number of down units.
-    // equipment_running=true (Running) → no extra fields (serial_no/unit_count from form as-is).
-    // equipment_running=null (other category) → unchanged legacy behaviour.
-    var isBreakdown = isDraftInverter(draft.equipment) && draft.equipmentRunning === false;
-    var totalUnitsForPlant = unitConfigCache[draft.plantCode] || 0;
-    var serialForPayload = (draft.serialNo || "").trim() || null;
-    var unitCountForPayload = isNaN(units) ? null : units;
-    if (isBreakdown) {
-      if (totalUnitsForPlant > 0 && draft.selectedUnits.length > 0) {
-        serialForPayload = draft.selectedUnits.map(function (n) { return "Unit " + n; }).join(", ");
-        unitCountForPayload = draft.selectedUnits.length;
-      } else if (totalUnitsForPlant === 0) {
-        unitCountForPayload = 1;
-      }
-    }
+    var equipmentDetails = issueEquipmentDetails(draft);
+    var isBreakdown = hasEquipmentRunningStatus(draft.equipment) && draft.equipmentRunning === false;
     var payload = {
       plant_id: plant.dbId,
       vertical: draft.equipment,
       subcategory: draft.subpart || null,
-      serial_no: serialForPayload,
+      serial_no: equipmentDetails.serial_no,
       supplier_maker: (draft.supplierMaker || "").trim() || null,
-      unit_count: unitCountForPayload,
+      unit_count: equipmentDetails.unit_count,
       description: draft.problem.trim(),
       // Tickets raised here all carry the same priority, so the form no longer asks for one.
       // Medium is what the deadline defaults and notifications are keyed to.
@@ -2443,9 +2469,7 @@
       occurred_at: toUtcTimestamp(draft.occurredAt, "09:00"),
       etc_at: draft.dueAt ? toUtcTimestamp(draft.dueAt) : null,
       photo_count: 0,
-      // equipment_running: null = not an equipment-breakdown ticket (not sent), true = running, false = breakdown.
-      equipment_running: isDraftInverter(draft.equipment) && draft.equipmentRunning !== null
-        ? draft.equipmentRunning : undefined
+      equipment_running: equipmentDetails.equipment_running
     };
 
     api.request("/api/issues", { method: "POST", body: payload }).then(function (issue) {

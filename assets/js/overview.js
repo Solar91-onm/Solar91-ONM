@@ -347,7 +347,7 @@
     (issueRows || []).forEach((row) => {
       if (row.site_code && !codes.has(row.site_code)) return;
       tickets += Number(row.open) || 0;
-      down += Number(row.open_ticket_units == null ? row.units : row.open_ticket_units) || 0;
+      down += Number(row.units) || 0;
       affected += 1;
     });
     if (total) down = Math.min(down, total);

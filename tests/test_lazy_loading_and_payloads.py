@@ -272,10 +272,10 @@ def test_equipment_summary_counts_open_tickets_per_plant(db, client):
     db.commit()
 
     body = client.get("/api/issues/equipment-summary?vertical=Inverter").json()
-    assert body["plants"] == [{"site_code": "EQ01", "open": 4, "units": 3, "open_ticket_units": 12},
-                              {"site_code": "EQ02", "open": 1, "units": 3, "open_ticket_units": 3}]
+    assert body["plants"] == [{"site_code": "EQ01", "open": 4, "units": 3},
+                              {"site_code": "EQ02", "open": 1, "units": 3}]
     assert body["open"] == 5 and body["units"] == 6
-    assert body["open_ticket_units"] == 15 and body["plants_affected"] == 2
+    assert body["plants_affected"] == 2
 
     # Without a category it counts every open ticket.
     everything = client.get("/api/issues/equipment-summary").json()
@@ -350,8 +350,6 @@ def test_equipment_summary_filters_by_string_vertical(db, client):
     row = plants["STR01"]
     # Only the ticket with equipment_running=False counts as a unit down.
     assert row["units"] == 2
-    # String Health marks every string on an open issue as not working.
-    assert row["open_ticket_units"] == 3
     # Both open String tickets count as open.
     assert row["open"] == 2
     # The Inverter ticket must NOT appear in the String summary.
@@ -380,7 +378,6 @@ def test_string_units_down_rule_matches_equipment_running_false_only(db, client)
     row = {r["site_code"]: r for r in response.json()["plants"]}.get("STR02")
     assert row is not None
     assert row["units"] == 3   # only the equipment_running=False ticket
-    assert row["open_ticket_units"] == 12  # all strings on any open issue
     assert row["open"] == 3    # all three tickets are open
 
 
@@ -390,18 +387,18 @@ def test_string_tile_reads_counts_in_overview_js():
     assert '"/api/issues/equipment-summary?vertical=String"' in overview
     assert "/api/issues?vertical=String&limit=200" not in overview
     assert "strings.issues = (body && body.plants) || [];" in overview
-    assert "row.open_ticket_units == null ? row.units : row.open_ticket_units" in overview
+    assert "down += Number(row.units) || 0;" in overview
     assert '"strings working out of total"' in overview
     assert '"strings not working"' in overview
     assert 'label: "Not working"' in overview
 
 
-def test_string_health_treats_any_open_string_ticket_as_not_working():
+def test_string_health_counts_only_breakdowns_as_not_working():
     overview = (PORTAL_ASSETS / "js" / "overview.js").read_text(encoding="utf-8")
     health = (PORTAL_ASSETS / "js" / "inverter-health.js").read_text(encoding="utf-8")
     assert 'label: typeConfig.type === "string" ? "Working" : "Running"' in health
-    assert 'units: row.open_ticket_units == null ? row.units : row.open_ticket_units' in health
-    assert 'return typeConfig.type === "string" || ticket.equipment_running === false;' in health
+    assert "plantCounts.set(row.site_code, row);" in health
+    assert "return ticket.equipment_running === false;" in health
     assert 'typeConfig.type === "string" ? "Not working" : "Not running"' in health
     assert 'typeConfig.type === "string" ? "s working" : "s running"' in health
 
@@ -415,11 +412,91 @@ def test_string_health_treats_any_open_string_ticket_as_not_working():
       const result = calculate(new Set(["STR01"]), [
         {{site_code: "STR01", equipment_type: "String", total_units: 7}}
       ], [
-        {{site_code: "STR01", open: 6, units: 0, open_ticket_units: 7}}
+        {{site_code: "STR01", open: 6, units: 2}}
       ]);
-      if (result.down !== 7 || result.running !== 0 || result.runningPercent !== 0) {{
+      if (result.down !== 2 || result.running !== 5 || result.runningPercent !== 71) {{
         throw new Error(JSON.stringify(result));
       }}
+    """
+    result = subprocess.run(["node", "-e", script], cwd=ROOT, capture_output=True, text=True, timeout=30)
+    assert result.returncode == 0, result.stderr or result.stdout
+
+
+def test_string_breakdown_picker_saves_string_ids_and_count():
+    script = f"""
+      const fs = require("fs");
+      const vm = require("vm");
+      const source = fs.readFileSync("assets/js/site-issues.js", "utf8").replace(/\\r\\n/g, "\\n");
+      const exported = [
+        "  global.Solar91PortalIssues = {{",
+        "    render: render,",
+        "    presetEquipment: presetEquipment,",
+        "    openTicket: openTicket",
+        "  }};"
+      ].join("\\n");
+      if (!source.includes(exported)) throw new Error("Issue module export changed.");
+      const testExport = [
+        "  global.__issueTest = {{",
+        "    loadUnitConfigFor: loadUnitConfigFor,",
+        "    issueEquipmentDetails: issueEquipmentDetails,",
+        "    renderInverterRunningBlock: renderInverterRunningBlock,",
+        "    state: state,",
+        "    inverterCache: unitConfigCache,",
+        "    stringCache: stringUnitConfigCache",
+        "  }};"
+      ].join("\\n");
+      const testSource = source.replace(exported, testExport);
+      const calls = [];
+      const context = {{
+        Solar91PortalData: {{}},
+        Solar91PortalFormat: {{escape: (value) => String(value == null ? "" : value)}},
+        Solar91PortalAPI: {{
+          request: (url) => {{
+            calls.push(url);
+            return Promise.resolve({{total_units: url.includes("vertical=String") ? 6 : 3}});
+          }}
+        }}
+      }};
+      context.window = context;
+      vm.runInNewContext(testSource, context);
+      (async () => {{
+        const api = context.__issueTest;
+        api.state.plants = [{{siteCode: "STR01", dbId: "plant-uuid"}}];
+        await api.loadUnitConfigFor("STR01", "String");
+        await api.loadUnitConfigFor("STR01", "Inverter");
+        const breakdown = api.issueEquipmentDetails({{
+          equipment: "String", plantCode: "STR01", equipmentRunning: false,
+          selectedUnits: [2, 6], serialNo: "", unitCount: ""
+        }});
+        if (breakdown.serial_no !== "String 2, String 6" ||
+            breakdown.unit_count !== 2 || breakdown.equipment_running !== false) {{
+          throw new Error(JSON.stringify(breakdown));
+        }}
+        if (api.stringCache.STR01 !== 6 || api.inverterCache.STR01 !== 3) {{
+          throw new Error("Equipment counts were stored in the wrong cache.");
+        }}
+        const picker = api.renderInverterRunningBlock({{
+          equipment: "String", plantCode: "STR01", equipmentRunning: false,
+          selectedUnits: [2], serialNo: ""
+        }});
+        if (!picker.includes("Which strings are down") ||
+            !picker.includes('value="2" selected>String 2')) {{
+          throw new Error(picker);
+        }}
+        const running = api.issueEquipmentDetails({{
+          equipment: "String", plantCode: "STR01", equipmentRunning: true,
+          selectedUnits: [], serialNo: "", unitCount: "4"
+        }});
+        if (running.equipment_running !== true || running.unit_count !== 4) {{
+          throw new Error(JSON.stringify(running));
+        }}
+        if (!calls.some((url) => url.includes("vertical=String"))) {{
+          throw new Error("String count endpoint was not requested.");
+        }}
+      }})().catch((error) => {{
+        console.error(error);
+        process.exitCode = 1;
+      }});
     """
     result = subprocess.run(["node", "-e", script], cwd=ROOT, capture_output=True, text=True, timeout=30)
     assert result.returncode == 0, result.stderr or result.stdout

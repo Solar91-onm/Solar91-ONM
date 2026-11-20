@@ -14,7 +14,7 @@ Administration, Site Engineers, Assignees and Viewers **cannot** list, delete, r
 
 **Before deploying the new application**, review and back up the database, then apply the approved `database/migrations/025_issue_safe_deletion.sql` and `database/migrations/045_issue_equipment_running.sql` using a controlled Supabase migration process. Do not use `python scripts/migrate.py` as a bulk production runner; it does not track applied migrations and includes historical data-changing SQL.
 
-Migration 025 adds nullable `issues.deleted_at`, `issues.deleted_by`, and `issues.deletion_reason` columns and two indexes. Migration 045 adds nullable `issues.equipment_running`; only an explicit `false` on an open Inverter issue contributes its `unit_count` to the units-down figure. Existing rows remain `NULL`, and the column does not change whether a ticket is open. No ticket data is removed or renumbered. Existing issue_history and audit_logs remain unchanged.
+Migration 025 adds nullable `issues.deleted_at`, `issues.deleted_by`, and `issues.deletion_reason` columns and two indexes. Migration 045 adds nullable `issues.equipment_running`; only an explicit `false` on an open Inverter or String issue contributes its `unit_count` to the units-down figure. Existing rows remain `NULL`, and the column does not change whether a ticket is open. No ticket data is removed or renumbered. Existing issue_history and audit_logs remain unchanged.
 
 Take a Supabase backup before applying migrations. Use staging before production. The original O&M workflows, PM group-by-equipment quantities, Washing, Command Centre drill-downs, reports, and read-only Ask Solar91 search are preserved in this release.
 

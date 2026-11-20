@@ -116,7 +116,7 @@ class IssueService:
     DUPLICATE_WINDOW_SECONDS = 120
 
     def _recent_duplicate(self, user: User, payload: dict) -> Issue | None:
-        """The creator's newest ticket if it is identical and was raised moments ago (double submit)."""
+        """The creator's newest ticket if its submitted issue details match a recent retry."""
         latest = self.db.scalar(
             select(Issue).where(Issue.created_by == user.id, Issue.deleted_at.is_(None))
             .order_by(Issue.created_at.desc()).limit(1)
@@ -128,16 +128,23 @@ class IssueService:
             return None
         def norm(value):
             return " ".join(str(value or "").split()).casefold()
-        same = (
-            latest.plant_id == payload.get("plant_id")
-            and norm(latest.vertical) == norm(payload.get("vertical"))
-            and norm(latest.description) == norm(payload.get("description"))
-        )
+        def norm_datetime(value):
+            if value is None:
+                return None
+            value = value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
+            return value.isoformat()
+        same = latest.plant_id == payload.get("plant_id")
+        for field in ("vertical", "subcategory", "description", "serial_no", "supplier_maker"):
+            same = same and norm(getattr(latest, field)) == norm(payload.get(field))
+        for field in ("unit_count", "equipment_running", "severity", "impact", "assigned_to"):
+            same = same and getattr(latest, field) == payload.get(field)
+        same = same and norm_datetime(latest.occurred_at) == norm_datetime(payload.get("occurred_at"))
         return latest if same else None
 
     def create(self,data:IssueCreate,user:User):
         payload = data.model_dump()
         assigned_to = payload.pop("assigned_to", None)
+        assignee_id = assigned_to
         ticket_no = (payload.pop("ticket_no", None) or "").strip()
         auto_number = not ticket_no
         plant_id = payload.get("plant_id")
@@ -155,7 +162,7 @@ class IssueService:
                 _lock_issue_ticket_numbers(self.db)
                 # Checked under the ticket-number lock so simultaneous submissions of the same form cannot each
                 # pass the check before either ticket is saved.
-                duplicate = self._recent_duplicate(user, payload)
+                duplicate = self._recent_duplicate(user, {**payload, "assigned_to": assignee_id})
                 if duplicate is not None:
                     # A repeated click or resubmission of the same form returns the ticket that was already saved.
                     self.db.rollback()

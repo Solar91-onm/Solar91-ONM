@@ -49,6 +49,37 @@ def test_identical_resubmission_returns_the_same_ticket(client, db):
     assert len(db.scalars(select(Issue)).all()) == 1
 
 
+def test_distinct_string_running_and_breakdown_issues_get_separate_tickets(client, db):
+    login_user(client, db, email="string-duplicate@example.com")
+    plant = _plant(db)
+    base = {
+        "plant_id": str(plant.id),
+        "vertical": "String",
+        "description": "Intermittent string current fault",
+        "severity": "Medium",
+        "unit_count": 1,
+    }
+    running = client.post("/api/issues", json={**base, "equipment_running": True})
+    breakdown_two = client.post("/api/issues", json={
+        **base, "equipment_running": False, "serial_no": "String 2",
+    })
+    breakdown_three = client.post("/api/issues", json={
+        **base, "equipment_running": False, "serial_no": "String 3",
+    })
+
+    assert running.status_code == 201, running.text
+    assert breakdown_two.status_code == 201, breakdown_two.text
+    assert breakdown_three.status_code == 201, breakdown_three.text
+    ticket_numbers = {
+        running.json()["ticket_no"],
+        breakdown_two.json()["ticket_no"],
+        breakdown_three.json()["ticket_no"],
+    }
+    assert len(ticket_numbers) == 3
+    assert db.scalar(select(Issue).where(Issue.description == base["description"]).limit(2)) is not None
+    assert len(db.scalars(select(Issue).where(Issue.description == base["description"])).all()) == 3
+
+
 
 
 

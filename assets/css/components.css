@@ -1070,6 +1070,7 @@
 .ep-nav-detail-sub { padding: 0 0 2px; display: none; }
 .ep-nav-detail-sub.is-open { display: block; }
 .ep-nav-details-row { display: flex; align-items: center; }
+.ep-nav-details-row[hidden] { display: none !important; }
 .ep-nav-details-row > .ep-nav-item { flex: 1 1 auto; min-width: 0; width: auto; margin-right: 0; }
 /* Dropdown arrow: a small soft pill so it reads as clickable without shouting. */
 .ep-nav-chevron {
@@ -1613,20 +1614,20 @@
   border-bottom: 1px solid var(--ep-border);
 }
 .ep-view-section-switcher button {
-  padding: 12px 16px;
+  padding: 12px 16px 10px;
   border: 0;
   border-bottom: 2px solid transparent;
   background: transparent;
-  color: var(--ep-text-muted);
+  color: var(--ep-text-strong);
   font: inherit;
-  font-size: var(--ep-fs-lg);
-  font-weight: 600;
+  font-size: 18px;
+  font-weight: 700;
   cursor: pointer;
 }
-.ep-view-section-switcher button[aria-selected="true"] {
+.ep-view-section-switcher button[aria-expanded="true"] {
   border-bottom-color: var(--ep-accent);
-  color: var(--ep-text-strong);
-  font-weight: 700;
+  color: var(--ep-accent-strong);
+  font-weight: 800;
 }
 .ep-view-section-switcher button:focus-visible {
   outline: 2px solid var(--ep-accent);

@@ -90,6 +90,7 @@
     selectedSubPage: null,       // e.g. "details", "health"
     selectedViewPage: null,      // e.g. "details", "health"
     selectedDetailSection: "details",
+    infoHealthOpen: { info: true, health: false },
     selectedRange: null,         // { startDate, endDate } when opened from Overview
     pmParent: "overview",
     pmCalendarOpen: false,
@@ -110,6 +111,10 @@
       selectedSubPage: navState.selectedSubPage,
       selectedViewPage: navState.selectedViewPage,
       selectedDetailSection: navState.selectedDetailSection,
+      infoHealthOpen: {
+        info: navState.infoHealthOpen.info,
+        health: navState.infoHealthOpen.health
+      },
       selectedRange: navState.selectedRange ? {
         startDate: navState.selectedRange.startDate,
         endDate: navState.selectedRange.endDate
@@ -150,6 +155,7 @@
         selectedSubPage: null,
         selectedViewPage: null,
         selectedDetailSection: "details",
+        infoHealthOpen: { info: true, health: false },
         selectedRange: null,
         pmParent: "overview",
         pmCalendarOpen: false,
@@ -168,6 +174,14 @@
         selectedViewPage: viewPage,
         selectedDetailSection: snapshot.selectedViewPage === "health"
           ? "health" : viewPage === "details" ? details : "details",
+        infoHealthOpen: snapshot.infoHealthOpen &&
+          typeof snapshot.infoHealthOpen.info === "boolean" &&
+          typeof snapshot.infoHealthOpen.health === "boolean"
+          ? {
+            info: snapshot.infoHealthOpen.info,
+            health: snapshot.infoHealthOpen.health
+          }
+          : details === "health" ? { info: false, health: true } : { info: true, health: false },
         selectedRange: snapshot.selectedRange &&
           typeof snapshot.selectedRange.startDate === "string" &&
           typeof snapshot.selectedRange.endDate === "string"
@@ -191,6 +205,7 @@
         selectedSubPage: plantSubPage,
         selectedViewPage: null,
         selectedDetailSection: plantSubPage === "details" ? details : "details",
+        infoHealthOpen: { info: true, health: false },
         selectedRange: snapshot.selectedRange &&
           typeof snapshot.selectedRange.startDate === "string" &&
           typeof snapshot.selectedRange.endDate === "string"
@@ -214,6 +229,7 @@
     navState.selectedSubPage = snapshot.selectedSubPage;
     navState.selectedViewPage = snapshot.selectedViewPage;
     navState.selectedDetailSection = snapshot.selectedDetailSection;
+    navState.infoHealthOpen = snapshot.infoHealthOpen || { info: true, health: false };
     navState.selectedRange = snapshot.selectedRange;
     navState.pmParent = snapshot.pmParent || "overview";
     navState.pmCalendarOpen = snapshot.pmCalendarOpen === true;
@@ -368,6 +384,10 @@
   }
 
   function renderPlantSubNav(siteCode) {
+    var selectedDetailSubpage = navState.activeView === "plant-sub" &&
+      navState.selectedPlant === siteCode &&
+      navState.selectedSubPage === "details" &&
+      DETAIL_SECTIONS.some(function (section) { return section.id === navState.selectedDetailSection; });
     return '<div class="ep-nav-plant__sub">' +
       plantPages().map(function (page) {
         var navId = "plant:" + siteCode + ":" + page.id;
@@ -379,8 +399,13 @@
           '<span class="ep-nav-item__label">' + page.label + '</span>' +
         '</button>';
         if (page.id === "details" && canShowPlantDetailSections()) {
-          item = '<div class="ep-nav-details-row">' + item + detailsToggleHTML("plant", siteCode) + '</div>';
-          item += '<div class="ep-nav-detail-sub' + (isDetailsOpen('plant', siteCode) ? ' is-open' : '') + '">' + DETAIL_SECTIONS.map(function (section) {
+          if (!selectedDetailSubpage) {
+            item = '<div class="ep-nav-details-row">' + item + detailsToggleHTML("plant", siteCode) + '</div>';
+          } else {
+            item = "";
+          }
+          item += '<div class="ep-nav-detail-sub' +
+            (isDetailsOpen('plant', siteCode) || selectedDetailSubpage ? ' is-open' : '') + '">' + DETAIL_SECTIONS.map(function (section) {
             var sectionActive = navState.activeView === "plant-sub" &&
               navState.selectedPlant === siteCode &&
               navState.selectedSubPage === "details" &&
@@ -438,6 +463,13 @@
     navState.selectedDetailSection = pageId === "details" &&
       (detailSection === "health" || DETAIL_SECTIONS.some(function (item) { return item.id === detailSection; }))
       ? detailSection : "details";
+    navState.infoHealthOpen = pageId === "details"
+      ? detailSection === "health"
+        ? { info: false, health: true }
+        : DETAIL_SECTIONS.some(function (item) { return item.id === detailSection; })
+          ? { info: false, health: false }
+          : { info: true, health: false }
+      : { info: true, health: false };
     navState.selectedPlant = null;
     navState.selectedSubPage = null;
     navState.selectedRange = dateRange || null;
@@ -449,6 +481,22 @@
     writeNavigationHistory(false);
     renderPlantList(document.querySelector("[data-plant-search]")?.value || "");
     updateContentArea();
+    updateHighlights();
+  }
+
+  function toggleViewInfoHealthSection(section) {
+    if (navState.activeView !== "view-sub" || navState.selectedViewPage !== "details" ||
+        (section !== "info" && section !== "health")) return;
+    navState.infoHealthOpen[section] = !navState.infoHealthOpen[section];
+    navState.selectedDetailSection = navState.infoHealthOpen.health && !navState.infoHealthOpen.info
+      ? "health" : "details";
+
+    var button = document.querySelector('[data-view-section="' + section + '"]');
+    var panel = document.querySelector('[data-view-section-panel="' + section + '"]');
+    if (button) button.setAttribute("aria-expanded", String(navState.infoHealthOpen[section]));
+    if (panel) panel.hidden = !navState.infoHealthOpen[section];
+    writeNavigationHistory(false);
+    try { sessionStorage.setItem("solar91Portal.navState", JSON.stringify(navState)); } catch (_) {}
     updateHighlights();
   }
 
@@ -546,7 +594,10 @@
     if (pageId === "movable-assets") return ["movable-assets"];
     if (pageId === "details") {
       var section = navState.selectedDetailSection;
-      if (!plantCode && section === "health") return ["site-issues"];
+      if (!plantCode && navState.activeView === "view-sub" &&
+          (section === "details" || section === "health")) {
+        return ["plants-table", "site-issues"];
+      }
       // The Details page hands Design/MDL, Liasoning and BOM to their own modules.
       if (section === "design-mdl") return ["plants-table", "design"];
       if (section === "liasoning") return ["plants-table", "liasoning"];
@@ -692,14 +743,15 @@
       document.dispatchEvent(new CustomEvent("portal:route-changed"));
     }
 
-    function showViewInfoHealthSection(showTabs, isHealth) {
-      if (viewSectionTabs) viewSectionTabs.hidden = !showTabs;
-      if (viewInfoPanel) viewInfoPanel.hidden = !!isHealth;
-      if (viewHealthPanel) viewHealthPanel.hidden = !isHealth;
+    function showViewInfoHealthSection(showSections) {
+      if (viewSectionTabs) viewSectionTabs.hidden = !showSections;
+      var infoOpen = showSections ? navState.infoHealthOpen.info : true;
+      var healthOpen = showSections && navState.infoHealthOpen.health;
+      if (viewInfoPanel) viewInfoPanel.hidden = !infoOpen;
+      if (viewHealthPanel) viewHealthPanel.hidden = !healthOpen;
       document.querySelectorAll("[data-view-section]").forEach(function (button) {
-        var selected = button.getAttribute("data-view-section") === (isHealth ? "health" : "info");
-        button.setAttribute("aria-selected", String(selected));
-        button.tabIndex = selected ? 0 : -1;
+        var section = button.getAttribute("data-view-section");
+        button.setAttribute("aria-expanded", String(section === "health" ? healthOpen : infoOpen));
       });
     }
 
@@ -831,16 +883,24 @@
       var viewSectionPicker = !plantCode && navState.activeView === "view-sub" &&
         (navState.selectedDetailSection === "details" || viewHealth);
       showOnly(plantCode ? detailsEl : infoHealthEl);
-      showViewInfoHealthSection(viewSectionPicker, viewHealth);
-      if (viewHealth && global.Solar91PortalIssues) {
-        global.Solar91PortalIssues.render(
-          document.querySelector("[data-issues-host]"),
-          {
-            plantCode: null,
-            startDate: navState.selectedRange && navState.selectedRange.startDate,
-            endDate: navState.selectedRange && navState.selectedRange.endDate
-          }
-        );
+      showViewInfoHealthSection(viewSectionPicker);
+      if (viewSectionPicker) {
+        if (global.Solar91PortalPlantsTable) {
+          global.Solar91PortalPlantsTable.show(
+            document.querySelector("[data-plants-table-host]"),
+            { section: "details" }
+          );
+        }
+        if (global.Solar91PortalIssues) {
+          global.Solar91PortalIssues.render(
+            document.querySelector("[data-issues-host]"),
+            {
+              plantCode: null,
+              startDate: navState.selectedRange && navState.selectedRange.startDate,
+              endDate: navState.selectedRange && navState.selectedRange.endDate
+            }
+          );
+        }
       } else if (!viewHealth && global.Solar91PortalPlantsTable) {
         global.Solar91PortalPlantsTable.show(
           document.querySelector(plantCode ? "[data-plant-details-host]" : "[data-plants-table-host]"),
@@ -867,7 +927,8 @@
       }
     } else if (pageId === "health" && global.Solar91PortalIssues) {
       showOnly(infoHealthEl);
-      showViewInfoHealthSection(true, true);
+      navState.infoHealthOpen = { info: false, health: true };
+      showViewInfoHealthSection(true);
       global.Solar91PortalIssues.render(
         document.querySelector("[data-issues-host]"),
         {
@@ -890,7 +951,8 @@
       showOnly(plantCode ? detailsEl : infoHealthEl);
     } else if (pageId === "health") {
       showOnly(infoHealthEl);
-      showViewInfoHealthSection(true, true);
+      navState.infoHealthOpen = { info: false, health: true };
+      showViewInfoHealthSection(true);
     } else if (pageId === "movable-assets") {
       showOnly(movableAssetsEl);
     } else {
@@ -940,6 +1002,13 @@
       // plant sub-items are handled in renderPlantSubNav
       btn.classList.toggle("is-active", isActive);
     });
+
+    var viewDetailsRow = document.querySelector('[data-nav-details-row="view"]');
+    if (viewDetailsRow) {
+      viewDetailsRow.hidden = navState.activeView === "view-sub" &&
+        navState.selectedViewPage === "details" &&
+        DETAIL_SECTIONS.some(function (section) { return section.id === navState.selectedDetailSection; });
+    }
 
     // Plants group header highlight when a plant sub-page is active
     var plantsToggle = document.querySelector('[data-nav-group="plants"] .ep-nav-group__toggle');
@@ -1029,7 +1098,7 @@
     document.querySelectorAll("[data-view-section]").forEach(function (button) {
       button.addEventListener("click", function () {
         if (navState.activeView !== "view-sub" || navState.selectedViewPage !== "details") return;
-        selectView("details", navState.selectedRange, button.getAttribute("data-view-section"));
+        toggleViewInfoHealthSection(button.getAttribute("data-view-section"));
       });
     });
 

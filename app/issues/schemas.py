@@ -36,7 +36,7 @@ class IssueCreate(BaseModel):
     supplier_maker: str | None = Field(default=None, max_length=160)
     unit_count: int | None = Field(default=None, ge=1, le=100000)
     # Was the equipment still running? False = breakdown, True = running, None = not asked.
-    # Only False counts towards the Inverter Health "not running" figure.
+    # Only False counts towards the Inverter and String Health "not running" figures.
     equipment_running: bool | None = None
     description: str = Field(min_length=1)
     severity: str = "Medium"
@@ -53,9 +53,10 @@ class IssueCreate(BaseModel):
 
     @model_validator(mode="after")
     def require_breakdown_details(self) -> "IssueCreate":
-        if (self.vertical or "").strip().casefold() == "inverter" and self.equipment_running is False:
+        equipment = (self.vertical or "").strip().casefold()
+        if equipment in {"inverter", "string"} and self.equipment_running is False:
             if not (self.serial_no or "").strip():
-                raise ValueError("Choose or enter at least one inverter for a Breakdown")
+                raise ValueError(f"Choose or enter at least one {equipment} for a Breakdown")
             if not self.description.strip():
                 raise ValueError("Add a remark for the Breakdown")
         return self
