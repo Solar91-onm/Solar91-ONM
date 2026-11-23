@@ -875,3 +875,21 @@
   .ep-pm__tracker-foot { flex-direction: column; align-items: stretch; }
   .ep-pm__tracker-foot-right { margin-left: 0; }
 }
+
+/* A way out when the filters have narrowed the register to nothing. */
+.ep-pm__clear-filters {
+  align-self: flex-end;
+  border: 1px solid var(--ep-border-strong);
+  border-radius: 999px;
+  background: var(--ep-bg);
+  color: var(--ep-text);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 6px 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.ep-pm__clear-filters:hover { border-color: var(--ep-accent); color: var(--ep-accent-strong); }
+.ep-pm__empty .ep-pm__clear-filters,
+.ep-pm__empty-cell .ep-pm__clear-filters { align-self: auto; margin-left: 6px; }

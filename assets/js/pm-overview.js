@@ -68,6 +68,67 @@
     };
   }
 
+  /** Months the picker allows: up to a year ahead, because a cycle plan takes effect from the NEXT
+   *  cycle and the O&M Head needs to look at the month it will first run in. */
+  function monthMax() {
+    var today = businessToday();
+    var year = Number(today.slice(0, 4));
+    var mon = Number(today.slice(5, 7)) + 12;
+    year += Math.floor((mon - 1) / 12);
+    mon = ((mon - 1) % 12) + 1;
+    return year + "-" + (mon < 10 ? "0" + mon : String(mon));
+  }
+
+  /** True when the selected month has not started yet: nothing is measurable in it. */
+  function futureMonth(month) {
+    return monthBounds(month || state.month).start > businessToday();
+  }
+
+  /** True when the From/To filters are narrower than the whole selected month. */
+  function narrowedDates() {
+    var bounds = monthBounds(state.month);
+    return !!((state.filters.dateFrom && state.filters.dateFrom > bounds.start) ||
+              (state.filters.dateTo && state.filters.dateTo < bounds.end));
+  }
+
+  /**
+   * Rows for a month that has not started yet.
+   *
+   * Compliance is measured against work that was due, so a future month has nothing to measure and
+   * the portfolio API refuses a future range outright ("End date cannot be in the future"). The
+   * register is still "PM status by plant", so every plant in scope is listed with its planned or
+   * paused state and whatever is already scheduled; the figures read "—" rather than 0%.
+   */
+  function plannedRows() {
+    var list = state.cyclePlans;
+    if (!list || !list.plans) return [];
+    return list.plans.map(function (p) {
+      return {
+        plant: { siteCode: p.site_code, plantName: p.plant, displayName: p.plant, status: "active" },
+        profile: { pm: { compliancePercent: null, completed: null, pending: null, overdue: null } }
+      };
+    });
+  }
+
+  /** True when something is narrowing the plant register, so a way out can be offered. */
+  function filtersNarrowing() {
+    return !!(state.filters.query.trim() || state.filters.plant || state.filters.equipment ||
+              (state.filters.status && state.filters.status !== "all") ||
+              state.pausedOnly || narrowedDates());
+  }
+
+  /** Put every filter back to "everything in this month", the state the page opens in. */
+  function clearFilters() {
+    var bounds = monthBounds(state.month);
+    state.filters.query = "";
+    state.filters.plant = "";
+    state.filters.equipment = "";
+    state.filters.status = "all";
+    state.filters.dateFrom = bounds.start;
+    state.filters.dateTo = bounds.end;
+    state.pausedOnly = false;
+  }
+
   function periodRange(month) {
     var bounds = monthBounds(month);
     var today = businessToday();
@@ -254,7 +315,11 @@
       }
       if (state.filters.status !== "all" &&
           statusFor(row, entriesForPlant(plant.siteCode)) !== state.filters.status) return false;
-      if ((state.filters.dateFrom || state.filters.dateTo) && !entries.length) return false;
+      // "PM status by plant": a plant with no work orders in the period is still a plant. The date
+      // filters are pre-filled with the whole month, so dropping those plants hid the ENTIRE
+      // portfolio in any month where PM had not been generated yet. Only an explicit narrowing
+      // inside the month filters plants out.
+      if (narrowedDates() && !entries.length) return false;
       if (query) {
         var text = [
           plantName(plant), plant.siteCode, plant.location,
@@ -471,7 +536,8 @@
           '</td><td>' + (next ? escape(dateLabel(next.date)) : "—") + '</td><td>' +
           '<button type="button" class="ep-pm__table-open" data-pm-open-plant="' +
           escape(plant.siteCode) + '">Open</button></td></tr>';
-      }).join("") : '<tr><td colspan="7" class="ep-pm__empty-cell">No plants match these filters.</td></tr>') +
+      }).join("") : '<tr><td colspan="7" class="ep-pm__empty-cell">No plants match these filters. ' +
+        '<button type="button" class="ep-pm__clear-filters" data-pm-clear-filters>Clear filters</button></td></tr>') +
       '</tbody></table></div>';
   }
 
@@ -488,11 +554,17 @@
         '<h1>Preventive Maintenance</h1><p>Role-scoped PM work orders and compliance for active plants.</p>' +
         plannedLine() + '</div>' +
         '<div class="ep-pm__header-actions"><label>Month<input type="month" data-pm-month value="' +
-          escape(state.month) + '" max="' + today.slice(0, 7) + '" /></label>' +
+          escape(state.month) + '" max="' + monthMax() + '" /></label>' +
           '<button type="button" class="ep-pm__calendar-button" data-pm-calendar>Open PM calendar</button></div></header>' +
       (state.truncated
         ? '<p class="ep-pm__notice" role="status">The server returned the first ' + number(state.limit) +
           ' records for this month. Open a plant to view its own records.</p>' : "") +
+      (futureMonth()
+        ? '<p class="ep-pm__notice" role="status">' + escape(monthLabel(state.month)) +
+          ' has not started yet, so there is nothing due to measure: compliance and completion read ' +
+          '— until the month begins. Plants below show their cycle plan state and whatever PM is ' +
+          'already scheduled.</p>'
+        : "") +
       (state.error ? retryMessage(state.error, "all") : "") +
       (state.calendarError ? retryMessage(state.calendarError, "calendar") : "") +
       (state.loading
@@ -534,6 +606,10 @@
               '<label class="ep-pm__date-filter"><span>To</span><input type="date" data-pm-filter="dateTo" ' +
                 'min="' + period.start + '" max="' + period.end + '" value="' +
                 escape(state.filters.dateTo) + '" /></label>' +
+              (filtersNarrowing()
+                ? '<button type="button" class="ep-pm__clear-filters" data-pm-clear-filters>' +
+                  'Clear filters</button>'
+                : "") +
               '<div class="ep-pm__layout-toggle" role="group" aria-label="Plant layout">' +
                 '<button type="button" data-pm-layout="cards" aria-pressed="' +
                   (state.layout === "cards") + '">Cards</button>' +
@@ -544,7 +620,11 @@
               (rows.length
                 ? (state.layout === "table" ? plantTable(rows) :
                   '<div class="ep-pm__plants-grid">' + rows.map(plantCard).join("") + '</div>')
-                : '<p class="ep-pm__empty">No active plants match these filters.</p>') +
+                : '<p class="ep-pm__empty">' +
+                  (filtersNarrowing()
+                    ? 'No active plants match these filters. ' +
+                      '<button type="button" class="ep-pm__clear-filters" data-pm-clear-filters>Clear filters</button>'
+                    : 'No active plants to show for this month.') + '</p>') +
             '</div></section>') +
       '<p class="ep-pm__footnote">Compliance and due counts use the portal’s existing PM rules. Cancelled work is excluded.</p>' +
     '</div>';
@@ -692,12 +772,18 @@
         (plant.location ? " · " + escape(plant.location) : "") + ' · ' + escape(monthLabel(state.month)) +
         '</p></div><div class="ep-pm__header-actions">' + statusBadge(status) +
           '<label>Month<input type="month" data-pm-month value="' + escape(state.month) +
-            '" max="' + businessToday().slice(0, 7) + '" /></label>' +
+            '" max="' + monthMax() + '" /></label>' +
           '<button type="button" class="ep-pm__calendar-button" data-pm-calendar>Open PM calendar</button>' +
         '</div></header>' +
       (state.truncated
         ? '<p class="ep-pm__notice" role="status">The server returned the first ' + number(state.limit) +
           ' records for this month. Change the month to narrow the results.</p>' : "") +
+      (futureMonth()
+        ? '<p class="ep-pm__notice" role="status">' + escape(monthLabel(state.month)) +
+          ' has not started yet, so there is nothing due to measure: compliance and completion read ' +
+          '— until the month begins. Plants below show their cycle plan state and whatever PM is ' +
+          'already scheduled.</p>'
+        : "") +
       (state.error ? retryMessage(state.error, "all") : "") +
       (state.calendarError ? retryMessage(state.calendarError, "calendar") : "") +
       (state.loading
@@ -808,14 +894,14 @@
       render();
       return;
     }
-    var currentMonth = businessToday().slice(0, 7);
-    if (!/^\d{4}-\d{2}$/.test(state.month) || state.month > currentMonth) {
-      state.error = "Choose a valid month up to the current month.";
+    if (!/^\d{4}-\d{2}$/.test(state.month) || state.month > monthMax()) {
+      state.error = "Choose a month up to " + monthLabel(monthMax()) + ".";
       state.loading = false;
       state.calendarLoading = false;
       render();
       return;
     }
+    var ahead = futureMonth(state.month);
     var period = periodRange(state.month);
     var requestId = ++state.requestId;
     state.loading = true;
@@ -828,21 +914,29 @@
     state.limit = null;
     render();
 
-    withTimeout(Promise.resolve().then(function () {
-      return data.fetchPortfolioRange(period.start, period.end, state.siteCode || "");
-    }), "PM summary").then(function (result) {
-      if (requestId !== state.requestId) return;
-      state.rows = result.rows || [];
+    if (ahead) {
+      // A month that has not started has nothing due, so there is no compliance range to ask for.
+      // The plants come from the cycle-plan listing below and the figures stay "—".
       state.loading = false;
       state.error = "";
-      render();
-    }).catch(function (error) {
-      if (requestId !== state.requestId) return;
-      state.loading = false;
-      state.error = error && error.message
-        ? error.message : "PM summary could not be loaded.";
-      render();
-    });
+      state.rows = plannedRows();
+    } else {
+      withTimeout(Promise.resolve().then(function () {
+        return data.fetchPortfolioRange(period.start, period.end, state.siteCode || "");
+      }), "PM summary").then(function (result) {
+        if (requestId !== state.requestId) return;
+        state.rows = result.rows || [];
+        state.loading = false;
+        state.error = "";
+        render();
+      }).catch(function (error) {
+        if (requestId !== state.requestId) return;
+        state.loading = false;
+        state.error = error && error.message
+          ? error.message : "PM summary could not be loaded.";
+        render();
+      });
+    }
 
     // Which plants have a tracker and which are paused. One small request per visit; a role without
     // PM planning access simply gets no planned/paused line and no paused tags.
@@ -850,6 +944,7 @@
       global.Solar91PortalAPI.request("/api/pm-plan/cycle-plans").then(function (body) {
         if (requestId !== state.requestId) return;
         state.cyclePlans = body;
+        if (ahead) state.rows = plannedRows();
         render();
       }).catch(function () {
         if (requestId !== state.requestId) return;
@@ -951,6 +1046,11 @@
         } else {
           global.Solar91PortalNav.selectPlantPage(state.siteCode, "details");
         }
+        return;
+      }
+      if (event.target.closest("[data-pm-clear-filters]")) {
+        clearFilters();
+        render();
         return;
       }
       // The paused count filters the register in place; it never opens a separate page.

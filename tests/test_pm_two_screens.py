@@ -236,3 +236,139 @@ def test_the_modules_json_still_lists_the_tracker_as_a_lazy_module():
 
     assert modules.get("pm-cycle-plans") == "/assets/js/pm-cycle-plans.js"
     assert (ROOT / "assets" / "js" / "pm-cycle-plans.js").exists()
+
+
+# ── looking at a month that has not started, and listing every plant ─────────
+#
+# Reported from the live portal: the PM page showed "13 of 42 plants planned" above a register that
+# said "No active plants match these filters", and December — the month the loaded plans first run
+# in — could not be selected at all.
+
+
+def test_the_register_keeps_a_plant_that_has_no_work_orders():
+    """The register is "PM status by plant", not "plants with work orders".
+
+    The From/To filters are pre-filled with the whole month, so the old `(dateFrom || dateTo) &&
+    !entries.length` test fired for every plant in a month where PM had not been generated yet and
+    emptied the entire portfolio.
+    """
+    overview = _text(OVERVIEW)
+
+    assert "function narrowedDates()" in overview
+    assert "if (narrowedDates() && !entries.length) return false;" in overview
+    assert "(state.filters.dateFrom || state.filters.dateTo) && !entries.length" not in overview
+
+    narrowed = overview[overview.index("function narrowedDates()"):]
+    narrowed = narrowed[:narrowed.index("\n  }")]
+    assert "state.filters.dateFrom > bounds.start" in narrowed
+    assert "state.filters.dateTo < bounds.end" in narrowed
+
+
+def test_a_month_that_has_not_started_can_be_selected():
+    """A plan takes effect from the NEXT cycle, so the month it will first run in must be reachable."""
+    overview = _text(OVERVIEW)
+
+    assert "function monthMax()" in overview
+    assert 'max="\' + monthMax() + \'"' in overview
+    assert "businessToday().slice(0, 7) + '\" /></label>'" not in overview, "the cap on the current month is gone"
+    assert "Choose a month up to" in overview
+
+
+def test_a_future_month_is_not_asked_of_the_compliance_range():
+    """`/api/portal/overview/range` refuses a future end date, so the page must not ask."""
+    overview = _text(OVERVIEW)
+
+    assert "function futureMonth(month)" in overview
+    assert "if (ahead) {" in overview
+    ahead = overview[overview.index("if (ahead) {"):]
+    ahead = ahead[:ahead.index("} else {")]
+    assert "state.rows = plannedRows();" in ahead
+    assert "fetchPortfolioRange" not in ahead, "no range request for a month with nothing due"
+
+
+def test_a_future_month_still_lists_every_plant_with_its_plan_state():
+    overview = _text(OVERVIEW)
+
+    assert "function plannedRows()" in overview
+    planned = overview[overview.index("function plannedRows()"):]
+    planned = planned[:planned.index("\n  function periodRange")]
+    assert "state.cyclePlans" in planned, "the plants come from the cycle-plan listing"
+    assert "compliancePercent: null" in planned, "nothing is measurable yet, so it reads as unknown"
+    assert "site_code" in planned and "p.plant" in planned
+
+
+def test_a_future_month_says_why_the_figures_are_blank():
+    overview = _text(OVERVIEW)
+
+    assert "has not started yet, so there is nothing due to measure" in overview
+    # Both screens say it: the portfolio and a plant's own page.
+    assert overview.count("has not started yet, so there is nothing due to measure") == 2
+
+
+def test_the_backend_rule_this_works_around_is_still_in_place():
+    """The page avoids the request rather than loosening the API's own guard."""
+    router = (ROOT / "app" / "portal" / "router.py").read_text(encoding="utf-8")
+
+    assert "End date cannot be in the future." in router
+
+
+# ── a way out of the filters ────────────────────────────────────────────────
+#
+# The Plant filter already opens on "All active plants"; what was missing was any way back once a
+# filter had been chosen. Combined with the register bug above, that left a page reading
+# "13 of 42 plants planned" over "No active plants match these filters" and no control to undo it.
+
+
+def test_the_plant_filter_opens_on_all_plants():
+    overview = _text(OVERVIEW)
+    options = overview[overview.index("function plantOptions(rows, selected)"):]
+    options = options[:options.index("\n  }")]
+
+    assert '<option value="">All active plants</option>' in options
+    assert "row.plant.siteCode === selected" in options, "a chosen plant stays chosen"
+
+
+def test_a_clear_control_appears_only_while_something_is_narrowing():
+    overview = _text(OVERVIEW)
+
+    assert "function filtersNarrowing()" in overview
+    narrowing = overview[overview.index("function filtersNarrowing()"):]
+    narrowing = narrowing[:narrowing.index("\n  }")]
+    for condition in ("state.filters.query.trim()", "state.filters.plant", "state.filters.equipment",
+                     'state.filters.status !== "all"', "state.pausedOnly", "narrowedDates()"):
+        assert condition in narrowing, condition
+
+    assert "filtersNarrowing()\n                ? '<button type=\"button\" class=\"ep-pm__clear-filters\"" in overview
+
+
+def test_clearing_puts_every_filter_back_to_the_whole_month():
+    overview = _text(OVERVIEW)
+    clear = overview[overview.index("function clearFilters()"):]
+    clear = clear[:clear.index("\n  }")]
+
+    assert 'state.filters.query = "";' in clear
+    assert 'state.filters.plant = "";' in clear
+    assert 'state.filters.equipment = "";' in clear
+    assert 'state.filters.status = "all";' in clear
+    assert "state.filters.dateFrom = bounds.start;" in clear
+    assert "state.filters.dateTo = bounds.end;" in clear
+    assert "state.pausedOnly = false;" in clear, "the paused count's own filter is undone too"
+
+
+def test_both_register_layouts_offer_the_clear_control_when_empty():
+    overview = _text(OVERVIEW)
+
+    cards = overview[overview.index("No active plants match these filters."):]
+    assert "data-pm-clear-filters" in cards[:400]
+    table = overview[overview.index("No plants match these filters."):]
+    assert "data-pm-clear-filters" in table[:300]
+    # With nothing narrowing, an empty month says so plainly instead of blaming filters.
+    assert "No active plants to show for this month." in overview
+
+
+def test_the_clear_control_is_wired_before_the_other_filter_buttons():
+    overview = _text(OVERVIEW)
+    handler = overview[overview.index('if (event.target.closest("[data-pm-clear-filters]"))'):]
+    handler = handler[:handler.index("[data-pm-paused-filter]")]
+
+    assert "clearFilters();" in handler and "render();" in handler
