@@ -1686,7 +1686,10 @@ def test_pm_overview_routes_through_role_scoped_portal_data_and_existing_calenda
     assert "function withTimeout(promise, requestName)" in overview
     assert "state.calendarLoading = false;" in overview
     assert 'data.fetchCalendarMonth("pm", state.month, state.siteCode || "")' in overview
-    assert "data.aggregatePortfolio(rows).totals" in overview
+    # aggregatePortfolio returns the totals object itself (overview.js assigns it straight to
+    # state.totals), so the PM page must NOT reach for a .totals property that does not exist.
+    assert "data.aggregatePortfolio(rows)" in overview
+    assert "data.aggregatePortfolio(rows).totals" not in overview
     assert 'entry.status !== "Cancelled"' in overview
     assert 'data-pm-open-plant="' in overview
     assert 'data-pm-open-event="' in overview
@@ -2297,7 +2300,7 @@ def test_record_sheet_tracks_exactly_which_tables_were_cleaned():
     assert "data-record-list placeholder=" in calendar
     assert "From start" not in calendar and "From end" not in calendar
     assert "data-record-mode" not in calendar and "data-record-end" not in calendar
-    assert "function parseTableList(text, total)" in calendar and "function planDay(state, draft, used, total)" in calendar
+    assert "function parseTableList(text, total)" in calendar and "function planDay(state, draft, used, total, post)" in calendar
     # the exact tables are sent, shown for every saved day, and summarised for the cycle
     assert "table_numbers: row.numbers," in calendar
     assert "formatTableList(row.numbers)" in calendar

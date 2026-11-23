@@ -1,8 +1,14 @@
-"""Extra cleaning remains in the calendar, but only post-cycle-three work affects compliance.
+"""Extra cleaning stays in the calendar and NEVER affects compliance, whenever it was done.
 
-Re-cleaning during an incomplete cycle cannot stand in for work owed or raise the plant's score.
-`is_extra` (migration 048) stores the distinction; entries after all three cycles are confirmed
-still count toward the monthly score without advancing cycle progress.
+Re-cleaning cannot stand in for work owed or raise the plant's score. `is_extra` (migration 048)
+stores the distinction.
+
+Changed deliberately (O&M Head's instruction): an entry marked extra used to count towards the
+month when it fell after all three cycles were confirmed. That rule existed only because the cycle
+sheet refused ordinary readings once Cycle 3 was full, so post-cycle work had nowhere else to go.
+The sheet now keeps taking ordinary readings for the rest of the month, and those days carry the
+month's credit; "+ Extra cleaning" means re-cleaning and is a calendar record only. An entry saved
+as extra before that can be converted (PATCH `is_extra: false`).
 """
 from __future__ import annotations
 
@@ -66,7 +72,7 @@ def test_extra_cleaning_never_counts_as_cycle_progress():
     assert _cycle_ledger(fresh, TOTAL)[1]["confirmed"] == 2, "rework cannot stand in for work owed"
 
 
-def test_mid_cycle_extra_cleaning_is_calendar_only_until_all_three_cycles_are_complete():
+def test_extra_cleaning_is_a_calendar_record_only_whenever_it_happened():
     today = date(2026, 11, 28)
     one_cycle = [_R(date(2026, 11, 5), 4, 1, completed=True, numbers=range(1, 5))]
     mid = one_cycle + [_R(date(2026, 11, 8), 2, 1, extra=True, numbers=(1, 2))]
@@ -88,7 +94,7 @@ def test_mid_cycle_extra_cleaning_is_calendar_only_until_all_three_cycles_are_co
 
     before = _cycle_work_scores(all_three, TOTAL, today, None, set())["month"]["tables_done"]
     after = _cycle_work_scores(mid_and_done, TOTAL, today, None, set())["month"]["tables_done"]
-    assert after == before + 2, "only extra cleaning after Cycle 3 contributes to compliance"
+    assert after == before, "an entry marked extra never contributes to compliance, even after Cycle 3"
     summary = _month_wash_summary(mid_and_done, TOTAL)
     assert (summary["extra_tables"], summary["extra_times"]) == (4, 1.0)
     assert summary["times_washed"] == 3.0, "extra washing is reported apart from the cycles"
@@ -204,7 +210,7 @@ def test_a_site_engineers_extra_cleaning_waits_for_confirmation(client, db):
     assert row.review_status == "Confirmed" and row.is_extra is True and row.cycle_no == 1
 
 
-def test_extra_cleaning_counts_before_and_after_all_three_cycles_are_confirmed(client, db):
+def test_extra_cleaning_is_recorded_apart_from_the_cycles_and_never_scores(client, db):
     plant, _head, _assignee = _team(client, db)
     d1, d2, d3, d4 = _days(4, back=30)
     assert _sheet(client, plant, [_picked(d1, [1, 2, 3, 4])]).status_code == 200

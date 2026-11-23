@@ -141,7 +141,7 @@ def test_opening_the_day_keeps_extra_cleaning_distinct(render):
 
     assert "ep-calendar__event-card--extra" in out["cards"]
     assert "ep-calendar__extra-badge" in out["cards"]
-    assert "does not count towards this cycle" in out["cards"]
+    assert "calendar record only, never counted" in out["cards"]
     assert "During cycle 3" in out["cards"] and "· Cycle 3 ·" not in out["cards"]
 
 
@@ -171,9 +171,10 @@ def test_the_detail_panel_explains_what_extra_cleaning_is(render):
     assert "ep-calendar__event-detail-modal--extra" in detail
     assert "ep-calendar__extra-badge" in detail
     assert "ep-calendar__detail-extra-note" in detail
-    assert "does not count towards cycle progress" in detail
-    assert "does not count towards cycle progress or plant compliance" in detail
-    assert "Only extra cleaning after all three cycles are complete increases monthly compliance" in detail
+    # The rule the panel states changed with the O&M Head's instruction: extra cleaning never
+    # counts, and work after the three cycles is recorded on the sheet as an ordinary day instead.
+    assert "never " in detail and "counts towards cycle progress or plant compliance" in detail
+    assert "after all three cycles are complete belongs on the cycle sheet as an ordinary day" in detail
     assert "During cycle 3" in detail, "the Cycle field must not read as this cycle's work"
 
 

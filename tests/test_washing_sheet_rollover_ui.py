@@ -106,6 +106,8 @@ def record_rows():
               tables: row.report ? row.report.tables_cleaned : null,
               numbers: row.report ? null : row.numbers,
               nextNumbers: row.report ? null : row.nextNumbers,
+              full: row.report ? null : !!row.full,
+              afterCycles: row.report ? null : !!row.afterCycles,
               error: row.report ? "" : row.error, note: row.report ? "" : row.note
             })),
             cleanedTables: rows.cleanedTables, openTables: rows.openTables
@@ -126,7 +128,8 @@ def test_a_mid_cycle_repeat_cannot_roll_into_the_next_cycle_on_the_same_date(pla
     plan, = plan_day(_case("1-25, 26-35", cleaned=done))
 
     assert plan["error"] == (
-        "Table 26 is already cleaned in this cycle. Use + Extra cleaning to record additional cleaning."
+        "Table 26 is already cleaned in this cycle. "
+        "Use + Extra cleaning to record re-cleaning (a calendar record only)."
     )
     assert plan["numbers"] == [] and plan["nextNumbers"] == []
 
@@ -158,14 +161,18 @@ def test_mid_cycle_repeats_are_refused_and_directed_to_extra_cleaning(plan_day):
     assert not plan["note"]
 
 
-def test_the_last_cycle_calls_the_roll_over_extra_washing(plan_day):
-    """Cycle 3 has no next cycle: the same split happens, described and saved as extra cleaning."""
+def test_the_last_cycle_calls_the_roll_over_cleaning_that_counts(plan_day):
+    """Cycle 3 has no next cycle: the same split happens, and the surplus is ordinary cleaning.
+
+    Changed deliberately (O&M Head's instruction): the surplus used to be saved as marked extra,
+    which no longer counts towards the month. Cleaning done once the cycles are complete is
+    ordinary work, so the roll-over says so and is saved without the extra flag."""
     split, refused = plan_day(
         _case("1-25, 26-35", cleaned=range(26, 36), cycle=3),
         _case("1-20, 26-35", cleaned=range(26, 36), cycle=3),
     )
     assert split["nextNumbers"] == list(range(26, 36))
-    assert "count as extra washing on this same date." in split["note"]
+    assert "are recorded as cleaning after the three cycles and count towards the month" in split["note"]
     assert "Use + Extra cleaning" in refused["error"]
 
 
@@ -193,14 +200,14 @@ def test_a_full_cycle_still_blocks_the_row(plan_day):
 
 
 def test_same_day_next_cycle_uses_a_separate_explicit_entry():
-    """Same-day rollover is explicitly marked; Cycle 3's surplus stays extra."""
+    """Same-day rollover is explicitly marked; Cycle 3's surplus is saved as ordinary cleaning."""
     calendar = CALENDAR.read_text(encoding="utf-8")
     save = calendar[calendar.index("if (row.error) { invalidRange = true; return; }"):]
     save = save[:save.index("if (invalidRange")]
-    assert "is_extra: !nextCycleNo(state)" in save
+    assert "is_extra: false" in save, "the surplus is ordinary work the month is credited for"
     assert "same_day_next_cycle: !!row.sameDayNextCycle" in save
     assert 'data-calendar-action="open-same-day-next-cycle"' in calendar
-    assert "Use + Extra cleaning to record additional cleaning." in calendar
+    assert "Use + Extra cleaning to record re-cleaning (a calendar record only)." in calendar
     assert "If the same day finishes this cycle and the next round" not in calendar
     assert "regularReportByDate[date] && !(isSameDayNextCycle && date === state.recordSameDayDate)" in calendar
     # Saved reports are replaced by id: a date can now hold more than one entry.
@@ -393,3 +400,73 @@ def test_a_rejected_entry_leaves_the_day_open_again(record_rows):
     assert nineteenth and not nineteenth[0]["saved"]
     assert grid["cleanedTables"] == list(range(26, 36)), "a rejected day reserves no tables"
     assert grid["openTables"] == list(range(1, 26))
+
+
+# ───────────── recording for the rest of the month once the three cycles are full ─────────────
+#
+# The O&M Head's rule: once all three cycles are complete, whatever cleaning happens for the rest
+# of the month is entered on the ordinary sheet and counts. The sheet used to close every remaining
+# row (`full`) because the last cycle had taken every table, which is what forced that work into
+# "+ Extra cleaning" -- where, under the same instruction, it no longer counts at all.
+
+def _month_of_three_cycles(total=4):
+    """A small plant whose three cycles are complete, one full day each."""
+    return [_saved("2026-11-10", 1, range(1, total + 1), completed=True),
+            _saved("2026-11-12", 2, range(1, total + 1), completed=True),
+            _saved("2026-11-14", 3, range(1, total + 1), completed=True)]
+
+
+def test_days_after_the_three_cycles_stay_open_for_recording(record_rows):
+    grid = record_rows(3, _month_of_three_cycles(), today=TODAY, month=MONTH, total=4)
+
+    later = [row for row in grid["rows"] if not row["saved"] and row["date"] > "2026-11-14"]
+    assert later, "the last cycle's grid must reach the rest of the month"
+    assert all(row["full"] is False for row in later), "a completed month must still take readings"
+    assert all(row["afterCycles"] is True for row in later)
+
+
+def test_a_day_after_the_three_cycles_accepts_tables_already_cleaned(record_rows):
+    """Every table is free again: this is a further round, not a repeat inside a running cycle."""
+    grid = record_rows(3, _month_of_three_cycles(), today=TODAY, month=MONTH, total=4,
+                       drafts={"2026-11-16": {"list": "1-4", "remarks": ""}})
+
+    row = next(r for r in grid["rows"] if r["date"] == "2026-11-16")
+    assert row["numbers"] == [1, 2, 3, 4] and not row["error"]
+    assert not row["note"], "the first round after the cycles is unremarkable"
+
+
+def test_repeating_a_table_after_the_cycles_opens_the_next_round_and_says_so(record_rows):
+    """Asked for by the O&M Head: treat it as a round of its own, but still tell me."""
+    grid = record_rows(3, _month_of_three_cycles(), today=TODAY, month=MONTH, total=4,
+                       drafts={"2026-11-16": {"list": "1-4", "remarks": ""},
+                               "2026-11-17": {"list": "1-4", "remarks": ""}})
+
+    second = next(r for r in grid["rows"] if r["date"] == "2026-11-17")
+    assert second["numbers"] == [1, 2, 3, 4], "the work is recorded, not refused"
+    assert not second["error"]
+    assert "already cleaned in round 1" in second["note"] and "round 2 starts here" in second["note"]
+
+
+def test_a_cycle_still_running_is_unchanged(record_rows):
+    """The once-per-cycle rule still holds while a cycle is being filled."""
+    grid = record_rows(1, [_saved("2026-11-10", 1, [1, 2])], today=TODAY, month=MONTH, total=4,
+                       drafts={"2026-11-11": {"list": "1-2", "remarks": ""}})
+
+    row = next(r for r in grid["rows"] if r["date"] == "2026-11-11")
+    assert row["afterCycles"] is False
+    assert "already cleaned in this cycle" in row["error"] and row["numbers"] == []
+
+
+def test_every_day_tile_opens_its_drawer():
+    """The drawer is the only route to a record's details and to the extra-cleaning actions.
+
+    The plant's Module Cleaning calendar lists its chips in full rather than "+N more"; that must
+    not cost the day its open action, which is what made Edit / Remove extra cleaning unreachable
+    for the O&M Head and the Assignee on exactly the page they manage washing from.
+    """
+    calendar = CALENDAR.read_text(encoding="utf-8")
+    grid = calendar[calendar.index('days += \'<button type="button" class="\' + classes'):]
+    grid = grid[:grid.index("</button>")]
+
+    assert 'data-calendar-action="open-date" data-date="' in grid
+    assert 'plainDay ? "" :' not in grid, "no view may drop the day's open action"

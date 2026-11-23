@@ -167,6 +167,8 @@
         extraDeleteConfirmId: "",
         extraDeleting: false,
         extraDeleteError: "",
+        extraConverting: false,
+        extraConvertError: "",
         extraDate: "",
         extraList: "",
         extraRemarks: "",
@@ -702,8 +704,12 @@
       var classes = "ep-calendar__day";
       if (!inMonth) classes += " ep-calendar__day--outside";
       if (isToday) classes += " ep-calendar__day--today";
+      // Every in-month day opens its drawer. The plant's Module Cleaning calendar lists its chips
+      // in full (see `plainDay` below) instead of "+N more", but it must still OPEN: the drawer is
+      // the only way to reach a record's details, and the Edit / Remove / Count-as-cleaning actions
+      // on an extra-cleaning entry live there. Without the action the day did nothing at all.
       days += '<button type="button" class="' + classes + '"' +
-        (inMonth ? (plainDay ? "" : ' data-calendar-action="open-date"') + ' data-date="' + date + '"' : " disabled") +
+        (inMonth ? ' data-calendar-action="open-date" data-date="' + date + '"' : " disabled") +
         (inMonth
         ? (hoverEnabled ? ' aria-describedby="' + hoverId + '"' : "") +
           ' aria-label="' + escape(displayDate(date) + ", " + dayEvents.length +
@@ -756,7 +762,7 @@
           (event.plantSiteCode ? " · " + escape(event.plantSiteCode) : "") +
           " · " + escape(event.isExtra ? "During cycle " + cycleNumber : cycle) + '</span>' +
         (event.isExtra
-          ? '<span class="ep-calendar__event-card-extra-note">Re-cleaning · does not count towards this cycle</span>'
+          ? '<span class="ep-calendar__event-card-extra-note">Re-cleaning · calendar record only, never counted</span>'
           : "") +
         '<span class="ep-calendar__event-card-open">View details →</span>' +
       '</button>';
@@ -878,12 +884,20 @@
         extraActions = '<div class="ep-calendar__extra-detail-actions">' +
           '<button type="button" class="ep-calendar__setup-submit" data-calendar-action="edit-extra" data-report-id="' +
             escape(event.reportId) + '">Edit extra cleaning</button>' +
+          // Work done after the three cycles are complete belongs on the sheet as an ordinary day.
+          // Entries saved as extra before the sheet accepted those days are put right here instead
+          // of being left out of the month's score.
+          '<button type="button" class="ep-calendar__setup-submit" data-calendar-action="convert-extra" ' +
+            'data-report-id="' + escape(event.reportId) + '"' + (state.extraConverting ? " disabled" : "") + '>' +
+            (state.extraConverting ? "Counting…" : "Count as cleaning (not extra)") + '</button>' +
           (event.canDelete
             ? '<button type="button" class="ep-calendar__setup-submit ep-calendar__setup-submit--danger" ' +
               'data-calendar-action="request-extra-delete" data-report-id="' + escape(event.reportId) +
               '">Remove extra cleaning</button>'
             : "") +
-          '</div>';
+          '</div>' +
+          (state.extraConvertError ? '<p class="ep-calendar__setup-error" role="alert">' +
+            escape(state.extraConvertError) + '</p>' : "");
       }
     } else {
       extraActions = '<p class="ep-calendar__detail-note">Saved record, shown read-only.</p>';
@@ -904,9 +918,10 @@
               '</span>' + (event.isExtra ? '<span class="ep-calendar__extra-badge">Extra cleaning</span>' : "") +
               '<span>' + escape(event.status) + '</span></div>' +
             (event.isExtra
-              ? '<p class="ep-calendar__detail-extra-note">Extra cleaning recorded before all three cycles are ' +
-                'complete is a calendar entry only; it does not count towards cycle progress or plant compliance. ' +
-                'Only extra cleaning after all three cycles are complete increases monthly compliance.</p>'
+              ? '<p class="ep-calendar__detail-extra-note">Extra cleaning is a calendar entry only: it never ' +
+                'counts towards cycle progress or plant compliance, whenever it was done. Cleaning carried out ' +
+                'after all three cycles are complete belongs on the cycle sheet as an ordinary day, where it does ' +
+                'count towards the month.</p>'
               : "") +
             '<dl class="ep-calendar__detail-fields">' +
               fields.map(function (field) {
@@ -1437,15 +1452,34 @@
     // cycle work still owed.
     var used = {};
     var savedUsed = {};
+    // Once the month's LAST cycle is full the plant keeps cleaning, and the sheet keeps taking
+    // readings for the rest of the month. Those days are ordinary records (the backend derives them
+    // as the last cycle's surplus and counts them towards the month), tracked in ROUNDS of their
+    // own: a table that comes round again opens the next round, exactly as it would inside a cycle.
+    var post = null;
+    function cycleFull() {
+      if (total <= 0) return false;
+      for (var n = 1; n <= total; n += 1) if (!used[n]) return false;
+      return true;
+    }
+    function markRound(numbers) {
+      (numbers || []).forEach(function (number) {
+        if (post.used[number]) { post.used = {}; post.round += 1; }
+        post.used[number] = true;
+      });
+    }
     (state.washingReports || []).filter(function (report) {
       return Number(report.cycle_no) === Number(cycle.cycle_no) &&
         report.review_status !== "Rejected" && !isExtraReport(report);
     }).slice().sort(function (a, b) {
       return a.report_date < b.report_date ? -1 : a.report_date > b.report_date ? 1 : 0;
     }).forEach(function (report) {
+      if (!post && isLastCycle && cycleFull()) post = { used: {}, round: 1 };
+      if (post) { markRound(tableNumbersOf(report)); return; }
       markUsed(used, total, report);
       markUsed(savedUsed, total, report);
     });
+    if (!post && isLastCycle && cycleFull()) post = { used: {}, round: 1 };
     var rows = [];
     dates.forEach(function (date) {
       var saved = savedByDate[date] || [];
@@ -1457,13 +1491,15 @@
       }
       if (regularReportByDate[date] && !(isSameDayNextCycle && date === state.recordSameDayDate)) return;
       var draft = state.recordDrafts[date] || {};
-      var plan = planDay(state, draft, used, total);
-      plan.numbers.forEach(function (number) { used[number] = true; });
+      var plan = planDay(state, draft, used, total, post);
+      if (plan.afterCycles) markRound(plan.numbers);
+      else plan.numbers.forEach(function (number) { used[number] = true; });
       rows.push({
         date: date, report: null, draft: draft, numbers: plan.numbers,
         nextNumbers: plan.nextNumbers || [],
         error: plan.error, full: plan.full, zero: plan.zero,
-        note: rollOverNote(state, plan),
+        afterCycles: !!plan.afterCycles,
+        note: rollOverNote(state, plan) || plan.roundNote || "",
         sameDayNextCycle: !!(isSameDayNextCycle && date === state.recordSameDayDate)
       });
     });
@@ -1551,7 +1587,8 @@
     return plan.numbers.length + " table" + (plan.numbers.length === 1 ? "" : "s") +
       " complete cycle " + cycleNo + " · " + rolled.length + " table" +
       (rolled.length === 1 ? "" : "s") + " (" + formatTableList(rolled) + ") " +
-      (next ? "start cycle " + next : "count as extra washing") + " on this same date.";
+      (next ? "start cycle " + next : "are recorded as cleaning after the three cycles and count towards the month") +
+      " on this same date.";
   }
 
   /** Total tables in the regular entry and any same-day extra cleaning after Cycle 3. */
@@ -1559,17 +1596,32 @@
     return (row.numbers || []).length + ((row.nextNumbers || []).length);
   }
 
-  /** The cycle sheet permits one regular entry per plant/date. After Cycle 3 completes, same-day
-   *  work is extra cleaning; between cycles, use the separate Extra Cleaning action. */
-  function planDay(state, draft, used, total) {
+  /** The cycle sheet permits one regular entry per plant/date within a cycle. Between cycles, use
+   *  the separate Extra Cleaning action -- that is re-cleaning and never counts towards the score.
+   *  Once the month's last cycle is FULL, the sheet keeps taking ordinary readings for the rest of
+   *  the month (`post`): that work is credited to the month as the last cycle's surplus. */
+  function planDay(state, draft, used, total, post) {
     var free = [];
     for (var n = 1; n <= total; n += 1) if (!used[n]) free.push(n);
-    var plan = { numbers: [], nextNumbers: [], error: "", full: free.length === 0, zero: !!draft.reason };
+    var afterCycles = !!post;
+    var plan = { numbers: [], nextNumbers: [], error: "", full: free.length === 0 && !afterCycles,
+                 zero: !!draft.reason, afterCycles: afterCycles, roundNote: "" };
     if (plan.zero || plan.full) return plan;
     var text = String(draft.list || "").trim();
     if (!text) return plan;
     var parsed = parseTableList(text, total);
     if (parsed.error) { plan.error = parsed.error; return plan; }
+    if (afterCycles) {
+      // All three cycles are complete: every table is free again. A table already cleaned in this
+      // round opens the next one, and the day says so rather than refusing the entry.
+      var again = parsed.numbers.filter(function (number) { return post.used[number]; });
+      plan.numbers = parsed.numbers;
+      if (again.length) {
+        plan.roundNote = "Table " + again[0] + " was already cleaned in round " + post.round +
+          " after the three cycles, so round " + (post.round + 1) + " starts here.";
+      }
+      return plan;
+    }
     var taken = parsed.numbers.filter(function (number) { return used[number]; });
     var next = nextCycleNo(state);
     if (!taken.length) {
@@ -1587,7 +1639,7 @@
     // to hand over to at all, which is a different thing to tell the user.
     plan.error = "Table " + taken[0] + " is already cleaned in this cycle. " +
       (next ? "" : "This is the month's last cycle, so a re-clean cannot start a next cycle. ") +
-      "Use + Extra cleaning to record additional cleaning.";
+      "Use + Extra cleaning to record re-cleaning (a calendar record only).";
     return plan;
   }
 
@@ -1975,7 +2027,7 @@
             ? '<div class="ep-calendar__record-table"><div class="ep-calendar__record-head"><span>Day</span><span>Tables</span><span>Table numbers</span><span>Remarks</span></div>' +
               days + '</div>'
             : '<p class="ep-calendar__empty">No reportable days for this cycle yet.</p>') +
-          '<p class="ep-calendar__record-help">Type the tables cleaned that day as numbers or ranges, e.g. 1, 2, 4, 7-8, 13 or 100-91. Each table counts once per cycle. The next cycle starts only after all configured tables are cleaned. Use + Extra cleaning for re-cleaning between cycles; it stays on the calendar and does not increase compliance. Only extra cleaning after all three cycles are complete increases compliance. When nothing was cleaned, choose the not-done reason for that day and add the details in Remarks.' +
+          '<p class="ep-calendar__record-help">Type the tables cleaned that day as numbers or ranges, e.g. 1, 2, 4, 7-8, 13 or 100-91. Each table counts once per cycle. The next cycle starts only after all configured tables are cleaned. Use + Extra cleaning for re-cleaning while a cycle is still running; it stays on the calendar and never increases compliance. Once all three cycles are complete the sheet keeps taking readings for the rest of the month: enter those days here and they count towards the month. When nothing was cleaned, choose the not-done reason for that day and add the details in Remarks.' +
             (canManageWashing() ? " Apart from that, tables already cleaned in an incomplete cycle cannot be selected again." : "") + '</p>' +
         '</div>' +
         '<footer class="ep-calendar__record-footer"><button type="button" class="ep-calendar__close-button" data-calendar-action="close-record"' +
@@ -2971,6 +3023,34 @@
         renderView(host, state, context);
         var editExtraDate = host.querySelector("[data-extra-date]");
         if (editExtraDate) editExtraDate.focus();
+      } else if (action.dataset.calendarAction === "convert-extra") {
+        // "+ Extra cleaning" never counts towards compliance. Cleaning done after the three cycles
+        // are complete is an ordinary day, so the O&M team can reclassify an entry saved as extra
+        // and have the month credited for the work. The server re-sequences the month afterwards.
+        if (state.extraConverting || !canManageWashing()) return;
+        var convertId = action.dataset.reportId;
+        var convertible = (state.washingReports || []).find(function (report) {
+          return report.id === convertId && report.is_extra === true && report.can_edit === true;
+        });
+        if (!convertible) return;
+        state.extraConverting = true;
+        state.extraConvertError = "";
+        renderView(host, state, context);
+        global.Solar91PortalAPI.request(
+          "/api/scheduled/washing/daily-reports/" + encodeURIComponent(convertId),
+          { method: "PATCH", body: { is_extra: false } }
+        ).then(function () {
+          if (!active || active.host !== host || active.state !== state) return;
+          if (data && data.invalidate) data.invalidate(true);
+          state.extraConverting = false;
+          state.detailEventIndex = null;
+          loadEvents(host, state, context);
+        }).catch(function (error) {
+          if (!active || active.host !== host || active.state !== state) return;
+          state.extraConverting = false;
+          state.extraConvertError = (error && error.message) || "The entry could not be changed.";
+          renderView(host, state, context);
+        });
       } else if (action.dataset.calendarAction === "request-extra-delete") {
         if (!canManageWashing()) return;
         var deletableExtra = (state.washingReports || []).find(function (report) {
@@ -3138,7 +3218,10 @@
             remarks: row.draft.remarks || null,
             same_day_next_cycle: !!row.sameDayNextCycle
           });
-          // Once Cycle 3 is complete, any further tables cleaned that day are extra cleaning.
+          // The day that fills the last cycle can carry more tables cleaned after it. That is
+          // ordinary cleaning the month is credited for, so it is saved WITHOUT the extra flag:
+          // the backend derives it as the last cycle's surplus (_cycle_sequence) and counts it.
+          // Only the "+ Extra cleaning" action marks an entry extra, and that never counts.
           if (row.nextNumbers && row.nextNumbers.length) {
             entries.push({
               report_date: row.date,
@@ -3146,10 +3229,7 @@
               tables_cleaned: row.nextNumbers.length,
               table_numbers: row.nextNumbers,
               remarks: row.draft.remarks || null,
-              // In the month's last cycle there is no next cycle to open, so the re-cleaned tables are
-              // the month's extra cleaning and are marked as such (migration 048) to be counted that
-              // way. Below the last cycle they are the next cycle's real work and carry no flag.
-              is_extra: !nextCycleNo(state)
+              is_extra: false
             });
           }
         });

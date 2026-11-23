@@ -248,6 +248,11 @@ class WashingReportUpdateRequest(BaseModel):
     table_numbers: list[int] | None = Field(default=None, max_length=5000)
     exception_reason: Literal["Rain", "Water shortage", "Machine breakdown", "Access restriction", "Safety stand-down", "Other"] | None = None
     remarks: str | None = Field(default=None, max_length=4000)
+    # Turn a marked "+ Extra cleaning" entry into an ordinary cleaning day, or back. Entries marked
+    # extra never count towards compliance; cleaning done after the three cycles are complete is an
+    # ordinary day. Work recorded as extra before the sheet accepted those days is converted with
+    # this, rather than being left uncounted. O&M Head / washing Assignee only.
+    is_extra: bool | None = None
 
     @model_validator(mode="after")
     def validate_range(self):
