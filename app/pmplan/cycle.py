@@ -41,9 +41,21 @@ Work orders created before the change are kept as they are.
 """
 from __future__ import annotations
 
+from calendar import monthrange
 from datetime import date, timedelta
 from typing import Any
 
+# A plan is AUTHORED against 30 days, so a stored plan is month-length independent: `plan_problem`
+# bounds start_day and days by CYCLE_DAYS whatever month it will run in. A cycle RUNS from the first
+# day of a calendar month to that month's real last day (28, 29, 30 or 31), so the authoring limit
+# and the running window are two different things:
+#
+#   * a 31-day month has a spare day at the end. Nothing is scheduled there and nothing is invented
+#     for it.
+#   * a month SHORTER than the plan's highest start day loses days -- day 29 and 30 do not exist in
+#     February. `effective_start_day` clamps such a phase to the month's last day and the ordinary
+#     chaining rule then resolves the collision it causes. The phase is never dropped and never
+#     moved to another month; work pushed beyond the month end is reported as `past_cycle_days`.
 CYCLE_DAYS = 30
 MISC = "Miscellaneous"
 # Categories whose phase length follows the plant's unit count (pm_unit_config:
@@ -78,6 +90,25 @@ _PHASES: list[tuple[str, str, tuple[str, ...], int | None]] = [
 def _span(phase: dict[str, Any]) -> int:
     """Calendar days a phase occupies: N working days spaced `step_days` apart."""
     return (phase["days"] - 1) * (phase.get("step_days") or 1) + 1
+
+
+def month_days(cycle_start: date) -> int:
+    """Days in the calendar month the cycle runs in -- its real length, not CYCLE_DAYS."""
+    return monthrange(cycle_start.year, cycle_start.month)[1]
+
+
+def cycle_end(cycle_start: date) -> date:
+    """Last day of the cycle: the last day of its calendar month."""
+    return cycle_start.replace(day=month_days(cycle_start))
+
+
+def effective_start_day(phase: dict[str, Any], cycle_start: date) -> int:
+    """A phase's start day inside THIS month: its planned day, clamped to the month's last day.
+
+    A plan authored with Miscellaneous on day 30 still has to run in February. Clamping keeps the
+    phase in the month on its nearest possible day; chaining then pushes whatever it collides with,
+    exactly as it does for an overrun."""
+    return min(int(phase["start_day"]), month_days(cycle_start))
 
 
 def _build() -> list[dict[str, Any]]:
@@ -163,7 +194,7 @@ def phase_index(equipment_type: str, cycle: list[dict[str, Any]] | None = None) 
 def window(equipment_type: str, cycle_start: date, cycle: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     """Dates of this category's phase in the cycle that starts on `cycle_start`."""
     p = phase_for(equipment_type, cycle)
-    start = cycle_start + timedelta(days=p["start_day"] - 1)
+    start = cycle_start + timedelta(days=effective_start_day(p, cycle_start) - 1)
     return {**p, "cycle_start": cycle_start, "start": start, "end": start + timedelta(days=_span(p) - 1)}
 
 
@@ -180,7 +211,7 @@ def chained_window(equipment_type: str, cycle_start: date, booked: dict[int, dat
     target = phase_index(equipment_type, cycle)
     prev_end: date | None = None
     for i, p in enumerate(phases):
-        nominal = cycle_start + timedelta(days=p["start_day"] - 1)
+        nominal = cycle_start + timedelta(days=effective_start_day(p, cycle_start) - 1)
         start = max(nominal, prev_end + timedelta(days=1)) if prev_end else nominal
         end = start + timedelta(days=_span(p) - 1)
         if i == target:
@@ -230,9 +261,16 @@ def plan_problem(phases: list[dict[str, Any]]) -> str | None:
 
 
 def window_out(w: dict[str, Any]) -> dict[str, Any]:
-    cycle_end = w["cycle_start"] + timedelta(days=CYCLE_DAYS - 1)
+    """The window as JSON. `past_cycle_days` counts work pushed beyond the month's last day, and
+    `clamped_from` names the authored day when a short month forced the phase earlier."""
+    last_day = cycle_end(w["cycle_start"])
+    planned_day = int(w["start_day"])
+    running_day = effective_start_day(w, w["cycle_start"])
     return {"area": w["area"], "phase": w["phase"], "start_day": w["start_day"], "end_day": w["end_day"],
             "days": w["days"], "step_days": w.get("step_days", 1),
-            "cycle_start": w["cycle_start"].isoformat(), "start": w["start"].isoformat(),
+            "cycle_start": w["cycle_start"].isoformat(), "cycle_end": last_day.isoformat(),
+            "cycle_length": month_days(w["cycle_start"]),
+            "start": w["start"].isoformat(),
             "end": w["end"].isoformat(), "moved_days": w.get("moved_days", 0),
-            "past_cycle_days": max(0, (w["end"] - cycle_end).days)}
+            "clamped_from": planned_day if running_day != planned_day else None,
+            "past_cycle_days": max(0, (w["end"] - last_day).days)}

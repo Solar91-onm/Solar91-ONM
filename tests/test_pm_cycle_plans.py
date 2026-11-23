@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 
-from app.core.models import OMTask, PMCyclePlan, PMUnitConfig, Plant
+from app.core.models import OMTask, PMCyclePlan, PMUnitConfig, Plant, UserPlantAssignment
 from app.pmplan.cycle import CYCLE, CYCLE_DAYS, chained_window, phase_for, phase_index, plan_problem, resolve_cycle
 from app.pmplan.units import distribute
 from tests.conftest import login_user
@@ -418,20 +418,55 @@ def test_the_cycle_endpoint_returns_a_named_plants_plan_and_the_default_otherwis
     assert named.json()["plant"]["site_code"] == plant.site_code
 
 
-def test_only_the_head_can_edit_a_cycle_plan(client, db):
+def test_the_head_and_the_plants_assignee_can_edit_a_cycle_plan(client, db):
+    """Changed deliberately: editing was the O&M Head's alone.
+
+    The Assignee runs the month, so routing every day change through the O&M Head served nothing.
+    They edit THEIR OWN plants (CREATOR_ROLES + the plant-scope check); an Assignee without the
+    plant, and a Site Engineer, still cannot -- and the API refuses it, not just the UI."""
     login_user(client, db, role="O&M Head")
     plant = _plant(db)
     phases = [_phase("VCB", ["VCB Panel"], 4, 1)]
     assert client.put(f"/api/pm-plan/cycle-plans/{plant.site_code}", json={"phases": phases}).status_code == 200
 
-    login_user(client, db, role="Assignee", email="as@example.com")
-    assert client.get("/api/pm-plan/cycle-plans").status_code == 200          # the team reads the plan
+    mine = login_user(client, db, role="Assignee", email="mine@example.com")
+    db.add(UserPlantAssignment(user_id=mine.id, plant_id=plant.id, assignment_role="Assignee"))
+    db.commit()
+    moved = [_phase("VCB", ["VCB Panel"], 6, 1)]
+    saved = client.put(f"/api/pm-plan/cycle-plans/{plant.site_code}", json={"phases": moved})
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["phases"][0]["start_day"] == 6
+    assert saved.json()["can_edit"] is True
+
+    other = login_user(client, db, role="Assignee", email="other@example.com")
+    elsewhere = _plant(db, code="OTH_01", name="Other Park")
+    db.add(UserPlantAssignment(user_id=other.id, plant_id=elsewhere.id, assignment_role="Assignee"))
+    db.commit()
+    assert client.get("/api/pm-plan/cycle-plans").status_code == 200          # the team reads the list
     assert client.put(f"/api/pm-plan/cycle-plans/{plant.site_code}", json={"phases": phases}).status_code == 403
     assert client.delete(f"/api/pm-plan/cycle-plans/{plant.site_code}").status_code == 403
 
     login_user(client, db, role="Site Engineer", email="se@example.com")
     assert client.get("/api/pm-plan/cycle-plans").status_code == 403
+    assert client.put(f"/api/pm-plan/cycle-plans/{plant.site_code}", json={"phases": phases}).status_code == 403
+    db.expire_all()
     assert db.query(PMCyclePlan).count() == 1
+    assert db.query(PMCyclePlan).one().phases[0]["start_day"] == 6, "the Assignee's change stands"
+
+
+def test_a_saved_plan_records_who_changed_it(client, db):
+    """A day that moved must trace to a person, so the tracker can say who and when."""
+    head = login_user(client, db, role="O&M Head", name="Head of O&M")
+    plant = _plant(db)
+    client.put(f"/api/pm-plan/cycle-plans/{plant.site_code}",
+               json={"phases": [_phase("VCB", ["VCB Panel"], 4, 1)]})
+
+    db.expire_all()
+    row = db.query(PMCyclePlan).one()
+    assert row.updated_by == head.id
+    body = client.get(f"/api/pm-plan/cycle-plans/{plant.site_code}").json()
+    assert body["updated_by"] == "Head of O&M"
+    assert body["updated_at"]
 
 
 def test_saving_a_plan_replaces_it_rather_than_adding_a_second_row(client, db):

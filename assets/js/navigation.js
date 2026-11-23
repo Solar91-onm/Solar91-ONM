@@ -872,9 +872,6 @@
     if (pageId === "pm" && !navState.pmCalendarOpen) {
       showOnly(pmOverviewEl);
       if (titleEl) titleEl.textContent = "Preventive Maintenance";
-      if (global.Solar91PortalPMCyclePlans) {
-        global.Solar91PortalPMCyclePlans.show(document.querySelector("[data-pm-cycle-plans-host]"), { siteCode: plantCode });
-      }
       if (global.Solar91PortalPMOverview) {
         global.Solar91PortalPMOverview.show(
           document.querySelector("[data-pm-overview-host]"),

@@ -13,7 +13,8 @@
     "inverter-health": ["table-sort", "table-column-filter"],
     "operations-calendar": ["register-io", "photo-evidence"],
     "washing-board": ["table-sort", "table-column-filter"],
-    // The PM page also shows which plants have a cycle plan and which are paused.
+    // A plant's PM page renders its cycle plan as a section of itself, so pm-overview consumes
+    // pm-cycle-plans as a component (mountTracker) rather than as a second panel on the page.
     "pm-overview": ["pm-cycle-plans"],
     settings: ["categories"]
   };

@@ -5,6 +5,11 @@
   var state = {
     host: null,
     siteCode: null,
+    // Cycle-plan state per plant (migration 049). A plant with no plan is PAUSED: it generates no
+    // new PM cycles, and it is never shown as failing or as 0%. Fetched once per visit and handed
+    // to the tracker on a plant's page so it does not ask for the same listing twice.
+    cyclePlans: null,
+    pausedOnly: false,
     plant: null,
     parent: "overview",
     month: "",
@@ -117,6 +122,45 @@
     return !plant.status || String(plant.status).toLowerCase() === "active";
   }
 
+  /** This plant's cycle-plan state, or null while the listing has not arrived (or is forbidden). */
+  function planState(siteCode) {
+    var list = state.cyclePlans;
+    if (!list || !list.plans) return null;
+    var key = String(siteCode || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+    return list.plans.find(function (p) {
+      return String(p.site_code || "").toUpperCase().replace(/[^A-Z0-9]/g, "") === key;
+    }) || null;
+  }
+
+  function isPaused(siteCode) {
+    var plan = planState(siteCode);
+    return !!(plan && plan.paused);
+  }
+
+  /** "13 of 42 plants planned · 29 paused" — one compact line, not a second screen. */
+  function plannedLine() {
+    var list = state.cyclePlans;
+    if (!list || !list.plans || !list.total) return "";
+    return '<p class="ep-pm__plan-line">' +
+      '<strong>' + number(list.configured) + ' of ' + number(list.total) + ' plants planned</strong>' +
+      (list.paused
+        ? ' · <button type="button" class="ep-pm__plan-paused" data-pm-paused-filter aria-pressed="' +
+          state.pausedOnly + '">' + number(list.paused) + ' paused</button>'
+        : "") +
+      (state.pausedOnly
+        ? ' <span class="ep-pm__plan-note">Showing paused plants only. A paused plant generates no new PM cycles and is left out of PM compliance, never counted as 0%.</span>'
+        : "") +
+    '</p>';
+  }
+
+  /** The paused state, in the same muted treatment the portal uses for "not configured". */
+  function pausedTag(siteCode) {
+    var plan = planState(siteCode);
+    if (!plan || !plan.paused) return "";
+    return '<span class="ep-pm__paused-tag">' +
+      escape((state.cyclePlans && state.cyclePlans.paused_reason) || "PM paused - no cycle plan") + '</span>';
+  }
+
   function pmBlock(row) {
     return row && row.profile && row.profile.pm || {};
   }
@@ -201,6 +245,7 @@
     var rows = state.rows.filter(function (row) {
       var plant = row.plant;
       if (!state.siteCode && !activePlant(plant)) return false;
+      if (state.pausedOnly && !isPaused(plant.siteCode)) return false;
       if (state.filters.plant && plant.siteCode !== state.filters.plant) return false;
       var entries = rowEntries(row);
       if (state.filters.equipment &&
@@ -374,11 +419,13 @@
     }).slice(0, 4);
     var nextDue = state.calendarLoading ? "Loading schedule…" :
       state.calendarError ? "Schedule unavailable" : next ? dateLabel(next.date) : "No upcoming PM this month";
-    return '<article class="ep-pm__plant-card">' +
+    var cardPaused = isPaused(plant.siteCode);
+    return '<article class="ep-pm__plant-card' + (cardPaused ? " is-paused" : "") + '">' +
       '<div class="ep-pm__plant-card-head"><div><p>' + escape(plant.siteCode) + '</p>' +
-        '<h3>' + escape(plantName(plant)) + '</h3></div>' + statusBadge(status) + '</div>' +
+        '<h3>' + escape(plantName(plant)) + '</h3>' + pausedTag(plant.siteCode) + '</div>' +
+        (cardPaused ? '<span class="ep-pm__paused-badge">Paused</span>' : statusBadge(status)) + '</div>' +
       '<div class="ep-pm__plant-card-stats"><div><span>Compliance</span><strong>' +
-        (pm.compliancePercent == null ? "—" : Math.round(Number(pm.compliancePercent)) + "%") +
+        (cardPaused || pm.compliancePercent == null ? "—" : Math.round(Number(pm.compliancePercent)) + "%") +
         '</strong></div><div><span>Completed</span><strong>' + number(pm.completed) +
         '</strong></div><div><span>Overdue</span><strong>' + number(pm.overdue) + '</strong></div></div>' +
       '<div class="ep-pm__plant-card-meta"><span>Next due</span><strong>' +
@@ -415,10 +462,11 @@
         var next = openEntries(entries).filter(function (entry) {
           return entry.date >= businessToday();
         }).sort(function (a, b) { return a.date.localeCompare(b.date); })[0];
+        var paused = isPaused(plant.siteCode);
         return '<tr><td><strong>' + escape(plantName(plant)) + '</strong><small>' +
-          escape(plant.siteCode) + '</small></td><td>' +
-          statusBadge(statusFor(row, entries)) + '</td><td>' +
-          (pm.compliancePercent == null ? "—" : Math.round(Number(pm.compliancePercent)) + "%") +
+          escape(plant.siteCode) + '</small>' + pausedTag(plant.siteCode) + '</td><td>' +
+          (paused ? '<span class="ep-pm__paused-badge">Paused</span>' : statusBadge(statusFor(row, entries))) + '</td><td>' +
+          (paused || pm.compliancePercent == null ? "—" : Math.round(Number(pm.compliancePercent)) + "%") +
           '</td><td>' + number(pm.completed) + '</td><td>' + number(pm.overdue) +
           '</td><td>' + (next ? escape(dateLabel(next.date)) : "—") + '</td><td>' +
           '<button type="button" class="ep-pm__table-open" data-pm-open-plant="' +
@@ -437,7 +485,8 @@
     });
     return '<div class="ep-pm">' +
       '<header class="ep-pm__header"><div><p class="ep-pm__eyebrow">Portfolio view</p>' +
-        '<h1>Preventive Maintenance</h1><p>Role-scoped PM work orders and compliance for active plants.</p></div>' +
+        '<h1>Preventive Maintenance</h1><p>Role-scoped PM work orders and compliance for active plants.</p>' +
+        plannedLine() + '</div>' +
         '<div class="ep-pm__header-actions"><label>Month<input type="month" data-pm-month value="' +
           escape(state.month) + '" max="' + today.slice(0, 7) + '" /></label>' +
           '<button type="button" class="ep-pm__calendar-button" data-pm-calendar>Open PM calendar</button></div></header>' +
@@ -654,8 +703,9 @@
       (state.loading
         ? '<div class="ep-pm__loading" role="status">Loading PM work orders…</div>'
         : '<div class="ep-pm__metrics ep-pm__metrics--plant">' +
-          metric("PM compliance", pm.compliancePercent == null
-            ? "—" : Math.round(Number(pm.compliancePercent)) + "%", "For selected month to date", "green") +
+          metric("PM compliance", isPaused(plant.siteCode) || pm.compliancePercent == null
+            ? "—" : Math.round(Number(pm.compliancePercent)) + "%",
+            isPaused(plant.siteCode) ? "PM paused - no cycle plan" : "For selected month to date", "green") +
           metric("Scheduled", state.calendarLoading ? "Loading…" : number(scheduled.length),
             "Work orders in this month", "blue") +
           metric("Completed", number(pm.completed), "Due work completed", "green") +
@@ -664,6 +714,7 @@
           metric("Next due", state.calendarLoading ? "Loading…" : next ? dateLabel(next.date) : "—",
             state.calendarLoading ? "Checking schedule" : next ? categoryName(next) : "No upcoming work this month", "blue") +
         '</div>' +
+        '<div data-pm-tracker-host></div>' +
         '<section class="ep-pm__detail-grid"><article class="ep-pm__panel"><header><div>' +
           '<p class="ep-pm__eyebrow">Monthly workload</p><h2>Scheduled work by day</h2></div>' +
           '<span>' + (state.calendarLoading ? "Loading…" : number(scheduled.length)) + ' work orders</span></header>' +
@@ -716,6 +767,7 @@
       }
       if (row) {
         state.host.innerHTML = plantContent(row);
+        mountTracker();
       } else {
         var title = plantName(state.plant);
         state.host.innerHTML = '<div class="ep-pm"><div class="ep-pm__breadcrumb"><button type="button" data-pm-back>' +
@@ -732,6 +784,19 @@
       return;
     }
     state.host.innerHTML = portfolioContent();
+  }
+
+  /** The plant's cycle plan, rendered as a section of this page by the pm-cycle-plans module. */
+  function mountTracker() {
+    if (!state.host || !state.siteCode || !global.Solar91PortalPMCyclePlans) return;
+    var host = state.host.querySelector("[data-pm-tracker-host]");
+    if (!host) return;
+    global.Solar91PortalPMCyclePlans.show(host, {
+      siteCode: state.siteCode,
+      month: state.month,
+      entries: entriesForPlant(state.siteCode),
+      list: state.cyclePlans
+    });
   }
 
   function loadData() {
@@ -778,6 +843,19 @@
         ? error.message : "PM summary could not be loaded.";
       render();
     });
+
+    // Which plants have a tracker and which are paused. One small request per visit; a role without
+    // PM planning access simply gets no planned/paused line and no paused tags.
+    if (!state.cyclePlans && global.Solar91PortalAPI) {
+      global.Solar91PortalAPI.request("/api/pm-plan/cycle-plans").then(function (body) {
+        if (requestId !== state.requestId) return;
+        state.cyclePlans = body;
+        render();
+      }).catch(function () {
+        if (requestId !== state.requestId) return;
+        state.cyclePlans = null;               // the page still works without it
+      });
+    }
 
     withTimeout(Promise.resolve().then(function () {
       return data.fetchCalendarMonth("pm", state.month, state.siteCode || "");
@@ -873,6 +951,14 @@
         } else {
           global.Solar91PortalNav.selectPlantPage(state.siteCode, "details");
         }
+        return;
+      }
+      // The paused count filters the register in place; it never opens a separate page.
+      if (event.target.closest("[data-pm-paused-filter]")) {
+        state.pausedOnly = !state.pausedOnly;
+        render();
+        var register = state.host.querySelector(".ep-pm__plants-grid, .ep-pm__table-wrap");
+        if (register && register.scrollIntoView) register.scrollIntoView({ block: "start" });
         return;
       }
       var layoutButton = event.target.closest("[data-pm-layout]");

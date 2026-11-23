@@ -31,9 +31,9 @@ from app.core.models import (AuditLog, OMTask, NotificationPreference, PMCyclePl
 from app.core.security import get_current_user, require_csrf, user_scoped_plant_ids
 from app.plants.codes import find_plant_by_code
 from app.pmplan.alerts import PM_ALERT_EVENTS, PM_TEAM_RECIPIENT_MODES, default_pm_preferences, get_pm_preferences
-from app.pmplan.cycle import (CYCLE, CYCLE_DAYS, NAMED_TYPES, NOT_IN_PM, ONE_JOB_TYPES, chained_window, in_pm,
-                               one_job, phase_for, phase_index, plan_problem, resolve_cycle,
-                               window as cycle_window, window_out)
+from app.pmplan.cycle import (CYCLE, CYCLE_DAYS, NAMED_TYPES, NOT_IN_PM, ONE_JOB_TYPES, chained_window,
+                               cycle_end, in_pm, month_days, one_job, phase_for, phase_index, plan_problem,
+                               resolve_cycle, window as cycle_window, window_out)
 from app.pmplan import sheets as pm_sheets
 from app.pmplan.units import distribute, next_cycle_id, run_daily  # noqa: F401  (next_cycle_id re-exported for the scheduled router)
 from app.scheduled.schemas import ALLOWED_ASSETS, ALLOWED_FREQUENCIES
@@ -452,10 +452,15 @@ def _plant_cycles(db: Session, plant_ids: list[Any]) -> dict[Any, list[dict[str,
     return out
 
 
+def _cycle_month_start(value: date) -> date:
+    """The cycle `value` belongs to: cycles run from the first day of a calendar month."""
+    return value.replace(day=1)
+
+
 def _booked(db: Session, plant_ids: list[Any], cycle_start: date,
             planned: list[tuple[Any, int, date]],
             cycles: dict[Any, list[dict[str, Any]]] | None = None) -> dict[Any, dict[int, date]]:
-    """Last due date booked per plant and cycle phase in the cycle from `cycle_start` (its 30 days).
+    """Last due date booked per plant and cycle phase in the cycle from `cycle_start` (its month).
 
     Counts PM work already in the register (any status but Cancelled, not Daily/Weekly; e.g. inverters set
     up earlier from Add PM task) plus `planned` (plant, phase, last due) from earlier rows of the same upload.
@@ -464,7 +469,8 @@ def _booked(db: Session, plant_ids: list[Any], cycle_start: date,
 
     A phase index means a position in ONE plant's cycle, so each plant's own plan does the lookup."""
     cycles = cycles or {}
-    lo, hi = cycle_start, cycle_start + timedelta(days=CYCLE_DAYS - 1)
+    # A cycle is a calendar month: the 1st to that month's real last day, not a rolling 30 days.
+    lo, hi = _cycle_month_start(cycle_start), cycle_end(cycle_start)
     out: dict[Any, dict[int, date]] = {}
 
     def add(pid: Any, idx: int, end: date) -> None:
@@ -496,8 +502,12 @@ def _fit_to_cycle(db: Session, items: list[dict[str, Any]], equipment_type: str,
     due date so later rows chain after it.
 
     `cycles` must already exclude paused plants; items for a plant that is not in it are dropped by
-    the caller, so nothing here plans work for a plant without a tracker."""
+    the caller, so nothing here plans work for a plant without a tracker.
+
+    A cycle is a calendar MONTH, so whatever date the caller asked for, the plan is laid out from the
+    1st of that month: day 16 of the plan means the 16th, not 16 days after a mid-month start."""
     cycles = cycles if cycles is not None else {}
+    cycle_start = _cycle_month_start(cycle_start)
     pids = list(dict.fromkeys(it["plant"].id for it in items))
     booked = _booked(db, pids, cycle_start, planned or [], cycles)
     wins = {pid: chained_window(equipment_type, cycle_start, booked.get(pid), cycles.get(pid)) for pid in pids}
@@ -933,13 +943,19 @@ def _version(row: PMCyclePlan | None) -> str | None:
 
 def _cycle_plan_out(plant: Plant, phases: list[dict[str, Any]] | None, notes: str | None,
                     resolved: list[dict[str, Any]] | None, chained: list[dict[str, Any]] | None = None,
-                    updated_at: str | None = None) -> dict[str, Any]:
-    """A plant's plan as stored, as the engine resolves it, and (when asked) as chaining will run it."""
+                    updated_at: str | None = None, updated_by: str | None = None,
+                    can_edit: bool = False) -> dict[str, Any]:
+    """A plant's plan as stored, as the engine resolves it, and (when asked) as chaining will run it.
+
+    `updated_by` / `updated_at` are who last moved a day and when, so the tracker can say it on the
+    page instead of leaving a changed schedule unattributable. `can_edit` is the caller's own right
+    to change this plant's plan (O&M Head, or the Assignee of this plant)."""
     out: dict[str, Any] = {
         "plant": {"id": str(plant.id), "plant": plant.plant_name, "site_code": plant.site_code},
         "cycle_days": CYCLE_DAYS, "configured": phases is not None, "paused": phases is None,
         "phases": phases or [], "notes": notes, "resolved": resolved or [],
-        "effective_from": "next cycle", "updated_at": updated_at,
+        "effective_from": "next cycle", "updated_at": updated_at, "updated_by": updated_by,
+        "can_edit": bool(can_edit),
     }
     if phases is None:
         out.update({"paused_reason": PAUSED_LABEL, "paused_hint": PAUSED_HINT})
@@ -961,6 +977,25 @@ def _cycle_plan_scope(db: Session, user: User, plant: Plant) -> None:
     allowed = user_scoped_plant_ids(db, user)
     if allowed is not None and plant.id not in allowed:
         raise HTTPException(403, f"{plant.plant_name} is outside your assigned plants")
+
+
+def _can_edit_cycle_plan(db: Session, user: User, plant: Plant) -> bool:
+    """Whether this caller may change THIS plant's days: the O&M Head, or its own Assignee.
+
+    The write endpoints enforce the same thing (`CREATOR_ROLES` + `_cycle_plan_scope`); this is what
+    the page reads to decide between an editor and a read-only tracker."""
+    if user.role not in CREATOR_ROLES:
+        return False
+    allowed = user_scoped_plant_ids(db, user)
+    return allowed is None or plant.id in allowed
+
+
+def _updated_by_name(db: Session, row: PMCyclePlan | None) -> str | None:
+    """Display name of whoever last saved the plan, for "Last changed by <name> on <date>"."""
+    if row is None or row.updated_by is None:
+        return None
+    user = db.get(User, row.updated_by)
+    return user.display_name if user else None
 
 
 @router.get("/cycle-plans")
@@ -997,25 +1032,33 @@ def list_cycle_plans(db: Annotated[Session, Depends(get_db)], user: Annotated[Us
 @router.get("/cycle-plans/{plant_key}")
 def get_cycle_plan(plant_key: str, db: Annotated[Session, Depends(get_db)],
                    user: Annotated[User, Depends(get_current_user)], cycle_start: date | None = None):
-    """One plant's stored plan, how it resolves, and the 30-day calendar chaining will produce."""
+    """One plant's stored plan, how it resolves, and the calendar chaining will produce for its month."""
     _require(user, CREATOR_ROLES, "Cycle plans are available to the O&M Head and Assignees")
     plant = _resolve_plants(db, [plant_key])[0]
     _cycle_plan_scope(db, user, plant)
+    editable = _can_edit_cycle_plan(db, user, plant)
     row = db.scalar(select(PMCyclePlan).where(PMCyclePlan.plant_id == plant.id))
     if not (row and row.phases):
-        return _cycle_plan_out(plant, None, row.notes if row else None, None, updated_at=_version(row))
+        return _cycle_plan_out(plant, None, row.notes if row else None, None, updated_at=_version(row),
+                               updated_by=_updated_by_name(db, row), can_edit=editable)
     resolved = _plant_cycles(db, [plant.id]).get(plant.id) or []
-    start = cycle_start or business_today()
+    start = _cycle_month_start(cycle_start or business_today())
     return _cycle_plan_out(plant, list(row.phases), row.notes, resolved, _chained_preview(resolved, start),
-                           updated_at=_version(row))
+                           updated_at=_version(row), updated_by=_updated_by_name(db, row), can_edit=editable)
 
 
 @router.put("/cycle-plans/{plant_key}", dependencies=[Depends(require_csrf)])
 def save_cycle_plan(plant_key: str, payload: CyclePlanIn, db: Annotated[Session, Depends(get_db)],
                     user: Annotated[User, Depends(get_current_user)], cycle_start: date | None = None):
-    """Store a plant's cycle plan. Takes effect from the NEXT cycle; work already generated is never rewritten."""
-    _require(user, TEMPLATE_WRITERS, "Only the O&M Head can edit a plant's cycle plan")
+    """Store a plant's cycle plan. Takes effect from the NEXT cycle; work already generated is never rewritten.
+
+    The Assignee runs the month, so they edit the days for their own plants as well as the O&M Head
+    (CREATOR_ROLES, the same check every other Assignee-level PM action uses). `_cycle_plan_scope`
+    keeps an Assignee to their assigned plants; a read-only UI is never the only thing stopping a
+    write."""
+    _require(user, CREATOR_ROLES, "Only the O&M Head or the plant's Assignee can edit a cycle plan")
     plant = _resolve_plants(db, [plant_key])[0]
+    _cycle_plan_scope(db, user, plant)
     phases = _plan_phases(payload)
     problem = plan_problem(phases)
     if problem:
@@ -1038,9 +1081,9 @@ def save_cycle_plan(plant_key: str, payload: CyclePlanIn, db: Annotated[Session,
     db.commit()
     db.refresh(row)
     resolved = _plant_cycles(db, [plant.id]).get(plant.id) or []
-    start = cycle_start or business_today()
+    start = _cycle_month_start(cycle_start or business_today())
     return _cycle_plan_out(plant, phases, row.notes, resolved, _chained_preview(resolved, start),
-                           updated_at=_version(row))
+                           updated_at=_version(row), updated_by=user.display_name, can_edit=True)
 
 
 @router.post("/cycle-plans/{plant_key}/preview", dependencies=[Depends(require_csrf)])
@@ -1050,18 +1093,21 @@ def preview_cycle_plan(plant_key: str, payload: CyclePlanIn, db: Annotated[Sessi
 
     The stored plan and what the engine will really do are different things once chaining is
     applied, so the editor shows both before a planner commits a day number."""
-    _require(user, TEMPLATE_WRITERS, "Only the O&M Head can edit a plant's cycle plan")
+    _require(user, CREATOR_ROLES, "Only the O&M Head or the plant's Assignee can edit a cycle plan")
     plant = _resolve_plants(db, [plant_key])[0]
+    _cycle_plan_scope(db, user, plant)
     phases = _plan_phases(payload)
     problem = plan_problem(phases)
     if problem:
         raise HTTPException(422, problem)
     derived = _derived_phase_days(db, [plant.id]).get(plant.id)
     resolved = resolve_cycle(phases, derived)
-    start = cycle_start or business_today()
+    start = _cycle_month_start(cycle_start or business_today())
     return {**_cycle_plan_out(plant, phases, (payload.notes or "").strip() or None, resolved,
-                              _chained_preview(resolved, start)),
-            "saved": False, "inverter_days": (derived or {}).get("Inverter")}
+                              _chained_preview(resolved, start), can_edit=True),
+            "saved": False, "inverter_days": (derived or {}).get("Inverter"),
+            "cycle_length": month_days(start), "cycle_start": start.isoformat(),
+            "cycle_end": cycle_end(start).isoformat()}
 
 
 @router.delete("/cycle-plans/{plant_key}", status_code=204, dependencies=[Depends(require_csrf)])
@@ -1071,8 +1117,9 @@ def delete_cycle_plan(plant_key: str, db: Annotated[Session, Depends(get_db)],
 
     Work orders already generated are deliberately left exactly as they are -- pausing stops new
     cycles, it does not withdraw planned work."""
-    _require(user, TEMPLATE_WRITERS, "Only the O&M Head can edit a plant's cycle plan")
+    _require(user, CREATOR_ROLES, "Only the O&M Head or the plant's Assignee can edit a cycle plan")
     plant = _resolve_plants(db, [plant_key])[0]
+    _cycle_plan_scope(db, user, plant)
     row = db.scalar(select(PMCyclePlan).where(PMCyclePlan.plant_id == plant.id))
     if not row:
         raise HTTPException(404, "This plant has no cycle plan")
