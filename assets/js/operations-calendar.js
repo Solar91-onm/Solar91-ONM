@@ -208,7 +208,9 @@
     if (context.type !== "washing" || !event.cycleNo) return title;
     return (event.isExtra
       ? "Extra · During cycle " + event.cycleNo
-      : "Cycle " + event.cycleNo) + " · " + title;
+      : event.isPostCycle
+        ? "After cycle " + event.cycleNo
+        : "Cycle " + event.cycleNo) + " · " + title;
   }
 
   function cycleCompletionTitle(event) {
@@ -248,10 +250,14 @@
     var title = eventChipTitle(event, context);
     var reportChip = '<span class="ep-calendar__event ' + statusClass(event.status) +
       (deadline ? " ep-calendar__event--deadline" : "") +
-      // Extra cleaning gets its own colour: it is work done, but it is not cycle progress, so it
-      // must not read like a confirmed cycle day. A date carrying both an ordinary and an extra
-      // entry renders both chips, because each saved report becomes its own event.
-      (event.isExtra ? " ep-calendar__event--extra" : "") +
+      // Three different things, three treatments. Extra cleaning (purple) is re-cleaning during a
+      // running cycle: work done, but not cycle progress, so it must not read like a confirmed cycle
+      // day. Cleaning after all three cycles are complete (blue) is ordinary work the month IS
+      // credited for, so it must not read like uncounted re-cleaning either. Everything else is
+      // cycle work. A date carrying more than one of them renders a chip for each, because every
+      // saved report becomes its own event.
+      (event.isExtra ? " ep-calendar__event--extra"
+        : event.isPostCycle ? " ep-calendar__event--after-cycles" : "") +
       (tables ? " ep-calendar__event--washing-detail" : "") +
       '" title="' + escape(eventCellDescription(event, context)) + '">' +
       (tables
@@ -751,19 +757,24 @@
       // the same purple as its grid chip and says which cycle it happened DURING, never "Cycle 3" as
       // though it were that cycle's work.
       return '<button type="button" class="ep-calendar__event-card' +
-        (event.isExtra ? " ep-calendar__event-card--extra" : "") +
+        (event.isExtra ? " ep-calendar__event-card--extra"
+          : event.isPostCycle ? " ep-calendar__event-card--after-cycles" : "") +
         '" data-calendar-event-index="' + eventIndex + '">' +
         '<span class="ep-calendar__event-card-top"><strong>' + escape(equipmentLabel(event, context)) +
-          '</strong>' + (event.isExtra ? '<span class="ep-calendar__extra-badge">Extra</span>' : "") +
+          '</strong>' + (event.isExtra ? '<span class="ep-calendar__extra-badge">Extra</span>'
+            : event.isPostCycle ? '<span class="ep-calendar__after-badge">After cycles</span>' : "") +
           '<span class="' + statusClass(event.status) + '">' + escape(event.status) + '</span></span>' +
         '<span class="ep-calendar__event-card-title">' + escape(event.title) + '</span>' +
         '<span class="ep-calendar__event-card-meta">' +
           escape(event.plantName || (context.plantCode ? "Selected plant" : "Plant not provided")) +
           (event.plantSiteCode ? " · " + escape(event.plantSiteCode) : "") +
-          " · " + escape(event.isExtra ? "During cycle " + cycleNumber : cycle) + '</span>' +
+          " · " + escape(event.isExtra ? "During cycle " + cycleNumber
+            : event.isPostCycle ? "After cycle " + cycleNumber : cycle) + '</span>' +
         (event.isExtra
           ? '<span class="ep-calendar__event-card-extra-note">Re-cleaning · calendar record only, never counted</span>'
-          : "") +
+          : event.isPostCycle
+            ? '<span class="ep-calendar__event-card-after-note">Cleaning after the three cycles · counts towards the month</span>'
+            : "") +
         '<span class="ep-calendar__event-card-open">View details →</span>' +
       '</button>';
     }).join("") + "</div>";
@@ -816,7 +827,9 @@
             ? "Unit " + event.unitNo + " of " + event.totalUnits
             : "";
           var cycle = event.cycleNo
-            ? (event.isExtra ? "During cycle " + event.cycleNo : "Cycle " + event.cycleNo) : "";
+            ? (event.isExtra ? "During cycle " + event.cycleNo
+               : event.isPostCycle ? "After cycle " + event.cycleNo
+               : "Cycle " + event.cycleNo) : "";
           var meta = [
             event.plantName,
             event.plantSiteCode,
@@ -825,12 +838,15 @@
             event.title
           ].filter(Boolean).join(" · ");
           return '<button type="button" class="ep-calendar__pm-summary-item' +
-            (event.isExtra ? " ep-calendar__pm-summary-item--extra" : "") +
+            (event.isExtra ? " ep-calendar__pm-summary-item--extra"
+              : event.isPostCycle ? " ep-calendar__pm-summary-item--after-cycles" : "") +
             '" data-calendar-event-index="' + eventIndex + '">' +
             '<span class="ep-calendar__pm-summary-badge' +
               (event.isExtra ? " ep-calendar__pm-summary-badge--extra"
+                : event.isPostCycle ? " ep-calendar__pm-summary-badge--after-cycles"
                 : context.type === "washing" ? " ep-calendar__pm-summary-badge--washing" : "") + '">' +
-              (event.isExtra ? "EXTRA" : context.type === "pm" ? "PM" : "CLEAN") + '</span>' +
+              (event.isExtra ? "EXTRA" : event.isPostCycle ? "AFTER"
+                : context.type === "pm" ? "PM" : "CLEAN") + '</span>' +
             '<strong>' + escape(equipmentLabel(event, context)) + '</strong>' +
             '<span class="ep-calendar__pm-summary-meta">' + escape(meta) + '</span>' +
             '<span class="ep-calendar__pm-summary-status">' + escape(event.status) + '</span>' +
@@ -858,7 +874,11 @@
       ["Completed on", event.completedOn ? displayDate(event.completedOn) : ""],
       // Extra cleaning belongs to no cycle's progress; naming the cycle plainly would read as if
       // it did. The banner below carries the full explanation.
-      ["Cycle", event.cycleNo ? (event.isExtra ? "During cycle " + event.cycleNo : "Cycle " + event.cycleNo) : ""],
+      ["Cycle", event.cycleNo
+        ? (event.isExtra ? "During cycle " + event.cycleNo
+           : event.isPostCycle ? "After cycle " + event.cycleNo
+           : "Cycle " + event.cycleNo)
+        : ""],
       ["Tables cleaned", event.tablesCleaned],
       ["Which tables", event.tablesList],
       ["Exception", event.exceptionReason],
@@ -903,7 +923,8 @@
       extraActions = '<p class="ep-calendar__detail-note">Saved record, shown read-only.</p>';
     }
     return '<div class="ep-calendar__modal ep-calendar__event-detail-modal' +
-      (event.isExtra ? " ep-calendar__event-detail-modal--extra" : "") + '" data-calendar-event-detail>' +
+      (event.isExtra ? " ep-calendar__event-detail-modal--extra"
+        : event.isPostCycle ? " ep-calendar__event-detail-modal--after-cycles" : "") + '" data-calendar-event-detail>' +
       '<button class="ep-calendar__backdrop" type="button" data-calendar-action="close-event-detail" aria-label="Close activity details"></button>' +
       '<section class="ep-calendar__dialog ep-calendar__event-detail-dialog" role="dialog" aria-modal="true" aria-labelledby="calendar-event-detail-title">' +
         '<header class="ep-calendar__dialog-head"><div>' +
@@ -915,14 +936,19 @@
             '<div class="ep-calendar__detail-banner"><strong>' + escape(event.title) +
               '</strong><span>' + escape(event.reference || displayDate(event.date)) + '</span></div>' +
             '<div class="ep-calendar__detail-chips"><span>' + escape(equipmentLabel(event, context)) +
-              '</span>' + (event.isExtra ? '<span class="ep-calendar__extra-badge">Extra cleaning</span>' : "") +
+              '</span>' + (event.isExtra ? '<span class="ep-calendar__extra-badge">Extra cleaning</span>'
+                : event.isPostCycle ? '<span class="ep-calendar__after-badge">After the three cycles</span>' : "") +
               '<span>' + escape(event.status) + '</span></div>' +
             (event.isExtra
               ? '<p class="ep-calendar__detail-extra-note">Extra cleaning is a calendar entry only: it never ' +
                 'counts towards cycle progress or plant compliance, whenever it was done. Cleaning carried out ' +
                 'after all three cycles are complete belongs on the cycle sheet as an ordinary day, where it does ' +
                 'count towards the month.</p>'
-              : "") +
+              : event.isPostCycle
+                ? '<p class="ep-calendar__detail-after-note">Cleaning carried out after all three cycles were ' +
+                  'complete. This is ordinary work, not re-cleaning: it counts towards the month and can take the ' +
+                  'plant above 100%. It is kept on the last cycle because the month has no fourth cycle.</p>'
+                : "") +
             '<dl class="ep-calendar__detail-fields">' +
               fields.map(function (field) {
                 var value = field[0] === "Plant" && event.plantSiteCode
@@ -1514,6 +1540,15 @@
     return !!report && report.is_extra === true;
   }
 
+  /** Ordinary cleaning recorded once all three cycles were complete.
+   *
+   *  It is NOT re-cleaning: the month is credited for it (the last cycle's surplus). It used to be
+   *  shown in the same purple as re-cleaning, which read as "does not count" for work that counts.
+   *  It gets its own treatment instead, and the purple now means only re-cleaning between cycles. */
+  function isPostCycleReport(report) {
+    return !!report && report.post_cycle === true && report.is_extra !== true;
+  }
+
   function tableNumbersOf(report) {
     return (report.cleaned_table_codes || []).map(tableNumber).filter(function (number) { return number !== null; });
   }
@@ -1932,6 +1967,7 @@
         var numbers = row.numbers && row.numbers.length ? formatTableList(row.numbers) : "\u2014";
         // Extra cleaning is not cycle progress, so keep its label visible beside the table numbers.
         if (row.report.is_extra === true) numbers += " (extra cleaning)";
+        else if (isPostCycleReport(row.report)) numbers += " (after the three cycles · counts)";
         var edit = state.recordEdit;
         if (edit && edit.id === row.report.id) return renderRecordEditRow(state, row, dateLabel);
         return '<div class="ep-calendar__record-row ep-calendar__record-row--saved">' +
@@ -2384,10 +2420,13 @@
             title: report.is_extra === true
               ? Number(report.tables_cleaned || 0) + " tables re-cleaned (extra)"
               : report.job_status === "Done"
+                // The chip and the card already say "After cycle N"; repeating it in the title read
+                // as "After cycle 3 - 4 tables cleaned after the three cycles".
                 ? Number(report.tables_cleaned || 0) + " tables cleaned"
                 : "No module cleaning reported",
             status: status,
             isExtra: report.is_extra === true,
+            isPostCycle: isPostCycleReport(report),
             reportId: report.id,
             canEdit: report.can_edit === true,
             canDelete: report.can_delete === true,

@@ -100,19 +100,43 @@ def test_the_portfolio_header_states_how_many_plants_are_planned_and_paused():
 
     assert "function plannedLine()" in overview
     assert "plants planned" in overview
-    assert "data-pm-paused-filter" in overview, "the paused count filters the register in place"
+    assert "data-pm-plan-filter" in overview, "the counts filter the register in place"
     header = overview[overview.index("'<h1>Preventive Maintenance</h1>"):]
     assert "plannedLine()" in header[:400], "the line sits under the portfolio title"
 
 
-def test_the_paused_count_filters_rather_than_opening_another_page():
+def test_the_plan_filter_is_three_way_and_opens_on_all():
+    """Changed deliberately: it was a paused-only toggle.
+
+    Reported from the live portal — with the toggle on, the page read "13 of 42 plants planned" over
+    an empty register and there was no way to ask for those 13. This is the index page for every
+    plant's PM, so it opens on All and can be pointed at Planned or Paused.
+    """
     overview = _text(OVERVIEW)
-    handler = overview[overview.index('if (event.target.closest("[data-pm-paused-filter]"))'):]
+
+    assert 'planFilter: "all"' in overview, "the page opens showing every plant"
+    for choice in ('["all", "All "', '["planned", "Planned "', '["paused", "Paused "'):
+        assert choice in overview, choice
+    assert 'state.planFilter === "paused" && !isPaused(plant.siteCode)' in overview
+    assert 'state.planFilter === "planned" && isPaused(plant.siteCode)' in overview
+    assert "pausedOnly" not in overview, "no remnant of the two-way toggle"
+
+
+def test_the_plan_filter_filters_rather_than_opening_another_page():
+    overview = _text(OVERVIEW)
+    handler = overview[overview.index('var planButton = event.target.closest("[data-pm-plan-filter]");'):]
     handler = handler[:handler.index("var layoutButton")]
 
-    assert "state.pausedOnly = !state.pausedOnly;" in handler
+    assert 'state.planFilter = planButton.getAttribute("data-pm-plan-filter") || "all";' in handler
     assert "scrollIntoView" in handler
     assert "selectView" not in handler and "selectPlantPage" not in handler
+
+
+def test_asking_for_the_planned_plants_says_what_it_is_showing():
+    overview = _text(OVERVIEW)
+
+    assert "Showing plants with a cycle plan. Open a plant to see its tracker." in overview
+    assert "Showing paused plants only." in overview
 
 
 def test_a_paused_plant_reads_as_paused_and_never_as_a_zero():
@@ -335,7 +359,7 @@ def test_a_clear_control_appears_only_while_something_is_narrowing():
     narrowing = overview[overview.index("function filtersNarrowing()"):]
     narrowing = narrowing[:narrowing.index("\n  }")]
     for condition in ("state.filters.query.trim()", "state.filters.plant", "state.filters.equipment",
-                     'state.filters.status !== "all"', "state.pausedOnly", "narrowedDates()"):
+                     'state.filters.status !== "all"', 'state.planFilter !== "all"', "narrowedDates()"):
         assert condition in narrowing, condition
 
     assert "filtersNarrowing()\n                ? '<button type=\"button\" class=\"ep-pm__clear-filters\"" in overview
@@ -352,7 +376,7 @@ def test_clearing_puts_every_filter_back_to_the_whole_month():
     assert 'state.filters.status = "all";' in clear
     assert "state.filters.dateFrom = bounds.start;" in clear
     assert "state.filters.dateTo = bounds.end;" in clear
-    assert "state.pausedOnly = false;" in clear, "the paused count's own filter is undone too"
+    assert 'state.planFilter = "all";' in clear, "the plan filter goes back to every plant too"
 
 
 def test_both_register_layouts_offer_the_clear_control_when_empty():
@@ -369,6 +393,6 @@ def test_both_register_layouts_offer_the_clear_control_when_empty():
 def test_the_clear_control_is_wired_before_the_other_filter_buttons():
     overview = _text(OVERVIEW)
     handler = overview[overview.index('if (event.target.closest("[data-pm-clear-filters]"))'):]
-    handler = handler[:handler.index("[data-pm-paused-filter]")]
+    handler = handler[:handler.index("[data-pm-plan-filter]")]
 
     assert "clearFilters();" in handler and "render();" in handler

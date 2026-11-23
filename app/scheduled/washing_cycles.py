@@ -603,7 +603,33 @@ def _missing_photo_kinds(report: WashingDailyReport, total_tables: int) -> list[
     return [kind for kind in ("before", "after") if kind not in kinds]
 
 
-def _report_out(report: WashingDailyReport, plant: Plant, viewer: User, config: WashingConfig, manager: bool = False, total_tables: int | None = None) -> dict:
+def _post_cycle_ids(rows, total_tables: int) -> set:
+    """Ids of ORDINARY days that fell after the month's three cycles were already full.
+
+    Two different things used to be shown identically. An entry MARKED extra (`is_extra`) is
+    re-cleaning done while a cycle was still running: a calendar record that never counts. A day
+    recorded once all three cycles are complete is ordinary cleaning the month IS credited for (the
+    last cycle's surplus). `_cycle_sequence` flags both as "extra" because neither advances a cycle,
+    so the stored flag is what separates them."""
+    if total_tables <= 0:
+        return set()
+    sequence = _cycle_sequence([_sequence_entry(row) for row in rows], total_tables)
+    return {row.id for row, (_cycle_no, extra) in zip(rows, sequence)
+            if extra and not bool(getattr(row, "is_extra", False))}
+
+
+def _is_post_cycle(db: Session, report: WashingDailyReport, total_tables: int) -> bool:
+    """The same question for one report, for the endpoints that answer with a single row."""
+    if bool(getattr(report, "is_extra", False)) or total_tables <= 0:
+        return False
+    rows = list(db.scalars(select(WashingDailyReport).where(
+        WashingDailyReport.plant_id == report.plant_id,
+        WashingDailyReport.cycle_month == report.cycle_month,
+    ).order_by(WashingDailyReport.report_date, WashingDailyReport.created_at)))
+    return report.id in _post_cycle_ids(rows, total_tables)
+
+
+def _report_out(report: WashingDailyReport, plant: Plant, viewer: User, config: WashingConfig, manager: bool = False, total_tables: int | None = None, post_cycle: bool = False) -> dict:
     can_review = report.review_status == "Pending" and report.reported_by_id != viewer.id and _can_review_washing(viewer, config)
     table_total = total_tables if total_tables is not None else int(config.tables_per_cycle or 0)
     backfilled = _is_backfilled(report)
@@ -622,6 +648,11 @@ def _report_out(report: WashingDailyReport, plant: Plant, viewer: User, config: 
         # part of that cycle's progress, so the register and calendar can say "Extra — during
         # Cycle 1" without the reader mistaking it for cycle work.
         "is_extra": bool(report.is_extra),
+        # Ordinary cleaning done once all three cycles were complete. It is NOT re-cleaning and it
+        # does count towards the month, so the page gives it its own treatment instead of the
+        # "extra" one: the two were indistinguishable before, which is why counted work was being
+        # read as uncounted re-cleaning.
+        "post_cycle": bool(post_cycle),
         "remarks": report.remarks,
         "exception_reason": report.exception_reason,
         "evidence": [
@@ -1270,12 +1301,15 @@ def _build_overview(db: Session, user: User, include_tables: bool = False, repor
             plant_rows[-1]["table_codes"] = table_codes
             plant_rows[-1]["table_health"] = table_health
         # Every report still feeds the figures above; only recent ones (and any awaiting review) are sent to the browser.
+        overview_post_cycle = _post_cycle_ids(sorted(
+            reports, key=lambda r: (r.report_date, str(getattr(r, "created_at", "") or ""))), table_count)
         for report in reports:
             if report.report_date >= send_cutoff or report.review_status == "Pending":
                 if report.review_status == "Pending":
                     pending_reviews += 1
                 if include_reports:
-                    reports_out.append(_report_out(report, plant, user, config, manager, table_count))
+                    reports_out.append(_report_out(report, plant, user, config, manager, table_count,
+                                                   post_cycle=report.id in overview_post_cycle))
 
     completed_rows = db.execute(
         select(
@@ -1998,7 +2032,8 @@ def create_daily_report(db: Session, user: User, payload: WashingDailyReportRequ
             extra_user_ids=[user.id],
         )
     db.commit()
-    return _report_out(report, plant, user, config, manager, total_tables)
+    return _report_out(report, plant, user, config, manager, total_tables,
+                       post_cycle=_is_post_cycle(db, report, total_tables))
 
 
 def _day_label(value: date) -> str:
@@ -2163,7 +2198,14 @@ def create_sheet_reports(db: Session, user: User, payload: WashingSheetRequest) 
             extra_user_ids=[user.id],
         )
     db.commit()
-    return {"saved": len(created), "reports": [_report_out(report, plant, user, config, manager, total_tables) for report in created]}
+    saved_post_cycle = _post_cycle_ids(list(db.scalars(select(WashingDailyReport).where(
+        WashingDailyReport.plant_id == plant.id,
+        WashingDailyReport.cycle_month.in_({r.cycle_month for r in created}),
+    ).order_by(WashingDailyReport.report_date, WashingDailyReport.created_at))), total_tables)
+    return {"saved": len(created),
+            "reports": [_report_out(report, plant, user, config, manager, total_tables,
+                                    post_cycle=report.id in saved_post_cycle)
+                        for report in created]}
 
 
 def _load_report_for_change(db: Session, user: User, report_id: UUID):
@@ -2352,7 +2394,8 @@ def update_daily_report(db: Session, user: User, report_id: UUID, payload: Washi
         metadata_json={"plant": plant.site_code, "before": before, "after": {"report_date": new_date.isoformat(), "tables_cleaned": tables, "job_status": status, "exception_reason": reason, "cycle_no": cycle_no, "cycle_month": new_month, "is_extra": bool(report.is_extra)}},
     ))
     db.commit()
-    return _report_out(report, plant, user, config, manager, total_tables)
+    return _report_out(report, plant, user, config, manager, total_tables,
+                       post_cycle=_is_post_cycle(db, report, total_tables))
 
 
 def delete_daily_report(db: Session, user: User, report_id: UUID) -> dict:
@@ -2588,6 +2631,7 @@ def month_cycles(db: Session, user: User, plant_id: UUID, month: str) -> dict:
         WashingDailyReport.plant_id == plant.id, WashingDailyReport.cycle_month == month,
     ).order_by(WashingDailyReport.report_date, WashingDailyReport.created_at)))
     reports = [r for r in month_reports if r.review_status in ("Pending", "Confirmed")]
+    post_cycle = _post_cycle_ids(month_reports, table_count)
     manager = _is_washing_manager(db, user)
     starts, dues = _cycle_start_dates(first, config.cycle_overrides), _cycle_due_dates(first, config.cycle_overrides)
     default_starts, default_dues = _default_start_dates(first), _default_due_dates(first)
@@ -2635,7 +2679,9 @@ def month_cycles(db: Session, user: User, plant_id: UUID, month: str) -> dict:
         "cycles": cycles, "pattern": _pattern_out(config), "can_edit": manager,
         "summary": _month_wash_summary(month_reports, table_count),
         # every report of the month (rejected ones included) so the cycle sheet can show each day on one row
-        "reports": [_report_out(r, plant, user, config, manager, table_count) for r in month_reports],
+        "reports": [_report_out(r, plant, user, config, manager, table_count,
+                                post_cycle=r.id in post_cycle)
+                    for r in month_reports],
         "today": today.isoformat(),
     }
 
@@ -2778,7 +2824,8 @@ def review_daily_report(db: Session, user: User, report_id: UUID, payload: Washi
             extra_user_ids=[report.reported_by_id] if report.reported_by_id else [],
         )
     db.commit()
-    return _report_out(report, plant, user, config, True, total_tables)
+    return _report_out(report, plant, user, config, True, total_tables,
+                       post_cycle=_is_post_cycle(db, report, total_tables))
 
 
 def confirm_sheet_reports(db: Session, user: User, payload: WashingBulkConfirmRequest) -> dict:
@@ -2860,10 +2907,16 @@ def confirm_sheet_reports(db: Session, user: User, payload: WashingBulkConfirmRe
             extra_user_ids=reporters,
         )
     db.commit()
+    confirmed_post_cycle = _post_cycle_ids(list(db.scalars(select(WashingDailyReport).where(
+        WashingDailyReport.plant_id == plant.id,
+        WashingDailyReport.cycle_month.in_({r.cycle_month for r in reports}),
+    ).order_by(WashingDailyReport.report_date, WashingDailyReport.created_at))), total_tables) if reports else set()
     return {
         "confirmed": len(reports),
         "cycles_completed": [{"cycle_month": month, "cycle_no": cycle_no} for month, cycle_no in completed],
-        "reports": [_report_out(report, plant, user, config, True, total_tables) for report in reports],
+        "reports": [_report_out(report, plant, user, config, True, total_tables,
+                                post_cycle=report.id in confirmed_post_cycle)
+                    for report in reports],
     }
 
 

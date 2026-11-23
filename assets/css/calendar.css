@@ -1994,3 +1994,69 @@
   background: var(--ep-bg);
   box-shadow: none;
 }
+/* ── Cleaning after all three cycles are complete ─────────────────────────────
+   Purple means re-cleaning (".ep-calendar__event--extra"): work done while a cycle
+   was still running, which never counts. This BLUE means ordinary cleaning carried
+   out once the three cycles were full — the month IS credited for it. The two were
+   shown identically, so counted work read as uncounted re-cleaning.
+
+   Blue is deliberately not the green of a confirmed cycle day either: it is beyond
+   the month's plan, not part of it. */
+.ep-calendar__event--after-cycles {
+  border-left-color: #0b3d73;
+  border-top: 1px dotted #cfe2f7;
+  border-right: 1px dotted #cfe2f7;
+  border-bottom: 1px dotted #cfe2f7;
+  background: #1366b0;
+  color: #ffffff;
+}
+
+.ep-calendar__after-badge {
+  flex: 0 0 auto;
+  padding: 1px 8px;
+  border: 1px solid #1366b0;
+  border-radius: 99px;
+  background: #1366b0;
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .03em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.ep-calendar__event-card--after-cycles {
+  border-color: #1366b0;
+  background: #eff6fd;
+}
+
+.ep-calendar__event-card-after-note {
+  color: #0b3d73;
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+.ep-calendar__pm-summary-item--after-cycles { background: #eff6fd; box-shadow: inset 3px 0 0 #1366b0; }
+.ep-calendar__pm-summary-badge--after-cycles { background: #1366b0; color: #ffffff; }
+
+.ep-calendar__event-detail-modal--after-cycles .ep-calendar__detail-banner {
+  border-color: #1366b0;
+  background: #eff6fd;
+}
+
+.ep-calendar__detail-after-note {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid #cfe2f7;
+  border-radius: 10px;
+  background: #eff6fd;
+  color: #0b3d73;
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.ep-calendar__day-chip--after-cycles {
+  border-color: #1366b0;
+  background: #1366b0;
+  color: #ffffff;
+}

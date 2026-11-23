@@ -830,18 +830,32 @@
   font-size: 13px;
   color: var(--ep-text-muted);
 }
-.ep-pm__plan-paused {
+/* All / Planned / Paused over the plant register. A segmented control, because asking for the
+   planned plants is as ordinary a question as asking for the paused ones. */
+.ep-pm__plan-filter {
+  display: inline-flex;
+  gap: 0;
   border: 1px solid var(--ep-border-strong);
   border-radius: 999px;
-  background: var(--ep-grey-soft);
+  overflow: hidden;
+}
+.ep-pm__plan-filter button {
+  border: 0;
+  border-right: 1px solid var(--ep-border-soft);
+  background: var(--ep-bg);
   color: var(--ep-text-muted);
   font: inherit;
   font-size: 12px;
   font-weight: 600;
-  padding: 2px 10px;
+  padding: 3px 11px;
   cursor: pointer;
 }
-.ep-pm__plan-paused[aria-pressed="true"] { border-color: var(--ep-accent); color: var(--ep-accent-strong); }
+.ep-pm__plan-filter button:last-child { border-right: 0; }
+.ep-pm__plan-filter button:hover { color: var(--ep-accent-strong); }
+.ep-pm__plan-filter button[aria-pressed="true"] {
+  background: var(--ep-accent-soft);
+  color: var(--ep-accent-strong);
+}
 .ep-pm__plan-note { color: var(--ep-text-faint); }
 .ep-pm__paused-tag {
   display: inline-block;

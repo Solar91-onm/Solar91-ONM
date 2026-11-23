@@ -9,7 +9,10 @@
     // new PM cycles, and it is never shown as failing or as 0%. Fetched once per visit and handed
     // to the tracker on a plant's page so it does not ask for the same listing twice.
     cyclePlans: null,
-    pausedOnly: false,
+    // "all" | "planned" | "paused". This is the index page for every plant's PM, so it opens on
+    // "all"; a two-way paused toggle left no way to ask for the planned plants and, once on, read
+    // as though the portfolio had emptied.
+    planFilter: "all",
     plant: null,
     parent: "overview",
     month: "",
@@ -114,7 +117,7 @@
   function filtersNarrowing() {
     return !!(state.filters.query.trim() || state.filters.plant || state.filters.equipment ||
               (state.filters.status && state.filters.status !== "all") ||
-              state.pausedOnly || narrowedDates());
+              state.planFilter !== "all" || narrowedDates());
   }
 
   /** Put every filter back to "everything in this month", the state the page opens in. */
@@ -126,7 +129,7 @@
     state.filters.status = "all";
     state.filters.dateFrom = bounds.start;
     state.filters.dateTo = bounds.end;
-    state.pausedOnly = false;
+    state.planFilter = "all";
   }
 
   function periodRange(month) {
@@ -198,19 +201,33 @@
     return !!(plan && plan.paused);
   }
 
-  /** "13 of 42 plants planned · 29 paused" — one compact line, not a second screen. */
+  /**
+   * "13 of 42 plants planned", with a three-way filter over the register below it.
+   *
+   * All / Planned / Paused, defaulting to All: the O&M Head opens this page to see every plant's
+   * PM, and asking for the planned ones is as ordinary a question as asking for the paused ones.
+   */
   function plannedLine() {
     var list = state.cyclePlans;
     if (!list || !list.plans || !list.total) return "";
+    var choices = [
+      ["all", "All " + number(list.total)],
+      ["planned", "Planned " + number(list.configured)],
+      ["paused", "Paused " + number(list.paused)]
+    ];
     return '<p class="ep-pm__plan-line">' +
       '<strong>' + number(list.configured) + ' of ' + number(list.total) + ' plants planned</strong>' +
-      (list.paused
-        ? ' · <button type="button" class="ep-pm__plan-paused" data-pm-paused-filter aria-pressed="' +
-          state.pausedOnly + '">' + number(list.paused) + ' paused</button>'
-        : "") +
-      (state.pausedOnly
+      ' · <span class="ep-pm__plan-filter" role="group" aria-label="Show plants by cycle plan">' +
+        choices.map(function (choice) {
+          return '<button type="button" data-pm-plan-filter="' + choice[0] + '" aria-pressed="' +
+            (state.planFilter === choice[0]) + '">' + escape(choice[1]) + '</button>';
+        }).join("") +
+      '</span>' +
+      (state.planFilter === "paused"
         ? ' <span class="ep-pm__plan-note">Showing paused plants only. A paused plant generates no new PM cycles and is left out of PM compliance, never counted as 0%.</span>'
-        : "") +
+        : state.planFilter === "planned"
+          ? ' <span class="ep-pm__plan-note">Showing plants with a cycle plan. Open a plant to see its tracker.</span>'
+          : "") +
     '</p>';
   }
 
@@ -306,7 +323,8 @@
     var rows = state.rows.filter(function (row) {
       var plant = row.plant;
       if (!state.siteCode && !activePlant(plant)) return false;
-      if (state.pausedOnly && !isPaused(plant.siteCode)) return false;
+      if (state.planFilter === "paused" && !isPaused(plant.siteCode)) return false;
+      if (state.planFilter === "planned" && isPaused(plant.siteCode)) return false;
       if (state.filters.plant && plant.siteCode !== state.filters.plant) return false;
       var entries = rowEntries(row);
       if (state.filters.equipment &&
@@ -1053,9 +1071,10 @@
         render();
         return;
       }
-      // The paused count filters the register in place; it never opens a separate page.
-      if (event.target.closest("[data-pm-paused-filter]")) {
-        state.pausedOnly = !state.pausedOnly;
+      // All / Planned / Paused filters the register in place; it never opens a separate page.
+      var planButton = event.target.closest("[data-pm-plan-filter]");
+      if (planButton) {
+        state.planFilter = planButton.getAttribute("data-pm-plan-filter") || "all";
         render();
         var register = state.host.querySelector(".ep-pm__plants-grid, .ep-pm__table-wrap");
         if (register && register.scrollIntoView) register.scrollIntoView({ block: "start" });
