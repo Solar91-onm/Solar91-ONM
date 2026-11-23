@@ -245,7 +245,8 @@
 
   function aggregate(rows) {
     if (data && typeof data.aggregatePortfolio === "function") {
-      return data.aggregatePortfolio(rows).totals;
+      // aggregatePortfolio returns the totals object itself (the Dashboard uses it the same way).
+      return data.aggregatePortfolio(rows);
     }
     return rows.reduce(function (total, row) {
       var pm = pmBlock(row);

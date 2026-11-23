@@ -614,6 +614,28 @@
       });
     });
 
+    // Hover to expand/collapse compact cells (More/Less)
+    container.querySelectorAll("[data-compact-cell]").forEach(function (cell) {
+      var toggle = cell.querySelector("[data-compact-cell-toggle]");
+      if (!toggle) return;
+      cell.addEventListener("mouseenter", function () {
+        if (toggle.hidden) return; // nothing to expand
+        var content = cell.querySelector("[data-compact-content]");
+        if (!content) return;
+        content.classList.remove("is-collapsed");
+        toggle.setAttribute("aria-expanded", "true");
+        toggle.textContent = "Less";
+      });
+      cell.addEventListener("mouseleave", function () {
+        if (toggle.hidden) return;
+        var content = cell.querySelector("[data-compact-content]");
+        if (!content) return;
+        content.classList.add("is-collapsed");
+        toggle.setAttribute("aria-expanded", "false");
+        toggle.textContent = "More";
+      });
+    });
+
     var search = container.querySelector("[data-pt-search]");
     if (search) {
       search.addEventListener("input", function () {

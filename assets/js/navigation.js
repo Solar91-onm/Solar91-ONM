@@ -485,17 +485,28 @@
   function toggleViewInfoHealthSection(section) {
     if (navState.activeView !== "view-sub" || navState.selectedViewPage !== "details" ||
         (section !== "info" && section !== "health")) return;
-    navState.infoHealthOpen[section] = !navState.infoHealthOpen[section];
-    navState.selectedDetailSection = navState.infoHealthOpen.health && !navState.infoHealthOpen.info
-      ? "health" : "details";
 
-    var button = document.querySelector('[data-view-section="' + section + '"]');
-    var panel = document.querySelector('[data-view-section-panel="' + section + '"]');
-    if (button) button.setAttribute("aria-expanded", String(navState.infoHealthOpen[section]));
-    if (panel) panel.hidden = !navState.infoHealthOpen[section];
-    if (navState.infoHealthOpen[section]) {
-      document.dispatchEvent(new CustomEvent("portal:info-health-panel-opened", { detail: { section: section } }));
-    }
+    // Exclusive tab: clicking the already-active tab does nothing;
+    // clicking the other tab switches to it.
+    var otherSection = section === "info" ? "health" : "info";
+
+    // If this section is already open, do nothing (tabs stay selected)
+    if (navState.infoHealthOpen[section]) return;
+
+    // Switch: open the clicked tab, close the other
+    navState.infoHealthOpen[section] = true;
+    navState.infoHealthOpen[otherSection] = false;
+    navState.selectedDetailSection = section === "health" ? "health" : "details";
+
+    // Update all buttons and panels
+    ["info", "health"].forEach(function (s) {
+      var button = document.querySelector('[data-view-section="' + s + '"]');
+      var panel = document.querySelector('[data-view-section-panel="' + s + '"]');
+      if (button) button.setAttribute("aria-expanded", String(navState.infoHealthOpen[s]));
+      if (panel) panel.hidden = !navState.infoHealthOpen[s];
+    });
+
+    document.dispatchEvent(new CustomEvent("portal:info-health-panel-opened", { detail: { section: section } }));
     writeNavigationHistory(false);
     try { sessionStorage.setItem("solar91Portal.navState", JSON.stringify(navState)); } catch (_) {}
     updateHighlights();
@@ -744,8 +755,18 @@
     }
 
     function showViewInfoHealthSection(showSections) {
+      if (showSections) {
+        // Ensure exactly one tab is open (default to info if neither is set)
+        if (!navState.infoHealthOpen.info && !navState.infoHealthOpen.health) {
+          navState.infoHealthOpen.info = true;
+        }
+        // Enforce mutual exclusivity
+        if (navState.infoHealthOpen.info && navState.infoHealthOpen.health) {
+          navState.infoHealthOpen.health = false;
+        }
+      }
       var infoOpen = showSections ? navState.infoHealthOpen.info : true;
-      var healthOpen = showSections && navState.infoHealthOpen.health;
+      var healthOpen = showSections ? navState.infoHealthOpen.health : false;
       if (viewInfoPanel) viewInfoPanel.hidden = !infoOpen;
       if (viewHealthPanel) viewHealthPanel.hidden = !healthOpen;
       document.querySelectorAll("[data-view-section]").forEach(function (button) {
@@ -851,6 +872,9 @@
     if (pageId === "pm" && !navState.pmCalendarOpen) {
       showOnly(pmOverviewEl);
       if (titleEl) titleEl.textContent = "Preventive Maintenance";
+      if (global.Solar91PortalPMCyclePlans) {
+        global.Solar91PortalPMCyclePlans.show(document.querySelector("[data-pm-cycle-plans-host]"), { siteCode: plantCode });
+      }
       if (global.Solar91PortalPMOverview) {
         global.Solar91PortalPMOverview.show(
           document.querySelector("[data-pm-overview-host]"),

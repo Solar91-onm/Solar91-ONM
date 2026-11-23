@@ -783,6 +783,22 @@ class PMUnitConfig(Base, TimestampMixin):
     updated_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
     __table_args__ = (UniqueConstraint("plant_id", "equipment_type"),)
 
+
+class PMCyclePlan(Base, TimestampMixin):
+    """One plant's monthly PM cycle, loaded from the tracker the team works from. Migration 049.
+
+    `phases` is an ordered list of {phase, area, categories, start_day, days, step_days}; a phase's
+    categories are done as one visit, and `days` is null on the Inverter phase, whose length follows
+    pm_unit_config. A plant with NO row here is paused: no new PM cycles are generated for it, which
+    is deliberate -- only plants with a tracker are planned."""
+    __tablename__ = "pm_cycle_plans"
+    id: Mapped[uuid.UUID] = uuid_pk()
+    plant_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("plants.id", ondelete="CASCADE"), nullable=False, unique=True, index=True)
+    phases: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    notes: Mapped[str | None] = mapped_column(Text)
+    updated_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+
 # The Asset & Warranty page was removed from the portal. Its table, `asset_warranty`
 # (migration 034), is deliberately left in the database with its rows intact; no model
 # maps it any more, so nothing in the application reads or writes it.

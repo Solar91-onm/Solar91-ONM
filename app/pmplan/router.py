@@ -26,12 +26,14 @@ from sqlalchemy.orm import Session
 
 from app.core.timeutil import business_today, log_stamp
 from app.core.database import get_db
-from app.core.models import AuditLog, OMTask, NotificationPreference, PMScopeConfig, PMTemplate, PMUnitConfig, Plant, User
+from app.core.models import (AuditLog, OMTask, NotificationPreference, PMCyclePlan, PMScopeConfig, PMTemplate,
+                             PMUnitConfig, Plant, User)
 from app.core.security import get_current_user, require_csrf, user_scoped_plant_ids
 from app.plants.codes import find_plant_by_code
 from app.pmplan.alerts import PM_ALERT_EVENTS, PM_TEAM_RECIPIENT_MODES, default_pm_preferences, get_pm_preferences
-from app.pmplan.cycle import (CYCLE, CYCLE_DAYS, NAMED_TYPES, NOT_IN_PM, ONE_JOB_TYPES, chained_window, in_pm, one_job,
-                               phase_for, phase_index, window as cycle_window, window_out)
+from app.pmplan.cycle import (CYCLE, CYCLE_DAYS, NAMED_TYPES, NOT_IN_PM, ONE_JOB_TYPES, chained_window, in_pm,
+                               one_job, phase_for, phase_index, plan_problem, resolve_cycle,
+                               window as cycle_window, window_out)
 from app.pmplan import sheets as pm_sheets
 from app.pmplan.units import distribute, next_cycle_id, run_daily  # noqa: F401  (next_cycle_id re-exported for the scheduled router)
 from app.scheduled.schemas import ALLOWED_ASSETS, ALLOWED_FREQUENCIES
@@ -294,6 +296,16 @@ def _plan_tasks(db: Session, user: User, plants: list[Plant], tpl: dict[str, Any
     return items, skipped
 
 
+def _due_date(item: dict[str, Any], start: date) -> date:
+    """When one planned task falls due: its WORKING-day ordinal placed on the phase's step spacing.
+
+    `day` and `due_day` are always working-day ordinals (1, 2, 3, ...), so the calendar date of the
+    Nth working day of a phase that runs every `step` days is start + (N - 1) * step. Computing it
+    in one place keeps the stored due date, the chaining hand-off and the upload preview in step."""
+    ordinal = item.get("due_day") or item.get("day") or 1
+    return start + timedelta(days=(ordinal - 1) * (item.get("step") or 1))
+
+
 def _create_tasks(db: Session, user: User, tpl: dict[str, Any], items: list[dict[str, Any]], start: date,
                   template_id: str | None, remarks: str | None = None) -> None:
     hours = tpl.get("est_hours")
@@ -306,7 +318,7 @@ def _create_tasks(db: Session, user: User, tpl: dict[str, Any], items: list[dict
     quantity_by_plant: dict[Any, int | None] = {}
     for it in items:
         job_start = it.get("start") or start      # PM cycle: each plant has its own turn (_fit_to_cycle)
-        due = job_start + timedelta(days=(it.get("due_day") or it.get("day") or 1) - 1)
+        due = _due_date(it, job_start)
         wo = "WO-" + uuid.uuid4().hex[:10].upper()
         who_user: User | None = it["assignee_user"]
         if it["plant"].id not in quantity_by_plant:
@@ -400,16 +412,58 @@ def _start_and_plan(payload: ApplyIn, equipment_type: str) -> tuple[date, dict[s
 
 
 _UNCHAINED_FREQUENCIES = ("Daily", "Weekly")    # short-period checks are not part of the monthly phase order
+# Shown wherever PM work is listed or counted for a plant with no row in pm_cycle_plans. It is a
+# STATE, not a failure: 29 of 42 plants have no tracker yet and must not read as a broken portal.
+PAUSED_LABEL = "PM paused - no cycle plan configured"
+PAUSED_HINT = ("Configure a cycle plan for this plant to start generating PM. "
+               "Work orders already generated are not affected.")
+
+
+def _derived_phase_days(db: Session, plant_ids: list[Any]) -> dict[Any, dict[str, int]]:
+    """{plant: {"Inverter": working days}} from pm_unit_config: ceil(total_units / units_per_day).
+
+    The Inverter phase's length is the one a plan does not state, because it follows the plant's
+    unit count rather than a number typed into the tracker."""
+    out: dict[Any, dict[str, int]] = {}
+    if not plant_ids:
+        return out
+    for pid, total, per_day in db.execute(
+            select(PMUnitConfig.plant_id, PMUnitConfig.total_units, PMUnitConfig.units_per_day)
+            .where(PMUnitConfig.plant_id.in_(plant_ids),
+                   func.lower(PMUnitConfig.equipment_type) == "inverter")):
+        if total and per_day and per_day > 0:
+            out.setdefault(pid, {})["Inverter"] = -(-total // per_day)
+    return out
+
+
+def _plant_cycles(db: Session, plant_ids: list[Any]) -> dict[Any, list[dict[str, Any]]]:
+    """Each plant's resolved cycle plan, worked out ONCE per request and passed down.
+
+    A plant with no stored plan (or an empty one) is absent from the result: it is paused and
+    generates no new PM cycles. Callers treat "not in this dict" as paused."""
+    ids = list(dict.fromkeys(plant_ids))
+    if not ids:
+        return {}
+    derived = _derived_phase_days(db, ids)
+    out: dict[Any, list[dict[str, Any]]] = {}
+    for row in db.scalars(select(PMCyclePlan).where(PMCyclePlan.plant_id.in_(ids))):
+        if row.phases:
+            out[row.plant_id] = resolve_cycle(row.phases, derived.get(row.plant_id))
+    return out
 
 
 def _booked(db: Session, plant_ids: list[Any], cycle_start: date,
-            planned: list[tuple[Any, int, date]]) -> dict[Any, dict[int, date]]:
+            planned: list[tuple[Any, int, date]],
+            cycles: dict[Any, list[dict[str, Any]]] | None = None) -> dict[Any, dict[int, date]]:
     """Last due date booked per plant and cycle phase in the cycle from `cycle_start` (its 30 days).
 
     Counts PM work already in the register (any status but Cancelled, not Daily/Weekly; e.g. inverters set
     up earlier from Add PM task) plus `planned` (plant, phase, last due) from earlier rows of the same upload.
     For the Miscellaneous phase only the Miscellaneous job itself counts from the register, because that phase
-    also holds every other equipment type; those count only when planned in the same request."""
+    also holds every other equipment type; those count only when planned in the same request.
+
+    A phase index means a position in ONE plant's cycle, so each plant's own plan does the lookup."""
+    cycles = cycles or {}
     lo, hi = cycle_start, cycle_start + timedelta(days=CYCLE_DAYS - 1)
     out: dict[Any, dict[int, date]] = {}
 
@@ -425,7 +479,7 @@ def _booked(db: Session, plant_ids: list[Any], cycle_start: date,
                        OMTask.problem_source == "PM template", OMTask.status != "Cancelled",
                        OMTask.frequency.not_in(_UNCHAINED_FREQUENCIES), OMTask.due_on.between(lo, hi))
                 .group_by(OMTask.plant_id, OMTask.task_type)):
-            add(pid, phase_index(etype), end)
+            add(pid, phase_index(etype, cycles.get(pid)), end)
     for pid, idx, end in planned:
         if pid in plant_ids:
             add(pid, idx, end)
@@ -433,18 +487,32 @@ def _booked(db: Session, plant_ids: list[Any], cycle_start: date,
 
 
 def _fit_to_cycle(db: Session, items: list[dict[str, Any]], equipment_type: str, cycle_start: date,
-                  planned: list[tuple[Any, int, date]] | None = None) -> dict[Any, dict[str, Any]]:
-    """Give each plant's tasks its own turn in the cycle, after the work already booked there (chained_window).
+                  planned: list[tuple[Any, int, date]] | None = None,
+                  cycles: dict[Any, list[dict[str, Any]]] | None = None) -> dict[Any, dict[str, Any]]:
+    """Give each plant's tasks its own turn in its own cycle, after the work already booked there.
 
-    Sets item["start"]; with `planned`, records each plant's last due date so later rows chain after it."""
+    Sets item["start"] from chained_window() against that plant's plan, and item["due_day"] from the
+    plant's own phase length where the job fills its phase. With `planned`, records each plant's last
+    due date so later rows chain after it.
+
+    `cycles` must already exclude paused plants; items for a plant that is not in it are dropped by
+    the caller, so nothing here plans work for a plant without a tracker."""
+    cycles = cycles if cycles is not None else {}
     pids = list(dict.fromkeys(it["plant"].id for it in items))
-    booked = _booked(db, pids, cycle_start, planned or [])
-    wins = {pid: chained_window(equipment_type, cycle_start, booked.get(pid)) for pid in pids}
-    idx = phase_index(equipment_type)
+    booked = _booked(db, pids, cycle_start, planned or [], cycles)
+    wins = {pid: chained_window(equipment_type, cycle_start, booked.get(pid), cycles.get(pid)) for pid in pids}
     for it in items:
-        it["start"] = wins[it["plant"].id]["start"]
+        pid = it["plant"].id
+        cycle = cycles.get(pid)
+        win = wins[pid]
+        it["start"] = win["start"]
+        it["step"] = win.get("step_days") or 1
+        # A job that fills its phase is due on the phase's last working day, which is the plant's
+        # own length, not the built-in one.
+        if it.get("due_day"):
+            it["due_day"] = win["days"]
         if planned is not None:
-            planned.append((it["plant"].id, idx, it["start"] + timedelta(days=(it.get("due_day") or it.get("day") or 1) - 1)))
+            planned.append((pid, phase_index(equipment_type, cycle), _due_date(it, it["start"])))
     return wins
 
 
@@ -460,6 +528,22 @@ def _cycle_out(nominal: dict[str, Any] | None, wins: dict[Any, dict[str, Any]], 
 
 def _asks_all_plants(values: list[str]) -> bool:
     return any((v or "").strip().casefold() in {"all", "all plants"} for v in values)
+
+
+def _split_paused(db: Session, plants: list[Plant]) -> tuple[list[Plant], list[Plant], dict[Any, list[dict[str, Any]]]]:
+    """(planned, paused, resolved cycles): which plants have a cycle plan and which do not.
+
+    Only plants with a tracker are planned, by the O&M Head's decision. A plant with no plan is
+    PAUSED: it is reported, not failed, and the work orders it already has are left alone."""
+    cycles = _plant_cycles(db, [p.id for p in plants])
+    return ([p for p in plants if p.id in cycles],
+            [p for p in plants if p.id not in cycles], cycles)
+
+
+def _paused_out(paused: list[Plant]) -> dict[str, Any]:
+    """How a paused plant is reported: a state with an action, never a silent zero."""
+    return {"paused": len(paused), "paused_reason": PAUSED_LABEL, "paused_hint": PAUSED_HINT,
+            "paused_plants": [{"plant": p.plant_name, "site_code": p.site_code} for p in paused]}
 
 
 def _equipped_plants(db: Session, plants: list[Plant], equipment_type: str) -> tuple[list[Plant], list[Plant]]:
@@ -561,14 +645,18 @@ def apply_template(template_id: uuid.UUID, payload: ApplyIn, db: Annotated[Sessi
     without: list[Plant] = []
     if _asks_all_plants(payload.plants):
         plants, without = _equipped_plants(db, plants, tpl["equipment_type"])
+    paused: list[Plant] = []
+    cycles: dict[Any, list[dict[str, Any]]] = {}
+    if payload.follow_cycle:          # a cycle can only be planned for a plant that has a plan
+        plants, paused, cycles = _split_paused(db, plants)
     start, plan, w = _start_and_plan(payload, tpl["equipment_type"])
     items, skipped = _plan_tasks(db, user, plants, tpl, payload.assignees, payload.per_unit, payload.units, set(), {}, plan)
-    wins = _fit_to_cycle(db, items, tpl["equipment_type"], payload.start_date) if w else {}
+    wins = _fit_to_cycle(db, items, tpl["equipment_type"], payload.start_date, None, cycles) if w else {}
     if not payload.dry_run and items:
         _create_tasks(db, user, tpl, items, start, str(row.id))
         db.commit()
     return {**_summary(items, skipped, payload.dry_run, db, tpl), "skipped_plants": [p.plant_name for p in without],
-            **_cycle_out(w, wins, items)}
+            **_paused_out(paused), **_cycle_out(w, wins, items)}
 
 
 # ───────────────────────── quick add ("Add PM task") ─────────────────────────
@@ -585,9 +673,13 @@ def quick_add(payload: QuickTaskIn, db: Annotated[Session, Depends(get_db)], use
         plants, without = _equipped_plants(db, plants, tpl["equipment_type"])
     if payload.save_unit_config:
         _require(user, TEMPLATE_WRITERS, "Only the O&M Head can save plant unit configuration")
+    paused: list[Plant] = []
+    cycles: dict[Any, list[dict[str, Any]]] = {}
+    if payload.follow_cycle:          # a cycle can only be planned for a plant that has a plan
+        plants, paused, cycles = _split_paused(db, plants)
     start, plan, w = _start_and_plan(payload, tpl["equipment_type"])
     items, skipped = _plan_tasks(db, user, plants, tpl, payload.assignees, payload.per_unit, payload.units, set(), {}, plan)
-    wins = _fit_to_cycle(db, items, tpl["equipment_type"], payload.start_date) if w else {}
+    wins = _fit_to_cycle(db, items, tpl["equipment_type"], payload.start_date, None, cycles) if w else {}
     if not payload.dry_run and items:
         tid = str(_upsert_template(db, user, tpl).id) if payload.save_template else None
         _create_tasks(db, user, tpl, items, start, tid, (payload.remarks or "").strip() or None)
@@ -598,14 +690,34 @@ def quick_add(payload: QuickTaskIn, db: Annotated[Session, Depends(get_db)], use
                 _save_config(db, user, plant, tpl["equipment_type"], payload.total_units, payload.units_per_day or spread_pace or tpl.get("units_per_day"))
         db.commit()
     return {**_summary(items, skipped, payload.dry_run, db, tpl), "skipped_plants": [p.plant_name for p in without],
-            **_cycle_out(w, wins, items)}
+            **_paused_out(paused), **_cycle_out(w, wins, items)}
 
 
 @router.get("/cycle")
-def get_cycle(user: Annotated[User, Depends(get_current_user)]):
-    """The 30-day PM cycle (Plant side, then GSS side) used when a job or upload follows the cycle."""
+def get_cycle(db: Annotated[Session, Depends(get_db)], user: Annotated[User, Depends(get_current_user)],
+              plant: str | None = None):
+    """The 30-day PM cycle used when a job or upload follows the cycle.
+
+    With `plant`, that plant's own stored plan, or `paused` when it has none. Without one, the
+    built-in cycle, which is what a caller with no plant in hand (a side template, the generic
+    view) wants."""
     _require(user, CREATOR_ROLES, "The PM cycle is available to the O&M Head and Assignees")
-    return {"cycle_days": CYCLE_DAYS, "phases": CYCLE, "one_job_types": list(ONE_JOB_TYPES), "not_in_pm": list(NOT_IN_PM)}
+    out: dict[str, Any] = {"cycle_days": CYCLE_DAYS, "phases": CYCLE, "one_job_types": list(ONE_JOB_TYPES),
+                           "not_in_pm": list(NOT_IN_PM), "plant": None, "paused": False, "source": "default"}
+    if plant is None:
+        return out
+    row = _resolve_plants(db, [plant])[0]
+    allowed = user_scoped_plant_ids(db, user)
+    if allowed is not None and row.id not in allowed:
+        raise HTTPException(403, f"{row.plant_name} is outside your assigned plants")
+    cycles = _plant_cycles(db, [row.id])
+    plan = cycles.get(row.id)
+    out.update({"plant": {"id": str(row.id), "plant": row.plant_name, "site_code": row.site_code},
+                "paused": plan is None, "source": "plant" if plan else "paused",
+                "phases": plan if plan else []})
+    if plan is None:
+        out.update({"paused_reason": PAUSED_LABEL, "paused_hint": PAUSED_HINT})
+    return out
 
 
 # ───────────────────────── maintenance scope library (editable by the O&M Head) ─────────────────────────
@@ -762,6 +874,212 @@ def delete_unit_config(config_id: uuid.UUID, db: Annotated[Session, Depends(get_
     if user.role == "Assignee" and row.plant_id not in (user_scoped_plant_ids(db, user) or set()):
         raise HTTPException(403, "This plant is outside your assigned plants")
     db.delete(row)      # tasks already scheduled keep their unit numbers
+    db.commit()
+
+
+# ───────────────────────── per-plant monthly cycle plan (migration 049) ─────────────────────────
+class CyclePhaseIn(BaseModel):
+    """One phase of a plant's cycle: the categories done as a single visit, and when."""
+    phase: str = Field(min_length=1, max_length=120)
+    area: str = "Plant side"
+    categories: list[str] = Field(min_length=1, max_length=20)
+    start_day: int = Field(ge=1, le=CYCLE_DAYS)
+    days: int | None = Field(default=None, ge=1, le=CYCLE_DAYS)     # null on the Inverter phase (pm_unit_config)
+    step_days: int = Field(default=1, ge=1, le=CYCLE_DAYS)
+
+    @field_validator("area")
+    @classmethod
+    def _area(cls, v: str) -> str:
+        key = (v or "").strip().casefold()
+        for name in ("Plant side", "GSS side"):
+            if key == name.casefold():
+                return name
+        raise ValueError("Area must be Plant side or GSS side")
+
+    @field_validator("categories")
+    @classmethod
+    def _categories(cls, v: list[str]) -> list[str]:
+        out: list[str] = []
+        for name in v:
+            canon = _ASSET_BY_LOWER.get((name or "").strip().casefold())
+            if not canon:
+                raise ValueError(f"Unknown work category: {name}")
+            if not in_pm(canon):
+                raise ValueError(_not_in_pm_text(canon))
+            if canon not in out:
+                out.append(canon)
+        if not out:
+            raise ValueError("Choose at least one work category")
+        return out
+
+
+class CyclePlanIn(BaseModel):
+    phases: list[CyclePhaseIn] = Field(min_length=1, max_length=CYCLE_DAYS)
+    notes: str | None = Field(default=None, max_length=2000)
+    # The `updated_at` the editor loaded (null = the plant had no plan). When sent, a save is refused
+    # if the stored plan has changed since, so two planners cannot silently overwrite each other.
+    expected_updated_at: str | None = None
+
+
+def _plan_phases(payload: CyclePlanIn) -> list[dict[str, Any]]:
+    """The stored shape: exactly the keys the loader SQL writes, in the order the phases run."""
+    return [{"phase": p.phase.strip(), "area": p.area, "categories": list(p.categories),
+             "start_day": p.start_day, "days": p.days, "step_days": p.step_days} for p in payload.phases]
+
+
+def _version(row: PMCyclePlan | None) -> str | None:
+    return row.updated_at.isoformat() if row is not None and row.updated_at else None
+
+
+def _cycle_plan_out(plant: Plant, phases: list[dict[str, Any]] | None, notes: str | None,
+                    resolved: list[dict[str, Any]] | None, chained: list[dict[str, Any]] | None = None,
+                    updated_at: str | None = None) -> dict[str, Any]:
+    """A plant's plan as stored, as the engine resolves it, and (when asked) as chaining will run it."""
+    out: dict[str, Any] = {
+        "plant": {"id": str(plant.id), "plant": plant.plant_name, "site_code": plant.site_code},
+        "cycle_days": CYCLE_DAYS, "configured": phases is not None, "paused": phases is None,
+        "phases": phases or [], "notes": notes, "resolved": resolved or [],
+        "effective_from": "next cycle", "updated_at": updated_at,
+    }
+    if phases is None:
+        out.update({"paused_reason": PAUSED_LABEL, "paused_hint": PAUSED_HINT})
+    if chained is not None:
+        out["chained"] = chained
+    return out
+
+
+def _chained_preview(cycle: list[dict[str, Any]], cycle_start: date) -> list[dict[str, Any]]:
+    """What the engine will actually produce once chaining is applied, so colliding phases show up.
+
+    Nothing is booked here: this is the plan running clean, which is what a planner is checking
+    against the day numbers they typed."""
+    return [{**window_out(chained_window(p["equipment_types"][0], cycle_start, None, cycle)),
+             "categories": list(p["equipment_types"])} for p in cycle]
+
+
+def _cycle_plan_scope(db: Session, user: User, plant: Plant) -> None:
+    allowed = user_scoped_plant_ids(db, user)
+    if allowed is not None and plant.id not in allowed:
+        raise HTTPException(403, f"{plant.plant_name} is outside your assigned plants")
+
+
+@router.get("/cycle-plans")
+def list_cycle_plans(db: Annotated[Session, Depends(get_db)], user: Annotated[User, Depends(get_current_user)]):
+    """Every plant in the caller's scope with its cycle-plan state, and the paused count.
+
+    A paused plant is listed, not hidden: the O&M Head needs to see how much of the portfolio has
+    no tracker yet. Paused plants are NOT counted as zero-compliance anywhere."""
+    _require(user, CREATOR_ROLES, "Cycle plans are available to the O&M Head and Assignees")
+    allowed = user_scoped_plant_ids(db, user)
+    plants = [p for p in db.scalars(select(Plant).order_by(Plant.site_code))
+              if (allowed is None or p.id in allowed) and (p.status or "").casefold() != "inactive"]
+    stored = {r.plant_id: r for r in db.scalars(select(PMCyclePlan).where(
+        PMCyclePlan.plant_id.in_([p.id for p in plants]))) } if plants else {}
+    rows = []
+    for p in plants:
+        row = stored.get(p.id)
+        has = bool(row and row.phases)
+        rows.append({"plant_id": str(p.id), "plant": p.plant_name, "site_code": p.site_code,
+                     "configured": has, "paused": not has,
+                     "phases": len(row.phases) if has else 0,
+                     "notes": row.notes if row else None,
+                     "updated_at": row.updated_at.isoformat() if row and row.updated_at else None})
+    paused = [r for r in rows if r["paused"]]
+    return {"cycle_days": CYCLE_DAYS, "plans": rows, "configured": len(rows) - len(paused),
+            "paused": len(paused), "total": len(rows), "paused_reason": PAUSED_LABEL,
+            "paused_hint": PAUSED_HINT, "categories": sorted(a for a in ALLOWED_ASSETS if in_pm(a)),
+            "default_phases": [{"phase": p["phase"], "area": p["area"], "categories": list(p["equipment_types"]),
+                                "start_day": p["start_day"],
+                                "days": None if p["phase"] == "Inverter" else p["days"],
+                                "step_days": p.get("step_days", 1)} for p in CYCLE]}
+
+
+@router.get("/cycle-plans/{plant_key}")
+def get_cycle_plan(plant_key: str, db: Annotated[Session, Depends(get_db)],
+                   user: Annotated[User, Depends(get_current_user)], cycle_start: date | None = None):
+    """One plant's stored plan, how it resolves, and the 30-day calendar chaining will produce."""
+    _require(user, CREATOR_ROLES, "Cycle plans are available to the O&M Head and Assignees")
+    plant = _resolve_plants(db, [plant_key])[0]
+    _cycle_plan_scope(db, user, plant)
+    row = db.scalar(select(PMCyclePlan).where(PMCyclePlan.plant_id == plant.id))
+    if not (row and row.phases):
+        return _cycle_plan_out(plant, None, row.notes if row else None, None, updated_at=_version(row))
+    resolved = _plant_cycles(db, [plant.id]).get(plant.id) or []
+    start = cycle_start or business_today()
+    return _cycle_plan_out(plant, list(row.phases), row.notes, resolved, _chained_preview(resolved, start),
+                           updated_at=_version(row))
+
+
+@router.put("/cycle-plans/{plant_key}", dependencies=[Depends(require_csrf)])
+def save_cycle_plan(plant_key: str, payload: CyclePlanIn, db: Annotated[Session, Depends(get_db)],
+                    user: Annotated[User, Depends(get_current_user)], cycle_start: date | None = None):
+    """Store a plant's cycle plan. Takes effect from the NEXT cycle; work already generated is never rewritten."""
+    _require(user, TEMPLATE_WRITERS, "Only the O&M Head can edit a plant's cycle plan")
+    plant = _resolve_plants(db, [plant_key])[0]
+    phases = _plan_phases(payload)
+    problem = plan_problem(phases)
+    if problem:
+        raise HTTPException(422, problem)
+    row = db.scalar(select(PMCyclePlan).where(PMCyclePlan.plant_id == plant.id))
+    if "expected_updated_at" in payload.model_fields_set and _version(row) != payload.expected_updated_at:
+        raise HTTPException(409, f"{plant.plant_name}'s cycle plan was changed by someone else after you opened "
+                                 "it. Reload it to see the latest version, then make your change again.")
+    was_paused = row is None or not (row.phases or [])
+    if row is None:
+        row = PMCyclePlan(plant_id=plant.id, phases=phases)
+        db.add(row)
+    row.phases, row.notes, row.updated_by = phases, (payload.notes or "").strip() or None, user.id
+    db.add(AuditLog(user_id=user.id, actor_name=user.display_name,
+                    action="Saved PM cycle plan" if not was_paused else "Configured PM cycle plan",
+                    module="Scheduled O&M",
+                    metadata_json={"plant": plant.plant_name, "site_code": plant.site_code,
+                                   "phases": len(phases),
+                                   "categories": sum(len(p["categories"]) for p in phases)}))
+    db.commit()
+    db.refresh(row)
+    resolved = _plant_cycles(db, [plant.id]).get(plant.id) or []
+    start = cycle_start or business_today()
+    return _cycle_plan_out(plant, phases, row.notes, resolved, _chained_preview(resolved, start),
+                           updated_at=_version(row))
+
+
+@router.post("/cycle-plans/{plant_key}/preview", dependencies=[Depends(require_csrf)])
+def preview_cycle_plan(plant_key: str, payload: CyclePlanIn, db: Annotated[Session, Depends(get_db)],
+                       user: Annotated[User, Depends(get_current_user)], cycle_start: date | None = None):
+    """Validate and resolve a plan WITHOUT saving it, for the editor's calendar.
+
+    The stored plan and what the engine will really do are different things once chaining is
+    applied, so the editor shows both before a planner commits a day number."""
+    _require(user, TEMPLATE_WRITERS, "Only the O&M Head can edit a plant's cycle plan")
+    plant = _resolve_plants(db, [plant_key])[0]
+    phases = _plan_phases(payload)
+    problem = plan_problem(phases)
+    if problem:
+        raise HTTPException(422, problem)
+    derived = _derived_phase_days(db, [plant.id]).get(plant.id)
+    resolved = resolve_cycle(phases, derived)
+    start = cycle_start or business_today()
+    return {**_cycle_plan_out(plant, phases, (payload.notes or "").strip() or None, resolved,
+                              _chained_preview(resolved, start)),
+            "saved": False, "inverter_days": (derived or {}).get("Inverter")}
+
+
+@router.delete("/cycle-plans/{plant_key}", status_code=204, dependencies=[Depends(require_csrf)])
+def delete_cycle_plan(plant_key: str, db: Annotated[Session, Depends(get_db)],
+                      user: Annotated[User, Depends(get_current_user)]):
+    """Remove a plant's plan, which pauses it: no NEW cycles are generated for it.
+
+    Work orders already generated are deliberately left exactly as they are -- pausing stops new
+    cycles, it does not withdraw planned work."""
+    _require(user, TEMPLATE_WRITERS, "Only the O&M Head can edit a plant's cycle plan")
+    plant = _resolve_plants(db, [plant_key])[0]
+    row = db.scalar(select(PMCyclePlan).where(PMCyclePlan.plant_id == plant.id))
+    if not row:
+        raise HTTPException(404, "This plant has no cycle plan")
+    db.delete(row)
+    db.add(AuditLog(user_id=user.id, actor_name=user.display_name, action="Paused PM cycle plan", module="Scheduled O&M",
+                    metadata_json={"plant": plant.plant_name, "site_code": plant.site_code,
+                                   "effect": "no new PM cycles; existing work orders untouched"}))
     db.commit()
 
 
@@ -1138,10 +1456,13 @@ async def import_plan(db: Annotated[Session, Depends(get_db)], user: Annotated[U
                       file: UploadFile = File(...), dry_run: bool = True, follow_cycle: bool = False,
                       cycle_start: date | None = None):
     """With follow_cycle, each row's Start date (else cycle_start) is that row's PM cycle start and the
-    row's dates come from its equipment's phase (e.g. Inverter days 1-7, VCB Panel days 10-11). Rows run in
-    cycle order and each plant's phase starts after the earlier phases' work there (_fit_to_cycle), so a
-    10-day inverter round moves ACCB and everything after it. The Plant side / GSS side templates
-    reject equipment of the other side."""
+    row's dates come from that plant's own phase for the equipment. Rows run in cycle order and each
+    plant's phase starts after the earlier phases' work there (_fit_to_cycle), so a 10-day inverter
+    round moves ACCB and everything after it. The Plant side / GSS side templates reject equipment of
+    the other side.
+
+    With follow_cycle, a plant with no cycle plan is paused: its rows create nothing and it is listed
+    under `paused_plants`. The rest of the file still imports."""
     _require(user, PLANNER_ROLES, "Only the O&M Head can import a PM plan")
     if not (file.filename or "").lower().endswith((".xlsx", ".xlsm", ".csv")):
         raise HTTPException(422, "Upload an .xlsx, .xlsm, or .csv file")
@@ -1165,6 +1486,7 @@ async def import_plan(db: Annotated[Session, Depends(get_db)], user: Annotated[U
     default_start = (cycle_start if follow_cycle and cycle_start else None) or business_today() + timedelta(days=3)
     schedule: dict[tuple[str, date, date], dict[str, Any]] = {}
     planned: list[tuple[Any, int, date]] = []        # (plant, phase, last due) of rows already planned in this file
+    paused_by_id: dict[Any, Plant] = {}              # plants in the file that have no cycle plan
     rows = [(cell, *_clean_row(cell)) for cell in cells]
     if follow_cycle:      # cycle order (Inverter first, GSS side last) so each equipment follows the one before it
         rows.sort(key=lambda r: phase_index(r[1]["equipment_type"]) if r[1] else -1)
@@ -1179,6 +1501,10 @@ async def import_plan(db: Annotated[Session, Depends(get_db)], user: Annotated[U
         elif tpl and plant_text:
             try:
                 plants = _resolve_plants(db, [p for p in plant_text.split(",")])
+                cycles: dict[Any, list[dict[str, Any]]] = {}
+                if follow_cycle:
+                    plants, row_paused, cycles = _split_paused(db, plants)
+                    paused_by_id.update({p.id: p for p in row_paused})
                 units_hint = None
                 if cell.get("units") not in (None, ""):
                     units_hint = int(float(cell["units"]))
@@ -1194,10 +1520,9 @@ async def import_plan(db: Annotated[Session, Depends(get_db)], user: Annotated[U
                 skipped += skip
                 if w:
                     names = {it["plant"].id: it["plant"].plant_name for it in items}
-                    for pid, pw in _fit_to_cycle(db, items, tpl["equipment_type"], cycle_day1, planned).items():
+                    for pid, pw in _fit_to_cycle(db, items, tpl["equipment_type"], cycle_day1, planned, cycles).items():
                         n_tasks = sum(1 for it in items if it["plant"].id == pid)
-                        last = max(it["start"] + timedelta(days=(it.get("due_day") or it.get("day") or 1) - 1)
-                                   for it in items if it["plant"].id == pid)
+                        last = max(_due_date(it, it["start"]) for it in items if it["plant"].id == pid)
                         entry = schedule.setdefault((tpl["equipment_type"], pw["start"], last), {
                             "equipment_type": tpl["equipment_type"], **window_out(pw), "end": last.isoformat(),
                             "tasks": 0, "plants": []})
@@ -1220,7 +1545,8 @@ async def import_plan(db: Annotated[Session, Depends(get_db)], user: Annotated[U
         raise HTTPException(422, f"This file would create {total} tasks (limit {MAX_TASKS_PER_CALL}). Split it into smaller files.")
     result = {"dry_run": dry_run, "rows": len(plan), "templates": len(plan), "tasks": total, "skipped": skipped,
               "template_only_rows": templates_only, "follow_cycle": follow_cycle,
-              "schedule": sorted(schedule.values(), key=lambda e: (e["start"], phase_index(e["equipment_type"])))}
+              "schedule": sorted(schedule.values(), key=lambda e: (e["start"], phase_index(e["equipment_type"]))),
+              **_paused_out(sorted(paused_by_id.values(), key=lambda p: p.site_code or ""))}
     if dry_run:
         return result
     for cell, tpl, plants, items, start in plan:

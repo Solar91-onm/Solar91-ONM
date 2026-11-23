@@ -50,24 +50,33 @@ def test_overview_trend_returns_grouped_compliance_and_active_issue_series(clien
         due_on=today,
         actual_completed_on=today,
     )
+    # Washing compliance is CUMULATIVE (on-time to date over expected to date), so every cycle
+    # whose due date falls in the range counts. All three due dates are pinned to today and all
+    # three are completed, which makes the scenario "every due cycle was done on time" whatever
+    # the calendar date the suite runs on. Overriding only cycle 1 left cycles 2 and 3 on their
+    # defaults (20th / month-end), so the expected total -- and this assertion -- changed with
+    # the day of the month: it read 100% before the 20th and 50% after it.
     config = WashingConfig(
         plant_id=selected.id,
         tables_per_cycle=8,
-        cycle_overrides={today.strftime("%Y-%m"): {"1": today.isoformat()}},
+        cycle_overrides={today.strftime("%Y-%m"): {str(cycle): today.isoformat() for cycle in (1, 2, 3)}},
     )
-    washing = WashingDailyReport(
-        plant_id=selected.id,
-        cycle_month=today.strftime("%Y-%m"),
-        cycle_no=1,
-        report_date=today,
-        job_status="Done",
-        tables_cleaned=8,
-        cleaned_table_codes=[],
-        reported_by="Trend Assignee",
-        review_status="Confirmed",
-        cycle_completed=True,
-    )
-    db.add_all([first_issue, outside_issue, task, config, washing])
+    washing = [
+        WashingDailyReport(
+            plant_id=selected.id,
+            cycle_month=today.strftime("%Y-%m"),
+            cycle_no=cycle,
+            report_date=today,
+            job_status="Done",
+            tables_cleaned=8,
+            cleaned_table_codes=[],
+            reported_by="Trend Assignee",
+            review_status="Confirmed",
+            cycle_completed=True,
+        )
+        for cycle in (1, 2, 3)
+    ]
+    db.add_all([first_issue, outside_issue, task, config, *washing])
     db.commit()
     login_user(client, db, email="overview-trend@example.com")
     params = {"start_date": start.isoformat(), "end_date": today.isoformat()}

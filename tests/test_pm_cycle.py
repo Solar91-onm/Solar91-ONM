@@ -2,16 +2,33 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 
-from app.core.models import OMTask, Plant
+from app.core.models import OMTask, PMCyclePlan, Plant
 from app.pmplan.cycle import CYCLE, CYCLE_DAYS, phase_for, phase_index, window
 from tests.conftest import login_user
 
 START = date(2026, 11, 1)
 
 
-def _plant(db, code="KRN_01", name="Kerli"):
+def default_plan_phases():
+    """The built-in cycle in the stored `pm_cycle_plans.phases` shape.
+
+    `days` is null on the Inverter phase, which is how a real tracker stores it: that phase's
+    length follows pm_unit_config, not a number in the plan."""
+    return [{"phase": p["phase"], "area": p["area"], "categories": list(p["equipment_types"]),
+             "start_day": p["start_day"], "days": None if p["phase"] == "Inverter" else p["days"],
+             "step_days": 1} for p in CYCLE]
+
+
+def _plant(db, code="KRN_01", name="Kerli", plan=True):
+    """A plant that has a cycle plan, because only plants with one are planned (migration 049).
+
+    The plan stored is the built-in cycle, so every day-number assertion in this file keeps its
+    original meaning and now also proves a stored plan reproduces the built-in schedule. Pass
+    plan=False for a paused plant."""
     p = Plant(site_code=code, plant_name=name)
     db.add(p); db.commit(); db.refresh(p)
+    if plan:
+        db.add(PMCyclePlan(plant_id=p.id, phases=default_plan_phases())); db.commit()
     return p
 
 

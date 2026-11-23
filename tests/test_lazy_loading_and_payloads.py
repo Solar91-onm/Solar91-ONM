@@ -450,6 +450,9 @@ def test_string_breakdown_picker_saves_string_ids_and_count():
       const context = {{
         Solar91PortalData: {{}},
         Solar91PortalFormat: {{escape: (value) => String(value == null ? "" : value)}},
+        // The module registers a portal:info-health-panel-opened listener at load time, so the
+        // sandbox needs a document before the source is even evaluated.
+        document: {{querySelector: () => null, querySelectorAll: () => [], addEventListener: () => {{}}}},
         Solar91PortalAPI: {{
           request: (url) => {{
             calls.push(url);

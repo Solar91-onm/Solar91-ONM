@@ -2082,29 +2082,36 @@ def create_sheet_reports(db: Session, user: User, payload: WashingSheetRequest) 
     A Site Engineer's days wait for O&M confirmation and raise ONE review notification for the whole sheet;
     the O&M Head / a washing Assignee saves them as confirmed, like a single O&M entry."""
     plant, config, manager, total_tables = _locked_report_plant(db, user, payload.plant_id)
-    # One regular module-cleaning entry is allowed per plant/date. Extra cleaning is a separate
-    # entry and may share a date with the regular report; Cycle 3's same-day post-completion
-    # rollover uses that explicit extra flag.
+    # A date normally holds ONE regular module-cleaning entry. It may hold a second when the first
+    # fills the running cycle and the second is the next cycle started the same afternoon: the
+    # tables a cycle still needed, plus the tables re-cleaned that day, saved together. Sorting is
+    # stable, so same-date entries keep their submitted order, and each row is stamped with an
+    # increasing created_at below so the sequencer can tell which came first. Whether the pair is a
+    # real roll-over cannot be judged here -- it depends on the cycle numbers the month resequences
+    # to -- so it is checked after the rows exist, by _assert_one_regular_entry_per_cycle_date.
+    # Extra cleaning is a separate entry and may always share a date with the regular report.
     entries = sorted(payload.entries, key=lambda entry: entry.report_date)
-    regular_dates: set[date] = set()
+    regular_dates: dict[date, int] = {}
     for entry in entries:
         _validate_report_date(user, manager, entry.report_date)
         if entry.is_extra:
             continue
+        seen_for_date = regular_dates.get(entry.report_date, 0)
         if entry.same_day_next_cycle:
-            if entry.report_date in regular_dates:
+            if seen_for_date:
                 raise HTTPException(409, "A date can contain only one regular module cleaning entry.")
-            regular_dates.add(entry.report_date)
+            regular_dates[entry.report_date] = seen_for_date + 1
             _assert_same_day_next_cycle_allowed(db, plant.id, entry.report_date)
             continue
-        if entry.report_date in regular_dates:
+        if seen_for_date >= MONTHLY_CYCLE_TARGET:
             raise HTTPException(
                 409,
-                f"A module cleaning entry already exists for {_day_label(entry.report_date)}. "
-                "Edit that entry or use Extra Cleaning for additional cleaning on that date.",
+                f"{_day_label(entry.report_date)} cannot hold more than {MONTHLY_CYCLE_TARGET} module "
+                "cleaning entries. Use Extra Cleaning for additional cleaning on that date.",
             )
-        regular_dates.add(entry.report_date)
-        _assert_single_sheet_report_date(db, plant.id, entry.report_date)
+        regular_dates[entry.report_date] = seen_for_date + 1
+        if not seen_for_date:
+            _assert_single_sheet_report_date(db, plant.id, entry.report_date)
     created: list[WashingDailyReport] = []
     # Keep same-date regular/extra entries in their submitted order for calendar display and recounts.
     stamp = datetime.now(timezone.utc)
@@ -2131,7 +2138,10 @@ def create_sheet_reports(db: Session, user: User, payload: WashingSheetRequest) 
             is_extra=entry.is_extra, created_at=stamp + timedelta(microseconds=index),
         )
         created.append(report)
-    _assert_distinct_tables(db, plant.id, [report.cycle_month for report in created], total_tables, {report.id for report in created})
+    months = [report.cycle_month for report in created]
+    touched = {report.id for report in created}
+    _assert_distinct_tables(db, plant.id, months, total_tables, touched)
+    _assert_one_regular_entry_per_cycle_date(db, plant.id, months, total_tables, touched)
     pending = [report for report in created if report.review_status == "Pending"]
     if pending:
         done = [report for report in pending if report.job_status == "Done"]
@@ -2201,6 +2211,38 @@ def _numbered_codes(numbers: list[int], total_tables: int) -> list[str]:
     if too_high:
         raise HTTPException(422, f"Table number {max(too_high)} exceeds this plant's configured table count ({total_tables})")
     return [f"Table {number:03d}" for number in numbers]
+
+
+def _assert_one_regular_entry_per_cycle_date(db: Session, plant_id: UUID, months, total_tables: int,
+                                             touched: set) -> None:
+    """A date holds at most one regular entry PER CYCLE.
+
+    This is what separates a genuine same-day roll-over from a date that was simply recorded twice.
+    Two entries on one date are legal only when the first fills the running cycle and the second is
+    the next cycle begun that same afternoon, so they resequence to DIFFERENT cycle numbers. Two
+    entries that both land in the same cycle are one day's work split in two and belong in a single
+    entry, which the caller is told to edit instead.
+
+    Checked after the rows exist, because the cycle numbers come from resequencing the whole month.
+    Only days being saved or edited are refused, so existing data is never retroactively rejected."""
+    for month in dict.fromkeys(months):
+        rows = list(db.scalars(select(WashingDailyReport).where(
+            WashingDailyReport.plant_id == plant_id, WashingDailyReport.cycle_month == month,
+        ).order_by(WashingDailyReport.report_date, WashingDailyReport.created_at)))
+        sequence = _cycle_sequence([_sequence_entry(row) for row in rows], total_tables)
+        seen: dict[tuple[date, int], WashingDailyReport] = {}
+        for row, (cycle_no, extra) in zip(rows, sequence):
+            if extra or row.review_status not in ("Pending", "Confirmed"):
+                continue
+            key = (row.report_date, cycle_no)
+            other = seen.get(key)
+            if other is not None and (row.id in touched or other.id in touched):
+                raise HTTPException(409, (
+                    f"{_day_label(row.report_date)} already has a cycle {cycle_no} module cleaning "
+                    "entry. Edit that entry, or record the tables that finish the cycle first so the "
+                    "re-cleaned tables start the next one."
+                ))
+            seen.setdefault(key, row)
 
 
 def _assert_distinct_tables(db: Session, plant_id: UUID, months, total_tables: int, touched: set) -> None:

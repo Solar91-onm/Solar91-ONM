@@ -13,6 +13,8 @@
     "inverter-health": ["table-sort", "table-column-filter"],
     "operations-calendar": ["register-io", "photo-evidence"],
     "washing-board": ["table-sort", "table-column-filter"],
+    // The PM page also shows which plants have a cycle plan and which are paused.
+    "pm-overview": ["pm-cycle-plans"],
     settings: ["categories"]
   };
 

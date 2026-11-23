@@ -29,13 +29,20 @@ ESCALATION = [(7, "critical"), (3, "site_engineer"), (1, "assignee_and_head")]
 OPEN_STATUSES = {"Scheduled", "In Progress"}
 
 
-def distribute(unit_nos: list[int], per_day: int | None, start: date) -> list[tuple[int, int, date]]:
-    """Return (unit_no, cycle_day, due_date) for each unit. per_day None/0 = all units on the first day."""
+def distribute(unit_nos: list[int], per_day: int | None, start: date,
+               step_days: int = 1) -> list[tuple[int, int, date]]:
+    """Return (unit_no, cycle_day, due_date) for each unit. per_day None/0 = all units on the first day.
+
+    `step_days` is the phase's spacing between working days: with 2, the working days fall on
+    alternate dates (real inverter rounds run days 1, 3, 5, 7, ...). `cycle_day` stays the
+    WORKING-day ordinal (1, 2, 3, ...), never the calendar offset, because the roll-forward
+    logic and the dashboards both read it as "which day of this phase's work is this"."""
     cap = per_day if per_day and per_day > 0 else max(1, len(unit_nos))
+    step = step_days if step_days and step_days > 0 else 1
     out = []
     for i, n in enumerate(sorted(unit_nos)):
         day = i // cap + 1
-        out.append((n, day, start + timedelta(days=day - 1)))
+        out.append((n, day, start + timedelta(days=(day - 1) * step)))
     return out
 
 
@@ -60,7 +67,12 @@ def _stamp(text: str) -> dict[str, str]:
 
 
 def roll_missed_units(db: Session, today: date) -> int:
-    """Move missed units forward (front of today's capacity) and record the miss. Returns units rolled."""
+    """Move missed units forward (front of today's capacity) and record the miss. Returns units rolled.
+
+    Catching up uses the next CALENDAR day, not the next working day of the phase's step_days
+    spacing. A phase that runs on alternate days has gap days between its working days, and a crew
+    that has fallen behind should be allowed to use one: holding a late unit back to the next
+    alternate day would make the plan's own spacing extend the delay it is meant to absorb."""
     rows = list(db.scalars(select(OMTask).where(
         OMTask.unit_no.is_not(None), OMTask.cycle_id.is_not(None), OMTask.status.in_(OPEN_STATUSES))))
     groups: dict[str, list[OMTask]] = {}

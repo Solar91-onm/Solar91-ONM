@@ -1582,7 +1582,12 @@
       plan.nextNumbers = taken;
       return plan;
     }
-    plan.error = "Table " + taken[0] + " is already cleaned in this cycle. Use + Extra cleaning to record additional cleaning.";
+    // Below the last cycle a full day's re-clean opens the next cycle (handled above), so a repeat
+    // here only means the day does not finish this cycle. In the last cycle there is no next cycle
+    // to hand over to at all, which is a different thing to tell the user.
+    plan.error = "Table " + taken[0] + " is already cleaned in this cycle. " +
+      (next ? "" : "This is the month's last cycle, so a re-clean cannot start a next cycle. ") +
+      "Use + Extra cleaning to record additional cleaning.";
     return plan;
   }
 

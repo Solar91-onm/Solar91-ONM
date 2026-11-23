@@ -170,8 +170,12 @@ def test_security_tab_label_and_header_count_people():
     assert 'navState.activeView === "security"' in navigation
     assert 'titleEl.textContent = "Site Engineer and Security"' in navigation
     assert '<h1 class="ep-pt__title">Site Engineer and Security</h1>' in security
-    assert "function countLabel(count, singular)" in security
-    assert '(count === 1 ? "" : "s")' in security
+    # The counts moved out of a pluralised subtitle and into the column headings (commit 44ab719),
+    # so the helper that built "3 site engineers" is gone. What matters is unchanged and still
+    # asserted here: the header reports how many PEOPLE are on the register, not how many plants.
+    assert "function registerHeadings(counts)" in security
+    assert '"Site Engineer (" + counts.engineers + ")"' in security
+    assert '"Security Guard (" + counts.guards + ")"' in security
     assert "engineers += contacts.engineers.length;" in security
     assert "guards += contacts.guards.length;" in security
     assert 'row.parentNode.replaceChild(fresh, row)' in security
@@ -621,9 +625,10 @@ def test_record_sheet_advances_only_after_every_table_is_cleaned():
       ];
       const day1 = { id: 'a', report_date: '2026-10-01', cycle_no: 1, tables_cleaned: 3, job_status: 'Done',
                      review_status: 'Confirmed', cycle_completed: false, cleaned_table_codes: ['Table 001', 'Table 002', 'Table 003'] };
-      const rows = (reports, cycleNo, drafts) => global.__i.recordRows({
+      const rows = (reports, cycleNo, drafts, sameDay) => global.__i.recordRows({
         month: '2026-10', recordCycle: cycleNo, washingDataToday: '2026-10-17', washingReports: reports,
-        recordDrafts: drafts || {}, washingPlant: { cycles, table_count: 10, monthly_target: 3 } });
+        recordDrafts: drafts || {}, washingPlant: { cycles, table_count: 10, monthly_target: 3 },
+        recordSameDayDate: sameDay || '', recordSameDayCycle: sameDay ? cycleNo : 0 });
 
       // Re-cleaning a table before this cycle is full is rejected for the Head too.
       const drafts = { '2026-10-03': { list: '2-5' }, '2026-10-04': { list: '1' } };
@@ -650,11 +655,22 @@ def test_record_sheet_advances_only_after_every_table_is_cleaned():
       if (unfinished[unfinished.length - 1].date !== '2026-10-17') {
         fail('Cycle 1 should remain recordable after its scheduled window until all tables are cleaned');
       }
-      // Cycle 2 opens ON the day cycle 1 filled, because the next round is often started that same
-      // afternoon, and on every day after it. Its tables all start open: cycle 1 reserves none of them.
-      const c2 = rows([day1, day3], 2, { '2026-10-03': { list: '1-4' }, '2026-10-04': { list: '5' } });
-      if (c2[0].date !== '2026-10-03' || c2[0].numbers.join(',') !== '1,2,3,4' || c2[0].error) {
-        fail('cycle 2 should open on the day cycle 1 completed: ' + JSON.stringify(c2[0]));
+      // Cycle 2 CAN start on the very day cycle 1 filled, because the next round is often begun that
+      // same afternoon. That date already holds cycle 1's entry, so it is NOT offered as an ordinary
+      // blank row: the planner asks for it with the "Start Cycle 2 on ..." button, which sets
+      // recordSameDayDate. test_washing_sheet_rollover_ui.py is the detailed spec for that flow.
+      const blocked = rows([day1, day3], 2, { '2026-10-04': { list: '5' } });
+      if (blocked.some((r) => r.date === '2026-10-03' && !r.report)) {
+        fail('the completion date must not be offered as an ordinary blank row');
+      }
+      // Asked for: the row appears on that date, flagged so the save tells the server this is the
+      // next cycle starting rather than a duplicate day. Its tables all start open -- cycle 1
+      // reserves none of them.
+      const c2 = rows([day1, day3], 2, { '2026-10-03': { list: '1-4' }, '2026-10-04': { list: '5' } },
+                      '2026-10-03');
+      if (c2[0].date !== '2026-10-03' || c2[0].numbers.join(',') !== '1,2,3,4' || c2[0].error ||
+          !c2[0].sameDayNextCycle) {
+        fail('cycle 2 should open on the day cycle 1 completed when asked for: ' + JSON.stringify(c2[0]));
       }
       if (c2[1].date !== '2026-10-04' || c2[1].numbers.join(',') !== '5' || c2[1].error) {
         fail('cycle 2 should continue the days after it: ' + JSON.stringify(c2[1]));
@@ -1208,15 +1224,25 @@ def test_portfolio_info_health_uses_two_sections_and_keeps_health_deep_links():
     assert page.count('class="ep-view-section-switcher__chevron"') == 2
     disclosure_styles = styles[
         styles.index(".ep-view-section-switcher {"):styles.index(".ep-view-section-panel[hidden]")]
-    assert "display: grid;" in disclosure_styles
-    assert "grid-template-columns: repeat(2, minmax(0, 1fr));" in disclosure_styles
+    # The switcher is a horizontal tab bar: a flex row on a shared bottom border, with the open
+    # section marked by an underline rather than a rotating chevron. It replaced a two-column grid
+    # of disclosure buttons, so the grid rules and the 760px single-column fallback are gone --
+    # a flex row needs neither. What the test guards is unchanged: both sections are reachable,
+    # each is targeted by [data-view-section] rather than a bare button rule, and a hidden section
+    # stays hidden.
+    assert "display: flex;" in disclosure_styles
+    assert "border-bottom: 2px solid var(--ep-border);" in disclosure_styles
     assert ".ep-view-section-switcher button {" not in disclosure_styles
     assert ".ep-view-section-switcher button[data-view-section]" in disclosure_styles
     assert ".ep-view-section-switcher button[data-view-section][hidden]" in disclosure_styles
-    assert "@media (max-width: 760px)" in styles
-    assert ".ep-view-section-switcher { grid-template-columns: minmax(0, 1fr); }" in styles
+    assert '.ep-view-section-switcher button[data-view-section][aria-expanded="true"]::after' in disclosure_styles
+    assert ".ep-view-section-switcher__chevron {\n  display: none;\n}" in disclosure_styles
     assert "button.hidden = !showSections;" in nav
-    assert 'navState.infoHealthOpen[section] = !navState.infoHealthOpen[section];' in nav
+    # Info and Health are exclusive TABS, not independent disclosures: exactly one is open, the
+    # clicked one opens and the other closes, and clicking the already-open tab is a no-op.
+    assert "if (navState.infoHealthOpen[section]) return;" in nav
+    assert "navState.infoHealthOpen[section] = true;" in nav
+    assert "navState.infoHealthOpen[otherSection] = false;" in nav
     assert 'return ["plants-table", "site-issues"];' in nav
     assert 'data-nav="view:health"' not in page
     assert 'if (pageId === "health") {' in nav
