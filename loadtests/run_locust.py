@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import subprocess
 import sys
@@ -24,6 +25,16 @@ def positive_float(value: str) -> float:
     return parsed
 
 
+def max_rps(value: str) -> float:
+    try:
+        parsed = float(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("must be between 0.1 and 50 requests per second") from exc
+    if not 0.1 <= parsed <= 50:
+        raise argparse.ArgumentTypeError("must be between 0.1 and 50 requests per second")
+    return parsed
+
+
 def run_time(value: str) -> str:
     if not re.fullmatch(r"[1-9]\d*(?:s|m|h)?", value):
         raise argparse.ArgumentTypeError("use a positive duration such as 60s, 5m, or 1h")
@@ -43,6 +54,7 @@ def main() -> int:
     parser.add_argument("--users", type=int, choices=USER_STAGES, default=1)
     parser.add_argument("--spawn-rate", type=positive_float, default=1)
     parser.add_argument("--run-time", type=run_time, default="2m")
+    parser.add_argument("--max-rps", type=max_rps, help="Maximum staging requests per second (default: 5)")
     parser.add_argument("--csv-prefix", help="Optional output prefix under loadtests/results.")
     args = parser.parse_args()
 
@@ -58,6 +70,13 @@ def main() -> int:
     report_dir = ROOT / "loadtests" / "results"
     report_dir.mkdir(parents=True, exist_ok=True)
     csv_base = report_dir / prefix
+
+    child_env = os.environ.copy()
+    if args.max_rps is not None:
+        child_env["SOLAR91_LOADTEST_MAX_RPS"] = str(args.max_rps)
+        effective_max_rps = args.max_rps
+    else:
+        effective_max_rps = config.max_rps
 
     command = [
         sys.executable,
@@ -78,15 +97,17 @@ def main() -> int:
         str(csv_base),
         "--csv-full-history",
         "--only-summary",
+        "--stop-timeout",
+        "15",
     ]
     print(
         f"Starting one staging load stage: users={args.users}, "
-        f"spawn_rate={args.spawn_rate}/s, duration={args.run_time}, "
+        f"spawn_rate={args.spawn_rate}/s, duration={args.run_time}, max_rps={effective_max_rps}, "
         f"host={config.base_url}, run_id={config.run_id}"
     )
     print(f"Locust CSV output: {csv_base}_[stats|failures|exceptions].csv")
     try:
-        return subprocess.run(command, cwd=ROOT, check=False).returncode
+        return subprocess.run(command, cwd=ROOT, env=child_env, check=False).returncode
     except FileNotFoundError:
         print("Locust is not installed. Install loadtests/requirements.txt first.", file=sys.stderr)
         return 2

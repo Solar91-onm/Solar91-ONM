@@ -171,7 +171,7 @@ def test_issue_evidence_upload_failure_rolls_back_metadata_and_cleans_uploaded_o
 
     storage = FailingStorage()
     monkeypatch.setattr(issue_router, "SupabaseStorage", lambda: storage)
-    image = bytes(range(32, 80))
+    image = b"\xff\xd8\xff" + b"A" * 45
     response = client.post(
         f"/api/issues/{created.json()['id']}/evidence",
         files=[

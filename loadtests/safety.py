@@ -12,6 +12,29 @@ class LoadTestSafetyError(ValueError):
 
 
 KNOWN_PRODUCTION_HOSTS = frozenset({"solar91-om.onrender.com"})
+REQUIRED_LOADTEST_PERMISSIONS = frozenset({
+    "plants.view",
+    "issues.view",
+    "issues.create",
+    "issues.manage",
+    "issues.close",
+})
+
+
+def validate_loadtest_session(session: object) -> None:
+    if not isinstance(session, dict) or session.get("authenticated") is not True:
+        raise LoadTestSafetyError("The staging auth session returned an invalid response.")
+    user = session.get("user")
+    permissions = session.get("permissions")
+    if not isinstance(user, dict) or user.get("role") != "O&M Head":
+        raise LoadTestSafetyError("The load-test bearer token must belong to an active O&M Head.")
+    if not isinstance(permissions, list) or not all(isinstance(item, str) for item in permissions):
+        raise LoadTestSafetyError("The staging auth session did not return permissions.")
+    missing = sorted(REQUIRED_LOADTEST_PERMISSIONS - set(permissions))
+    if missing:
+        raise LoadTestSafetyError(
+            "The load-test O&M Head is missing required permissions: " + ", ".join(missing)
+        )
 
 
 @dataclass(frozen=True)
@@ -24,6 +47,7 @@ class LoadTestConfig:
     run_id: str
     upload_evidence: bool
     evidence_bucket_private_acknowledged: bool
+    max_rps: float
 
     @property
     def issue_prefix(self) -> str:
@@ -94,6 +118,14 @@ def load_config(environ: dict[str, str] | None = None) -> LoadTestConfig:
             "Evidence uploads require explicit confirmation of the private staging Storage bucket."
         )
 
+    max_rps_text = env.get("SOLAR91_LOADTEST_MAX_RPS", "5").strip()
+    try:
+        max_rps = float(max_rps_text)
+    except ValueError as exc:
+        raise LoadTestSafetyError("SOLAR91_LOADTEST_MAX_RPS must be between 0.1 and 50 requests per second.") from exc
+    if not 0.1 <= max_rps <= 50:
+        raise LoadTestSafetyError("SOLAR91_LOADTEST_MAX_RPS must be between 0.1 and 50 requests per second.")
+
     return LoadTestConfig(
         base_url=f"https://{parsed.netloc}",
         bearer_token=token,
@@ -103,6 +135,7 @@ def load_config(environ: dict[str, str] | None = None) -> LoadTestConfig:
         run_id=run_id,
         upload_evidence=upload_evidence,
         evidence_bucket_private_acknowledged=bucket_ack,
+        max_rps=max_rps,
     )
 
 

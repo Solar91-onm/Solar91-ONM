@@ -15,6 +15,7 @@ from app.core.config import get_settings
 from app.core.database import get_db, release_connection
 from app.core.models import AuditLog, Issue, OMTask, PMAlertLog, PMDueChange, PMFollowUp, Plant, User, WashingHistory, WashingTable, WashingConfig, Permit, StateRevision
 from app.core.security import get_current_user, require_csrf, require_permission, user_scoped_plant_ids
+from app.photos.imaging import header_matches
 from app.plants.codes import find_plant_by_code, normalize_site_code
 from app.pmplan.units import distribute, next_cycle_id
 from app.scheduled.schemas import PMFollowUpCreate, ProblemTaskCreate, TaskCompletion, TaskIssueLink, TaskReassign, TaskScheduleEdit, TaskUnitPlanEdit, WashingCycleDateRequest, WashingCycleScheduleRequest, WashingDailyReportRequest, WashingExcusedReasonRequest, WashingExcusedReasonsRequest, WashingReportReviewRequest, WashingReportUpdateRequest, WashingSetupRequest, WashingSheetRequest, WashingBulkConfirmRequest
@@ -477,6 +478,8 @@ def upload_evidence(
         raise HTTPException(413, f"Image exceeds {settings.max_upload_mb} MB")
     if len(data) < 32:
         raise HTTPException(422, "Image is empty or invalid")
+    if not header_matches(content_type, data[:12]):
+        raise HTTPException(415, "The selected file content does not match its image type")
     ext = {"image/jpeg":"jpg", "image/png":"png", "image/webp":"webp"}[content_type]
     object_path = f"scheduled/{task.id}/{kind}-{uuid.uuid4().hex}.{ext}"
     # Checks are done: hand the pooled connection back before the slow Storage upload.

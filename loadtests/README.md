@@ -30,6 +30,14 @@ Locust.
   make public, or delete a bucket. Arrange manual cleanup of generated evidence objects afterward.
 - This suite never changes Render, Supabase, database, or Storage configuration. It does not execute
   migrations.
+- The harness is rate-limited to 5 requests/second by default. Override a stage with
+  `--max-rps 2` or `--max-rps 10`; valid values are 0.1-50. It also caps concurrent in-flight
+  requests per Locust process at 10. Every request has a 15-second timeout,
+  the limit is shared across virtual users in one Locust process, users wait 3-8 seconds between
+  tasks, and HTTP 429/502/503/504/529 responses stop the stage. Before running workflows, the
+  bearer token is checked against `/api/auth/session` and must resolve to an O&M Head with the
+  required permissions. This is a load-generator safeguard, not server-side or multi-instance API
+  rate limiting.
 
 ## Suggested acceptance criteria (set before a run)
 

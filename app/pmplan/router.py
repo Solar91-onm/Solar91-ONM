@@ -1513,8 +1513,9 @@ async def import_plan(db: Annotated[Session, Depends(get_db)], user: Annotated[U
     _require(user, PLANNER_ROLES, "Only the O&M Head can import a PM plan")
     if not (file.filename or "").lower().endswith((".xlsx", ".xlsm", ".csv")):
         raise HTTPException(422, "Upload an .xlsx, .xlsm, or .csv file")
-    content = await file.read()
-    if len(content) > 5 * 1024 * 1024:
+    max_bytes = 5 * 1024 * 1024
+    content = await file.read(max_bytes + 1)
+    if len(content) > max_bytes:
         raise HTTPException(413, "File is larger than 5 MB")
     try:
         cells = _read_csv_plan(content) if (file.filename or "").lower().endswith(".csv") else _read_plan(content)

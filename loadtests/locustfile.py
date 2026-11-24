@@ -5,12 +5,31 @@ from datetime import date
 import itertools
 import struct
 import zlib
+import time
+from collections.abc import Callable
+from typing import Any
 from uuid import uuid4
 
 import gevent
+from gevent.lock import Semaphore
 from locust import HttpUser, between, task
 
-from safety import LoadTestConfig, load_config, validate_active_target
+try:
+    from .safety import (
+        LoadTestConfig,
+        LoadTestSafetyError,
+        load_config,
+        validate_active_target,
+        validate_loadtest_session,
+    )
+except ImportError:
+    from safety import (
+        LoadTestConfig,
+        LoadTestSafetyError,
+        load_config,
+        validate_active_target,
+        validate_loadtest_session,
+    )
 
 
 def _png_1x1() -> bytes:
@@ -29,18 +48,53 @@ def _png_1x1() -> bytes:
 _user_ordinals = itertools.count()
 
 
+class _RequestLimiter:
+    def __init__(self, max_rps: float) -> None:
+        self._interval = 1.0 / max_rps
+        self._next_allowed = 0.0
+        self._lock = Semaphore()
+        self._in_flight = Semaphore(max(1, min(10, int(max_rps * 2))))
+
+    def wait(self) -> None:
+        with self._lock:
+            now = time.monotonic()
+            delay = max(0.0, self._next_allowed - now)
+            if delay:
+                gevent.sleep(delay)
+            self._next_allowed = time.monotonic() + self._interval
+
+    def request(self, original: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+        with self._in_flight:
+            self.wait()
+            kwargs.setdefault("timeout", 15)
+            return original(*args, **kwargs)
+
+
 class PortalUser(HttpUser):
-    wait_time = between(1, 4)
+    wait_time = between(3, 8)
+    _shared_limiter: _RequestLimiter | None = None
+
+    @staticmethod
+    def _json_value(response: Any) -> Any:
+        try:
+            return response.json()
+        except (AttributeError, ValueError):
+            return None
 
     def on_start(self) -> None:
         self.config: LoadTestConfig = load_config()
         validate_active_target(self.client.base_url, self.config)
+        if PortalUser._shared_limiter is None:
+            PortalUser._shared_limiter = _RequestLimiter(self.config.max_rps)
+        self._limiter = PortalUser._shared_limiter
+        self._install_request_guard()
         self.client.headers.update(
             {
                 "Authorization": f"Bearer {self.config.bearer_token}",
                 "Accept": "application/json",
             }
         )
+        self._validate_session_rbac()
         self.synthetic_issue_id: str | None = None
         self.synthetic_ticket_no: str | None = None
         self.workflow_complete = False
@@ -48,6 +102,39 @@ class PortalUser(HttpUser):
         if self.workflow_user:
             self.workflow_complete = True
             self._workflow_once()
+
+    def _validate_session_rbac(self) -> None:
+        with self.client.get(
+            "/api/auth/session",
+            name="/api/auth/session [RBAC validation]",
+            catch_response=True,
+            timeout=15,
+        ) as response:
+            if response.status_code != 200:
+                raise LoadTestSafetyError(
+                    f"Load-test authentication failed with HTTP {response.status_code}."
+                )
+            try:
+                validate_loadtest_session(self._json_value(response))
+            except LoadTestSafetyError as exc:
+                response.failure(str(exc))
+                raise
+
+    def _install_request_guard(self) -> None:
+        for method_name in ("get", "post", "patch"):
+            original = getattr(self.client, method_name)
+
+            def guarded(*args: Any, _original: Any = original, **kwargs: Any) -> Any:
+                response = self._limiter.request(_original, *args, **kwargs)
+                if response.status_code == 429 or response.status_code in {502, 503, 504, 529}:
+                    if hasattr(self.environment, "stop"):
+                        self.environment.stop()
+                    response.failure(
+                        f"Staging target overloaded or unavailable (HTTP {response.status_code}); load stopped"
+                    )
+                return response
+
+            setattr(self.client, method_name, guarded)
 
     def _dashboard(self) -> None:
         """What the current portal requests at sign-in: session, plant list, Overview, then the period figures and
@@ -70,7 +157,7 @@ class PortalUser(HttpUser):
     def _issues(self, status: str | None = None) -> list[dict] | None:
         params = {
             "plant_id": self.config.plant_id,
-            "limit": 50,
+            "limit": 20,
             "offset": 0,
             "q": self.config.issue_prefix,
         }
@@ -86,9 +173,10 @@ class PortalUser(HttpUser):
                 response.failure(f"Synthetic issue list returned HTTP {response.status_code}")
                 return None
             else:
-                rows = response.json()
+                rows = self._json_value(response)
                 if not isinstance(rows, list) or any(
-                    not str(row.get("ticket_no", "")).startswith(self.config.issue_prefix)
+                    not isinstance(row, dict)
+                    or not str(row.get("ticket_no", "")).startswith(self.config.issue_prefix)
                     for row in rows
                 ):
                     response.failure("Issue query returned a record outside this synthetic run")
@@ -105,8 +193,11 @@ class PortalUser(HttpUser):
             if response.status_code != 200:
                 response.failure(f"Plant search returned HTTP {response.status_code}")
             else:
-                rows = response.json()
-                if not any(row.get("site_code") == self.config.plant_site_code for row in rows):
+                rows = self._json_value(response)
+                if not isinstance(rows, list) or not any(
+                    isinstance(row, dict) and row.get("site_code") == self.config.plant_site_code
+                    for row in rows
+                ):
                     response.failure("Plant search did not find the designated synthetic site")
 
     def _issue_detail(self) -> None:
@@ -114,7 +205,10 @@ class PortalUser(HttpUser):
             rows = self._issues()
             if not rows:
                 return
-            self.synthetic_issue_id = str(rows[0]["id"])
+            row_id = rows[0].get("id") if isinstance(rows[0], dict) else None
+            if not row_id:
+                return
+            self.synthetic_issue_id = str(row_id)
         issue_path = f"/api/issues/{self.synthetic_issue_id}"
         for path, label in (
             (f"{issue_path}/activity", "activity"),
@@ -151,8 +245,15 @@ class PortalUser(HttpUser):
             if response.status_code != 200:
                 response.failure(f"Issue integrity query returned HTTP {response.status_code}")
                 return False
-            rows = response.json()
-            exact = [row for row in rows if row.get("ticket_no") == self.synthetic_ticket_no]
+            rows = self._json_value(response)
+            if not isinstance(rows, list):
+                response.failure("Issue integrity query returned an invalid response")
+                return False
+            exact = [
+                row
+                for row in rows
+                if isinstance(row, dict) and row.get("ticket_no") == self.synthetic_ticket_no
+            ]
             if len(exact) != 1:
                 response.failure(
                     f"Expected one record for synthetic ticket, found {len(exact)}"
@@ -161,7 +262,7 @@ class PortalUser(HttpUser):
             row = exact[0]
             if (
                 row.get("status") != expected_status
-                or row.get("maker") != maker
+                or row.get("supplier_maker") != maker
                 or row.get("impact") != impact
                 or row.get("assigned_to") != self.config.assignee_id
             ):
@@ -191,7 +292,7 @@ class PortalUser(HttpUser):
             "vertical": "Inverter",
             "description": f"SYNTHETIC LOAD TEST {self.config.run_id} - {ticket_no}",
             "severity": "Low",
-            "maker": "Load test pending",
+            "supplier_maker": "Load test pending",
             "impact": "Synthetic load-test record",
         }
         with self.client.post(
@@ -203,7 +304,10 @@ class PortalUser(HttpUser):
             if response.status_code != 201:
                 response.failure(f"Synthetic issue creation returned HTTP {response.status_code}")
                 return
-            issue = response.json()
+            issue = self._json_value(response)
+            if not isinstance(issue, dict) or not issue.get("id"):
+                response.failure("Synthetic issue creation response did not include an issue ID")
+                return
             self.synthetic_issue_id = str(issue["id"])
             self.synthetic_ticket_no = ticket_no
 
@@ -236,7 +340,7 @@ class PortalUser(HttpUser):
         first = gevent.spawn(
             self._patch_field,
             issue_path,
-            {"maker": maker, "change_reason": "Synthetic concurrent load-test edit"},
+            {"supplier_maker": maker, "change_reason": "Synthetic concurrent load-test edit"},
         )
         second = gevent.spawn(
             self._patch_field,
@@ -263,8 +367,15 @@ class PortalUser(HttpUser):
             name="/api/issues/{issue_id}/close [synthetic]",
             catch_response=True,
         ) as response:
-            if response.status_code != 200 or response.json().get("status") != "Closed":
+            if response.status_code != 200:
                 response.failure(f"Synthetic issue close returned HTTP {response.status_code}")
+                return
+            closed = self._json_value(response)
+            if closed is None:
+                response.failure("Synthetic issue close returned invalid JSON")
+                return
+            if not isinstance(closed, dict) or closed.get("status") != "Closed":
+                response.failure("Synthetic issue close did not return Closed status")
                 return
 
         with self.client.post(
@@ -293,8 +404,13 @@ class PortalUser(HttpUser):
             if response.status_code != 200:
                 response.failure(f"Synthetic evidence upload returned HTTP {response.status_code}")
                 return
-            evidence = response.json()
-            if not evidence or not evidence[0].get("id"):
+            evidence = self._json_value(response)
+            if (
+                not isinstance(evidence, list)
+                or not evidence
+                or not isinstance(evidence[0], dict)
+                or not evidence[0].get("id")
+            ):
                 response.failure("Evidence upload response did not include an evidence ID")
                 return
             evidence_id = evidence[0]["id"]

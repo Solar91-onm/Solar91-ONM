@@ -31,6 +31,7 @@ The application uses SQLAlchemy with psycopg 3 against PostgreSQL (Supabase); SQ
 - Optimistic collection revision checks and stale-write rejection for legacy state sync.
 - Row locking and duplicate-transition rejection for selected issue, washing and PM workflows.
 - Private evidence handling with bounded upload size, generated storage paths and authorization checks.
+- Spreadsheet imports read at most one byte beyond their configured size limit before rejecting oversized files; request-validation errors omit raw submitted values.
 - Health/readiness endpoints and startup preflight without automatic SQL migration execution.
 - Staged, opt-in Locust harness with no automatic production targeting or record cleanup.
 - Isolated synthetic SQLite fixture generator for repeatable 1x/5x/10x data volumes; Storage evidence remains metadata-only.

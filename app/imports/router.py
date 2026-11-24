@@ -42,8 +42,9 @@ def parse_date(v):
 @router.post("/plants",dependencies=[Depends(require_csrf)])
 async def import_plants(file:UploadFile=File(...),db:Session=Depends(get_db),user:User=Depends(require_permission("plants.manage"))):
     if not file.filename or not file.filename.lower().endswith((".xlsx",".xlsm",".csv")): raise HTTPException(415,"Upload an .xlsx, .xlsm, or .csv plant information file")
-    data=await file.read()
-    if len(data)>settings.max_upload_mb*1024*1024: raise HTTPException(413,"Workbook is too large")
+    max_bytes=settings.max_upload_mb*1024*1024
+    data=await file.read(max_bytes+1)
+    if len(data)>max_bytes: raise HTTPException(413,"Workbook is too large")
     if file.filename.lower().endswith(".csv"):
         try:
             matrix=list(csv.reader(io.StringIO(data.decode("utf-8-sig"))))
@@ -127,8 +128,9 @@ async def import_locations(
     lower = filename.lower()
     if not lower.endswith((".xlsx", ".xlsm", ".csv")):
         raise HTTPException(415, "Upload an .xlsx, .xlsm, or .csv location file")
-    data = await file.read()
-    if len(data) > settings.max_upload_mb * 1024 * 1024:
+    max_bytes = settings.max_upload_mb * 1024 * 1024
+    data = await file.read(max_bytes + 1)
+    if len(data) > max_bytes:
         raise HTTPException(413, "Location file is too large")
 
     if lower.endswith(".csv"):

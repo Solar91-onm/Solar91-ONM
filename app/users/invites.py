@@ -339,8 +339,9 @@ async def import_people(
     name = file.filename or ""
     if not name.lower().endswith((".xlsx", ".xlsm", ".csv")):
         raise HTTPException(415, "Upload an .xlsx, .xlsm or .csv file")
-    data = await file.read()
-    if len(data) > settings.max_upload_mb * 1024 * 1024:
+    max_bytes = settings.max_upload_mb * 1024 * 1024
+    data = await file.read(max_bytes + 1)
+    if len(data) > max_bytes:
         raise HTTPException(413, "File is too large")
     matrix = _read_matrix(name, data)
     if not matrix:

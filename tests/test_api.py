@@ -27,6 +27,21 @@ def test_head_can_create_update_delete_plant(client, db):
     assert client.delete(f'/api/plants/{plant_id}').status_code == 204
 
 
+def test_validation_error_does_not_echo_submitted_values(client, db):
+    login_user(client, db)
+    secret = "private-invalid-value"
+    response = client.post("/api/plants", json={
+        "site_code": "INVALID01",
+        "plant_name": {"unexpected": secret},
+    })
+
+    assert response.status_code == 422
+    assert secret not in response.text
+    error = response.json()["detail"][0]
+    assert error["loc"] == ["body", "plant_name"]
+    assert error["type"] == "string_type"
+
+
 def test_security_guard_mobile_must_be_ten_digits_and_is_persisted(client, db):
     login_user(client, db)
     plant = client.post('/api/plants', json={'site_code': 'GUARD01', 'plant_name': 'Guard Plant'})
@@ -310,6 +325,22 @@ def test_issue_evidence_enforces_ten_photo_limit(client, db):
     evidence = next(row for row in listed if row['id'] == issue_id)['evidence']
     assert len(evidence) == 10
     assert all('storage_path' not in photo for photo in evidence)
+
+
+def test_issue_evidence_rejects_mismatched_image_content(client, db):
+    login_user(client, db)
+    plant = client.post('/api/plants', json={'site_code':'MIME01','plant_name':'MIME Plant'}).json()
+    created = client.post('/api/issues', json={
+        'plant_id':plant['id'],'description':'Evidence MIME validation','severity':'Low',
+    })
+    assert created.status_code == 201, created.text
+
+    response = client.post(
+        f"/api/issues/{created.json()['id']}/evidence",
+        files=[('files', ('not-a-png.png', b'x' * 64, 'image/png'))],
+    )
+    assert response.status_code == 415
+    assert 'content does not match' in response.json()['detail']
 
 
 def test_issue_filters_are_server_side(client, db):

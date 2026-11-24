@@ -60,6 +60,13 @@ Set the variables exactly as documented in `loadtests/README.md`: `SOLAR91_LOADT
 
 Use the guarded runner to execute one stage at a time. Begin with one user, inspect errors and resource headroom, then proceed only if the staging owner approves the next stage:
 
+The runner limits aggregate load-generator traffic to 5 requests/second by default
+(`--max-rps` accepts 0.1-50) and caps concurrent in-flight requests at 10 per Locust process.
+It stops on HTTP 429 or common upstream overload responses and uses 15-second request timeouts.
+These controls limit this one load-test process; they are not API-side or deployment-wide rate
+limits. The runner also verifies the staging token is an O&M Head with the workflow permissions
+before generating synthetic writes.
+
 ```powershell
 py -3.12 -m venv .venv-load
 .\.venv-load\Scripts\python.exe -m pip install -r loadtests/requirements.txt

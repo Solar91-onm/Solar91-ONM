@@ -10,6 +10,7 @@ from loadtests.safety import (
     LoadTestSafetyError,
     load_config,
     validate_active_target,
+    validate_loadtest_session,
 )
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -45,6 +46,7 @@ def test_loadtest_config_accepts_confirmed_nonproduction_target_without_exposing
 
     assert config.base_url == "https://solar91-qa.example.test"
     assert config.issue_prefix == "LT-qa-run-2026-"
+    assert config.max_rps == 5
     assert "do-not-print-test-token" not in repr(config)
     validate_active_target(config.base_url, config)
     validate_active_target(config.base_url + "/", config)
@@ -110,3 +112,55 @@ def test_evidence_upload_requires_private_bucket_confirmation():
 
     with pytest.raises(LoadTestSafetyError, match="private staging Storage bucket"):
         load_config(env)
+
+
+def test_loadtest_max_rps_has_safe_default_and_accepts_explicit_value():
+    env = _staging_env()
+    assert load_config(env).max_rps == 5
+
+    env["SOLAR91_LOADTEST_MAX_RPS"] = "2.5"
+    assert load_config(env).max_rps == 2.5
+
+
+@pytest.mark.parametrize("value", ["0", "-1", "51", "not-a-number"])
+def test_loadtest_max_rps_fails_closed(value):
+    env = _staging_env()
+    env["SOLAR91_LOADTEST_MAX_RPS"] = value
+
+    with pytest.raises(LoadTestSafetyError, match="0.1 and 50"):
+        load_config(env)
+
+
+def test_loadtest_session_requires_head_role_and_workflow_permissions():
+    permissions = [
+        "plants.view",
+        "issues.view",
+        "issues.create",
+        "issues.manage",
+        "issues.close",
+    ]
+    validate_loadtest_session({"authenticated": True, "user": {"role": "O&M Head"}, "permissions": permissions})
+
+    with pytest.raises(LoadTestSafetyError, match="O&M Head"):
+        validate_loadtest_session({"authenticated": True, "user": {"role": "Assignee"}, "permissions": permissions})
+
+    with pytest.raises(LoadTestSafetyError, match="missing required permissions"):
+        validate_loadtest_session({
+            "authenticated": True,
+            "user": {"role": "O&M Head"},
+            "permissions": ["plants.view"],
+        })
+
+    with pytest.raises(LoadTestSafetyError, match="did not return permissions"):
+        validate_loadtest_session({
+            "authenticated": True,
+            "user": {"role": "O&M Head"},
+            "permissions": [{"issues.manage": True}],
+        })
+
+    with pytest.raises(LoadTestSafetyError, match="invalid response"):
+        validate_loadtest_session({
+            "authenticated": False,
+            "user": {"role": "O&M Head"},
+            "permissions": permissions,
+        })

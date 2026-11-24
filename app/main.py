@@ -11,6 +11,7 @@ import sys
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.httpsredirect import HTTPSRedirectMiddleware
 from sqlalchemy import inspect as sa_inspect, text
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
@@ -108,6 +109,8 @@ app=FastAPI(
     description="FastAPI backend for the Solar91 O&M Command Center. Persistent business data is stored in Supabase PostgreSQL; authentication is provided by Clerk.",
     lifespan=lifespan,
 )
+if settings.app_env == "production":
+    app.add_middleware(HTTPSRedirectMiddleware)
 app.state.bootstrap_ready = settings.app_env != "production"
 app.add_middleware(
     CORSMiddleware,
@@ -439,8 +442,21 @@ def ready():
     }
 
 @app.exception_handler(RequestValidationError)
-async def validation_error(request:Request,exc:RequestValidationError):
-    return JSONResponse(status_code=422,content=jsonable_encoder({"error":"validation_error","detail":exc.errors()}, custom_encoder={ValueError: str}))
+async def validation_error(request: Request, exc: RequestValidationError):
+    route = request.scope.get("route")
+    route_path = getattr(route, "path", "<unmatched>")
+    logger.warning("Request validation failed on %s %s", request.method, route_path)
+    details = [
+        {key: error[key] for key in ("loc", "msg", "type") if key in error}
+        for error in exc.errors()
+    ]
+    return JSONResponse(
+        status_code=422,
+        content=jsonable_encoder(
+            {"error": "validation_error", "detail": details},
+            custom_encoder={ValueError: str},
+        ),
+    )
 
 _SCHEMA_MISSING_LOGGED={"at":0.0}
 
@@ -487,6 +503,6 @@ async def database_error(request:Request,exc:SQLAlchemyError):
     return JSONResponse(status_code=503,content={"error":"database_error","detail":"The database operation could not be completed."})
 
 @app.exception_handler(Exception)
-async def unexpected_error(request:Request,exc:Exception):
-    logger.exception("Unhandled error on %s",request.url.path)
+async def unexpected_error(request: Request, exc: Exception):
+    logger.exception("Unhandled error on %s: %s", request.url.path, exc)
     return JSONResponse(status_code=500,content={"error":"internal_server_error","detail":"An unexpected server error occurred."})

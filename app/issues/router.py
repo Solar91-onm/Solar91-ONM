@@ -20,6 +20,7 @@ from app.issues.deadlines import deadline_settings, save_deadline_hours
 from app.issues.repository import OPEN_ISSUE_STATUSES, IssueRepository
 from app.issues.schemas import AssignmentRequest, BulkAssignRequest, CloseRequest, StepBackRequest, IssueCommentCreate, IssueCreate, IssueDatesUpdate, IssueDeadlinesUpdate, IssueETCUpdate, IssueOut, IssueStatusRequest, IssueStepCreate, IssueStepUpdate, IssueUpdate, IssueDeleteRequest, IssueRestoreRequest, ProgressRequest, ResolveRequest, ReopenRequest, normalize_issue_severity
 from app.issues.service import IssueService
+from app.photos.imaging import header_matches
 from app.storage.service import SupabaseStorage
 
 router=APIRouter(prefix="/api/issues",tags=["Site Issues"])
@@ -314,6 +315,8 @@ def upload_issue_evidence(issue_id:UUID,db:Annotated[Session,Depends(get_db)],us
         data=file.file.read(max_bytes+1)
         if len(data)>max_bytes: raise HTTPException(413,f"Each photo must be no larger than {get_settings().max_upload_mb} MB")
         if len(data)<32: raise HTTPException(422,"A selected photo is empty or invalid")
+        if not header_matches(content_type, data[:12]):
+            raise HTTPException(415, "The selected file content does not match its image type")
         prepared.append((file,data,content_type,accepted[content_type]))
     # Checks are done: hand the pooled connection back before the Storage uploads, which are slow
     # on a field connection. Holding it here is what makes the portal feel hung for other users.

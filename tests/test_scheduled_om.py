@@ -208,7 +208,7 @@ def test_scheduled_before_after_evidence_is_private_and_required(client, db, mon
     assert incomplete.status_code == 422, incomplete.text
     assert 'Before and After' in incomplete.json()['detail']
 
-    before_bytes = b'B' * 128
+    before_bytes = b'\xff\xd8\xff' + b'B' * 125
     before = client.post(
         '/api/scheduled/tasks/WO-EVIDENCE-01/evidence/before',
         files={'file': ('before.jpg', before_bytes, 'image/jpeg')}, data={'note': 'Before maintenance'},
@@ -216,13 +216,18 @@ def test_scheduled_before_after_evidence_is_private_and_required(client, db, mon
     assert before.status_code == 200, before.text
     assert before.json()['kind'] == 'before'
 
-    after_bytes = b'A' * 128
+    after_bytes = b'\xff\xd8\xff' + b'A' * 125
     after = client.post(
         '/api/scheduled/tasks/WO-EVIDENCE-01/evidence/after',
         files={'file': ('after.jpg', after_bytes, 'image/jpeg')}, data={'note': 'After maintenance'},
     )
     assert after.status_code == 200, after.text
     assert after.json()['kind'] == 'after'
+    invalid_content = client.post(
+        '/api/scheduled/tasks/WO-EVIDENCE-01/evidence/before',
+        files={'file': ('not-a-jpeg.jpg', b'X' * 128, 'image/jpeg')},
+    )
+    assert invalid_content.status_code == 415
 
     read_before = client.get('/api/scheduled/tasks/WO-EVIDENCE-01/evidence/before')
     assert read_before.status_code == 200
