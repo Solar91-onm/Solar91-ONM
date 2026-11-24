@@ -253,8 +253,10 @@
   font-weight: 500;
 }
 .ep-wb__body { display: flex; align-items: center; gap: 15px; min-width: 0; }
-.ep-wb__gauge { position: relative; flex: 0 0 auto; width: 68px; height: 68px; }
-.ep-wb__ring { width: 68px; height: 68px; transform: rotate(-90deg); }
+/* 74px, not 68: the percentage is the only thing in the ring now, and a score above 100 ("121.2%")
+   overflowed the smaller circle. Wider ring plus a slightly smaller number leaves real margin. */
+.ep-wb__gauge { position: relative; flex: 0 0 auto; width: 74px; height: 74px; }
+.ep-wb__ring { width: 74px; height: 74px; transform: rotate(-90deg); }
 .ep-wb__ring circle { fill: none; stroke-width: 4.5; }
 .ep-wb__ring-track { stroke: var(--ep-border-soft, #e5e7eb); }
 .ep-wb__ring-fill { stroke-linecap: round; stroke: var(--wb-tone, var(--ep-accent)); }
@@ -266,13 +268,12 @@
   position: absolute;
   inset: 0;
   display: flex;
-  flex-direction: column;
   align-items: center;
   justify-content: center;
+  padding: 0 6px;
   line-height: 1.05;
 }
-.ep-wb__ring-text strong { font-size: 15px; color: var(--ep-text); font-variant-numeric: tabular-nums; }
-.ep-wb__ring-text small { font-size: 9px; color: var(--ep-text-muted); }
+.ep-wb__ring-text strong { font-size: 14px; color: var(--ep-text); font-variant-numeric: tabular-nums; }
 
 .ep-wb__facts { display: flex; flex: 1 1 auto; flex-direction: column; gap: 4px; min-width: 0; }
 .ep-wb__table-count {

@@ -1050,7 +1050,10 @@ def test_module_cleaning_card_ring_uses_monthly_compliance_without_zero_fallback
       assert.strictEqual(box.value(row),'133.3%');
       const html=box.ring(box.compliance(row),'Compliance',{key:'ontrack'});
       assert(html.includes('133.3%'));
-      assert(html.includes('<small>Compliance</small>'));
+      // The word is no longer printed inside the circle -- a score above 100 overflowed it --
+      // but it still reaches a screen reader, which would otherwise be read a bare number.
+      assert(!html.includes('<small>'),'the label must not be visible inside the ring');
+      assert(html.includes('<span class="ep-wb__sr-only">Compliance</span>'));
       assert.strictEqual(box.compliance({table_count:10}),null);
       assert.strictEqual(box.compliance({table_count:0,monthly_compliance_percent:100}),null);
       assert.strictEqual(box.value({table_count:10}),'Not available');

@@ -386,9 +386,12 @@
       '<circle class="ep-wb__ring-fill ep-wb__ring-fill--' + status.key + '" cx="26" cy="26" r="22" ' +
         'stroke-dasharray="' + filled.toFixed(1) + " " + (RING - filled).toFixed(1) + '"></circle>' +
       "</svg>" +
+      // The number alone fills the ring. What it measures is said once, above the card's figures,
+      // so printing "Compliance" inside the circle only squeezed the percentage; it stays for
+      // screen readers, which would otherwise be read a bare number.
       '<span class="ep-wb__ring-text"><strong>' +
         (percent === null ? "—" : Number(percent).toFixed(1) + "%") +
-        "</strong><small>" + escape(label) + "</small></span>";
+        '</strong><span class="ep-wb__sr-only">' + escape(label) + "</span></span>";
   }
 
   /** One small bar per cycle: its work score (or its grade, for roles that do not see scores). */
