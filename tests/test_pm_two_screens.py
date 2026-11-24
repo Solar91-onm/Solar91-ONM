@@ -107,21 +107,16 @@ def test_the_portfolio_header_states_how_many_plants_are_planned_and_paused():
     assert "plannedLine()" in header[:400], "the line sits under the portfolio title"
 
 
-def test_the_plan_filter_is_three_way_and_opens_on_all():
-    """Changed deliberately: it was a paused-only toggle.
-
-    Reported from the live portal — with the toggle on, the page read "13 of 42 plants planned" over
-    an empty register and there was no way to ask for those 13. This is the index page for every
-    plant's PM, so it opens on All and can be pointed at Planned or Paused.
-    """
+def test_the_plan_filter_offers_all_and_planned_and_opens_on_all():
+    """Keep the portfolio filter focused on All plants or plants with a cycle plan."""
     overview = _text(OVERVIEW)
 
     assert 'planFilter: "all"' in overview, "the page opens showing every plant"
-    for choice in ('["all", "All "', '["planned", "Planned "', '["paused", "Paused "'):
+    for choice in ('["all", "All "', '["planned", "Planned "'):
         assert choice in overview, choice
-    assert 'state.planFilter === "paused" && !isPaused(plant.siteCode)' in overview
+    assert '["paused", "Paused "' not in overview
+    assert 'state.planFilter === "paused"' not in overview
     assert 'state.planFilter === "planned" && isPaused(plant.siteCode)' in overview
-    assert "pausedOnly" not in overview, "no remnant of the two-way toggle"
 
 
 def test_the_plan_filter_filters_rather_than_opening_another_page():
@@ -129,7 +124,7 @@ def test_the_plan_filter_filters_rather_than_opening_another_page():
     handler = overview[overview.index('var planButton = event.target.closest("[data-pm-plan-filter]");'):]
     handler = handler[:handler.index("var layoutButton")]
 
-    assert 'state.planFilter = planButton.getAttribute("data-pm-plan-filter") || "all";' in handler
+    assert 'state.planFilter = planButton.getAttribute("data-pm-plan-filter") === "planned" ? "planned" : "all";' in handler
     assert "scrollIntoView" in handler
     assert "selectView" not in handler and "selectPlantPage" not in handler
 
@@ -138,7 +133,7 @@ def test_asking_for_the_planned_plants_says_what_it_is_showing():
     overview = _text(OVERVIEW)
 
     assert "Showing plants with a cycle plan. Open a plant to see its tracker." in overview
-    assert "Showing paused plants only." in overview
+    assert "Showing paused plants only." not in overview
 
 
 def test_a_paused_plant_reads_as_paused_and_never_as_a_zero():

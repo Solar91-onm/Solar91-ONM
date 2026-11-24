@@ -9,9 +9,7 @@
     // new PM cycles, and it is never shown as failing or as 0%. Fetched once per visit and handed
     // to the tracker on a plant's page so it does not ask for the same listing twice.
     cyclePlans: null,
-    // "all" | "planned" | "paused". This is the index page for every plant's PM, so it opens on
-    // "all"; a two-way paused toggle left no way to ask for the planned plants and, once on, read
-    // as though the portfolio had emptied.
+    // "all" | "planned". Keep every plant visible by default; the optional filter narrows to plans.
     planFilter: "all",
     plant: null,
     parent: "overview",
@@ -39,6 +37,8 @@
     // The bottom register: "all" | "upcoming" | "overdue" | "completed", plus its own sort and the
     // shared searchable column filters.
     activityFilter: "all",
+    portfolioWorkspaceTab: "upcoming",
+    plantWorkspaceTab: "plan",
     activitySort: { key: "due", dir: "asc" },
     activityColumnFilters: {},
     registerSort: { key: "", dir: "asc" },
@@ -302,18 +302,14 @@
   }
 
   /**
-   * "13 of 42 plants planned", with a three-way filter over the register below it.
-   *
-   * All / Planned / Paused, defaulting to All: the O&M Head opens this page to see every plant's
-   * PM, and asking for the planned ones is as ordinary a question as asking for the paused ones.
+   * "13 of 42 plants planned", with an optional filter for plants that have a cycle plan.
    */
   function plannedLine() {
     var list = state.cyclePlans;
     if (!list || !list.plans || !list.total) return "";
     var choices = [
       ["all", "All " + number(list.total)],
-      ["planned", "Planned " + number(list.configured)],
-      ["paused", "Paused " + number(list.paused)]
+      ["planned", "Planned " + number(list.configured)]
     ];
     return '<p class="ep-pm__plan-line">' +
       '<strong>' + number(list.configured) + ' of ' + number(list.total) + ' plants planned</strong>' +
@@ -323,11 +319,9 @@
             (state.planFilter === choice[0]) + '">' + escape(choice[1]) + '</button>';
         }).join("") +
       '</span>' +
-      (state.planFilter === "paused"
-        ? ' <span class="ep-pm__plan-note">Showing paused plants only. A paused plant generates no new PM cycles and is left out of PM compliance, never counted as 0%.</span>'
-        : state.planFilter === "planned"
-          ? ' <span class="ep-pm__plan-note">Showing plants with a cycle plan. Open a plant to see its tracker.</span>'
-          : "") +
+      (state.planFilter === "planned"
+        ? ' <span class="ep-pm__plan-note">Showing plants with a cycle plan. Open a plant to see its tracker.</span>'
+        : "") +
     '</p>';
   }
 
@@ -365,6 +359,122 @@
       return entry.status === "Completed" ? "completed" : "cancelled";
     }
     return entry.date < businessToday() ? "overdue" : "upcoming";
+  }
+
+  function dateOnly(value) {
+    if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return "";
+    var parts = value.split("-").map(Number);
+    var parsed = new Date(Date.UTC(parts[0], parts[1] - 1, parts[2]));
+    return parsed.getUTCFullYear() === parts[0] && parsed.getUTCMonth() === parts[1] - 1 &&
+      parsed.getUTCDate() === parts[2] ? value : "";
+  }
+
+  function scheduleAdherence(entry) {
+    if (!entry || entry.status !== "Completed") return "";
+    var due = dateOnly(entry.date);
+    var completed = dateOnly(entry.completedOn);
+    if (!due || !completed) return "";
+    return completed < due ? "ahead" : completed > due ? "late" : "on-time";
+  }
+
+  function scheduleStatusLabel(entry) {
+    var status = activityState(entry);
+    if (status === "completed") {
+      var adherence = scheduleAdherence(entry);
+      return adherence === "ahead" ? "Ahead of Schedule"
+        : adherence === "on-time" ? "On Time"
+        : adherence === "late" ? "Completed Late"
+        : "Completed · timing unavailable";
+    }
+    if (status === "overdue") return "Overdue";
+    if (entry.status === "In Progress") return "In Progress";
+    if (dateOnly(entry.date) === businessToday()) return "Due Today";
+    if (status === "upcoming") return "Upcoming";
+    return entry.status || "Status unavailable";
+  }
+
+  function isDueToday(entry) {
+    return openStatus(entry.status) && dateOnly(entry.date) === businessToday();
+  }
+
+  function matchesPlantActivityFilter(entry) {
+    var filter = state.activityFilter;
+    if (filter === "all") return activityState(entry) !== "cancelled";
+    if (filter === "upcoming") return activityState(entry) === "upcoming" &&
+      dateOnly(entry.date) > businessToday();
+    if (filter === "due_today") return isDueToday(entry);
+    if (filter === "overdue") return activityState(entry) === "overdue";
+    if (filter === "completed") return activityState(entry) === "completed";
+    if (filter === "ahead") return scheduleAdherence(entry) === "ahead";
+    if (filter === "on_time") return scheduleAdherence(entry) === "on-time";
+    if (filter === "completed_late") return scheduleAdherence(entry) === "late";
+    return false;
+  }
+
+  function plantActivityCounts(entries) {
+    var counts = {
+      all: 0, upcoming: 0, due_today: 0, overdue: 0, completed: 0,
+      ahead: 0, on_time: 0, completed_late: 0
+    };
+    entries.forEach(function (entry) {
+      var kind = activityState(entry);
+      if (kind === "cancelled") return;
+      counts.all += 1;
+      if (kind === "completed") {
+        counts.completed += 1;
+        var adherence = scheduleAdherence(entry);
+        if (adherence === "ahead") counts.ahead += 1;
+        if (adherence === "on-time") counts.on_time += 1;
+        if (adherence === "late") counts.completed_late += 1;
+      } else if (kind === "overdue") {
+        counts.overdue += 1;
+      } else if (isDueToday(entry)) {
+        counts.due_today += 1;
+      } else {
+        counts.upcoming += 1;
+      }
+    });
+    return counts;
+  }
+
+  function workOrderStatusCounts(entries) {
+    var today = businessToday();
+    var labels = {
+      completed: "Completed", upcoming: "Upcoming", due_today: "Due Today",
+      in_progress: "In Progress", overdue: "Overdue"
+    };
+    var colors = {
+      completed: "#17803D", upcoming: "#89949B", due_today: "#2874A6",
+      in_progress: "#6F59A5", overdue: "#B42318"
+    };
+    var counts = {};
+    entries.forEach(function (entry) {
+      var kind = activityState(entry);
+      if (kind === "cancelled") return;
+      var key;
+      if (kind === "completed") key = "completed";
+      else if (kind === "overdue") key = "overdue";
+      else if (entry.status === "In Progress") key = "in_progress";
+      else if (dateOnly(entry.date) === today) key = "due_today";
+      else if (kind === "upcoming") key = "upcoming";
+      else key = "status:" + (entry.status || "unknown");
+      if (!counts[key]) {
+        counts[key] = {
+          key: key,
+          label: labels[key] || entry.status || "Status unavailable",
+          color: colors[key] || "#6B7280",
+          count: 0
+        };
+      }
+      counts[key].count += 1;
+    });
+    var order = ["overdue", "in_progress", "due_today", "upcoming", "completed"];
+    return Object.keys(counts).map(function (key) { return counts[key]; }).sort(function (a, b) {
+      var aOrder = order.indexOf(a.key);
+      var bOrder = order.indexOf(b.key);
+      return (aOrder < 0 ? order.length : aOrder) - (bOrder < 0 ? order.length : bOrder) ||
+        a.label.localeCompare(b.label);
+    });
   }
 
   var ACTIVITY_LABELS = { upcoming: "Upcoming", overdue: "Overdue", completed: "Completed", cancelled: "Cancelled" };
@@ -459,7 +569,7 @@
   }
 
   function statusClass(status) {
-    return status.toLowerCase().replace(/\s+/g, "-");
+    return status.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
   }
 
   function statusBadge(status) {
@@ -519,7 +629,7 @@
   }
 
   /** Every plant this page is about: active plants, narrowed by the header's plant scope selector.
-   *  The All / Planned / Paused chips narrow the plant register only, not the whole page. */
+   *  The All / Planned chips narrow the plant register only, not the whole page. */
   function scopedRows() {
     return state.rows.filter(function (row) {
       if (!state.siteCode && !activePlant(row.plant)) return false;
@@ -566,7 +676,6 @@
     var rows = state.rows.filter(function (row) {
       var plant = row.plant;
       if (!state.siteCode && !activePlant(plant)) return false;
-      if (state.planFilter === "paused" && !isPaused(plant.siteCode)) return false;
       if (state.planFilter === "planned" && isPaused(plant.siteCode)) return false;
       if (state.filters.plant && plant.siteCode !== state.filters.plant) return false;
       var entries = rowEntries(row);
@@ -969,6 +1078,15 @@
     });
   }
 
+  function matchesPlantColumnFilters(entry) {
+    var columns = plantColumns();
+    return Object.keys(state.activityColumnFilters).every(function (key) {
+      var column = columns.filter(function (candidate) { return candidate.key === key; })[0];
+      var wanted = state.activityColumnFilters[key];
+      return !wanted || !column || column.value(entry) === wanted;
+    });
+  }
+
   /** The set the chip counts are taken from, so they always add up to the All count. */
   function activityFiltered() {
     return activityRows().filter(matchesColumnFilters);
@@ -1066,13 +1184,13 @@
 
   function plannedCycleSection() {
     var rows = plannedCycleRows();
-    if (!rows.length) return "";
     return '<section class="ep-pm__board" data-pm-cycle-activities>' +
       '<div class="ep-pm__board-head"><div><p class="ep-pm__eyebrow">Cycle plan</p>' +
         '<h2>Planned plant activities</h2>' +
         '<p class="ep-pm__empty-copy">These phase days come from each plant’s saved cycle plan; they are not work orders until generated.</p>' +
         '</div><span>' + number(rows.length) + ' planned</span></div>' +
-      '<div class="ep-pm__table-wrap"><table class="ep-pm__table ep-pm__activity-table">' +
+      (rows.length
+        ? '<div class="ep-pm__table-wrap"><table class="ep-pm__table ep-pm__activity-table">' +
         '<thead><tr><th>Planned day</th><th>Run day</th><th>Plant</th><th>Phase</th>' +
           '<th>Work categories</th><th>Schedule</th></tr></thead><tbody>' +
         rows.map(function (entry) {
@@ -1088,7 +1206,54 @@
             '<td>' + (changed ? "Chained" : "Planned") + '</td>' +
           '</tr>';
         }).join("") +
-        '</tbody></table></div></section>';
+        '</tbody></table></div>'
+        : '<p class="ep-pm__empty-copy">No saved cycle-plan activities fall in ' +
+          escape(monthLabel(state.month)) + '. Cycle-plan days remain separate from generated work orders.</p>') +
+      '</section>';
+  }
+
+  function workspaceTabs(kind, active, tabs) {
+    return '<section class="ep-pm__workspace ep-pm__workspace--' + escape(kind) +
+      '" data-pm-workspace="' + escape(kind) + '">' +
+      '<div class="ep-pm__workspace-tabs" role="tablist" aria-label="' +
+        (kind === "portfolio" ? "Portfolio PM activity views" : "Plant PM plan and summary") + '">' +
+        tabs.map(function (tab) {
+          return '<button type="button" role="tab" data-pm-workspace-tab="' + escape(tab.key) +
+            '" aria-selected="' + (active === tab.key) + '" tabindex="' +
+            (active === tab.key ? "0" : "-1") + '">' + escape(tab.label) + '</button>';
+        }).join("") + '</div>' +
+      tabs.map(function (tab) {
+        return '<div class="ep-pm__workspace-panel" role="tabpanel" data-pm-workspace-panel="' +
+          escape(tab.key) + '"' + (active === tab.key ? "" : " hidden") + '>' + tab.content + '</div>';
+      }).join("") +
+      '</section>';
+  }
+
+  function activateWorkspaceTab(workspace, key, focus) {
+    var tabs = Array.prototype.slice.call(workspace.querySelectorAll("[data-pm-workspace-tab]"));
+    var selected = tabs.filter(function (tab) {
+      return tab.getAttribute("data-pm-workspace-tab") === key;
+    })[0];
+    if (!selected) return;
+    var kind = workspace.getAttribute("data-pm-workspace");
+    state[kind + "WorkspaceTab"] = key;
+    tabs.forEach(function (tab) {
+      var active = tab === selected;
+      tab.setAttribute("aria-selected", String(active));
+      tab.setAttribute("tabindex", active ? "0" : "-1");
+    });
+    Array.prototype.forEach.call(workspace.querySelectorAll("[data-pm-workspace-panel]"), function (panel) {
+      panel.hidden = panel.getAttribute("data-pm-workspace-panel") !== key;
+    });
+    if (focus) selected.focus();
+  }
+
+  function portfolioWorkspace() {
+    return workspaceTabs("portfolio", state.portfolioWorkspaceTab, [
+      { key: "upcoming", label: "Upcoming", content: upcomingPanelCard() },
+      { key: "work-orders", label: "Work orders", content: activitySection() },
+      { key: "cycle-plans", label: "Cycle plans", content: plannedCycleSection() }
+    ]);
   }
 
   // -- Export ----------------------------------------------------------------
@@ -1274,8 +1439,8 @@
         // another month" is no help when no month has any.
         : (noWorkAnywhere() ? emptyPortfolio() : scopeNotice() + periodNotice()) +
           summaryMetrics(rows) +
-          '<section class="ep-pm__insights">' + registerPanel(rows) + upcomingPanelCard() +
-          '</section>' + activitySection() + plannedCycleSection()) +
+          '<section class="ep-pm__insights ep-pm__portfolio-workspace">' +
+            registerPanel(rows) + portfolioWorkspace() + '</section>') +
       '<p class="ep-pm__footnote">Compliance and due counts use the portal’s existing PM rules. ' +
         'Cancelled work is excluded, and a paused plant is never counted as zero.</p>' +
     '</div>';
@@ -1295,56 +1460,156 @@
     });
   }
 
-  // ── PM compliance, as a ring meter ─────────────────────────────────────────
-  //
-  // A single ratio against a limit, so it is a meter rather than a two-slice pie: the fill carries
-  // the band (good / warning / critical) and the unfilled track is a lighter step of that same hue,
-  // so the state reads across the whole ring rather than from the arc alone. The figure sits in the
-  // middle and is the one hero number on the page.
-
-  var METER_TRACK = { good: "#D7EDD9", warn: "#F6E3C8", bad: "#F5D6D3", muted: "#EEF0EE" };
-  var METER_FILL = { good: "#009710", warn: "#B4610A", bad: "#B42318", muted: "#C3C2B7" };
-
-  function complianceRing(percent) {
-    var band = complianceBand(percent);
-    var value = percent == null ? 0 : Math.max(0, Math.min(100, percent));
-    var sweep = Math.round(value * 3.6);
-    return '<span class="ep-pm__ring" role="img" aria-label="PM compliance ' +
-      (percent == null ? "not measurable yet" : value + " percent") + '" style="--ring-fill:' +
-      METER_FILL[band] + ';--ring-track:' + METER_TRACK[band] + ';--ring-sweep:' + sweep + 'deg">' +
-      '<span class="ep-pm__ring-value">' + (percent == null ? "—" : value + "%") + '</span></span>';
-  }
-
   function plantMetrics(row, entries) {
     var pm = pmBlock(row);
     var paused = isPaused(row.plant.siteCode);
     var counts = activityCounts(entries);
     var percent = paused || pm.compliancePercent == null ? null : Math.round(Number(pm.compliancePercent));
-    var open = counts.upcoming + counts.overdue;
-    var next = entries.filter(function (entry) {
-      return activityState(entry) !== "completed";
-    }).sort(function (a, b) { return a.date.localeCompare(b.date); })[0];
     var loading = state.calendarLoading ? "Loading…" : "";
     return '<div class="ep-pm__metrics ep-pm__metrics--plant">' +
-      '<article class="ep-pm__metric ep-pm__metric--ring">' + complianceRing(percent) +
-        '<span class="ep-pm__metric-body"><span class="ep-pm__metric-label">PM compliance</span>' +
-        '<span class="ep-pm__metric-note">' +
-          (paused ? "PM paused — no cycle plan"
-            : percent == null ? "No due work to measure yet" : "Due work completed to date") +
-        '</span></span></article>' +
-      metric("Scheduled", loading || (paused ? "—"
-        : number(counts.completed) + " / " + number(counts.all)),
-        loading ? "Reading this period’s schedule"
-          : paused ? "No cycle plan" : number(open) + " still open",
+      metric("PM compliance", loading ? "Loading…" : paused || percent == null ? "—" : percent + "%",
+        paused ? "PM paused — no cycle plan"
+          : percent == null ? "No due work to measure yet" : "Due work completed to date",
+        "green", "compliance",
+        '<span class="ep-pm__progress ep-pm__metric-bar"><span class="is-' +
+          escape(complianceBand(percent)) + '" style="width:' +
+          (percent == null ? 0 : Math.max(0, Math.min(100, percent))) + '%"></span></span>') +
+      metric("Scheduled activities", loading ? "Loading…" : paused ? "—" : number(counts.all),
+        paused ? "No cycle plan" : "In " + monthLabel(state.month),
         "blue", "calendar") +
-      metric("Overdue", loading || (paused ? "—" : number(counts.overdue)),
+      metric("Completed", loading ? "Loading…" : paused ? "—" : number(counts.completed),
+        paused ? "No cycle plan" : number(counts.completed) + " of " + number(counts.all) + " activities",
+        "green", "done") +
+      metric("Overdue", loading ? "Loading…" : paused ? "—" : number(counts.overdue),
         paused ? "No cycle plan" : counts.overdue ? "Needs attention" : "Nothing past due",
         "red", "alert") +
-      metric("Next due", loading || (next ? dateLabel(next.date) : "—"),
-        loading ? "Checking the schedule"
-          : next ? taskLabel(next) : "No open work in this period",
-        "green", "done") +
     '</div>';
+  }
+
+  function plantCompletionProgress(entries, siteCode) {
+    var counts = plantActivityCounts(entries);
+    var paused = isPaused(siteCode);
+    var percent = counts.all ? Math.round(counts.completed * 100 / counts.all) : null;
+    var remaining = Math.max(0, counts.all - counts.completed);
+    return '<section class="ep-pm__panel ep-pm__completion-panel">' +
+      '<header><div><p class="ep-pm__eyebrow">Completion progress</p><h2>Work orders completed</h2></div>' +
+      '<strong>' + (percent == null ? "—" : percent + "%") + '</strong></header>' +
+      (state.calendarLoading
+        ? '<p class="ep-pm__empty-copy" role="status">Loading scheduled PM work…</p>'
+        : state.calendarError
+          ? '<p class="ep-pm__empty-copy">Completion progress is unavailable. Use Retry above.</p>'
+          : counts.all
+            ? '<div class="ep-pm__completion-body">' +
+              '<div class="ep-pm__completion-track" role="progressbar" aria-label="Completed work orders" ' +
+                'aria-valuemin="0" aria-valuemax="100" aria-valuenow="' + percent + '">' +
+                '<span style="width:' + percent + '%"></span></div>' +
+              '<div class="ep-pm__completion-labels"><span><b>' + number(counts.completed) +
+                '</b> completed</span><span><b>' + number(remaining) +
+                '</b> remaining</span><span>' + number(counts.completed) + ' / ' +
+                number(counts.all) + ' activities</span></div>' +
+              (paused ? '<p class="ep-pm__completion-note">Existing work orders remain visible while PM planning is paused.</p>' : "") +
+              '</div>'
+            : '<p class="ep-pm__empty-copy">No scheduled work orders to measure in ' +
+              escape(monthLabel(state.month)) + '.</p>') +
+    '</section>';
+  }
+
+  function scheduleAdherencePanel(entries) {
+    var counts = plantActivityCounts(entries);
+    var eligible = counts.ahead + counts.on_time + counts.completed_late;
+    var parts = [
+      { key: "ahead", label: "Ahead of schedule", count: counts.ahead, color: "ahead" },
+      { key: "on_time", label: "Completed on time", count: counts.on_time, color: "on-time" },
+      { key: "completed_late", label: "Completed late", count: counts.completed_late, color: "late" }
+    ];
+    var body;
+    if (state.calendarLoading) {
+      body = '<p class="ep-pm__empty-copy" role="status">Loading completion dates…</p>';
+    } else if (state.calendarError) {
+      body = '<p class="ep-pm__empty-copy">Schedule adherence is unavailable. Use Retry above.</p>';
+    } else if (!eligible) {
+      body = '<p class="ep-pm__empty-copy">No completed activities have both a valid due date and completion date.</p>';
+    } else {
+      var offset = 0;
+      var segments = parts.filter(function (part) { return part.count > 0; }).map(function (part) {
+        var start = offset;
+        offset += 100 * part.count / eligible;
+        return "var(--ep-adherence-" + part.color + ") " + start.toFixed(2) + "% " +
+          offset.toFixed(2) + "%";
+      }).join(", ");
+      body = '<div class="ep-pm__adherence-body"><div class="ep-pm__adherence-bar" role="img" ' +
+        'aria-label="Schedule adherence for ' + number(eligible) + ' completed activities">' +
+        '<span style="background:linear-gradient(90deg, ' + segments + ')"></span></div>' +
+        '<ul class="ep-pm__adherence-legend">' + parts.map(function (part) {
+          var share = Math.round(part.count * 100 / eligible);
+          return '<li class="is-' + part.color + '"><span><i></i>' + escape(part.label) +
+            '</span><strong>' + number(part.count) + '</strong><small>' + share + '%</small></li>';
+        }).join("") + '</ul><p class="ep-pm__visual-note">Eligible completed activities: ' +
+        number(eligible) + '. Incomplete work and records missing either date are excluded.</p></div>';
+    }
+    return '<article class="ep-pm__panel ep-pm__visual-panel"><header><div>' +
+      '<p class="ep-pm__eyebrow">Completed work only</p><h2>Schedule Adherence</h2></div>' +
+      '<span>' + number(eligible) + ' eligible</span></header>' + body + '</article>';
+  }
+
+  function statusDonutPanel(entries) {
+    var parts = workOrderStatusCounts(entries);
+    var total = parts.reduce(function (sum, part) { return sum + part.count; }, 0);
+    var body;
+    if (state.calendarLoading) {
+      body = '<p class="ep-pm__empty-copy" role="status">Loading work-order status…</p>';
+    } else if (state.calendarError) {
+      body = '<p class="ep-pm__empty-copy">Work-order status is unavailable. Use Retry above.</p>';
+    } else if (!total) {
+      body = '<p class="ep-pm__empty-copy">No work orders to show in ' +
+        escape(monthLabel(state.month)) + '.</p>';
+    } else {
+      var offset = 0;
+      var segments = parts.map(function (part) {
+        var start = offset;
+        offset += 100 * part.count / total;
+        return part.color + " " + start.toFixed(2) + "% " + offset.toFixed(2) + "%";
+      }).join(", ");
+      body = '<div class="ep-pm__status-chart"><div class="ep-pm__status-donut" role="img" ' +
+        'aria-label="Work order status distribution for ' + number(total) + ' activities" ' +
+        'style="--pm-status-stops:' + segments + '"><span><b>' + number(total) +
+        '</b><small>Work orders</small></span></div><ul class="ep-pm__status-legend">' +
+        parts.map(function (part) {
+          return '<li><span><i style="background:' + part.color + '"></i>' + escape(part.label) +
+            '</span><strong>' + number(part.count) + '</strong><small>' +
+            Math.round(part.count * 100 / total) + '%</small></li>';
+        }).join("") + '</ul></div>';
+    }
+    return '<article class="ep-pm__panel ep-pm__visual-panel"><header><div>' +
+      '<p class="ep-pm__eyebrow">Selected period</p><h2>Work Order Status</h2></div>' +
+      '<span>' + number(total) + ' activities</span></header>' + body + '</article>';
+  }
+
+  function plantVisuals(entries) {
+    return '<div class="ep-pm__plant-visuals">' +
+      scheduleAdherencePanel(entries) + statusDonutPanel(entries) + '</div>';
+  }
+
+  function plantPlanningSummary(row, entries) {
+    var plan = planState(row.plant.siteCode);
+    var counts = activityCounts(entries);
+    var phaseCount = plan && plan.configured ? Number(plan.phases) || 0 : 0;
+    var planText = !plan ? "Status unavailable"
+      : plan.paused ? "Paused" : "Configured";
+    return '<section class="ep-pm__planning-summary" aria-label="Plant PM planning status">' +
+      '<div><span>Planning status</span>' + statusBadge(planText) + '</div>' +
+      '<div><span>Cycle plan</span><strong>' +
+        (plan && plan.configured ? number(phaseCount) + (phaseCount === 1 ? " phase" : " phases")
+          : plan && plan.paused ? "No saved plan" : "—") + '</strong></div>' +
+      '<div><span>Selected period</span><strong>' + escape(monthLabel(state.month)) + '</strong></div>' +
+      '<div><span>Scheduled work</span><strong>' +
+        (state.calendarLoading ? "Loading…" : number(counts.all) + " activities") + '</strong></div>' +
+      (plan && plan.paused
+        ? '<p class="ep-pm__planning-note">' +
+          escape(plan.paused_hint || "No new PM cycles are generated without a saved cycle plan. Existing work orders are not affected.") +
+          '</p>'
+        : '<p class="ep-pm__planning-note">Saved cycle-plan days are planning markers; work orders are created separately and shown in the register.</p>') +
+    '</section>';
   }
 
   // ── Maintenance workload ───────────────────────────────────────────────────
@@ -1510,7 +1775,7 @@
 
   // ── Recent and upcoming ────────────────────────────────────────────────────
 
-  /** The work either side of today: what was just done and what is next, soonest first. */
+  /** Nearest future-due work orders for this plant, soonest first. */
   function recentUpcomingPanel(entries) {
     var body;
     if (state.calendarLoading) {
@@ -1518,36 +1783,30 @@
     } else if (state.calendarError) {
       body = '<p class="ep-pm__empty-copy">Scheduled PM work is unavailable. Use Retry above.</p>';
     } else {
-      var today = businessToday();
-      var open = entries.filter(function (entry) { return activityState(entry) !== "completed"; })
+      var open = entries.filter(function (entry) {
+        return activityState(entry) === "upcoming" && dateOnly(entry.date) > businessToday();
+      })
         .sort(function (a, b) { return a.date.localeCompare(b.date); });
-      var done = entries.filter(function (entry) { return activityState(entry) === "completed"; })
-        .sort(function (a, b) { return b.date.localeCompare(a.date); });
-      // Two most recently completed, then the next three still open (overdue first, being the
-      // earliest due). Either half takes the other's room when it is short.
-      var recent = done.slice(0, 2).reverse();
-      var next = open.slice(0, 5 - recent.length);
-      if (next.length < 3) recent = done.slice(0, 5 - next.length).reverse();
-      var items = recent.concat(next);
+      var items = open.slice(0, 5);
       if (!items.length) {
-        body = '<p class="ep-pm__empty-copy">No PM work is scheduled in ' +
+        body = '<p class="ep-pm__empty-copy">No upcoming PM work orders in ' +
           escape(monthLabel(state.month)) + '.</p>';
       } else {
         body = '<div class="ep-pm__table-wrap"><table class="ep-pm__table ep-pm__upcoming-table">' +
-          '<thead><tr><th>Task</th><th>Equipment / Unit</th><th>Due date</th><th>Status</th></tr></thead>' +
+          '<thead><tr><th>Due date</th><th>Task</th><th>Equipment / Unit</th><th>Assigned to</th></tr></thead>' +
           '<tbody>' + items.map(function (entry) {
-            return '<tr' + (entry.date === today ? ' class="is-today"' : "") + '>' +
+            return '<tr>' +
+              '<td><time datetime="' + escape(entry.date) + '">' + escape(dateLabel(entry.date)) + '</time></td>' +
               '<td><button type="button" class="ep-pm__task-open" data-pm-open-event="' +
                 escape(entry.id) + '" data-pm-event-date="' + escape(entry.date) + '">' +
                 escape(taskLabel(entry)) + '</button></td>' +
-              '<td>' + escape(equipmentLabel(entry)) + '</td>' +
-              '<td><time datetime="' + escape(entry.date) + '">' + escape(dateLabel(entry.date)) +
-                '</time></td><td>' + statusBadge(activityLabel(entry)) + '</td></tr>';
+              '<td>' + escape(equipmentLabel(entry)) + '</td><td>' +
+              escape(assigneeLabel(entry)) + '</td></tr>';
           }).join("") + '</tbody></table></div>';
       }
     }
     return '<section class="ep-pm__panel"><header><div><p class="ep-pm__eyebrow">Activity</p>' +
-      '<h2>Recent / upcoming tasks</h2></div>' +
+      '<h2>Upcoming Maintenance</h2></div>' +
       '<button type="button" class="ep-pm__view-all" data-pm-view-all>View all</button></header>' +
       body + '</section>';
   }
@@ -1558,17 +1817,75 @@
   // answers in its title. Same shared sort headings and searchable column filters, same chips.
 
   function plantColumns() {
-    return ACTIVITY_COLUMNS.filter(function (column) { return column.key !== "plant"; });
+    var statusOrder = [
+      "Overdue", "In Progress", "Due Today", "Upcoming",
+      "Ahead of Schedule", "On Time", "Completed Late", "Completed · timing unavailable"
+    ];
+    return [
+      {
+        key: "due", label: "Due date", filter: false,
+        sort: function (entry) { return entry.date; },
+        value: function (entry) { return dateLabel(entry.date); }
+      },
+      {
+        key: "task", label: "Maintenance task", sort: taskLabel, value: taskLabel,
+        cell: function (entry) {
+          return '<button type="button" class="ep-pm__task-open" data-pm-open-event="' +
+            escape(entry.id) + '" data-pm-event-date="' + escape(entry.date) + '">' +
+            escape(taskLabel(entry)) + '</button><small>' +
+            escape(entry.reference || "No work order reference") + '</small>';
+        }
+      },
+      { key: "equipment", label: "Equipment / Unit", sort: equipmentLabel, value: equipmentLabel },
+      { key: "frequency", label: "Frequency", sort: frequencyLabel, value: frequencyLabel },
+      { key: "assignee", label: "Assigned to", sort: assigneeLabel, value: assigneeLabel },
+      {
+        key: "completed", label: "Completed on", filter: false,
+        sort: function (entry) { return dateOnly(entry.completedOn) || "9999-12-31"; },
+        value: function (entry) {
+          var completed = dateOnly(entry.completedOn);
+          return completed ? dateLabel(completed) : "—";
+        }
+      },
+      {
+        key: "status", label: "Schedule status", value: scheduleStatusLabel,
+        sort: function (entry) {
+          var index = statusOrder.indexOf(scheduleStatusLabel(entry));
+          return index < 0 ? statusOrder.length : index;
+        },
+        cell: function (entry) { return statusBadge(scheduleStatusLabel(entry)); }
+      }
+    ];
+  }
+
+  var PLANT_ACTIVITY_CHIPS = [
+    ["all", "All"], ["upcoming", "Upcoming"], ["due_today", "Due Today"],
+    ["overdue", "Overdue"], ["completed", "Completed"], ["ahead", "Ahead of Schedule"],
+    ["on_time", "On Time"], ["completed_late", "Completed Late"]
+  ];
+
+  function plantActivityChips(counts) {
+    return '<div class="ep-pm__chips ep-pm__chips--plant" role="group" aria-label="Filter maintenance schedule">' +
+      PLANT_ACTIVITY_CHIPS.map(function (chip) {
+        return '<button type="button" class="ep-pm__chip" data-pm-activity-filter="' +
+          escape(chip[0]) + '" aria-pressed="' + (state.activityFilter === chip[0]) + '">' +
+          escape(chip[1]) + ' <b>' + number(counts[chip[0]]) + '</b></button>';
+      }).join("") + '</div>';
   }
 
   function plantRegisterSection(entries) {
     var columns = plantColumns();
-    var filtered = entries.filter(matchesColumnFilters);
-    var counts = activityCounts(filtered);
-    var rows = filtered;
-    if (state.activityFilter !== "all") {
-      rows = rows.filter(function (entry) { return activityState(entry) === state.activityFilter; });
-    }
+    var query = state.filters.query.trim().toLowerCase();
+    var filtered = entries.filter(function (entry) {
+      if (!matchesPlantColumnFilters(entry)) return false;
+      if (!query) return true;
+      return [
+        taskLabel(entry), equipmentLabel(entry), frequencyLabel(entry), assigneeLabel(entry),
+        scheduleStatusLabel(entry), entry.reference, entry.date, entry.completedOn
+      ].join(" ").toLowerCase().indexOf(query) !== -1;
+    });
+    var counts = plantActivityCounts(filtered);
+    var rows = filtered.filter(matchesPlantActivityFilter);
     var sorter = global.Solar91PortalSort;
     rows = sorter
       ? sorter.apply(rows, state.activitySort, columns)
@@ -1600,7 +1917,7 @@
         'Scheduled PM work is unavailable. Use Retry above.</td></tr>';
     } else if (!rows.length) {
       body = '<tr><td colspan="' + columns.length + '" class="ep-pm__empty-cell">' +
-        (state.activityFilter === "all" && !Object.keys(state.activityColumnFilters).length
+        (state.activityFilter === "all" && !Object.keys(state.activityColumnFilters).length && !query
           ? 'No PM work orders fall in ' + escape(monthLabel(state.month)) + '.'
           : 'No PM work orders match these filters. ' +
             '<button type="button" class="ep-pm__clear-filters" data-pm-clear-activities>' +
@@ -1615,9 +1932,29 @@
     return '<section class="ep-pm__board" data-pm-activities>' +
       '<div class="ep-pm__board-head"><div><p class="ep-pm__eyebrow">Saved schedule</p>' +
         '<h2>PM work orders</h2></div><span>' + number(rows.length) + ' shown</span></div>' +
-      activityChips(counts) +
+      '<div class="ep-pm__panel-filters"><label class="ep-pm__search">' +
+        '<span class="ep-pm__sr-only">Search PM work orders</span>' +
+        '<input type="search" data-pm-filter="query" value="' + escape(state.filters.query) +
+        '" placeholder="Search task, equipment, assignee or reference" /></label>' +
+        (query ? '<button type="button" class="ep-pm__clear-filters" data-pm-clear-query>Clear search</button>' : "") +
+      '</div>' +
+      plantActivityChips(counts) +
       '<div class="ep-pm__table-wrap"><table class="ep-pm__table ep-pm__activity-table">' +
         '<thead><tr>' + header + '</tr></thead><tbody>' + body + '</tbody></table></div></section>';
+  }
+
+  function plantWorkspace(entries) {
+    return '<section class="ep-pm__plant-workspace">' +
+      plantRegisterSection(entries) +
+      workspaceTabs("plant", state.plantWorkspaceTab, [
+        { key: "plan", label: "Cycle plan", content: '<div data-pm-tracker-host></div>' },
+        { key: "upcoming", label: "Upcoming", content:
+          '<div class="ep-pm__plant-workspace-stack">' + recentUpcomingPanel(entries) +
+          calendarCard(entries) + '</div>' },
+        { key: "equipment", label: "Equipment", content: breakdownPanel(entries) },
+        { key: "workload", label: "Workload", content: workloadPanel(entries) }
+      ]) +
+    '</section>';
   }
 
   function plantContent(row) {
@@ -1625,9 +1962,10 @@
     var entries = plantEntries(plant.siteCode);
     var status = statusFor(row, entriesForPlant(plant.siteCode));
     return '<div class="ep-pm">' +
-      '<div class="ep-pm__breadcrumb"><button type="button" data-pm-back>' +
+      '<nav class="ep-pm__breadcrumb" aria-label="Breadcrumb"><button type="button" data-pm-back>' +
         (state.parent === "overview" ? "Preventive Maintenance" : "Plants") +
-        '</button><span aria-hidden="true">›</span><span>' + escape(plantName(plant)) + '</span></div>' +
+        '</button><span aria-hidden="true">›</span><span>' + escape(plantName(plant)) +
+        '</span><span aria-hidden="true">›</span><span aria-current="page">Preventive Maintenance</span></nav>' +
       '<header class="ep-pm__plant-head"><div class="ep-pm__plant-identity">' +
         // A generic tile, not a photograph: a plant has no picture of its own in the portal, and
         // site evidence is private O&M material that does not belong in a summary header.
@@ -1635,11 +1973,10 @@
           'stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">' +
           '<path d="M3.5 14.5h17l-1.6-9H5.1l-1.6 9Z"></path><path d="M12 5.5v9M4.6 10h14.8"></path>' +
           '<path d="M9 20h6M12 14.5V20"></path></svg></span>' +
-        '<div><h1>' + escape(plantName(plant)) + ' — Preventive Maintenance</h1>' +
-          '<p>Plant summary and upcoming tasks</p>' +
-          '<p class="ep-pm__plant-meta">' + escape(plant.siteCode) +
-            (plant.location ? ' · ' + escape(plant.location) : "") +
-            ' · ' + escape(monthLabel(state.month)) + '</p>' +
+        '<div><p class="ep-pm__eyebrow">Plant preventive maintenance</p>' +
+          '<h1>' + escape(plantName(plant)) + '</h1>' +
+          '<p class="ep-pm__plant-meta"><strong>' + escape(plant.siteCode) + '</strong>' +
+            (plant.location ? ' · ' + escape(plant.location) : "") + '</p>' +
           pausedTag(plant.siteCode) + '</div></div>' +
         '<div class="ep-pm__header-actions">' + statusBadge(status) +
           '<label>Period<input type="month" data-pm-month value="' + escape(state.month) +
@@ -1657,13 +1994,8 @@
       (state.calendarError ? retryMessage(state.calendarError, "calendar") : "") +
       (state.loading
         ? '<div class="ep-pm__loading" role="status">Loading PM work orders…</div>'
-        : plantMetrics(row, entries) +
-          workloadPanel(entries) +
-          '<section class="ep-pm__plant-grid">' + breakdownPanel(entries) + calendarCard(entries) +
-          '</section>' +
-          recentUpcomingPanel(entries) +
-          '<div data-pm-tracker-host></div>' +
-          plantRegisterSection(entries)) +
+        : plantMetrics(row, entries) + plantCompletionProgress(entries, plant.siteCode) +
+          plantVisuals(entries) + plantPlanningSummary(row, entries) + plantWorkspace(entries)) +
       '<p class="ep-pm__footnote">PM task details open in the existing role-scoped calendar. ' +
         'No schedules are changed here.</p>' +
     '</div>';
@@ -1953,6 +2285,11 @@
         render();
         return;
       }
+      if (event.target.closest("[data-pm-clear-query]")) {
+        state.filters.query = "";
+        render();
+        return;
+      }
       if (event.target.closest("[data-pm-export]")) {
         exportActivities();
         return;
@@ -1960,9 +2297,18 @@
       // "View all" lands on the work-order register with the Upcoming chip already applied.
       if (event.target.closest("[data-pm-view-all]")) {
         state.activityFilter = "upcoming";
+        if (!state.siteCode) state.portfolioWorkspaceTab = "work-orders";
         render();
         var activities = state.host.querySelector("[data-pm-activities]");
         if (activities && activities.scrollIntoView) activities.scrollIntoView({ block: "start" });
+        return;
+      }
+      var workspaceTab = event.target.closest("[data-pm-workspace-tab]");
+      if (workspaceTab) {
+        var workspace = workspaceTab.closest("[data-pm-workspace]");
+        if (workspace) activateWorkspaceTab(
+          workspace, workspaceTab.getAttribute("data-pm-workspace-tab"), false
+        );
         return;
       }
       var chip = event.target.closest("[data-pm-activity-filter]");
@@ -1980,10 +2326,10 @@
         }
         return;
       }
-      // All / Planned / Paused filters the register in place; it never opens a separate page.
+      // All / Planned filters the register in place; it never opens a separate page.
       var planButton = event.target.closest("[data-pm-plan-filter]");
       if (planButton) {
-        state.planFilter = planButton.getAttribute("data-pm-plan-filter") || "all";
+        state.planFilter = planButton.getAttribute("data-pm-plan-filter") === "planned" ? "planned" : "all";
         render();
         var register = state.host.querySelector(".ep-pm__plants-grid, .ep-pm__table-wrap");
         if (register && register.scrollIntoView) register.scrollIntoView({ block: "start" });
@@ -1995,6 +2341,20 @@
         saveLayoutPreference();
         render();
       }
+    });
+    host.addEventListener("keydown", function (event) {
+      var tab = event.target.closest && event.target.closest("[data-pm-workspace-tab]");
+      if (!tab || (event.key !== "ArrowLeft" && event.key !== "ArrowRight" &&
+          event.key !== "Home" && event.key !== "End")) return;
+      var workspace = tab.closest("[data-pm-workspace]");
+      if (!workspace) return;
+      var tabs = Array.prototype.slice.call(workspace.querySelectorAll("[data-pm-workspace-tab]"));
+      var index = tabs.indexOf(tab);
+      if (event.key === "Home") index = 0;
+      else if (event.key === "End") index = tabs.length - 1;
+      else index = (index + (event.key === "ArrowRight" ? 1 : tabs.length - 1)) % tabs.length;
+      event.preventDefault();
+      activateWorkspaceTab(workspace, tabs[index].getAttribute("data-pm-workspace-tab"), true);
     });
     host.addEventListener("input", function (event) {
       var filter = event.target.getAttribute("data-pm-filter");

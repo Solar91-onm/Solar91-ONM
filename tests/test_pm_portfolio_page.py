@@ -58,7 +58,7 @@ def test_the_header_states_what_the_page_is_for_and_what_it_can_do():
     # Period, plant scope, then Export as the primary action.
     assert page.index("data-pm-month") < page.index('data-pm-filter="plant"') < page.index("data-pm-export")
     assert 'class="ep-pm__primary-button" data-pm-export' in page
-    assert "plannedLine()" in page, "the planned/paused line and its chips stay under the subtitle"
+    assert "plannedLine()" in page, "the plan count and its optional filter stay under the subtitle"
 
 
 def test_the_pm_calendar_button_is_not_on_this_screen():
@@ -66,12 +66,13 @@ def test_the_pm_calendar_button_is_not_on_this_screen():
     source = _text(OVERVIEW)
 
     assert "data-pm-calendar" not in _portfolio(source)
-    # ...and the plant page keeps its own way through to the calendar, in its own card.
+    # ...and the plant page keeps its own way through to the calendar, inside its activity tab.
     card = source[source.index("  function calendarCard(entries) {"):]
     card = card[:card.index(chr(10) + "  }" + chr(10))]
     assert 'class="ep-pm__calendar-button" data-pm-calendar>Open PM calendar ' in card
-    plant = source[source.index("  function plantContent(row) {"):]
-    assert "calendarCard(entries)" in plant
+    workspace = source[source.index("  function plantWorkspace(entries) {"):]
+    workspace = workspace[:workspace.index(chr(10) + "  }" + chr(10))]
+    assert "calendarCard(entries)" in workspace
 
 
 def test_four_stat_tiles_with_a_tinted_icon_each_and_a_bar_under_compliance():
@@ -113,8 +114,9 @@ def test_two_panels_side_by_side_with_the_left_one_wider():
     page = _portfolio(_text(OVERVIEW))
     source = _text(OVERVIEW)
 
-    assert "registerPanel(rows)" in page and "upcomingPanelCard()" in page
-    assert page.index("registerPanel(rows)") < page.index("upcomingPanelCard()")
+    assert "registerPanel(rows)" in page and "portfolioWorkspace()" in page
+    assert "upcomingPanelCard()" in source and "activitySection()" in source and "plannedCycleSection()" in source
+    assert page.index("registerPanel(rows)") < page.index("portfolioWorkspace()")
     assert "Plant-wise PM status" in source and "Upcoming maintenance" in source
     # The panels these two replace are gone.
     assert "Plants to review" not in source
@@ -576,18 +578,13 @@ def test_the_plant_page_leads_with_the_plant_and_a_generic_tile():
     page = source[source.index("  function plantContent(row) {"):]
     page = page[:page.index(chr(10) + "  }" + chr(10))]
 
-    assert "' — Preventive Maintenance</h1>'" in page or "— Preventive Maintenance" in page
-    assert "Plant summary and upcoming tasks" in page
+    assert "'<h1>' + escape(plantName(plant)) + '</h1>'" in page
+    assert 'aria-label="Breadcrumb"' in page and 'aria-current="page">Preventive Maintenance' in page
     assert "ep-pm__plant-tile" in page
     assert "<img" not in page, "a plant has no photograph in the portal, and site evidence is private"
-    # The sections it is built from, in the order the page shows them.
-    for index, call in enumerate(["plantMetrics(row, entries)", "workloadPanel(entries)",
-                                  "breakdownPanel(entries)", "calendarCard(entries)",
-                                  "recentUpcomingPanel(entries)", "data-pm-tracker-host",
-                                  "plantRegisterSection(entries)"]):
-        assert call in page, call
-    assert page.index("plantMetrics(row, entries)") < page.index("workloadPanel(entries)")
-    assert page.index("recentUpcomingPanel(entries)") < page.index("data-pm-tracker-host")
+    assert "plantMetrics(row, entries)" in page
+    assert "plantPlanningSummary(row, entries)" in page
+    assert "plantWorkspace(entries)" in page
 
 
 def test_the_plant_page_keeps_the_tracker_and_the_full_work_order_register():
@@ -599,27 +596,42 @@ def test_the_plant_page_keeps_the_tracker_and_the_full_work_order_register():
     register = source[source.index("  function plantRegisterSection(entries) {"):]
     register = register[:register.index(chr(10) + "  }" + chr(10))]
     assert "<h2>PM work orders</h2>" in register
-    assert "activityChips(counts)" in register, "the same filter chips as the portfolio"
+    assert "plantActivityChips(counts)" in register, "the plant-specific status filters remain available"
     assert "columnFilter.headerHTML(th, {" in register, "the shared searchable column filter"
     assert "sorter.thHTML(column, state.activitySort" in register
-    # One plant's page already says which plant it is.
-    assert 'column.key !== "plant"' in source
+    for column in ('label: "Due date"', 'label: "Maintenance task"', 'label: "Equipment / Unit"',
+                   'label: "Assigned to"', 'label: "Completed on"', 'label: "Schedule status"'):
+        assert column in source, column
 
 
-def test_the_compliance_ring_is_a_meter_not_a_two_slice_pie():
-    """A single ratio against a limit: the arc carries the band and the track is a lighter step of
-    the SAME hue, so the state reads across the whole ring."""
+def test_plant_dashboard_adds_progress_adherence_and_a_mutually_exclusive_status_chart():
     source = _text(OVERVIEW)
-    ring = source[source.index("  function complianceRing(percent) {"):]
-    ring = ring[:ring.index(chr(10) + "  }" + chr(10))]
 
-    assert "complianceBand(percent)" in ring
-    assert "--ring-sweep:" in ring and "--ring-track:" in ring and "--ring-fill:" in ring
-    assert 'role="img"' in ring and "aria-label=" in ring, "the figure is announced, not just drawn"
-    assert "var METER_TRACK" in source and "var METER_FILL" in source
+    assert "plantCompletionProgress(entries, plant.siteCode)" in source
+    assert "counts.completed * 100 / counts.all" in source
+    assert "var remaining = Math.max(0, counts.all - counts.completed);" in source
+    assert "function scheduleAdherence(entry)" in source
+    assert 'completed < due ? "ahead" : completed > due ? "late" : "on-time"' in source
+    assert "var eligible = counts.ahead + counts.on_time + counts.completed_late;" in source
+    assert "Incomplete work and records missing either date are excluded." in source
+    assert "function workOrderStatusCounts(entries)" in source
+    assert 'else if (kind === "overdue") key = "overdue";' in source
+    assert 'else if (entry.status === "In Progress") key = "in_progress";' in source
+    assert 'aria-label="Work order status distribution for ' in source
+
+
+def test_plant_kpis_match_portfolio_cards_and_keep_unmeasurable_values_neutral():
+    source = _text(OVERVIEW)
+    metrics = source[source.index("  function plantMetrics(row, entries) {"):]
+    metrics = metrics[:metrics.index(chr(10) + "  }" + chr(10))]
+    for label in ("PM compliance", "Scheduled activities", "Completed", "Overdue"):
+        assert 'metric("' + label + '"' in metrics
+    assert "paused || pm.compliancePercent == null ? null" in metrics
+    assert 'paused ? "—"' in metrics
+    assert "number(counts.completed) + \" of \" + number(counts.all) + \" activities\"" in metrics
 
     css = _text(PM_CSS)
-    assert ".ep-pm__ring {" in css and "conic-gradient(var(--ring-fill)" in css
+    assert ".ep-pm__metric--green .ep-pm__metric-icon" in css
 
 
 def test_the_task_breakdown_uses_a_categorical_ramp_clear_of_the_status_colours():
@@ -697,6 +709,18 @@ const vm = require('vm');
 const month = new Intl.DateTimeFormat('en-CA', {
   timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit'
 }).format(new Date());
+const todayParts = new Intl.DateTimeFormat('en-CA', {
+  timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit'
+}).formatToParts(new Date()).reduce((out, part) => {
+  if (part.type !== 'literal') out[part.type] = part.value;
+  return out;
+}, {});
+const today = todayParts.year + '-' + todayParts.month + '-' + todayParts.day;
+const shiftDate = (date, offset) => {
+  const value = new Date(date + 'T00:00:00Z');
+  value.setUTCDate(value.getUTCDate() + offset);
+  return value.toISOString().slice(0, 10);
+};
 const nextMonth = (() => {
   const y = Number(month.slice(0, 4)), m = Number(month.slice(5, 7)) + 2;
   return (y + Math.floor((m - 1) / 12)) + '-' + String(((m - 1) % 12) + 1).padStart(2, '0');
@@ -751,6 +775,7 @@ const cyclePlanMarkers = [
 
 const empty = process.argv[1] === 'empty';
 const bands = process.argv[1] === 'bands';
+const plantPage = process.argv[1] === 'plant';
 
 // One plant per status band, so every pill is reached with real records rather than asserted
 // from the source. Compliance is held at 90% where the band must come from the overdue count.
@@ -774,6 +799,19 @@ if (bands) {
       entries.push(make(code, name, { status: 'Completed', date: day(1 + n), completedOn: day(1 + n) }));
     }
   });
+}
+if (plantPage) {
+  entries.length = 0;
+  entries.push(
+    make('AA-01', 'Alpha', { status: 'Completed', date: day(10), completedOn: day(9) }),
+    make('AA-01', 'Alpha', { status: 'Completed', date: day(11), completedOn: day(11) }),
+    make('AA-01', 'Alpha', { status: 'Completed', date: day(12), completedOn: day(13) }),
+    make('AA-01', 'Alpha', { status: 'Completed', date: day(14), completedOn: null }),
+    make('AA-01', 'Alpha', { status: 'Scheduled', date: today }),
+    make('AA-01', 'Alpha', { status: 'Scheduled', date: shiftDate(today, 1) }),
+    make('AA-01', 'Alpha', { status: 'In Progress', date: shiftDate(today, 2) }),
+    make('AA-01', 'Alpha', { status: 'Overdue', date: shiftDate(today, -1) })
+  );
 }
 let html = '';
 const listeners = {};
@@ -841,10 +879,42 @@ const bad = [];
 const want = (label, ok) => { if (!ok) bad.push(label); };
 
 (async () => {
-  Solar91PortalPMOverview.show(host, { parent: 'overview' });
+  Solar91PortalPMOverview.show(host, plantPage
+    ? { siteCode: 'AA-01', parent: 'plants' }
+    : { parent: 'overview' });
   for (let i = 0; i < 8; i += 1) await tick();
   const selected = (html.match(/type="month"[^>]*value="([^"]*)"/) || [])[1];
   const picker = (html.match(/type="month"[^>]*max="([^"]+)"/) || [])[1];
+
+  if (plantPage) {
+    want('individual plant breadcrumb and identity', html.includes('aria-label="Breadcrumb"') &&
+      html.includes('Alpha') && html.includes('AA-01'));
+    want('four individual plant KPI cards', html.includes('PM compliance') &&
+      html.includes('Scheduled activities') && html.includes('Completed') && html.includes('Overdue'));
+    want('completion progress uses all scheduled activities', html.includes('aria-valuenow="50"') &&
+      html.includes('4 / 8 activities'));
+    want('schedule adherence excludes missing completion date',
+      html.includes('Schedule Adherence') && html.includes('Eligible completed activities: 3') &&
+      html.includes('33%'));
+    want('work-order status chart includes exclusive status categories',
+      html.includes('Work Order Status') && html.includes('<b>8</b><small>Work orders</small>') &&
+      html.includes('In Progress') && html.includes('Due Today'));
+    want('missing timing is explicit in the schedule table',
+      html.includes('Completed · timing unavailable') && html.includes('Completed on'));
+    want('all detailed activity filters are available',
+      ['data-pm-activity-filter="due_today"', 'data-pm-activity-filter="ahead"',
+       'data-pm-activity-filter="on_time"', 'data-pm-activity-filter="completed_late"']
+        .every((key) => html.includes(key)));
+
+    listeners.click({ target: { closest: (s) => s === '[data-pm-activity-filter]'
+      ? { getAttribute: () => 'ahead' } : null } });
+    const filteredRows = (html.match(/class="ep-pm__task-row"/g) || []).length;
+    want('ahead filter isolates its matching completed work order', filteredRows === 1 &&
+      html.includes('ep-pm__status--ahead-of-schedule'));
+    console.log(JSON.stringify({ plant: true, rows: filteredRows }));
+    if (bad.length) { console.error('FAILED\n - ' + bad.join('\n - ')); process.exit(1); }
+    return;
+  }
 
   if (bands) {
     const table = html.slice(html.indexOf('ep-pm__register-table'), html.indexOf('</table>'));
@@ -920,11 +990,14 @@ const want = (label, ok) => { if (!ok) bad.push(label); };
   want('a row opens that plant PM page',
     nav.some((c) => c[0] === 'plant' && c[1] === 'BB-02' && c[5] && c[5].pmParent === 'overview'));
 
-  // The planned/paused chips filter the plant register in place.
-  listeners.click({ target: { closest: (s) => s === '[data-pm-plan-filter]' ? { getAttribute: () => 'paused' } : null } });
+  want('portfolio offers only All and Planned plan filters',
+    html.includes('data-pm-plan-filter="all"') && html.includes('data-pm-plan-filter="planned"') &&
+    !html.includes('data-pm-plan-filter="paused"'));
+  // The Planned chip filters the plant register in place without hiding paused status elsewhere.
+  listeners.click({ target: { closest: (s) => s === '[data-pm-plan-filter]' ? { getAttribute: () => 'planned' } : null } });
   const registerOnly = html.slice(html.indexOf('ep-pm__register-table'), html.indexOf('</table>'));
-  want('the Paused chip filters the plant register', html.includes('<span>1 plant</span>') &&
-    registerOnly.includes('>Delta<') && !registerOnly.includes('>Alpha<'));
+  want('the Planned chip filters the plant register', html.includes('<span>3 plants</span>') &&
+    registerOnly.includes('>Alpha<') && !registerOnly.includes('>Delta<'));
   listeners.click({ target: { closest: (s) => s === '[data-pm-plan-filter]' ? { getAttribute: () => 'all' } : null } });
 
   console.log(JSON.stringify({ picker: picker, chips: chips }));
@@ -934,8 +1007,8 @@ const want = (label, ok) => { if (!ok) bad.push(label); };
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="Node.js is required for frontend tests")
-@pytest.mark.parametrize("mode", ["populated", "empty", "bands"])
-def test_the_portfolio_page_behaves_on_both_shapes_of_real_data(mode):
+@pytest.mark.parametrize("mode", ["populated", "empty", "bands", "plant"])
+def test_pm_dashboard_behaves_on_real_record_shapes(mode):
     """Driven against the real module: a portfolio with work in the current month, the day-one
     shape where the only planned work is months ahead, and one plant per status band."""
     run = subprocess.run(["node", "-e", PORTFOLIO_SCRIPT, mode],
