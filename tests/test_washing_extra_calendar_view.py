@@ -20,6 +20,9 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 CALENDAR = ROOT / "assets" / "js" / "operations-calendar.js"
+# Extra cleaning's labels, its three actions and its form were extracted here so the Module
+# Cleaning board (assets/js/washing-board.js) shows the identical wording and confirm flow.
+EXTRAS = ROOT / "assets" / "js" / "extra-cleaning.js"
 STYLES = ROOT / "assets" / "css" / "calendar.css"
 
 EXPORTS = ("renderCalendarEventChip", "renderEventCards", "renderPortfolioSummaryEvents",
@@ -57,6 +60,9 @@ def render():
           global.Solar91PortalAPI = { request: () => Promise.resolve({}), can: () => true,
                                       currentUser: () => ({ role: 'O&M Head' }) };
           const fs = require('fs');
+          // Extra cleaning's labels, actions and form were extracted so the Module Cleaning board
+          // calls the same code; the calendar reads them off the global, so load it first.
+          eval(fs.readFileSync('./assets/js/extra-cleaning.js', 'utf8'));
           let src = fs.readFileSync('./assets/js/operations-calendar.js', 'utf8');
           src = src.replace(%s, '  global.__i = { %s };');
           eval(src);
@@ -195,16 +201,19 @@ def test_extra_cleaning_inputs_update_without_replacing_the_focused_field():
     change_extra_start = change_handler.index("if (active.state.extraOpen &&")
     change_extra_end = change_handler.index("var filter = event.target.dataset.calendarFilter;")
     change_extra = change_handler[change_extra_start:change_extra_end]
-    preview_start = source.index("function refreshExtraPreview")
-    preview_end = source.index("function syncRecordRangeInputs", preview_start)
-    preview = source[preview_start:preview_end]
+    # The in-place refresh itself was extracted so the Module Cleaning board's copy of this form
+    # behaves the same way; the calendar hands it the host and keeps the wiring.
+    shared = EXTRAS.read_text(encoding="utf-8")
+    preview_start = shared.index("function refreshPreview")
+    preview_end = shared.index("function formHTML", preview_start)
+    preview = shared[preview_start:preview_end]
 
     assert "refreshExtraPreview(host, active.state);" in input_handler
     assert "refreshKeepingFocus" not in input_extra
     assert "refreshExtraPreview(host, active.state);" in change_extra
     assert "renderView(" not in change_extra
     assert "save.disabled =" in preview
-    assert "renderView(" not in preview
+    assert "renderView(" not in preview and "render(" not in preview
 
 
 def test_managers_can_edit_or_remove_extra_cleaning_from_its_detail(render):

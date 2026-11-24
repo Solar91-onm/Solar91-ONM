@@ -12,6 +12,12 @@
 
   var data = global.Solar91PortalData;
   var format = global.Solar91PortalFormat;
+  // Extra cleaning -- its labels, its three actions and its form -- lives in ONE place for this
+  // page and the Module Cleaning board alike: assets/js/extra-cleaning.js. Read through `global`
+  // on every use so load order can never leave a stale reference behind.
+  function extras() {
+    return global.Solar91ExtraCleaning;
+  }
   var states = {};
   var active = null;
   var WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -849,8 +855,10 @@
         '<span class="ep-calendar__event-card-meta">' +
           escape(event.plantName || (context.plantCode ? "Selected plant" : "Plant not provided")) +
           (event.plantSiteCode ? " · " + escape(event.plantSiteCode) : "") +
-          " · " + escape(event.isExtra ? "During cycle " + cycleNumber
-            : event.isPostCycle ? "After cycle " + cycleNumber : cycle) + '</span>' +
+          " · " + escape(event.isExtra || event.isPostCycle
+            ? extras().cycleLabel({ cycleNo: cycleNumber, isExtra: event.isExtra,
+                                    isPostCycle: event.isPostCycle })
+            : cycle) + '</span>' +
         (event.isExtra
           ? '<span class="ep-calendar__event-card-extra-note">Re-cleaning · calendar record only, never counted</span>'
           : event.isPostCycle
@@ -987,12 +995,9 @@
       ["Run day", event.source === "cycle_plan" && event.scheduledDate
         ? displayDate(event.scheduledDate) : ""],
       // Extra cleaning belongs to no cycle's progress; naming the cycle plainly would read as if
-      // it did. The banner below carries the full explanation.
-      ["Cycle", event.cycleNo
-        ? (event.isExtra ? "During cycle " + event.cycleNo
-           : event.isPostCycle ? "After cycle " + event.cycleNo
-           : "Cycle " + event.cycleNo)
-        : ""],
+      // it did. The banner below carries the full explanation. The wording comes from the shared
+      // module, so the Module Cleaning board names the same entry the same way.
+      ["Cycle", extras().cycleLabel(event)],
       ["Tables cleaned", event.tablesCleaned],
       ["Which tables", event.tablesList],
       ["Exception", event.exceptionReason],
@@ -1000,39 +1005,12 @@
     ].filter(function (field) {
       return field[1] !== "" && field[1] !== null && field[1] !== undefined;
     });
+    // Edit / Count as cleaning (not extra) / Remove, and the two-step remove confirm, are drawn
+    // by assets/js/extra-cleaning.js -- the same markup, wording and disabled states the Module
+    // Cleaning board shows, so the two screens can never offer different actions.
     var extraActions = "";
     if (event.isExtra && event.reportId && event.canEdit) {
-      if (state.extraDeleteConfirmId === event.reportId) {
-        extraActions = '<p class="ep-calendar__extra-delete-warning" role="alert">Remove this extra cleaning record? This cannot be undone.</p>' +
-          '<div class="ep-calendar__extra-detail-actions">' +
-            '<button type="button" class="ep-calendar__close-button" data-calendar-action="cancel-extra-delete"' +
-              (state.extraDeleting ? " disabled" : "") + '>Keep entry</button>' +
-            '<button type="button" class="ep-calendar__setup-submit ep-calendar__setup-submit--danger" ' +
-              'data-calendar-action="confirm-extra-delete" data-report-id="' + escape(event.reportId) + '"' +
-              (state.extraDeleting ? " disabled" : "") + '>' +
-              (state.extraDeleting ? "Removing\u2026" : "Remove extra cleaning") + '</button>' +
-          '</div>' +
-          (state.extraDeleteError ? '<p class="ep-calendar__setup-error" role="alert">' +
-            escape(state.extraDeleteError) + '</p>' : "");
-      } else {
-        extraActions = '<div class="ep-calendar__extra-detail-actions">' +
-          '<button type="button" class="ep-calendar__setup-submit" data-calendar-action="edit-extra" data-report-id="' +
-            escape(event.reportId) + '">Edit extra cleaning</button>' +
-          // Work done after the three cycles are complete belongs on the sheet as an ordinary day.
-          // Entries saved as extra before the sheet accepted those days are put right here instead
-          // of being left out of the month's score.
-          '<button type="button" class="ep-calendar__setup-submit" data-calendar-action="convert-extra" ' +
-            'data-report-id="' + escape(event.reportId) + '"' + (state.extraConverting ? " disabled" : "") + '>' +
-            (state.extraConverting ? "Counting…" : "Count as cleaning (not extra)") + '</button>' +
-          (event.canDelete
-            ? '<button type="button" class="ep-calendar__setup-submit ep-calendar__setup-submit--danger" ' +
-              'data-calendar-action="request-extra-delete" data-report-id="' + escape(event.reportId) +
-              '">Remove extra cleaning</button>'
-            : "") +
-          '</div>' +
-          (state.extraConvertError ? '<p class="ep-calendar__setup-error" role="alert">' +
-            escape(state.extraConvertError) + '</p>' : "");
-      }
+      extraActions = extras().actionsHTML(event, state, { attr: "data-calendar-action" });
     } else if (event.source === "cycle_plan") {
       extraActions = '<p class="ep-calendar__detail-note">Cycle-plan marker only; no work order has been generated from this phase yet.</p>';
     } else {
@@ -1208,14 +1186,13 @@
     '</div>';
   }
 
+  /** Who the server lets change extra cleaning and the sheet: the O&M Head, or an active Assignee. */
   function canManageWashing() {
-    var user = global.Solar91PortalAPI && global.Solar91PortalAPI.currentUser();
-    return !!(user && (user.role === "O&M Head" || user.role === "Assignee"));
+    return extras().canManage();
   }
 
   function canRecordWashing() {
-    var user = global.Solar91PortalAPI && global.Solar91PortalAPI.currentUser();
-    return !!(user && ["O&M Head", "Assignee", "Site Engineer"].indexOf(user.role) !== -1);
+    return extras().canRecord();
   }
 
   function canManagePMSetup() {
@@ -1668,7 +1645,7 @@
   }
 
   function tableNumbersOf(report) {
-    return (report.cleaned_table_codes || []).map(tableNumber).filter(function (number) { return number !== null; });
+    return extras().tableNumbersOf(report);
   }
 
   /** Reports saved before table numbers were stored only have a count: they used the lowest free tables. */
@@ -1684,44 +1661,16 @@
     }
   }
 
-  /** "1, 2, 4, 7-8, 13" or "100-91" (either direction) -> ordered unique numbers, or an error message. */
+  /** "1, 2, 4, 7-8, 13" or "100-91" (either direction) -> ordered unique numbers, or an error
+   *  message. The parser itself is shared with the Module Cleaning board's extra-cleaning form
+   *  (assets/js/extra-cleaning.js), so both screens accept and reject the same input. */
   function parseTableList(text, total) {
-    var cleaned = String(text || "").replace(/\s*([-\u2013\u2014])\s*/g, "$1");
-    var parts = cleaned.split(/[,;\s]+/).filter(Boolean);
-    var numbers = [];
-    var seen = {};
-    for (var i = 0; i < parts.length; i += 1) {
-      var match = parts[i].match(/^(\d+)(?:[-\u2013\u2014](\d+))?$/);
-      if (!match) return { numbers: [], error: "\u201c" + parts[i] + "\u201d is not a table number or range." };
-      var from = Number(match[1]);
-      var to = match[2] === undefined ? from : Number(match[2]);
-      if (from < 1 || to < 1 || from > total || to > total) {
-        return { numbers: [], error: "Table numbers must be between 1 and " + total + "." };
-      }
-      var step = from <= to ? 1 : -1;
-      for (var number = from; ; number += step) {
-        if (seen[number]) return { numbers: [], error: "Table " + number + " is listed twice." };
-        seen[number] = true;
-        numbers.push(number);
-        if (number === to) break;
-      }
-    }
-    return { numbers: numbers, error: "" };
+    return extras().parseTableList(text, total);
   }
 
   /** Compresses consecutive numbers without changing the order in which the user entered them. */
   function formatTableList(numbers) {
-    var ordered = numbers || [];
-    var parts = [];
-    for (var i = 0; i < ordered.length;) {
-      var j = i;
-      var step = j + 1 < ordered.length && Math.abs(ordered[j + 1] - ordered[j]) === 1
-        ? ordered[j + 1] - ordered[j] : 0;
-      while (step && j + 1 < ordered.length && ordered[j + 1] - ordered[j] === step) j += 1;
-      parts.push(j > i ? ordered[i] + "\u2013" + ordered[j] : String(ordered[i]));
-      i = j + 1;
-    }
-    return parts.join(", ");
+    return extras().formatTableList(numbers);
   }
 
   /** The cycle after the selected one, or 0 when the selected cycle is the month's last. */
@@ -1799,11 +1748,6 @@
   /** An unsaved day is ready to save with valid tables, or as a zero-tables day. */
   function rowEntered(row) {
     return !row.report && !row.error && !row.full && (row.zero || row.numbers.length > 0);
-  }
-
-  function tableNumber(code) {
-    var match = String(code || "").match(/(?:Table\s*)?(\d+)$/i);
-    return match ? Number(match[1]) : null;
   }
 
   var NOT_DONE_REASONS = ["Rain", "Water shortage", "Machine breakdown", "Access restriction", "Safety stand-down", "Other"];
@@ -2196,75 +2140,95 @@
   /** How far back this user may record, as the API allows: the O&M team back to the sheet's range,
    *  a Site Engineer the last 45 days (MAX_BACKDATE_DAYS in app/scheduled/washing_cycles.py). */
   function earliestRecordDate(state) {
-    var today = state.washingDataToday || new Date().toISOString().slice(0, 10);
-    if (canManageWashing()) return state.month + "-01";
-    var first = new Date(today + "T12:00:00");
-    first.setDate(first.getDate() - 44);
-    return first.getFullYear() + "-" + pad2(first.getMonth() + 1) + "-" + pad2(first.getDate());
+    return extras().earliestDate(state.month,
+      state.washingDataToday || new Date().toISOString().slice(0, 10));
   }
 
-  /** The tables an extra-cleaning entry covers, or why it cannot be saved yet. Repeats are the point
-   *  here, so a table already cleaned in the running cycle is accepted; only the plant's own table
-   *  numbers are enforced, exactly as the API enforces them. */
-  function planExtra(state, total) {
-    var text = String(state.extraList || "").trim();
-    if (!state.extraDate) return { numbers: [], error: "" };
-    if (!text) return { numbers: [], error: "" };
-    var parsed = parseTableList(text, total);
-    return { numbers: parsed.numbers, error: parsed.error };
+  /**
+   * Which plant the shared extra-cleaning form is for, and the hooks this page's markup uses.
+   * `plants` is deliberately absent: a plant's calendar is already inside one plant, so the form
+   * never has to ask which. The portfolio's Module Cleaning board does pass a list.
+   */
+  function extraScope(state) {
+    var plant = state.washingPlant || {};
+    return {
+      attr: "data-calendar-action",
+      formAttr: "data-calendar-extra-form",
+      modalAttr: "data-calendar-extra-modal",
+      plantId: (state.washingSetup && state.washingSetup.plantId) || plant.plant_id || "",
+      plantName: plant.plant || "",
+      plantCode: plant.site_code || "",
+      tableCount: plant.table_count || 0,
+      today: state.washingDataToday || "",
+      minDate: earliestRecordDate(state)
+    };
   }
 
+  /**
+   * Everything assets/js/extra-cleaning.js needs to drive THIS page: the plant in scope, how to
+   * redraw it, and how to reload it once an entry changed. Editing, converting or removing an
+   * entry moves cycle state, so the page reloads from the server rather than patching a figure.
+   */
+  function extraContext(host, state, context) {
+    var scope = extraScope(state);
+    scope.ready = !!(state.washingPlant && state.washingSetup);
+    scope.find = function (reportId) {
+      return (state.washingReports || []).find(function (report) {
+        return report.id === reportId;
+      });
+    };
+    scope.alive = function () {
+      return !!active && active.host === host && active.state === state;
+    };
+    scope.render = function () {
+      renderView(host, state, active ? active.context : context);
+    };
+    scope.focus = function (selector) {
+      var field = host.querySelector(selector);
+      if (field) field.focus();
+    };
+    scope.sync = function () {
+      syncExtraForm(host, state);
+    };
+    scope.openedEdit = function () {
+      state.detailEventIndex = null;
+    };
+    scope.prune = function (reportId) {
+      state.washingReports = (state.washingReports || []).filter(function (report) {
+        return report.id !== reportId;
+      });
+      state.events = (state.events || []).filter(function (event) {
+        return event.reportId !== reportId;
+      });
+      state.detailEventIndex = null;
+    };
+    scope.reload = function (keepRecord) {
+      state.detailEventIndex = null;
+      loadEvents(host, state, active ? active.context : context, keepRecord === true);
+    };
+    scope.saved = function (saved, notice, editing) {
+      if (saved) {
+        state.washingReports = (state.washingReports || []).filter(function (item) {
+          return item.id !== saved.id;
+        });
+        state.washingReports.push(saved);
+        if (!editing) {
+          state.recordPhotos[saved.id] = [];
+          state.recordPhotosLoaded[saved.id] = true;
+        }
+      }
+      state.recordNotice = notice;
+      renderView(host, state, active ? active.context : context);
+      loadEvents(host, state, active ? active.context : context, true);
+    };
+    return scope;
+  }
+
+  /** The extra-cleaning dialog. The form is the shared one the Module Cleaning board opens too
+   *  (assets/js/extra-cleaning.js); this page only tells it which plant it is scoped to. */
   function renderExtraModal(state) {
     if (!state.extraOpen || !state.washingPlant) return "";
-    var total = Number(state.washingPlant.table_count) || 0;
-    var plan = planExtra(state, total);
-    var disabled = state.extraSaving ? " disabled" : "";
-    var manager = canManageWashing();
-    var editing = !!state.extraEditId;
-    var ready = !!state.extraDate && !plan.error && plan.numbers.length > 0;
-    return '<div class="ep-calendar__modal ep-calendar__extra-modal" data-calendar-extra-modal>' +
-      '<button class="ep-calendar__backdrop" type="button" data-calendar-action="close-extra" aria-label="Close extra cleaning"></button>' +
-      '<section class="ep-calendar__dialog ep-calendar__extra-dialog" role="dialog" aria-modal="true" aria-labelledby="washing-extra-title">' +
-        '<header class="ep-calendar__dialog-head"><div>' +
-          '<h2 id="washing-extra-title">' + (editing ? "Edit extra cleaning" : "Extra cleaning") + '</h2>' +
-          '<p>' + escape(state.washingPlant.plant) + " \u00b7 " + escape(total) + ' tables per cycle</p>' +
-        '</div><button type="button" class="ep-calendar__close" data-calendar-action="close-extra" aria-label="Close">\u00d7</button></header>' +
-        '<div class="ep-calendar__extra-body">' +
-          '<p class="ep-calendar__extra-lead">Record tables cleaned again during a running cycle \u2014 dust, fog or anything else. ' +
-            'Before all three cycles are complete, this is a calendar entry only and does <strong>not</strong> count towards ' +
-            'cycle progress or plant compliance. Extra cleaning after all three cycles are complete increases monthly compliance.</p>' +
-          (manager
-            ? ""
-            : '<p class="ep-calendar__extra-lead">Your entry is saved as awaiting review; the O&amp;M Head or the plant\u2019s ' +
-              'Cleaning Assignee confirms it.</p>') +
-          '<form class="ep-calendar__extra-form" data-calendar-extra-form>' +
-            '<label><span>Date cleaned</span>' +
-              '<input type="date" data-extra-date value="' + escape(state.extraDate) + '" min="' +
-                escape(earliestRecordDate(state)) + '" max="' +
-                escape(state.washingDataToday || "") + '" required' + disabled + ' /></label>' +
-            '<label><span>Table numbers</span>' +
-              '<input type="text" data-extra-list placeholder="e.g. 26-35, 40 or 100-91" value="' +
-                escape(state.extraList) + '" autocomplete="off"' + disabled + ' />' +
-              '<small data-extra-preview>' + (plan.numbers.length
-                  ? escape(plan.numbers.length + " table" + (plan.numbers.length === 1 ? "" : "s") +
-                    ": " + formatTableList(plan.numbers))
-                  : escape("Tables 1 to " + total)) + '</small></label>' +
-            '<label><span>Reason / remarks</span>' +
-              '<input type="text" data-extra-remarks maxlength="4000" placeholder="e.g. heavy dust after harvest" value="' +
-                escape(state.extraRemarks) + '"' + disabled + ' /></label>' +
-          '</form>' +
-          '<p class="ep-calendar__setup-error" data-extra-plan-error role="alert"' +
-            (plan.error ? "" : " hidden") + '>' + escape(plan.error) + '</p>' +
-          '<p class="ep-calendar__setup-error" data-extra-error role="alert"' +
-            (state.extraError ? "" : " hidden") + '>' + escape(state.extraError) + '</p>' +
-        '</div>' +
-        '<footer class="ep-calendar__record-footer">' +
-          '<button type="button" class="ep-calendar__close-button" data-calendar-action="close-extra"' + disabled + '>Cancel</button>' +
-          '<button type="button" class="ep-calendar__setup-submit" data-calendar-action="save-extra"' +
-            (ready && !state.extraSaving ? "" : " disabled") + '>' +
-            (state.extraSaving ? "Saving\u2026" : editing ? "Save changes" : "Save extra cleaning") + '</button></footer>' +
-      '</section>' +
-    '</div>';
+    return extras().formHTML(state, extraScope(state));
   }
 
   function renderSetupModal(state) {
@@ -2746,40 +2710,11 @@
 
   /** Read the extra-cleaning form back into state, so a re-render never loses what was typed. */
   function syncExtraForm(host, state) {
-    var form = host.querySelector("[data-calendar-extra-form]");
-    if (!form) return;
-    var date = form.querySelector("[data-extra-date]");
-    var list = form.querySelector("[data-extra-list]");
-    var remarks = form.querySelector("[data-extra-remarks]");
-    if (date) state.extraDate = date.value;
-    if (list) state.extraList = list.value;
-    if (remarks) state.extraRemarks = remarks.value;
+    extras().syncForm(host, state, extraScope(state));
   }
 
   function refreshExtraPreview(host, state) {
-    syncExtraForm(host, state);
-    state.extraError = "";
-    var total = Number(state.washingPlant && state.washingPlant.table_count) || 0;
-    var plan = planExtra(state, total);
-    var preview = host.querySelector("[data-extra-preview]");
-    if (preview) {
-      preview.textContent = plan.numbers.length
-        ? plan.numbers.length + " table" + (plan.numbers.length === 1 ? "" : "s") +
-          ": " + formatTableList(plan.numbers)
-        : "Tables 1 to " + total;
-    }
-    var planError = host.querySelector("[data-extra-plan-error]");
-    if (planError) {
-      planError.textContent = plan.error;
-      planError.hidden = !plan.error;
-    }
-    var save = host.querySelector('[data-calendar-action="save-extra"]');
-    if (save) save.disabled = state.extraSaving || !state.extraDate || !!plan.error || !plan.numbers.length;
-    var saveError = host.querySelector("[data-extra-error]");
-    if (saveError) {
-      saveError.textContent = "";
-      saveError.hidden = true;
-    }
+    extras().refreshPreview(host, state, extraScope(state));
   }
 
   function syncRecordRangeInputs(host, state) {
@@ -3153,187 +3088,12 @@
         state.recordDrafts = {};
         state.recordError = "";
         renderView(host, state, context);
-      } else if (action.dataset.calendarAction === "open-extra") {
-        if (!canRecordWashing() || !state.washingPlant) return;
-        state.extraOpen = true;
-        state.extraEditId = "";
-        state.extraDate = state.washingDataToday || "";
-        state.extraList = "";
-        state.extraRemarks = "";
-        state.extraError = "";
-        renderView(host, state, context);
-        var extraList = host.querySelector("[data-extra-list]");
-        if (extraList) extraList.focus();
-      } else if (action.dataset.calendarAction === "edit-extra") {
-        if (!canManageWashing() || !state.washingPlant || !state.washingSetup) return;
-        var savedExtra = (state.washingReports || []).find(function (report) {
-          return report.id === action.dataset.reportId && report.is_extra === true && report.can_edit === true;
-        });
-        if (!savedExtra) return;
-        state.extraOpen = true;
-        state.extraEditId = savedExtra.id;
-        state.extraDate = savedExtra.report_date || "";
-        state.extraList = formatTableList(tableNumbersOf(savedExtra));
-        state.extraRemarks = savedExtra.remarks || "";
-        state.extraError = "";
-        state.detailEventIndex = null;
-        renderView(host, state, context);
-        var editExtraDate = host.querySelector("[data-extra-date]");
-        if (editExtraDate) editExtraDate.focus();
-      } else if (action.dataset.calendarAction === "convert-extra") {
-        // "+ Extra cleaning" never counts towards compliance. Cleaning done after the three cycles
-        // are complete is an ordinary day, so the O&M team can reclassify an entry saved as extra
-        // and have the month credited for the work. The server re-sequences the month afterwards.
-        if (state.extraConverting || !canManageWashing()) return;
-        var convertId = action.dataset.reportId;
-        var convertible = (state.washingReports || []).find(function (report) {
-          return report.id === convertId && report.is_extra === true && report.can_edit === true;
-        });
-        if (!convertible) return;
-        state.extraConverting = true;
-        state.extraConvertError = "";
-        renderView(host, state, context);
-        global.Solar91PortalAPI.request(
-          "/api/scheduled/washing/daily-reports/" + encodeURIComponent(convertId),
-          { method: "PATCH", body: { is_extra: false } }
-        ).then(function () {
-          if (!active || active.host !== host || active.state !== state) return;
-          if (data && data.invalidate) data.invalidate(true);
-          state.extraConverting = false;
-          state.detailEventIndex = null;
-          loadEvents(host, state, context);
-        }).catch(function (error) {
-          if (!active || active.host !== host || active.state !== state) return;
-          state.extraConverting = false;
-          state.extraConvertError = (error && error.message) || "The entry could not be changed.";
-          renderView(host, state, context);
-        });
-      } else if (action.dataset.calendarAction === "request-extra-delete") {
-        if (!canManageWashing()) return;
-        var deletableExtra = (state.washingReports || []).find(function (report) {
-          return report.id === action.dataset.reportId && report.is_extra === true && report.can_delete === true;
-        });
-        if (!deletableExtra) return;
-        state.extraDeleteConfirmId = deletableExtra.id;
-        state.extraDeleteError = "";
-        renderView(host, state, context);
-      } else if (action.dataset.calendarAction === "cancel-extra-delete") {
-        if (state.extraDeleting) return;
-        state.extraDeleteConfirmId = "";
-        state.extraDeleteError = "";
-        renderView(host, state, context);
-      } else if (action.dataset.calendarAction === "confirm-extra-delete") {
-        if (state.extraDeleting || !canManageWashing()) return;
-        var deleteId = action.dataset.reportId;
-        var deletableRecord = (state.washingReports || []).find(function (report) {
-          return report.id === deleteId && report.is_extra === true && report.can_delete === true;
-        });
-        if (!deletableRecord || state.extraDeleteConfirmId !== deleteId) return;
-        state.extraDeleting = true;
-        state.extraDeleteError = "";
-        renderView(host, state, context);
-        global.Solar91PortalAPI.request(
-          "/api/scheduled/washing/daily-reports/" + encodeURIComponent(deleteId),
-          { method: "DELETE" }
-        ).then(function () {
-          if (!active || active.host !== host || active.state !== state) return;
-          if (data && data.invalidate) data.invalidate(true);
-          state.washingReports = (state.washingReports || []).filter(function (report) {
-            return report.id !== deleteId;
-          });
-          state.events = (state.events || []).filter(function (event) {
-            return event.reportId !== deleteId;
-          });
-          state.detailEventIndex = null;
-          state.extraDeleteConfirmId = "";
-          state.extraDeleting = false;
-          state.extraDeleteError = "";
-          renderView(host, state, active.context);
-          loadEvents(host, state, active.context, true);
-        }).catch(function (error) {
-          if (!active || active.host !== host || active.state !== state) return;
-          state.extraDeleting = false;
-          state.extraDeleteError = "Extra cleaning was not removed. " +
-            (error && error.message ? error.message : "Please retry.");
-          renderView(host, state, active.context);
-        });
-      } else if (action.dataset.calendarAction === "close-extra") {
-        if (state.extraSaving) return;
-        state.extraOpen = false;
-        state.extraEditId = "";
-        state.extraDeleteConfirmId = "";
-        state.extraDeleteError = "";
-        state.extraError = "";
-        renderView(host, state, context);
-      } else if (action.dataset.calendarAction === "save-extra") {
-        var editingExtra = !!state.extraEditId;
-        if (state.extraSaving || (editingExtra ? !canManageWashing() : !canRecordWashing()) || !state.washingSetup) return;
-        syncExtraForm(host, state);
-        var extraTotal = Number(state.washingPlant && state.washingPlant.table_count) || 0;
-        var extraPlan = planExtra(state, extraTotal);
-        if (!state.extraDate || extraPlan.error || !extraPlan.numbers.length) {
-          state.extraError = extraPlan.error ||
-            "Choose the date and type the table numbers that were cleaned again.";
-          renderView(host, state, context);
-          return;
-        }
-        state.extraSaving = true;
-        state.extraError = "";
-        renderView(host, state, context);
-        var extraRequest = editingExtra
-          ? global.Solar91PortalAPI.request(
-            "/api/scheduled/washing/daily-reports/" + encodeURIComponent(state.extraEditId), {
-              method: "PATCH",
-              body: {
-                report_date: state.extraDate,
-                table_numbers: extraPlan.numbers,
-                remarks: state.extraRemarks || ""
-              }
-            })
-          : global.Solar91PortalAPI.request("/api/scheduled/washing/daily-reports/sheet", {
-            method: "POST",
-            body: {
-              plant_id: state.washingSetup.plantId,
-              entries: [{
-                report_date: state.extraDate,
-                job_status: "Done",
-                tables_cleaned: extraPlan.numbers.length,
-                table_numbers: extraPlan.numbers,
-                remarks: state.extraRemarks || null,
-                is_extra: true
-              }]
-            }
-          });
-        extraRequest.then(function (result) {
-          if (!active || active.host !== host || active.state !== state) return;
-          if (data && data.invalidate) data.invalidate(true);
-          var saved = editingExtra ? result : (Array.isArray(result.reports) ? result.reports : [])[0];
-          state.extraSaving = false;
-          state.extraOpen = false;
-          state.extraEditId = "";
-          if (saved) {
-            state.washingReports = (state.washingReports || []).filter(function (item) {
-              return item.id !== saved.id;
-            });
-            state.washingReports.push(saved);
-            if (!editingExtra) {
-              state.recordPhotos[saved.id] = [];
-              state.recordPhotosLoaded[saved.id] = true;
-            }
-          }
-          state.recordNotice = (editingExtra ? "Extra cleaning updated: " : "Extra cleaning saved: ") +
-            extraPlan.numbers.length + " table" + (extraPlan.numbers.length === 1 ? "" : "s") +
-            " on " + displayDate(state.extraDate) +
-            (saved && saved.review_status === "Pending" ? ", awaiting review." : ".");
-          renderView(host, state, active.context);
-          loadEvents(host, state, active.context, true);
-        }).catch(function (error) {
-          if (!active || active.host !== host || active.state !== state) return;
-          state.extraSaving = false;
-          state.extraError = (editingExtra ? "Extra cleaning was not updated. " : "Extra cleaning was not saved. ") +
-            (error && error.message ? error.message : "Please retry.");
-          renderView(host, state, active.context);
-        });
+      } else if (extras().isAction(action.dataset.calendarAction)) {
+        // Open / close / save the form, edit, "Count as cleaning (not extra)" and the two-step
+        // remove: every one of them is assets/js/extra-cleaning.js's, so this page and the Module
+        // Cleaning board perform the identical request, role check and state change.
+        extras().act(action.dataset.calendarAction, action.dataset.reportId, state,
+          extraContext(host, state, context));
       } else if (action.dataset.calendarAction === "close-record") {
         if (state.recordSaving || (state.recordEdit && state.recordEdit.saving)) return;
         clearDraftRecordPhotos(state);

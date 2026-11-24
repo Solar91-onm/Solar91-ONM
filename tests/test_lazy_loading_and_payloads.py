@@ -36,6 +36,9 @@ SHELL_SCRIPTS = ["format.js", "portal-api.js", "data-adapter.js", "modules.js",
 LAZY_MODULES = ["table-sort", "table-column-filter", "register-io", "plant-details", "plants-table", "site-issues",
                 "movable-assets", "bom", "design", "liasoning", "operations-calendar",
                 "washing-board", "categories", "security", "requirements", "settings", "photo-evidence",
+                # Extra cleaning: shared by the plant calendar and the Module Cleaning board, so it
+                # is fetched with whichever of the two is opened first.
+                "extra-cleaning",
                 "inverter-health", "pm-overview", "pm-cycle-plans"]
 
 

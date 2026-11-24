@@ -11,8 +11,10 @@
     "site-issues": ["table-sort", "table-column-filter", "register-io", "photo-evidence"],
     requirements: ["table-sort", "table-column-filter"],
     "inverter-health": ["table-sort", "table-column-filter"],
-    "operations-calendar": ["register-io", "photo-evidence"],
-    "washing-board": ["table-sort", "table-column-filter"],
+    // Both Module Cleaning screens drive extra cleaning through the one shared module, so the
+    // wording, the two-step delete confirm and the role gate cannot drift apart.
+    "operations-calendar": ["register-io", "photo-evidence", "extra-cleaning"],
+    "washing-board": ["table-sort", "table-column-filter", "extra-cleaning"],
     // A plant's PM page renders its cycle plan as a section of itself, so pm-overview consumes
     // pm-cycle-plans as a component (mountTracker) rather than as a second panel on the page.
     // The portfolio's registers use the SHARED click-to-sort headings and searchable column

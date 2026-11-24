@@ -41,6 +41,9 @@ def _run(body: str, payload: dict, role: str = "O&M Head"):
       global.Solar91PortalAPI = { request: () => Promise.resolve({}), can: () => true,
                                   currentUser: () => ({ role: %s }) };
       const fs = require('fs');
+      // parseTableList / formatTableList now live in the module the Module Cleaning board shares
+      // with this page (assets/js/extra-cleaning.js); the calendar reads them off the global.
+      eval(fs.readFileSync('./assets/js/extra-cleaning.js', 'utf8'));
       let src = fs.readFileSync('./assets/js/operations-calendar.js', 'utf8');
       src = src.replace(%s, '  global.__i = { %s };');
       eval(src);

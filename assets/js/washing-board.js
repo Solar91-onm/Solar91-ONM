@@ -14,6 +14,13 @@
  * calendar can never disagree. `overdue_bucket` is the server's own lateness
  * grouping (on_track / 1d / 3d / 7d) and drives the colour, so "behind" means
  * the same thing here as everywhere else in the portal.
+ *
+ * Extra cleaning is managed from here as well as from a plant's calendar: the entry-status filter
+ * has an "Extra cleaning" option that lists the month's re-cleaning (purple) and the days recorded
+ * after all three cycles were complete (blue), and an entry can be edited, counted as ordinary
+ * cleaning or removed without leaving this page. None of that behaviour lives here -- the labels,
+ * the three actions and the form all come from assets/js/extra-cleaning.js, which the plant
+ * calendar calls too, so the two screens can never offer different wording or different rules.
  */
 (function (global) {
   "use strict";
@@ -22,7 +29,18 @@
   var token = 0;
   var st = {
     rows: [], summary: {}, month: "", selectedMonth: "", today: "", loading: false, error: "",
-    dayActivity: null, dayActivityDate: "", dayActivityLoading: false, dayActivityError: ""
+    dayActivity: null, dayActivityDate: "", dayActivityLoading: false, dayActivityError: "",
+    // The month's extra-cleaning entries, read only while the filter that shows them is on.
+    // null = not asked for. extraNotice is what the form says after a save.
+    extraEntries: null, extraNotice: ""
+  };
+  // The state assets/js/extra-cleaning.js keeps for its form and for the three per-entry actions.
+  // The field names are the ones the plant calendar uses, because the same module reads them.
+  var xc = {
+    extraOpen: false, extraEditId: "", extraPlantCode: "", extraDate: "", extraList: "",
+    extraRemarks: "", extraSaving: false, extraError: "",
+    extraConverting: false, extraConvertError: "",
+    extraDeleteConfirmId: "", extraDeleting: false, extraDeleteError: ""
   };
   var ui = {
     search: "", status: "__all", plant: "__all", cycle: "__all", date: "__all",
@@ -35,6 +53,8 @@
   var viewPreferenceUser = null;
 
   function api() { return global.Solar91PortalAPI; }
+  /** Extra cleaning: labels, the three actions and the form, shared with the plant calendar. */
+  function extras() { return global.Solar91ExtraCleaning; }
   function escape(value) { return fmt.escape(value === null || value === undefined ? "" : String(value)); }
 
   function pad2(value) { return String(value).length < 2 ? "0" + value : String(value); }
@@ -145,6 +165,112 @@
     if (selection === "missing") return status === "not_reported";
     return selection === "recorded" &&
       ["confirmed", "awaiting", "not_done", "rejected"].indexOf(status) !== -1;
+  }
+
+  // ─── Extra cleaning ──────────────────────────────────────────────────
+  // Two kinds of entry, and they do not mean the same thing. Marked extra (`is_extra`) is
+  // re-cleaning done while a cycle was still running: a record that never counts, purple on the
+  // plant calendar. A day recorded once all three cycles were complete (`post_cycle`) is ordinary
+  // work the month IS credited for, blue there. Both are listed here, with the calendar's own
+  // labels and colours, so moving between the two screens teaches nothing new.
+
+  function isExtraEntry(report) {
+    return report.is_extra === true || report.post_cycle === true;
+  }
+
+  /** How many days of reports the selected month needs, so the read stays as small as it can be.
+   *  The server sends reports newer than (as-of − report_days); as-of is today for this month and
+   *  the month's last day for an earlier one, so the month's own span is exactly enough. */
+  function monthSpanDays(month) {
+    var parts = String(month || "").match(/^(\d{4})-(\d{2})$/);
+    if (!parts) return 35;
+    var lastDay = new Date(Number(parts[1]), Number(parts[2]), 0).getDate();
+    var day = st.today && st.today.slice(0, 7) === month
+      ? Number(st.today.slice(8, 10)) || lastDay : lastDay;
+    return Math.max(1, Math.min(90, day));
+  }
+
+  /** The entries the filters already on the page leave in scope: plant, cycle, date and month. */
+  function extraEntriesInScope() {
+    var month = st.month || st.selectedMonth;
+    var codes = Object.create(null);
+    baseRows().forEach(function (row) { codes["$" + row.site_code] = true; });
+    return (st.extraEntries || []).filter(function (entry) {
+      if (codes["$" + entry.site_code] !== true) return false;
+      if (month && entry.cycle_month !== month) return false;
+      if (ui.cycle !== "__all" && Number(entry.cycle_no) !== Number(ui.cycle)) return false;
+      if (ui.date !== "__all" && entry.report_date !== ui.date) return false;
+      return true;
+    }).sort(function (a, b) {
+      if (a.report_date !== b.report_date) return a.report_date < b.report_date ? 1 : -1;
+      return String(a.site_code).localeCompare(String(b.site_code), undefined, { numeric: true });
+    });
+  }
+
+  /** The plants the form may record against: every configured plant in the caller's scope. */
+  function extraPlants() {
+    return st.rows.filter(function (row) { return Number(row.table_count) > 0; })
+      .map(function (row) {
+        return { code: row.site_code, name: row.plant || row.site_code };
+      });
+  }
+
+  /**
+   * Which plant the shared form is working on, and the hooks this page's markup uses. The form is
+   * pre-scoped to the plant currently filtered; with no single plant in scope it asks which plant
+   * before it shows anything else, which is what `plants` is for.
+   */
+  function extraScope() {
+    var chosen = xc.extraOpen && xc.extraPlantCode
+      ? xc.extraPlantCode : (ui.plant !== "__all" ? ui.plant : "");
+    var row = chosen ? st.rows.find(function (item) { return item.site_code === chosen; }) : null;
+    return {
+      attr: "data-wb-extra-action",
+      formAttr: "data-wb-extra-form",
+      modalAttr: "data-wb-extra-modal",
+      plants: extraPlants(),
+      plantCode: ui.plant !== "__all" ? ui.plant : "",
+      plantId: row ? row.plant_id : "",
+      plantName: row ? (row.plant || row.site_code) : "",
+      tableCount: row ? Number(row.table_count) || 0 : 0,
+      today: st.today || "",
+      minDate: extras().earliestDate(st.month || st.selectedMonth, st.today || "")
+    };
+  }
+
+  /**
+   * What assets/js/extra-cleaning.js needs to drive THIS page. Editing, converting or removing an
+   * entry changes cycle progress and compliance, so the board re-reads the overview rather than
+   * patching a figure locally: cycle state is the server's answer, never the browser's.
+   */
+  function extraContext(container) {
+    var mine = token;
+    var scope = extraScope();
+    scope.ready = !st.loading && !!st.rows.length;
+    scope.find = function (reportId) {
+      return (st.extraEntries || []).find(function (entry) { return entry.id === reportId; });
+    };
+    scope.alive = function () { return mine === token && container.isConnected; };
+    scope.render = function () { render(container); };
+    scope.focus = function (selector) {
+      var field = container.querySelector(selector);
+      if (field) field.focus();
+    };
+    scope.sync = function () { extras().syncForm(container, xc, extraScope()); };
+    scope.prune = function (reportId) {
+      st.extraEntries = (st.extraEntries || []).filter(function (entry) {
+        return entry.id !== reportId;
+      });
+    };
+    scope.reload = function () { show(container, st.selectedMonth); };
+    scope.saved = function (saved, notice) {
+      // show() clears the notice, so it is set again for the reload it belongs to; the next visit
+      // to this page starts without it.
+      show(container, st.selectedMonth);
+      st.extraNotice = notice;
+      render(container);
+    };
+    return scope;
   }
 
   function dayStatus(row) {
@@ -550,21 +676,84 @@
   }
 
   // ─── Page ────────────────────────────────────────────────────────────
-  function visibleRows() {
+  /** Every filter except entry status, which needs this set to work out its own scope. */
+  function baseRows() {
     var term = ui.search.trim().toLowerCase();
-    var rows = st.rows.filter(function (row) {
+    return st.rows.filter(function (row) {
       if (ui.status !== "__all" && statusOf(row).key !== ui.status) return false;
       if (ui.plant !== "__all" && row.site_code !== ui.plant) return false;
       if (ui.cycle !== "__all" &&
           (row.cleaned_cycles || []).indexOf(Number(ui.cycle)) === -1) return false;
-      if (ui.entryStatus !== "__all" &&
-          !entryStatusMatches(dayStatus(row), ui.entryStatus)) return false;
       if (!term) return true;
       return [row.plant, row.site_code, row.district, row.assignee_name]
         .join(" ").toLowerCase().indexOf(term) !== -1;
     });
+  }
+
+  function visibleRows() {
+    var rows = baseRows();
+    if (ui.entryStatus === "extra") {
+      // Only the plants that have one of these entries in scope, so the cards and the list below
+      // them are talking about the same plants.
+      var codes = Object.create(null);
+      extraEntriesInScope().forEach(function (entry) { codes["$" + entry.site_code] = true; });
+      rows = rows.filter(function (row) { return codes["$" + row.site_code] === true; });
+    } else if (ui.entryStatus !== "__all") {
+      rows = rows.filter(function (row) {
+        return entryStatusMatches(dayStatus(row), ui.entryStatus);
+      });
+    }
     if (ui.sort !== "plant") sortByCompliance(rows, ui.sort);
     return rows;
+  }
+
+  /**
+   * One extra-cleaning entry: when it was done, which tables, the cycle it happened during or
+   * after, the remark and who recorded it -- then the three actions, for a viewer the SERVER says
+   * may change it (`can_edit` on a marked entry is only ever the O&M Head or an Assignee). Anyone
+   * else reads the entry with no disabled buttons cluttering it.
+   */
+  function extraEntryHTML(entry) {
+    var ec = extras();
+    var tables = ec.formatTableList(ec.tableNumbersOf(entry));
+    var manage = entry.is_extra === true && entry.can_edit === true;
+    return '<li class="ep-wb__entry ep-wb__entry--' + ec.tone(entry) + '">' +
+      '<div class="ep-wb__entry-top">' +
+        '<strong>' + escape(shortDate(entry.report_date)) + "</strong>" +
+        ec.badgeHTML(entry) +
+        '<span class="ep-wb__entry-cycle">' + escape(ec.cycleLabel(entry)) + "</span>" +
+        '<button type="button" class="ep-wb__entry-plant" data-wb-plant="' +
+          escape(entry.site_code) + '" title="Open this plant’s Module Cleaning calendar">' +
+          escape(entry.plant || entry.site_code) + " · " + escape(entry.site_code) + "</button>" +
+      "</div>" +
+      '<dl class="ep-wb__entry-facts">' +
+        "<div><dt>Which tables</dt><dd>" + escape(tables || "Not recorded") + "</dd></div>" +
+        "<div><dt>Tables cleaned</dt><dd>" + escape(Number(entry.tables_cleaned) || 0) + "</dd></div>" +
+        "<div><dt>Remark</dt><dd>" + escape(entry.remarks || "No remark") + "</dd></div>" +
+        "<div><dt>Recorded by</dt><dd>" + escape(entry.reported_by || "Not recorded") + "</dd></div>" +
+        "<div><dt>Review</dt><dd>" + escape(entry.review_status || "—") + "</dd></div>" +
+      "</dl>" +
+      (manage ? ec.actionsHTML(entry, xc, { attr: "data-wb-extra-action" }) : "") +
+    "</li>";
+  }
+
+  function extraPanelHTML() {
+    if (ui.entryStatus !== "extra") return "";
+    var entries = extraEntriesInScope();
+    var scope = ui.plant !== "__all" ? ui.plant : st.month;
+    return '<section class="ep-wb__entries" aria-label="Extra cleaning entries">' +
+      '<header class="ep-wb__entries-head">' +
+        "<h2>Extra cleaning</h2>" +
+        "<p>" + (entries.length
+          ? entries.length + (entries.length === 1 ? " entry · " : " entries · ") + escape(scope) +
+            " · purple is re-cleaning during a cycle, which never counts towards compliance;" +
+            " blue is cleaning after all three cycles, which does"
+          : "Nothing recorded for this scope") + "</p>" +
+      "</header>" +
+      (entries.length
+        ? '<ul class="ep-wb__entry-list">' + entries.map(extraEntryHTML).join("") + "</ul>"
+        : '<div class="ep-pt__empty-card">No extra cleaning for these filters.</div>') +
+    "</section>";
   }
 
   function countsHTML(rows) {
@@ -617,24 +806,39 @@
           '<option value="__all">All cycles</option>' + cycleOptions() + '</select></label>' +
         '<label><span class="ep-wb__sr-only">Cleaning date</span><select data-wb-filter="date" aria-label="Filter by cleaning date" title="Cleaning date">' +
           '<option value="__all">All dates</option>' + dateOptions() + '</select></label>' +
-        '<label><span class="ep-wb__sr-only">Entry status</span><select data-wb-filter="entryStatus" aria-label="Filter by entry status" title="Entry status (choose a date first)"' +
-          (ui.date === "__all" ? " disabled" : "") + '>' +
+        // Entry submitted / No entry answer a question about one day, so they still need a date
+        // chosen and are offered only then. Extra cleaning is the whole month's, so the select
+        // itself is no longer disabled when no date is picked.
+        '<label><span class="ep-wb__sr-only">Entry status</span><select data-wb-filter="entryStatus" aria-label="Filter by entry status" title="' +
+          (ui.date === "__all"
+            ? "Entry status (choose a date for the day-by-day options)"
+            : "Entry status") + '">' +
           '<option value="__all">All statuses</option>' +
           '<option value="recorded"' + (ui.entryStatus === "recorded" ? " selected" : "") +
-            '>Entry submitted</option>' +
+            (ui.date === "__all" ? " disabled" : "") + '>Entry submitted</option>' +
           '<option value="missing"' + (ui.entryStatus === "missing" ? " selected" : "") +
-            '>No entry</option></select></label>' +
+            (ui.date === "__all" ? " disabled" : "") + '>No entry</option>' +
+          '<option value="extra"' + (ui.entryStatus === "extra" ? " selected" : "") +
+            '>Extra cleaning</option></select></label>' +
         '<label><span>Sort</span><select data-wb-filter="sort" aria-label="Sort Module Cleaning plants">' +
           '<option value="plant"' + (ui.sort === "plant" ? " selected" : "") + '>Plant name</option>' +
           '<option value="compliance-high"' + (ui.sort === "compliance-high" ? " selected" : "") + '>Compliance: high to low</option>' +
           '<option value="compliance-low"' + (ui.sort === "compliance-low" ? " selected" : "") + '>Compliance: low to high</option>' +
         '</select></label>' +
+        // The manual entry action, the same one a plant's cleaning calendar carries: this is the
+        // page people are on when they notice something was recorded wrong.
+        (extras().canRecord()
+          ? '<button type="button" class="ep-calendar__extra-open" data-wb-extra-action="open-extra">' +
+            '+ Extra cleaning</button>'
+          : "") +
         '<button type="button" class="ep-wb__view-toggle" data-wb-view-toggle aria-pressed="' +
           (ui.view === "table" ? "true" : "false") + '" aria-label="Switch to ' +
           (ui.view === "table" ? "cards" : "table") + ' view" title="Switch to ' +
           (ui.view === "table" ? "cards" : "table") + ' view">' +
           (ui.view === "table" ? "Table" : "Cards") + "</button>" +
       '</div></div></div>' +
+      (st.extraNotice ? '<p class="ep-wb__notice" role="status">' + escape(st.extraNotice) + '</p>' : "") +
+      (st.loading || st.error ? "" : extraPanelHTML()) +
       (st.loading
         ? '<div class="ep-pt__loading" role="status">Loading Module Cleaning…</div>'
         : st.error
@@ -654,7 +858,11 @@
             ? "No plants are missing an entry for " + escape(shortDate(ui.date)) + "."
             : ui.entryStatus === "recorded"
               ? "No plants have an entry for " + escape(shortDate(ui.date)) + "."
-              : "No plants match this search.") + '</div>') +
+              : ui.entryStatus === "extra"
+                ? "No plant has extra cleaning for these filters."
+                : "No plants match this search.") + '</div>') +
+      // The extra-cleaning form is the plant calendar's, rendered here against this page's scope.
+      (xc.extraOpen ? extras().formHTML(xc, extraScope()) : "") +
       "</div>";
     wire(container);
   }
@@ -708,6 +916,7 @@
         st.selectedMonth = month.value;
         ui.date = "__all";
         ui.entryStatus = "__all";
+        st.extraNotice = "";
         clearDayActivity();
         show(container, st.selectedMonth);
       });
@@ -730,8 +939,18 @@
       select.addEventListener("change", function () {
         var filter = select.getAttribute("data-wb-filter");
         ui[filter] = select.value;
+        st.extraNotice = "";
         if (filter === "sort") ui.tableSort = { key: "", dir: "" };
-        if (filter === "date" && ui.date === "__all") ui.entryStatus = "__all";
+        // Clearing the date drops the two day-based answers, but not the month-wide one.
+        if (filter === "date" && ui.date === "__all" && ui.entryStatus !== "extra") {
+          ui.entryStatus = "__all";
+        }
+        if (ui.entryStatus === "extra" && !st.extraEntries) {
+          // The entries are this month's daily reports; the overview answers with them, so one
+          // read brings both the entries and the figures they have to agree with.
+          show(container, st.selectedMonth);
+          return;
+        }
         if (filter === "date" || filter === "entryStatus") {
           if (ui.date !== "__all") {
             loadDayActivity(container);
@@ -742,6 +961,35 @@
         render(container);
       });
     });
+    // Every extra-cleaning button -- open the form, the three per-entry actions, cancel, save --
+    // goes straight to assets/js/extra-cleaning.js. This page only says which entry was clicked.
+    container.querySelectorAll("[data-wb-extra-action]").forEach(function (button) {
+      button.addEventListener("click", function () {
+        extras().act(button.getAttribute("data-wb-extra-action"),
+          button.getAttribute("data-report-id"), xc, extraContext(container));
+      });
+    });
+
+    var extraForm = container.querySelector("[data-wb-extra-form]");
+    if (extraForm) {
+      // The preview and the save button are refreshed in place: a redraw on every keystroke would
+      // replace the field being typed in and lose the caret.
+      extraForm.addEventListener("input", function (event) {
+        if (!event.target.matches("[data-extra-list], [data-extra-remarks], [data-extra-date]")) return;
+        extras().refreshPreview(container, xc, extraScope());
+      });
+      extraForm.addEventListener("change", function (event) {
+        if (event.target.matches("[data-extra-plant]")) {
+          // A different plant means a different table count to check the numbers against.
+          extras().syncForm(container, xc, extraScope());
+          render(container);
+          return;
+        }
+        if (!event.target.matches("[data-extra-date], [data-extra-list], [data-extra-remarks]")) return;
+        extras().refreshPreview(container, xc, extraScope());
+      });
+    }
+
     container.querySelectorAll("[data-wb-status]").forEach(function (button) {
       button.addEventListener("click", function () {
         ui.status = button.getAttribute("data-wb-status");
@@ -834,11 +1082,20 @@
     st.month = month;
     st.loading = true;
     st.error = "";
+    st.extraEntries = null;
+    st.extraNotice = "";
+    // Extra cleaning entries ARE the month's daily reports, which this same endpoint answers with.
+    // They are asked for only while the filter that lists them is on, so the ordinary board keeps
+    // reading scalars only, and `report_days` trims the window to the month actually on screen.
+    var wantEntries = ui.entryStatus === "extra";
+    var reports = wantEntries
+      ? "&include_reports=true&report_days=" + monthSpanDays(month)
+      : "&include_reports=false";
     render(container);
     // summary=true: the cards read scalars only, so the per-plant day, cycle and productivity
     // lists — about three quarters of the response — are not asked for.
     return api().request("/api/scheduled/washing/overview?month=" + encodeURIComponent(month) +
-      "&include_reports=false&summary=true").then(function (body) {
+      reports + "&summary=true").then(function (body) {
       if (mine !== token) return;                       // a newer page replaced this one
       st.rows = (body.plants || []).slice().sort(function (a, b) {
         return String(a.site_code).localeCompare(String(b.site_code), undefined, { numeric: true });
@@ -846,6 +1103,7 @@
       st.summary = body.summary || {};
       st.month = body.month || month;
       st.today = body.today || "";
+      st.extraEntries = wantEntries ? (body.reports || []).filter(isExtraEntry) : null;
       st.loading = false;
       if (container.isConnected) {
         if (ui.date !== "__all") loadDayActivity(container);

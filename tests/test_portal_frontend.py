@@ -506,7 +506,7 @@ def test_register_import_export_is_offered_beside_raise_issue_and_set_up_pm():
     assert '<script defer src="/assets/js/register-io.js"' not in page
     modules = (PORTAL_ASSETS / "js" / "modules.js").read_text(encoding="utf-8")
     assert '"site-issues": ["table-sort", "table-column-filter", "register-io", "photo-evidence"]' in modules
-    assert '"operations-calendar": ["register-io", "photo-evidence"]' in modules
+    assert '"operations-calendar": ["register-io", "photo-evidence", "extra-cleaning"]' in modules
 
     # It points at the importers that already existed, plus the new downloads.
     for url in ("/api/issues/import", "/api/issues/import/template", "/api/issues/export",
@@ -631,6 +631,7 @@ def test_record_washing_keeps_the_last_cycle_open_for_extra_washing():
       global.Solar91PortalAPI = { request: () => Promise.resolve({}), can: () => true,
                                   currentUser: () => ({ role: 'O&M Head' }) };
       const fs = require('fs');
+      eval(fs.readFileSync('./assets/js/extra-cleaning.js', 'utf8'));
       let src = fs.readFileSync('./assets/js/operations-calendar.js', 'utf8');
       src = src.replace('  global.Solar91PortalCalendar = { render: render };',
                         '  global.__i = { recordRows };');
@@ -683,6 +684,7 @@ def test_record_sheet_advances_only_after_every_table_is_cleaned():
       let role = 'O&M Head';
       global.Solar91PortalAPI = { request: () => Promise.resolve({}), can: () => true, currentUser: () => ({ role: role }) };
       const fs = require('fs');
+      eval(fs.readFileSync('./assets/js/extra-cleaning.js', 'utf8'));
       let src = fs.readFileSync('./assets/js/operations-calendar.js', 'utf8');
       src = src.replace('  global.Solar91PortalCalendar = { render: render };', '  global.__i = { recordRows };');
       eval(src);
@@ -2381,9 +2383,11 @@ def test_record_sheet_tracks_exactly_which_tables_were_cleaned():
 
 
 def test_record_sheet_preserves_entered_table_range_direction():
+    # The parser is shared with the Module Cleaning board's extra-cleaning form, so it lives in
+    # assets/js/extra-cleaning.js and the calendar calls through to it.
     script = r"""
       const fs=require('fs'),vm=require('vm'),assert=require('assert');
-      const source=fs.readFileSync('assets/js/operations-calendar.js','utf8');
+      const source=fs.readFileSync('assets/js/extra-cleaning.js','utf8');
       function extract(name) {
         const start=source.indexOf('function '+name+'(');
         assert(start>=0,name+' missing');

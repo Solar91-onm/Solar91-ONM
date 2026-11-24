@@ -135,6 +135,15 @@
   border-color: var(--ep-accent);
   box-shadow: 0 0 0 3px var(--ep-accent-ring);
 }
+/* The manual "+ Extra cleaning" entry button IS the plant calendar's control
+   (.ep-calendar__extra-open in calendar.css), reused rather than restated; only its height is
+   brought into line with the other controls in this row. */
+.ep-wb__filters .ep-calendar__extra-open {
+  min-height: 32px;
+  padding: 4px 11px;
+  border-radius: 8px;
+  font-size: 12px;
+}
 .ep-wb__view-toggle {
   min-height: 32px;
   padding: 4px 11px;
@@ -342,6 +351,108 @@
   text-align: right;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* ── Extra cleaning entries ───────────────────────────────────────────
+   The Extra cleaning entry-status filter lists the month's entries here. The two colours are the
+   plant calendar's own, so moving between the two screens teaches nothing new: #6b2f8f purple is
+   re-cleaning done while a cycle was running (never counted) and #1366b0 blue is cleaning recorded
+   after all three cycles were complete (counted). They are the same values as
+   .ep-calendar__event-card--extra and --after-cycles in calendar.css, and the badge on each row IS
+   that file's rule, reused rather than restated. Do not add a third treatment. */
+.ep-wb__entries { margin: 0 0 16px; }
+.ep-wb__entries-head { margin-bottom: 8px; }
+.ep-wb__entries-head h2 {
+  margin: 0;
+  color: var(--ep-text-strong);
+  font-size: var(--ep-fs-md);
+  font-weight: 700;
+}
+.ep-wb__entries-head p {
+  margin: 2px 0 0;
+  color: var(--ep-text-muted);
+  font-size: var(--ep-fs-xs);
+}
+.ep-wb__entry-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.ep-wb__entry {
+  padding: 10px 12px;
+  border: 1px solid var(--ep-border);
+  border-radius: 12px;
+  background: var(--ep-bg);
+}
+.ep-wb__entry--extra { border-color: #6b2f8f; background: #f8f2fb; }
+.ep-wb__entry--after-cycles { border-color: #1366b0; background: #eff6fd; }
+.ep-wb__entry-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.ep-wb__entry-top strong {
+  color: var(--ep-text-strong);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+.ep-wb__entry-cycle {
+  color: var(--ep-text-muted);
+  font-size: 11.5px;
+  font-weight: 600;
+}
+.ep-wb__entry-plant {
+  margin-left: auto;
+  padding: 2px 8px;
+  border: 1px solid var(--ep-border);
+  border-radius: 999px;
+  background: var(--ep-bg);
+  color: var(--ep-text);
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.ep-wb__entry-plant:hover { border-color: var(--ep-accent); }
+.ep-wb__entry-plant:focus-visible { outline: 2px solid var(--ep-accent); outline-offset: 1px; }
+.ep-wb__entry-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 6px 12px;
+  margin: 0;
+}
+.ep-wb__entry-facts dt {
+  color: var(--ep-text-faint);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.ep-wb__entry-facts dd {
+  margin: 1px 0 0;
+  color: var(--ep-text-strong);
+  font-size: 12.5px;
+  overflow-wrap: anywhere;
+}
+/* The three actions are the shared module's markup, so they arrive with calendar.css's classes:
+   only their spacing inside a board row belongs here. */
+.ep-wb__entry .ep-calendar__extra-detail-actions { margin: 10px 0 0; }
+.ep-wb__entry .ep-calendar__extra-delete-warning { margin: 10px 0 4px; }
+
+.ep-wb__notice {
+  margin: 0 0 12px;
+  padding: 9px 12px;
+  border: 1px solid var(--ep-border);
+  border-left: 3px solid var(--ep-accent);
+  border-radius: 10px;
+  background: var(--ep-bg-muted);
+  color: var(--ep-text-strong);
+  font-size: 12.5px;
 }
 
 .ep-pt__empty-card {
