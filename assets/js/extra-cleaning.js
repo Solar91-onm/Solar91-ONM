@@ -31,6 +31,13 @@
  *                    complete. The month IS credited for it. Shown in blue.
  * Only the first kind is editable here; the second is what "Count as cleaning
  * (not extra)" turns the first into.
+ *
+ * REVIEW. Anyone who may record a day may record extra cleaning, a Site Engineer included, but an
+ * entry they submit is saved `Pending` and counts for nothing until it is confirmed. Who may
+ * confirm is again the server's rule, not this module's: the O&M Head or the plant's CONFIGURED,
+ * active Assignee, and never the person who submitted it (`_can_review_washing` and the four-eyes
+ * check in app/scheduled/washing_cycles.py). `can_review` on a report is that answer already
+ * computed for this viewer, so the buttons below follow it rather than re-deciding anything.
  */
 (function (global) {
   "use strict";
@@ -44,7 +51,13 @@
     convert: "convert-extra",
     requestDelete: "request-extra-delete",
     cancelDelete: "cancel-extra-delete",
-    confirmDelete: "confirm-extra-delete"
+    confirmDelete: "confirm-extra-delete",
+    // Review: a Site Engineer's entry is saved awaiting review and counts for nothing until the
+    // O&M Head or the plant's own Assignee confirms it.
+    confirmReview: "confirm-extra-review",
+    requestReject: "request-extra-reject",
+    cancelReject: "cancel-extra-reject",
+    confirmReject: "confirm-extra-reject"
   };
 
   var ACTION_NAMES = Object.keys(ACTIONS).map(function (key) { return ACTIONS[key]; });
@@ -221,8 +234,21 @@
       extraConvertError: "",
       extraDeleteConfirmId: "",
       extraDeleting: false,
-      extraDeleteError: ""
+      extraDeleteError: "",
+      extraReviewing: "",
+      extraReviewError: "",
+      extraRejectConfirmId: ""
     };
+  }
+
+  /** True when THIS viewer may decide on this entry: the server already worked that out. */
+  function canReview(entry) {
+    return !!entry && entry.can_review === true && entry.review_status === "Pending";
+  }
+
+  /** True while an entry is waiting for that decision, whoever is looking at it. */
+  function awaitingReview(entry) {
+    return !!entry && entry.review_status === "Pending";
   }
 
   /**
@@ -264,6 +290,45 @@
       '</div>' +
       (state.extraConvertError ? '<p class="ep-calendar__setup-error" role="alert">' +
         escape(state.extraConvertError) + '</p>' : "");
+  }
+
+  /**
+   * Confirm / Reject, for an entry that is waiting on a decision and a viewer the server says may
+   * make it. Rejecting cannot be taken back -- the endpoint refuses a second decision -- so it
+   * asks once more and offers the reason that goes back to whoever recorded the entry.
+   */
+  function reviewHTML(entry, state, opts) {
+    if (!canReview(entry)) return "";
+    var attr = (opts && opts.attr) || "data-calendar-action";
+    var reportId = entry.reportId || entry.id;
+    var busy = state.extraReviewing === reportId;
+    var error = state.extraReviewError && (state.extraRejectConfirmId === reportId ||
+        state.extraReviewing === reportId || !state.extraRejectConfirmId)
+      ? '<p class="ep-calendar__setup-error" role="alert">' + escape(state.extraReviewError) + '</p>'
+      : "";
+    if (state.extraRejectConfirmId === reportId) {
+      return '<p class="ep-calendar__extra-delete-warning" role="alert">Reject this entry? It stops ' +
+        'counting, and only the O&amp;M Head or the Assignee can change it afterwards.</p>' +
+        '<div class="ep-calendar__extra-detail-actions">' +
+          '<label class="ep-calendar__extra-review-reason"><span>Reason (optional)</span>' +
+            '<input type="text" data-extra-review-note maxlength="4000" ' +
+              'placeholder="e.g. tables were not actually cleaned"' +
+              (busy ? " disabled" : "") + ' /></label>' +
+          '<button type="button" class="ep-calendar__close-button" ' + attr + '="' +
+            ACTIONS.cancelReject + '"' + (busy ? " disabled" : "") + '>Keep awaiting review</button>' +
+          '<button type="button" class="ep-calendar__setup-submit ep-calendar__setup-submit--danger" ' +
+            attr + '="' + ACTIONS.confirmReject + '" data-report-id="' + escape(reportId) + '"' +
+            (busy ? " disabled" : "") + '>' + (busy ? "Rejecting…" : "Reject entry") + '</button>' +
+        '</div>' + error;
+    }
+    return '<div class="ep-calendar__extra-detail-actions">' +
+      '<button type="button" class="ep-calendar__setup-submit" ' + attr + '="' +
+        ACTIONS.confirmReview + '" data-report-id="' + escape(reportId) + '"' +
+        (busy ? " disabled" : "") + '>' + (busy ? "Confirming…" : "Confirm entry") + '</button>' +
+      '<button type="button" class="ep-calendar__close-button" ' + attr + '="' +
+        ACTIONS.requestReject + '" data-report-id="' + escape(reportId) + '"' +
+        (busy ? " disabled" : "") + '>Reject entry</button>' +
+    '</div>' + error;
   }
 
   function invalidateCaches() {
@@ -350,6 +415,61 @@
           (error && error.message ? error.message : "Please retry.");
         ctx.render();
       });
+  }
+
+  /** The entry this decision names, or null when this viewer may not make it. */
+  function reviewTarget(reportId, ctx) {
+    var report = ctx.find ? ctx.find(reportId) : null;
+    return canReview(report) ? report : null;
+  }
+
+  /**
+   * Send the decision. A confirmation can complete a cycle -- the server re-sequences the month
+   * behind it -- so the host re-reads afterwards rather than patching a figure locally. The
+   * server's own refusals come straight back: it declines a confirmation without the required
+   * cleaning photos, and it refuses a decision from whoever submitted the entry.
+   */
+  function review(reportId, decision, state, ctx) {
+    if (state.extraReviewing || !canManage()) return;
+    if (!reviewTarget(reportId, ctx)) return;
+    var note = decision === "Reject" && ctx.reviewNote ? ctx.reviewNote() : "";
+    state.extraReviewing = reportId;
+    state.extraReviewError = "";
+    ctx.render();
+    api().request(REPORTS_URL + "/" + encodeURIComponent(reportId) + "/review", {
+      method: "POST",
+      body: { decision: decision, remarks: (note || "").trim() || null }
+    }).then(function () {
+      if (!alive(ctx)) return;
+      invalidateCaches();
+      state.extraReviewing = "";
+      state.extraRejectConfirmId = "";
+      state.extraReviewError = "";
+      ctx.reload(false);
+    }).catch(function (error) {
+      if (!alive(ctx)) return;
+      state.extraReviewing = "";
+      state.extraReviewError = (decision === "Confirm"
+        ? "The entry was not confirmed. " : "The entry was not rejected. ") +
+        (error && error.message ? error.message : "Please retry.");
+      ctx.render();
+    });
+  }
+
+  function requestReject(reportId, state, ctx) {
+    if (state.extraReviewing || !canManage()) return;
+    var report = reviewTarget(reportId, ctx);
+    if (!report) return;
+    state.extraRejectConfirmId = report.id;
+    state.extraReviewError = "";
+    ctx.render();
+  }
+
+  function cancelReject(state, ctx) {
+    if (state.extraReviewing) return;
+    state.extraRejectConfirmId = "";
+    state.extraReviewError = "";
+    ctx.render();
   }
 
   // ── The form that records or edits one entry ────────────────────────────────
@@ -599,6 +719,10 @@
     else if (name === ACTIONS.requestDelete) requestDelete(reportId, state, ctx);
     else if (name === ACTIONS.cancelDelete) cancelDelete(state, ctx);
     else if (name === ACTIONS.confirmDelete) confirmDelete(reportId, state, ctx);
+    else if (name === ACTIONS.confirmReview) review(reportId, "Confirm", state, ctx);
+    else if (name === ACTIONS.requestReject) requestReject(reportId, state, ctx);
+    else if (name === ACTIONS.cancelReject) cancelReject(state, ctx);
+    else if (name === ACTIONS.confirmReject) review(reportId, "Reject", state, ctx);
     else return false;
     return true;
   }
@@ -616,6 +740,9 @@
     badgeHTML: badgeHTML,
     actionState: actionState,
     actionsHTML: actionsHTML,
+    canReview: canReview,
+    awaitingReview: awaitingReview,
+    reviewHTML: reviewHTML,
     formHTML: formHTML,
     syncForm: syncForm,
     refreshPreview: refreshPreview,

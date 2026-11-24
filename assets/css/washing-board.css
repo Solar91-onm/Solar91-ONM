@@ -390,6 +390,52 @@
 }
 .ep-wb__entry--extra { border-color: #6b2f8f; background: #f8f2fb; }
 .ep-wb__entry--after-cycles { border-color: #1366b0; background: #eff6fd; }
+/* Awaiting review: the entry is recorded but counts for nothing until the O&M Head or the plant's
+   Assignee confirms it, so it is marked on the row itself and not only in the Review line. */
+.ep-wb__entry--pending { border-style: dashed; }
+.ep-wb__entry-pending {
+  flex: 0 0 auto;
+  padding: 1px 8px;
+  border: 1px solid #b45309;
+  border-radius: 99px;
+  background: #fef3c7;
+  color: #7c2d12;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .03em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+/* The reason that goes back to whoever recorded the entry, inside the reject step. */
+.ep-wb__entry .ep-calendar__extra-review-reason {
+  display: flex;
+  flex: 1 1 200px;
+  flex-direction: column;
+  gap: 3px;
+}
+.ep-wb__entry .ep-calendar__extra-review-reason > span {
+  color: var(--ep-text-faint);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.ep-wb__entry .ep-calendar__extra-review-reason input {
+  min-height: 32px;
+  padding: 5px 9px;
+  border: 1px solid var(--ep-border);
+  border-radius: 8px;
+  background: var(--ep-bg);
+  color: var(--ep-text);
+  font: inherit;
+  font-size: 12.5px;
+}
+.ep-wb__entry .ep-calendar__extra-review-reason input:focus-visible {
+  outline: 0;
+  border-color: var(--ep-accent);
+  box-shadow: 0 0 0 3px var(--ep-accent-ring);
+}
+
 .ep-wb__entry-top {
   display: flex;
   flex-wrap: wrap;

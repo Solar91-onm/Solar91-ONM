@@ -40,7 +40,9 @@
     extraOpen: false, extraEditId: "", extraPlantCode: "", extraDate: "", extraList: "",
     extraRemarks: "", extraSaving: false, extraError: "",
     extraConverting: false, extraConvertError: "",
-    extraDeleteConfirmId: "", extraDeleting: false, extraDeleteError: ""
+    extraDeleteConfirmId: "", extraDeleting: false, extraDeleteError: "",
+    // Confirm / Reject on an entry that is still awaiting review.
+    extraReviewing: "", extraReviewError: "", extraRejectConfirmId: ""
   };
   var ui = {
     search: "", status: "__all", plant: "__all", cycle: "__all", date: "__all",
@@ -257,6 +259,10 @@
       if (field) field.focus();
     };
     scope.sync = function () { extras().syncForm(container, xc, extraScope()); };
+    scope.reviewNote = function () {
+      var field = container.querySelector("[data-extra-review-note]");
+      return field ? field.value : "";
+    };
     scope.prune = function (reportId) {
       st.extraEntries = (st.extraEntries || []).filter(function (entry) {
         return entry.id !== reportId;
@@ -720,10 +726,15 @@
     var ec = extras();
     var tables = ec.formatTableList(ec.tableNumbersOf(entry));
     var manage = entry.is_extra === true && entry.can_edit === true;
-    return '<li class="ep-wb__entry ep-wb__entry--' + ec.tone(entry) + '">' +
+    return '<li class="ep-wb__entry ep-wb__entry--' + ec.tone(entry) +
+      (ec.awaitingReview(entry) ? " ep-wb__entry--pending" : "") + '">' +
       '<div class="ep-wb__entry-top">' +
         '<strong>' + escape(shortDate(entry.report_date)) + "</strong>" +
         ec.badgeHTML(entry) +
+        // An entry that is waiting on a decision counts for nothing yet, so it says so where it
+        // cannot be missed rather than only in the Review line below.
+        (ec.awaitingReview(entry)
+          ? '<span class="ep-wb__entry-pending">Awaiting review</span>' : "") +
         '<span class="ep-wb__entry-cycle">' + escape(ec.cycleLabel(entry)) + "</span>" +
         '<button type="button" class="ep-wb__entry-plant" data-wb-plant="' +
           escape(entry.site_code) + '" title="Open this plant’s Module Cleaning calendar">' +
@@ -736,6 +747,9 @@
         "<div><dt>Recorded by</dt><dd>" + escape(entry.reported_by || "Not recorded") + "</dd></div>" +
         "<div><dt>Review</dt><dd>" + escape(entry.review_status || "—") + "</dd></div>" +
       "</dl>" +
+      // The decision comes first: until it is made the entry counts for nothing, and the three
+      // actions below are about an entry that is already standing.
+      ec.reviewHTML(entry, xc, { attr: "data-wb-extra-action" }) +
       (manage ? ec.actionsHTML(entry, xc, { attr: "data-wb-extra-action" }) : "") +
     "</li>";
   }
