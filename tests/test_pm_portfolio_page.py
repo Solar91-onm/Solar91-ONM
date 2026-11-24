@@ -321,17 +321,30 @@ def test_opening_pm_lands_on_a_month_that_has_data():
     assert "state.monthSettled = true;" in handler[:400]
 
 
-def test_when_no_month_has_work_the_page_says_so_instead_of_rendering_empty_tiles():
+def test_when_no_month_has_work_the_page_says_so_without_discarding_the_register():
+    """No work anywhere is a NOTICE, not a replacement for the page.
+
+    Replacing the whole page threw away the plant register — the planned / paused state of every
+    plant, which is knowable before any work exists — and removed every control with it, leaving no
+    route to the PM calendar where work is actually generated.
+    """
     source = _text(OVERVIEW)
     page = _portfolio(source)
 
     assert "noWorkAnywhere()" in page
     assert page.index("noWorkAnywhere()") < page.index("summaryMetrics(rows)"), \
-        "the plain statement replaces the tiles, it does not sit above them"
-    assert "No PM work has been generated for any plant" in source
+        "the notice sits above the page"
+    assert "registerPanel(rows)" in page[page.index("noWorkAnywhere()"):], \
+        "the plant register still renders when no month holds work"
+    assert "No PM work orders exist for any plant" in source
 
-    empty = source[source.index("  function noWorkAnywhere() {"):]
-    assert "return !!state.months && !workMonths().length;" in empty[:200], \
+    empty = source[source.index("  function emptyPortfolio() {"):]
+    empty = empty[:empty.index("\n  }\n")]
+    assert "Upload plan" in empty, "it names the step that actually generates work orders"
+    assert "data-pm-calendar" in empty, "and offers the way through to it"
+
+    gate = source[source.index("  function noWorkAnywhere() {"):]
+    assert "return !!state.months && !workMonths().length;" in gate[:200], \
         "only once the index has arrived, so a pending read never looks like an empty portfolio"
 
 

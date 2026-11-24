@@ -513,8 +513,12 @@ def test_register_import_export_is_offered_beside_raise_issue_and_set_up_pm():
                 "/api/pm-plan/import", "/api/pm-plan/import/template", "/api/pm-plan/export"):
         assert url in register, url
 
-    # Import is two steps: the file is validated with dry_run before anything is written.
-    assert 'dry_run: "true"' in register and 'dry_run: "false"' in register
+    # Import is two steps: the file is validated with dry_run before anything is written. Both
+    # steps go through uploadParams, so a register's own upload options (the PM cycle start) are
+    # on the check AND the save — a dry run checked under different parameters than the save
+    # would describe work that is not what gets created.
+    assert 'dry_run: dryRun ? "true" : "false"' in register
+    assert "uploadParams(true)" in register and "uploadParams(false)" in register
 
     # Mounted beside each primary action, not replacing it.
     assert 'Solar91RegisterIO.controls("issues"' in issues
@@ -522,6 +526,36 @@ def test_register_import_export_is_offered_beside_raise_issue_and_set_up_pm():
     assert 'Solar91RegisterIO.controls("pm"' in calendar
     assert 'data-calendar-action="open-pm-setup"' in calendar
     assert ".ep-sheet-io__button" in styles
+
+
+def test_pm_upload_can_follow_each_plants_cycle_plan():
+    """The PM upload sends follow_cycle and cycle_start.
+
+    A stored cycle plan becomes work orders by exactly one route: /api/pm-plan/import with
+    follow_cycle and a cycle_start. Without them the importer dates rows from the file's own Start
+    date column and the plans have no effect on anything the register shows, which is how a
+    portfolio of configured plants ended up with an empty PM page.
+    """
+    register = (PORTAL_ASSETS / "js" / "register-io.js").read_text(encoding="utf-8")
+    styles = (PORTAL_ASSETS / "css" / "components.css").read_text(encoding="utf-8")
+
+    options = register[register.index("      options: {"):]
+    options = options[:options.index("\n      }\n")]
+    assert 'data-sheet-option="follow_cycle"' in options
+    assert 'data-sheet-option="cycle_start"' in options
+    assert 'type="month"' in options, "a cycle runs from the first day of a calendar month"
+    assert 'cycle_start: month.value + "-01"' in options
+    assert 'follow_cycle: "true"' in options
+    # Unticked means the file's own Start date column decides, so neither parameter is sent.
+    assert "if (!follow || !follow.checked) return {};" in options
+    # A month must be chosen rather than silently falling back to the server's default.
+    assert "Choose the month the PM cycle starts in." in options
+
+    # Changing an option invalidates the dry run it was checked against.
+    change = register[register.index('if (event.target.hasAttribute("data-sheet-option"))'):]
+    assert "check();" in change[:300]
+
+    assert ".ep-sheet-io__options" in styles
 
 
 def test_register_import_is_gated_on_the_same_permission_as_creating_the_record():

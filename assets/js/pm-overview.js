@@ -1150,11 +1150,29 @@
 
   // -- Empty states: on day one most of this page is empty -------------------
 
-  /** No month in range holds any PM work. Said plainly, instead of a page of zero-filled tiles. */
+  /**
+   * No month in range holds any PM work.
+   *
+   * Said as a NOTICE above the page, not instead of it. Replacing the whole page here used to
+   * discard the plant register this page had already built — including the planned / paused state
+   * of every plant, which is the one thing that is knowable before any work exists — and it removed
+   * every control, so the empty state was also a dead end: the PM calendar, where work is actually
+   * generated, could not be reached from it.
+   *
+   * It names the real next step too. A cycle plan alone generates nothing: it sets out a plant's
+   * phases, and the work orders are created from them by the PM calendar's Upload plan.
+   */
   function emptyPortfolio() {
-    return '<p class="ep-pm__empty ep-pm__empty--page">No PM work has been generated for any plant ' +
-      'in your scope, in any month. Set up a cycle plan on a plant’s PM page and its schedule ' +
-      'will appear here.</p>';
+    var planned = state.cyclePlans && state.cyclePlans.configured;
+    return '<p class="ep-pm__notice" role="status">No PM work orders exist for any plant in your ' +
+      'scope, in any month. ' +
+      (planned
+        ? number(planned) + ' plant' + (planned === 1 ? ' has a cycle plan, which sets out its phases'
+            : 's have a cycle plan, which sets out their phases') + ' — the work orders themselves ' +
+          'are generated from those plans. '
+        : '') +
+      'Use <b>Upload plan</b> on the PM calendar, with the cycle start set to the month you are ' +
+      'planning. <button type="button" class="ep-pm__inline-button" data-pm-calendar>Open PM calendar</button></p>';
   }
 
   function scopeNotice() {
@@ -1203,11 +1221,14 @@
       (state.calendarError ? retryMessage(state.calendarError, "calendar") : "") +
       (state.loading
         ? '<div class="ep-pm__loading" role="status">Loading PM overview…</div>'
-        : noWorkAnywhere()
-          ? emptyPortfolio()
-          : scopeNotice() + periodNotice() + summaryMetrics(rows) +
-            '<section class="ep-pm__insights">' + registerPanel(rows) + upcomingPanelCard() +
-            '</section>' + activitySection()) +
+        // "PM status by plant" holds whether or not any work has been generated: the register is
+        // the plants, and a plant with no work is still a plant with a plan state. Only the
+        // period-specific notice is swapped out when there is no work anywhere, since "choose
+        // another month" is no help when no month has any.
+        : (noWorkAnywhere() ? emptyPortfolio() : scopeNotice() + periodNotice()) +
+          summaryMetrics(rows) +
+          '<section class="ep-pm__insights">' + registerPanel(rows) + upcomingPanelCard() +
+          '</section>' + activitySection()) +
       '<p class="ep-pm__footnote">Compliance and due counts use the portal’s existing PM rules. ' +
         'Cancelled work is excluded, and a paused plant is never counted as zero.</p>' +
     '</div>';

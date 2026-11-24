@@ -53,21 +53,111 @@
       summary: function (result) {
         var parts = [];
         if (result.rows) parts.push(result.rows + " row" + (result.rows === 1 ? "" : "s") + " read");
-        if (result.tasks) parts.push(result.tasks + " work order" + (result.tasks === 1 ? "" : "s") + " to create");
-        if (result.template_only_rows) parts.push(result.template_only_rows + " saved as templates only");
-        if (result.skipped) parts.push(result.skipped + " skipped");
+        // ALWAYS stated, including zero. A file that creates nothing used to show no work-order line
+        // at all, which read as success; the count is the whole point of the dry run.
+        var tasks = result.tasks || 0;
+        parts.push(tasks + " work order" + (tasks === 1 ? "" : "s") + " to create");
+        if (result.template_only_rows) parts.push(result.template_only_rows + " saved as templates only (no plant named)");
+        if (result.skipped) parts.push(result.skipped + " skipped (already open at that plant)");
+        if (result.paused) {
+          parts.push(result.paused + " plant" + (result.paused === 1 ? "" : "s") +
+            " skipped — no cycle plan" + pausedNames(result));
+        }
         return parts;
       },
       saved: function (result) {
         return (result.tasks || 0) + " work order" + ((result.tasks || 0) === 1 ? "" : "s") + " created.";
       },
-      canApply: function (result) { return (result.rows || 0) > 0; }
+      canApply: function (result) { return (result.rows || 0) > 0; },
+      /**
+       * The PM cycle controls.
+       *
+       * The importer can date every row from the plant's OWN cycle plan rather than from a Start
+       * date column: `follow_cycle` with a `cycle_start`. That is the only route by which a stored
+       * cycle plan ever becomes work orders, and nothing in the portal was sending either
+       * parameter, so the plans had no effect on anything the register shows.
+       */
+      options: {
+        render: function () {
+          var month = nextMonth();
+          return '<fieldset class="ep-sheet-io__options">' +
+            '<legend>PM cycle</legend>' +
+            '<label class="ep-sheet-io__check">' +
+              '<input type="checkbox" data-sheet-option="follow_cycle" checked />' +
+              '<span>Follow each plant’s cycle plan</span>' +
+            '</label>' +
+            '<label class="ep-sheet-io__month"><span>Cycle starts</span>' +
+              '<input type="month" data-sheet-option="cycle_start" value="' + escape(month) + '" /></label>' +
+            '<p class="ep-sheet-io__hint" data-sheet-option-hint>Each row is dated from that plant’s own ' +
+              'phase for the month, so the file needs no Start date. Plants with no cycle plan are ' +
+              'skipped and listed.</p>' +
+          '</fieldset>';
+        },
+        problem: function (root) {
+          var follow = root.querySelector('[data-sheet-option="follow_cycle"]');
+          var month = root.querySelector('[data-sheet-option="cycle_start"]');
+          if (follow && follow.checked && !(month && /^\d{4}-\d{2}$/.test(month.value))) {
+            return "Choose the month the PM cycle starts in.";
+          }
+          return "";
+        },
+        params: function (root) {
+          var follow = root.querySelector('[data-sheet-option="follow_cycle"]');
+          var month = root.querySelector('[data-sheet-option="cycle_start"]');
+          if (!follow || !follow.checked) return {};
+          if (!month || !/^\d{4}-\d{2}$/.test(month.value)) return {};
+          // A cycle runs from the first day of a calendar month (_cycle_month_start on the server),
+          // so the month picker is the honest control and the day is never the operator's to get wrong.
+          return { follow_cycle: "true", cycle_start: month.value + "-01" };
+        },
+        /** Fields whose value changes the dates the server would produce, so the dry run is stale. */
+        sync: function (root) {
+          var follow = root.querySelector('[data-sheet-option="follow_cycle"]');
+          var month = root.querySelector('[data-sheet-option="cycle_start"]');
+          var hint = root.querySelector("[data-sheet-option-hint]");
+          var on = !!(follow && follow.checked);
+          if (month) month.disabled = !on;
+          if (hint) {
+            hint.textContent = on
+              ? "Each row is dated from that plant’s own phase for the month, so the file needs no " +
+                "Start date. Plants with no cycle plan are skipped and listed."
+              : "Rows are dated from the file’s own Start date column. Cycle plans are not used.";
+          }
+        }
+      }
     }
   };
 
   function api() {
     if (!global.Solar91PortalAPI) throw new Error("Portal API client is not loaded.");
     return global.Solar91PortalAPI;
+  }
+
+  /**
+   * The month after the current business month, as YYYY-MM.
+   *
+   * PM is forward-looking: a cycle generated into the month already under way lands most of its
+   * work in the past and reads as overdue the moment it is created. The next month is the one an
+   * operator means when they plan a cycle, and the dry run shows the dates before anything is kept.
+   */
+  function nextMonth() {
+    var parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit"
+    }).formatToParts(new Date());
+    var values = {};
+    parts.forEach(function (part) { if (part.type !== "literal") values[part.type] = part.value; });
+    var year = Number(values.year);
+    var month = Number(values.month) + 1;
+    if (month > 12) { month = 1; year += 1; }
+    return year + "-" + (month < 10 ? "0" + month : String(month));
+  }
+
+  /** The first few paused plants by name, so "12 skipped" is never an unexplained number. */
+  function pausedNames(result) {
+    var list = result && result.paused_plants;
+    if (!list || !list.length) return "";
+    var names = list.slice(0, 4).map(function (p) { return p.site_code || p.plant; });
+    return " (" + names.join(", ") + (list.length > names.length ? ", …" : "") + ")";
   }
 
   function escape(value) {
@@ -151,6 +241,7 @@
           '<p class="ep-sheet-io__hint">Upload an .xlsx, .xlsm or .csv file. The file is checked first — ' +
             'nothing is saved until you confirm.</p>' +
           '<button type="button" class="ep-sheet-io__link" data-sheet-action="template">Download the blank template</button>' +
+          (register.options ? register.options.render() : "") +
           '<label class="ep-sheet-io__file"><span>Choose a file</span>' +
             '<input type="file" accept=".xlsx,.xlsm,.csv" data-sheet-file /></label>' +
           '<p class="ep-sheet-io__status" data-sheet-status role="status" aria-live="polite"></p>' +
@@ -176,6 +267,9 @@
         if (el.getAttribute("data-sheet-action") === "close") return;
         el.disabled = value || (el.getAttribute("data-sheet-action") === "apply" && !checked);
       });
+      // Runs last: a register's own options decide their enabled state themselves (a disabled
+      // cycle-start must not be switched back on by the blanket re-enable above).
+      if (!value && register.options) register.options.sync(dialog);
     }
 
     function chosenFile() {
@@ -183,15 +277,23 @@
       return input && input.files && input.files[0] ? input.files[0] : null;
     }
 
+    /** The register's own upload parameters alongside dry_run, for BOTH the check and the save. */
+    function uploadParams(dryRun) {
+      var params = { dry_run: dryRun ? "true" : "false" };
+      return register.options ? Object.assign(params, register.options.params(dialog)) : params;
+    }
+
     function check() {
       var file = chosenFile();
       checked = null;
       dialog.querySelector("[data-sheet-result]").innerHTML = "";
       setBusy(false);
+      var problem = register.options ? register.options.problem(dialog) : "";
+      if (problem) { status(problem, "error"); return; }
       if (!file) { status(""); return; }
       setBusy(true);
       status("Checking " + file.name + "…");
-      api().uploadFile(register.importUrl, file, { dry_run: "true" }).then(function (result) {
+      api().uploadFile(register.importUrl, file, uploadParams(true)).then(function (result) {
         var problems = problemsOf(null, result);
         if (problems) {
           dialog.querySelector("[data-sheet-result]").innerHTML = problemList(problems);
@@ -224,7 +326,7 @@
       if (!file || !checked || busy) return;
       setBusy(true);
       status("Uploading…");
-      api().uploadFile(register.importUrl, file, { dry_run: "false" }).then(function (result) {
+      api().uploadFile(register.importUrl, file, uploadParams(false)).then(function (result) {
         status(register.saved(result), "ok");
         // A write invalidates the cached reads, or the view would redraw from stale rows.
         if (global.Solar91PortalData && global.Solar91PortalData.invalidate) global.Solar91PortalData.invalidate();
@@ -256,8 +358,17 @@
       }
     });
     dialog.addEventListener("change", function (event) {
-      if (event.target.hasAttribute && event.target.hasAttribute("data-sheet-file")) check();
+      if (!event.target.hasAttribute) return;
+      if (event.target.hasAttribute("data-sheet-file")) { check(); return; }
+      // An option changes the dates the server would produce, so the dry run it was checked
+      // against no longer describes what Upload would save. Check again rather than let a stale
+      // summary be confirmed.
+      if (event.target.hasAttribute("data-sheet-option")) {
+        if (register.options) register.options.sync(dialog);
+        check();
+      }
     });
+    if (register.options) register.options.sync(dialog);
   }
 
   /**

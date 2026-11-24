@@ -1380,6 +1380,52 @@
   font: inherit;
   font-size: var(--ep-fs-sm);
 }
+/* Per-register upload options (the PM cycle start). Grouped in a fieldset so the two controls
+   read as one decision about the file, not as two unrelated inputs above the file chooser. */
+.ep-sheet-io__options {
+  display: grid;
+  gap: var(--ep-s-2);
+  margin: 0;
+  padding: var(--ep-s-3);
+  border: 1px solid var(--ep-border-soft);
+  border-radius: var(--ep-radius-sm);
+  background: var(--ep-bg-muted);
+}
+.ep-sheet-io__options legend {
+  padding: 0 6px;
+  color: var(--ep-text-muted);
+  font-size: var(--ep-fs-xs);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.ep-sheet-io__check {
+  display: flex;
+  align-items: center;
+  gap: var(--ep-s-2);
+  color: var(--ep-text-strong);
+  font-size: var(--ep-fs-sm);
+  font-weight: 650;
+  cursor: pointer;
+}
+.ep-sheet-io__check input { width: 16px; height: 16px; margin: 0; cursor: pointer; }
+.ep-sheet-io__month {
+  display: flex;
+  align-items: center;
+  gap: var(--ep-s-2);
+  color: var(--ep-text-muted);
+  font-size: var(--ep-fs-xs);
+  font-weight: 600;
+}
+.ep-sheet-io__month input {
+  padding: 7px 9px;
+  border: 1px solid var(--ep-border);
+  border-radius: var(--ep-radius-sm);
+  background: var(--ep-bg);
+  font: inherit;
+  font-size: var(--ep-fs-sm);
+}
+.ep-sheet-io__month input:disabled { opacity: 0.5; cursor: not-allowed; }
 .ep-sheet-io__status { min-height: 18px; margin: 0; color: var(--ep-text-muted); font-size: var(--ep-fs-xs); }
 .ep-sheet-io__status.is-error { color: var(--ep-red); }
 .ep-sheet-io__status.is-ok { color: var(--ep-accent-strong); }
