@@ -1251,8 +1251,7 @@
   function portfolioWorkspace() {
     return workspaceTabs("portfolio", state.portfolioWorkspaceTab, [
       { key: "upcoming", label: "Upcoming", content: upcomingPanelCard() },
-      { key: "work-orders", label: "Work orders", content: activitySection() },
-      { key: "cycle-plans", label: "Cycle plans", content: plannedCycleSection() }
+      { key: "work-orders", label: "Work orders", content: activitySection() }
     ]);
   }
 
@@ -1943,14 +1942,60 @@
         '<thead><tr>' + header + '</tr></thead><tbody>' + body + '</tbody></table></div></section>';
   }
 
+  function plantCyclePlanScheduleSection(entries) {
+    var byActivity = Object.create(null);
+    entries.forEach(function (entry) {
+      var key = entry.planActivityId || entry.id;
+      var existing = byActivity[key] || {};
+      var plannedDate = entry.plannedDate || (entry.cyclePlanState === "planned" ? entry.date : "");
+      var runDate = entry.scheduledDate || (entry.cyclePlanState === "chained" ? entry.date : "");
+      byActivity[key] = {
+        plannedDate: plannedDate || existing.plannedDate || entry.date,
+        runDate: runDate || existing.runDate || entry.date,
+        phase: entry.planPhase || entry.title || entry.phase || "Maintenance phase",
+        categories: (entry.categories && entry.categories.length
+          ? entry.categories
+          : existing.categories) || [],
+        chained: !!(existing.chained || entry.cyclePlanState === "chained" ||
+          (runDate && plannedDate && runDate !== plannedDate))
+      };
+    });
+    var rows = Object.keys(byActivity).map(function (key) { return byActivity[key]; }).sort(function (a, b) {
+      return (a.runDate || a.plannedDate).localeCompare(b.runDate || b.plannedDate) ||
+        a.phase.localeCompare(b.phase);
+    });
+    var body = rows.length
+      ? rows.map(function (row) {
+          var changed = row.runDate && row.plannedDate && row.runDate !== row.plannedDate;
+          return '<tr class="ep-pm__task-row ep-pm__cycle-plan-row">' +
+            '<td><strong>' + escape(dateLabel(row.plannedDate)) + '</strong></td>' +
+            '<td>' + escape(dateLabel(row.runDate)) +
+              (changed ? ' <small>(Chained)</small>' : "") + '</td>' +
+            '<td><strong>' + escape(row.phase) + '</strong></td>' +
+            '<td>' + escape(row.categories.join(", ")) + '</td>' +
+            '<td><span class="ep-pm__status ep-pm__status--muted">Planned</span></td>' +
+          '</tr>';
+        }).join("")
+      : '<tr><td colspan="5" class="ep-pm__empty-cell">No saved cycle-plan activities fall in ' +
+        escape(monthLabel(state.month)) + '. Generate work orders for the activities needed this month.</td></tr>';
+    return '<section class="ep-pm__board" data-pm-cycle-plan-schedule>' +
+      '<div class="ep-pm__board-head"><div><p class="ep-pm__eyebrow">Saved cycle plan</p>' +
+        '<h2>Planned plant activities</h2></div><span>' + number(rows.length) + ' planned</span></div>' +
+      '<div class="ep-pm__table-wrap"><table class="ep-pm__table ep-pm__activity-table">' +
+        '<thead><tr><th>Planned date</th><th>Run date</th><th>Phase</th>' +
+        '<th>Maintenance needed</th><th>Status</th></tr></thead><tbody>' + body +
+        '</tbody></table></div></section>';
+  }
+
   function plantWorkspace(entries) {
     return '<section class="ep-pm__plant-workspace">' +
+      plantCyclePlanScheduleSection(state.planEntries) +
       plantRegisterSection(entries) +
       workspaceTabs("plant", state.plantWorkspaceTab, [
         { key: "plan", label: "Cycle plan", content: '<div data-pm-tracker-host></div>' },
         { key: "upcoming", label: "Upcoming", content:
           '<div class="ep-pm__plant-workspace-stack">' + recentUpcomingPanel(entries) +
-          calendarCard(entries) + '</div>' },
+            '</div>' },
         { key: "equipment", label: "Equipment", content: breakdownPanel(entries) },
         { key: "workload", label: "Workload", content: workloadPanel(entries) }
       ]) +
@@ -1979,6 +2024,8 @@
             (plant.location ? ' · ' + escape(plant.location) : "") + '</p>' +
           pausedTag(plant.siteCode) + '</div></div>' +
         '<div class="ep-pm__header-actions">' + statusBadge(status) +
+          '<button type="button" class="ep-pm__calendar-button ep-pm__header-calendar" data-pm-calendar>' +
+            'Open PM calendar <span aria-hidden="true">→</span></button>' +
           '<label>Period<input type="month" data-pm-month value="' + escape(state.month) +
             '" max="' + monthMax() + '" /></label></div></header>' +
       (state.truncated

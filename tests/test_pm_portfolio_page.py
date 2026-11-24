@@ -66,13 +66,14 @@ def test_the_pm_calendar_button_is_not_on_this_screen():
     source = _text(OVERVIEW)
 
     assert "data-pm-calendar" not in _portfolio(source)
-    # ...and the plant page keeps its own way through to the calendar, inside its activity tab.
-    card = source[source.index("  function calendarCard(entries) {"):]
-    card = card[:card.index(chr(10) + "  }" + chr(10))]
-    assert 'class="ep-pm__calendar-button" data-pm-calendar>Open PM calendar ' in card
+    # ...and the plant header keeps the action beside the status and period controls.
+    plant = source[source.index("  function plantContent(row) {"):]
+    plant = plant[:plant.index(chr(10) + "  }" + chr(10))]
+    assert 'ep-pm__header-calendar" data-pm-calendar' in plant
+    assert 'Open PM calendar <span aria-hidden="true">→</span>' in plant
     workspace = source[source.index("  function plantWorkspace(entries) {"):]
-    workspace = workspace[:workspace.index(chr(10) + "  }" + chr(10))]
-    assert "calendarCard(entries)" in workspace
+    assert ("calendarCard(entries)" not in workspace), \
+        "the calendar action moved to the plant header instead of being duplicated in the workspace"
 
 
 def test_four_stat_tiles_with_a_tinted_icon_each_and_a_bar_under_compliance():
@@ -115,7 +116,9 @@ def test_two_panels_side_by_side_with_the_left_one_wider():
     source = _text(OVERVIEW)
 
     assert "registerPanel(rows)" in page and "portfolioWorkspace()" in page
-    assert "upcomingPanelCard()" in source and "activitySection()" in source and "plannedCycleSection()" in source
+    assert "upcomingPanelCard()" in source and "activitySection()" in source
+    assert 'key: "cycle-plans"' not in source
+    assert "plannedCycleSection()" not in page
     assert page.index("registerPanel(rows)") < page.index("portfolioWorkspace()")
     assert "Plant-wise PM status" in source and "Upcoming maintenance" in source
     # The panels these two replace are gone.
@@ -604,6 +607,17 @@ def test_the_plant_page_keeps_the_tracker_and_the_full_work_order_register():
         assert column in source, column
 
 
+def test_the_plant_page_shows_saved_cycle_plan_dates_separate_from_work_orders():
+    source = _text(OVERVIEW)
+
+    assert "function plantCyclePlanScheduleSection(entries)" in source
+    assert "plantCyclePlanScheduleSection(state.planEntries)" in source
+    assert "<th>Planned date</th><th>Run date</th>" in source
+    assert "<th>Maintenance needed</th>" in source
+    assert "No saved cycle-plan activities fall in" in source
+    assert 'data-pm-cycle-plan-schedule' in source
+
+
 def test_plant_dashboard_adds_progress_adherence_and_a_mutually_exclusive_status_chart():
     source = _text(OVERVIEW)
 
@@ -952,9 +966,8 @@ const want = (label, ok) => { if (!ok) bad.push(label); };
   // 4. Section badges count what they list.
   want('the register badge counts its rows', html.includes('<span>4 plants</span>'));
   if (!empty && !bands) {
-    want('saved plan activities have their own section', html.includes('data-pm-cycle-activities'));
-    want('the phase row shows planned and chained dates',
-      html.includes('Inverter') && html.includes('>Chained</td>'));
+    want('cycle-plan tab is removed from the all-plants portfolio',
+      !html.includes('data-pm-cycle-activities') && !html.includes('Cycle plans'));
     want('plan activities do not inflate work-order counts', html.includes('>8 shown</span>'));
   }
 

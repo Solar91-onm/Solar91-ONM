@@ -1212,6 +1212,10 @@
 .ep-pm__plant-meta { font-family: var(--ep-font-mono); font-size: var(--ep-fs-xs) !important; color: var(--ep-text-faint) !important; }
 .ep-pm__plant-head .ep-pm__header-actions { align-items: center; }
 .ep-pm__plant-head .ep-pm__paused-tag { margin-top: 6px; }
+.ep-pm__plant-head .ep-pm__header-calendar {
+  min-height: 34px;
+  white-space: nowrap;
+}
 
 /* Workload: one stacked column a day. The three segments are STATUS colours, which a red-green
    colourblind reader cannot separate by hue, so they never have to be: the stacking order is fixed,
