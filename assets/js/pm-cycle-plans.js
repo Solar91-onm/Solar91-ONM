@@ -43,6 +43,10 @@
 
   function api() { return global.Solar91PortalAPI; }
   function esc(value) { return global.Solar91PortalFormat.escape(value == null ? "" : String(value)); }
+  function invalidateCalendar() {
+    var data = global.Solar91PortalData;
+    if (data && typeof data.invalidate === "function") data.invalidate();
+  }
   /** The server decides; before the plan has loaded nothing is editable. */
   function canEdit() { return !!(state.plan && state.plan.can_edit && state.editing); }
   function mayEdit() { return !!(state.plan && state.plan.can_edit); }
@@ -134,6 +138,7 @@
         "?cycle_start=" + meta.start).then(function (body) {
       if (!sameCode(code, state.siteCode)) return;
       state.plan = body;
+      invalidateCalendar();
       state.baseVersion = body.updated_at || null;
       state.draft = { phases: (body.phases || []).map(clonePhase), notes: body.notes || "" };
       state.dirty = false;
@@ -650,6 +655,7 @@
     renderActions();
     api().request("/api/pm-plan/cycle-plans/" + encodeURIComponent(state.siteCode), { method: "DELETE" })
       .then(function () {
+        invalidateCalendar();
         state.list = null;                     // the portfolio counts are stale now
         return loadPlan();
       }).then(function () {

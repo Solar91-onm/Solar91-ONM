@@ -29,7 +29,23 @@ Configure these in the Render service environment. Never place secret values in 
 | `CLERK_ISSUER` | Exact issuer origin of Clerk session tokens, such as `https://<instance>.clerk.accounts.dev`. |
 | `ALLOWED_ORIGINS` | Comma-separated exact HTTPS origins; include the Render URL and any active custom domain. |
 
-`PORT` is assigned by Render and must not be set manually. Other optional settings include `BOOTSTRAP_ADMIN_EMAILS`, `APP_PUBLIC_URL`, `RESEND_API_KEY`, `MAIL_FROM`, `MAX_UPLOAD_MB`, and the `DB_POOL_*` variables. `PM_DAILY_JOB` defaults to `0`.
+`PORT` is assigned by Render and must not be set manually. Other optional settings include `BOOTSTRAP_ADMIN_EMAILS`, `APP_PUBLIC_URL`, `RESEND_API_KEY`, `MAIL_FROM`, `MAX_UPLOAD_MB`, the `DB_POOL_*` variables, and the invitation limits below. `PM_DAILY_JOB` defaults to `0`.
+
+### Invitation email limits
+
+Invitation sending uses shared PostgreSQL-backed hourly quotas and a resend cooldown. Defaults can be overridden with the listed environment variables; `429` responses include `Retry-After`. Rate-limit recipient keys are hashed. Bulk imports validate and reserve the complete unique-recipient batch before changing users or sending mail, and an identical completed upload returns its cached result for 24 hours.
+
+| Environment variable | Default | Purpose |
+| --- | ---: | --- |
+| `INVITE_DIRECT_PER_HOUR` | `20` | Actor quota for direct invites and resends. |
+| `INVITE_PROFILE_PER_HOUR` | `5` | Actor quota for pending-invite email corrections. |
+| `INVITE_BULK_PER_HOUR` | `500` | Actor quota for bulk-import invitations. |
+| `INVITE_BULK_MAX_PER_IMPORT` | `500` | Maximum unique invitees in one import. |
+| `INVITE_RECIPIENT_PER_HOUR` | `3` | Maximum invitation emails to one canonical recipient. |
+| `INVITE_RESEND_COOLDOWN_SECONDS` | `600` | Minimum delay between resends to the same recipient. |
+| `INVITE_IMPORT_IDEMPOTENCY_HOURS` | `24` | Retention for completed import receipts. |
+
+Before deploying the invitation limiter, review and manually apply the additive `database/migrations/050_invite_rate_limits.sql` through the controlled migration process above. Application startup does not create these tables. A duplicate upload that is still marked `processing` returns HTTP 409; do not retry that file until its original request has finished or an operator has investigated the incomplete receipt.
 
 ## Clerk setup
 

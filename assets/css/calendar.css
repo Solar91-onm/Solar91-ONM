@@ -733,6 +733,20 @@
   color: #304c78;
 }
 
+.ep-calendar__event--cycle-plan {
+  border: 1px dashed #6b55a1;
+  border-left: 4px dashed #6b55a1;
+  background: #f3effa;
+  color: #493576;
+}
+
+.ep-calendar__event--cycle-chained {
+  border-color: #9a5c14;
+  border-left-color: #9a5c14;
+  background: #fff4e5;
+  color: #70400d;
+}
+
 .ep-calendar__event--cycle-complete {
   white-space: normal;
   overflow-wrap: anywhere;
@@ -990,6 +1004,17 @@
   color: #267345;
   font-size: var(--ep-fs-xs);
   font-weight: 700;
+}
+
+.ep-calendar__pm-summary-item--cycle-plan {
+  border-style: dashed;
+  border-color: #c9bce2;
+  background: #f8f5fc;
+}
+
+.ep-calendar__pm-summary-badge--cycle-plan {
+  background: #6b55a1;
+  color: #ffffff;
 }
 
 .ep-calendar__pm-summary-item > strong {
@@ -2028,6 +2053,32 @@
 .ep-calendar__event-card--after-cycles {
   border-color: #1366b0;
   background: #eff6fd;
+}
+
+.ep-calendar__event-card--cycle-plan {
+  border-style: dashed;
+  border-color: #c9bce2;
+  background: #f8f5fc;
+}
+
+.ep-calendar__event-card-plan-note {
+  color: #493576;
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+.ep-calendar__plan-badge {
+  border-radius: 999px;
+  padding: 3px 8px;
+  background: #6b55a1;
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.ep-calendar__pm-tip-job--cycle-plan {
+  border-left: 3px dashed #6b55a1;
+  background: #f8f5fc;
 }
 
 .ep-calendar__event-card-after-note {

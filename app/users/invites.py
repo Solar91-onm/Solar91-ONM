@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import io
 import re
 from typing import Annotated
@@ -22,6 +23,12 @@ from app.plants.codes import normalize_site_code, plant_code_index
 from app.users.router import PORTFOLIO_ROLES, _active_head_count, out
 
 from app.notifications.mailer import send_invite_email
+from app.users.invite_limits import (
+    begin_bulk_import,
+    complete_bulk_import,
+    get_bulk_import_response,
+    reserve_invite_quota,
+)
 
 router = APIRouter(prefix="/api/users", tags=["Users"])
 settings = get_settings()
@@ -96,35 +103,59 @@ def _resolve_plants(tokens: list[str], index) -> list:
     return found
 
 
-def _upsert_person(
-    db: Session, actor: User, index, *, name: str, email: str, role: str,
-    plant_tokens: list[str],
-):
-    """Create or update one person. Raises ValueError BEFORE changing anything if the row is invalid."""
-    email = (email or "").strip()
-    key = email.lower()
-    if not EMAIL_RE.match(email) or len(email) > 240:
-        raise ValueError("Invalid email address")
-    if role not in {"O&M Head", "Assignee", "Administration", "Site Engineer", "Viewer"}:
-        raise ValueError("Unknown role")
-    # Scope is plants for every non-portfolio role.
-    plants = _resolve_plants(plant_tokens, index) if role in {"Site Engineer", "Assignee"} else []
-    if role in PORTFOLIO_ROLES or role == "Viewer":
-        _resolve_plants(plant_tokens, index)  # still reject typos, but ignore the result
-    if role == "Site Engineer" and len(plants) != 1:
-        raise ValueError("A Site Engineer needs exactly one plant")
-    if role == "Assignee" and not plants:
-        raise ValueError("An Assignee needs at least one plant")
-
-    existing = db.scalar(select(User).where(func.lower(User.email) == key))
+def _existing_user_for_email(db: Session, email: str) -> User | None:
+    existing = db.scalar(select(User).where(func.lower(User.email) == email.lower()))
     if existing is None and is_gmail_family(email):
-        wanted = canonical_email(email)   # Gmail ignores dots and +tags: same mailbox = same person
+        wanted = canonical_email(email)
         existing = next(
             (u for u in db.scalars(select(User).where(
                 User.email.ilike("%@gmail.com") | User.email.ilike("%@googlemail.com")))
              if canonical_email(u.email) == wanted),
             None,
         )
+    return existing
+
+
+def _validate_person(
+    db: Session,
+    actor: User,
+    index,
+    *,
+    email: str,
+    role: str,
+    plant_tokens: list[str],
+) -> tuple[str, list[Plant], User | None]:
+    email = (email or "").strip()
+    if not EMAIL_RE.match(email) or len(email) > 240:
+        raise ValueError("Invalid email address")
+    if role not in {"O&M Head", "Assignee", "Administration", "Site Engineer", "Viewer"}:
+        raise ValueError("Unknown role")
+    plants = _resolve_plants(plant_tokens, index) if role in {"Site Engineer", "Assignee"} else []
+    if role in PORTFOLIO_ROLES or role == "Viewer":
+        _resolve_plants(plant_tokens, index)
+    if role == "Site Engineer" and len(plants) != 1:
+        raise ValueError("A Site Engineer needs exactly one plant")
+    if role == "Assignee" and not plants:
+        raise ValueError("An Assignee needs at least one plant")
+
+    existing = _existing_user_for_email(db, email)
+    if existing:
+        if existing.id == actor.id and role != "O&M Head":
+            raise ValueError("You cannot change your own O&M Head access")
+        if existing.role == "O&M Head" and role != "O&M Head" and \
+                _active_head_count(db, exclude_id=existing.id) == 0:
+            raise ValueError("At least one active O&M Head is required")
+    return email, plants, existing
+
+
+def _upsert_person(
+    db: Session, actor: User, index, *, name: str, email: str, role: str,
+    plant_tokens: list[str], prepared: tuple[str, list[Plant], User | None] | None = None,
+):
+    """Create or update one person. Raises ValueError BEFORE changing anything if the row is invalid."""
+    email, plants, existing = prepared or _validate_person(
+        db, actor, index, email=email, role=role, plant_tokens=plant_tokens
+    )
     before = None
     if existing:
         if existing.id == actor.id and role != "O&M Head":
@@ -173,9 +204,13 @@ def _scope_text(db: Session, user: User) -> str:
     return "Access will be set by your O&M Head"
 
 
-def _email_invite(db: Session, actor: User, user: User) -> tuple[bool, str]:
+def _email_invite(
+    db: Session, actor: User, user: User, *, reserved: bool = False, channel: str = "direct",
+) -> tuple[bool, str]:
     if not user.email:
         return False, "No email address"
+    if not reserved:
+        reserve_invite_quota(db, actor.id, [user.email], channel=channel)
     return send_invite_email(to_email=user.email, name=user.display_name, role=user.role,
                              scope=_scope_text(db, user), invited_by=actor.display_name)
 
@@ -191,7 +226,7 @@ def resend_invite(
         raise HTTPException(404, "User not found")
     if not (target.external_subject or "").startswith(INVITE_PREFIX):
         raise HTTPException(409, "This person has already signed in")
-    sent, reason = _email_invite(db, actor, target)
+    sent, reason = _email_invite(db, actor, target, channel="resend")
     return {"email_sent": sent, "email_note": reason}
 
 
@@ -268,6 +303,8 @@ def update_profile(
         if clash:
             raise HTTPException(409, f"Another active person is already called {name}. Add a surname or initial so "
                                      "their tickets cannot be mixed up.")
+    if email_changed and target.is_active:
+        reserve_invite_quota(db, actor.id, [email], channel="profile")
 
     before = {"name": target.display_name, "email": target.email}
     renamed = 0
@@ -293,7 +330,7 @@ def update_profile(
     db.refresh(target)
     sent, reason = False, "Email not changed"
     if email_changed and target.is_active:
-        sent, reason = _email_invite(db, actor, target)
+        sent, reason = _email_invite(db, actor, target, reserved=True)
     return {**out(target), "email_sent": sent, "email_note": reason, "renamed_assignments": renamed}
 
 
@@ -305,15 +342,29 @@ def invite_person(
 ):
     role = _role(data.role) or data.role
     try:
-        status, user = _upsert_person(db, actor, _plant_index(db), name=data.name, email=data.email,
-                                          role=role, plant_tokens=data.plants)
+        index = _plant_index(db)
+        prepared = _validate_person(
+            db, actor, index, email=data.email, role=role, plant_tokens=data.plants,
+        )
     except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    _, _, existing = prepared
+    if (existing is None or (existing.external_subject or "").startswith(INVITE_PREFIX)) and \
+            (existing is None or existing.is_active):
+        reserve_invite_quota(db, actor.id, [prepared[0]], channel="direct")
+    try:
+        status, user = _upsert_person(
+            db, actor, index, name=data.name, email=data.email, role=role,
+            plant_tokens=data.plants, prepared=prepared,
+        )
+    except ValueError as exc:
+        db.rollback()
         raise HTTPException(422, str(exc)) from exc
     db.commit()
     db.refresh(user)
     sent, reason = False, "Already signed in \u2014 no invite needed"
     if (user.external_subject or "").startswith(INVITE_PREFIX) and user.is_active:
-        sent, reason = _email_invite(db, actor, user)
+        sent, reason = _email_invite(db, actor, user, reserved=True)
     return {**out(user), "status": status, "email_sent": sent, "email_note": reason}
 
 
@@ -343,6 +394,10 @@ async def import_people(
     data = await file.read(max_bytes + 1)
     if len(data) > max_bytes:
         raise HTTPException(413, "File is too large")
+    payload_hash = hashlib.sha256(data).hexdigest()
+    cached_response = get_bulk_import_response(db, actor.id, payload_hash)
+    if cached_response is not None:
+        return cached_response
     matrix = _read_matrix(name, data)
     if not matrix:
         raise HTTPException(422, "File is empty")
@@ -365,6 +420,7 @@ async def import_people(
     errors: list[dict] = []
     seen: set[str] = set()
     new_people: list[User] = []
+    prepared_rows: list[tuple[int, str, str, str, list[str], tuple[str, list[Plant], User | None]]] = []
 
     def cell(row, field):
         i = col.get(field)
@@ -374,28 +430,49 @@ async def import_people(
         email = str(cell(row, "email") or "").strip()
         if not email and not str(cell(row, "name") or "").strip():
             continue
-        if email.lower() in seen:
+        email_key = canonical_email(email).casefold() if EMAIL_RE.match(email) else email.casefold()
+        if email_key in seen:
             errors.append({"row": n, "email": email, "error": "Duplicate email in file"})
             continue
-        seen.add(email.lower())
+        seen.add(email_key)
         role = _role(cell(row, "role"))
         if not role:
             errors.append({"row": n, "email": email, "error": f"Unknown role '{cell(row, 'role')}'"})
             continue
+        name_value = str(cell(row, "name") or "")
+        plant_tokens = _tokens(cell(row, "plants"))
         try:
-            status, _ = _upsert_person(db, actor, index, name=str(cell(row, "name") or ""), email=email,
-                                       role=role, plant_tokens=_tokens(cell(row, "plants")),
-                                       )
+            prepared = _validate_person(
+                db, actor, index, email=email, role=role, plant_tokens=plant_tokens,
+            )
+        except ValueError as exc:
+            errors.append({"row": n, "email": email, "error": str(exc)})
+            continue
+        prepared_rows.append((n, name_value, prepared[0], role, plant_tokens, prepared))
+
+    invitees = [prepared[2] for prepared in prepared_rows if prepared[5][2] is None]
+    cached_response = begin_bulk_import(db, actor.id, payload_hash, invitees)
+    if cached_response is not None:
+        return cached_response
+
+    for n, name_value, email, role, plant_tokens, prepared in prepared_rows:
+        try:
+            status, person = _upsert_person(
+                db, actor, index, name=name_value, email=email, role=role,
+                plant_tokens=plant_tokens, prepared=prepared,
+            )
         except ValueError as exc:
             errors.append({"row": n, "email": email, "error": str(exc)})
             continue
         created += status == "created"
         updated += status == "updated"
         if status == "created":
-            new_people.append(_)
+            new_people.append(person)
     db.commit()
     emailed = 0
     for person in new_people:
         db.refresh(person)
-        emailed += bool(_email_invite(db, actor, person)[0])
-    return {"filename": name, "created": created, "updated": updated, "errors": errors, "emailed": emailed}
+        emailed += bool(_email_invite(db, actor, person, reserved=True)[0])
+    response = {"filename": name, "created": created, "updated": updated, "errors": errors, "emailed": emailed}
+    complete_bulk_import(db, actor.id, payload_hash, response)
+    return response

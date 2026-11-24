@@ -32,6 +32,8 @@ from sqlalchemy.orm import Session, aliased
 from app.core.models import (
     Issue,
     OMTask,
+    PMCyclePlan,
+    PMUnitConfig,
     Plant,
     PlantResponsibility,
     User,
@@ -42,6 +44,7 @@ from app.core.models import (
 )
 from app.core.security import can_view_security_contacts, user_scoped_plant_ids, visible_custom_fields
 from app.core.timeutil import BUSINESS_TZ, business_today
+from app.pmplan.cycle import chained_window, effective_start_day, resolve_cycle
 
 # ── Business rules (mirrored from the owning modules) ────────────────────────
 
@@ -1376,9 +1379,101 @@ def calendar_page(db: Session, user: User, kind: str, month: str, plant_ids: lis
     return page
 
 
+def _cycle_plan_calendar(
+    db: Session,
+    user: User,
+    plant_ids: list[UUID],
+    first: date,
+    last: date,
+    codes: dict[UUID, str],
+    names: dict[UUID, str],
+    limit: int,
+) -> list[dict[str, Any]]:
+    """Calendar markers for authorized plans, including nominal and chained work days."""
+    if user.role not in {"O&M Head", "Assignee"} or not plant_ids or limit <= 0:
+        return []
+
+    derived: dict[UUID, dict[str, int]] = {}
+    for plant_id, total, per_day in db.execute(
+        select(PMUnitConfig.plant_id, PMUnitConfig.total_units, PMUnitConfig.units_per_day)
+        .where(
+            PMUnitConfig.plant_id.in_(plant_ids),
+            func.lower(PMUnitConfig.equipment_type) == "inverter",
+        )
+    ):
+        if total and per_day and per_day > 0:
+            derived.setdefault(plant_id, {})["Inverter"] = -(-total // per_day)
+
+    plans = db.scalars(
+        select(PMCyclePlan)
+        .where(PMCyclePlan.plant_id.in_(plant_ids))
+        .order_by(PMCyclePlan.plant_id)
+    )
+    entries: list[dict[str, Any]] = []
+    for row in plans:
+        if not row.phases:
+            continue
+        phases = resolve_cycle(row.phases, derived.get(row.plant_id))
+        for phase_index, phase in enumerate(phases):
+            equipment = phase["equipment_types"]
+            if not equipment:
+                continue
+            nominal_start = first + timedelta(
+                days=effective_start_day(phase, first) - 1
+            )
+            chained = chained_window(equipment[0], first, cycle=phases)
+            step_days = int(phase["step_days"])
+            visible_days = max(0, (last - nominal_start).days // step_days + 1)
+            for work_day in range(min(int(phase["days"]), visible_days)):
+                nominal_date = nominal_start + timedelta(days=work_day * step_days)
+                scheduled_date = chained["start"] + timedelta(
+                    days=work_day * step_days
+                )
+                if nominal_date > last and scheduled_date > last:
+                    continue
+                activity_id = f"{row.id}:{phase_index}:{work_day}"
+                base = {
+                    "planActivityId": activity_id,
+                    "planPhase": phase["phase"],
+                    "categories": list(equipment),
+                    "equipmentType": phase["phase"],
+                    "frequency": "Monthly cycle",
+                    "title": phase["phase"],
+                    "taskName": phase["phase"],
+                    "status": "Planned",
+                    "reference": "Cycle plan",
+                    "plantSiteCode": codes.get(row.plant_id),
+                    "plantName": names.get(row.plant_id),
+                    "plannedDate": nominal_date.isoformat(),
+                    "scheduledDate": scheduled_date.isoformat(),
+                    "source": "cycle_plan",
+                }
+                if first <= nominal_date <= last:
+                    entries.append({
+                        **base,
+                        "id": activity_id + ":planned",
+                        "date": nominal_date.isoformat(),
+                        "cyclePlanState": "planned",
+                    })
+                if scheduled_date != nominal_date and first <= scheduled_date <= last:
+                    entries.append({
+                        **base,
+                        "id": activity_id + ":chained",
+                        "date": scheduled_date.isoformat(),
+                        "cyclePlanState": "chained",
+                    })
+    return sorted(
+        entries,
+        key=lambda event: (
+            event["date"], event.get("plantName") or "", event.get("title") or "",
+            event["id"],
+        ),
+    )[:limit]
+
+
 def calendar(db: Session, user: User, kind: str, month: str, plant_ids: list[UUID],
              limit: int = CALENDAR_LIMIT) -> list[dict[str, Any]]:
-    """Dated PM or Washing entries for one month — real records only, at most ``limit`` (earliest first)."""
+    """Dated PM/Washing records and authorized PM cycle-plan days for one month."""
     if kind not in {"pm", "washing"}:
         raise ValueError("Calendar activity requires kind=pm or kind=washing")
     try:
@@ -1433,7 +1528,14 @@ def calendar(db: Session, user: User, kind: str, month: str, plant_ids: list[UUI
                 "plantName": names.get(row.plant_id),
                 "source": "database",
             })
-        return out
+        out.extend(_cycle_plan_calendar(db, user, plant_ids, first, last, codes, names, limit))
+        return sorted(
+            out,
+            key=lambda event: (
+                event["date"], event.get("plantName") or "", event.get("title") or "",
+                event.get("source") or "",
+            ),
+        )[:limit]
 
     from app.core.models import WashingDailyReport
     from app.scheduled.washing_cycles import format_table_codes

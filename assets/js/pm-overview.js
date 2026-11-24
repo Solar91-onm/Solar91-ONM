@@ -18,6 +18,7 @@
     month: "",
     rows: [],
     entries: [],
+    planEntries: [],
     loading: false,
     calendarLoading: false,
     error: "",
@@ -533,6 +534,25 @@
     return monthEntries(scopedRows()).filter(function (entry) { return entry.status !== "Cancelled"; });
   }
 
+  function plannedCycleRows() {
+    var byActivity = Object.create(null);
+    state.planEntries.forEach(function (entry) {
+      if (state.filters.plant && entry.plantSiteCode !== state.filters.plant) return;
+      var query = state.filters.query.trim().toLowerCase();
+      if (query && [entry.plantName, entry.plantSiteCode, entry.planPhase,
+          (entry.categories || []).join(" ")].join(" ").toLowerCase().indexOf(query) === -1) return;
+      var key = entry.planActivityId || entry.id;
+      var existing = byActivity[key];
+      if (!existing || entry.cyclePlanState === "chained") byActivity[key] = entry;
+    });
+    return Object.keys(byActivity).map(function (key) { return byActivity[key]; })
+      .sort(function (a, b) {
+        return (a.scheduledDate || a.date).localeCompare(b.scheduledDate || b.date) ||
+          String(a.plantName || "").localeCompare(String(b.plantName || "")) ||
+          String(a.planPhase || "").localeCompare(String(b.planPhase || ""));
+      });
+  }
+
   /** True when every plant in scope is paused, so the page can say so rather than show empty tiles. */
   function allScopePaused() {
     var rows = scopedRows();
@@ -1044,6 +1064,33 @@
         '</tbody></table></div></section>';
   }
 
+  function plannedCycleSection() {
+    var rows = plannedCycleRows();
+    if (!rows.length) return "";
+    return '<section class="ep-pm__board" data-pm-cycle-activities>' +
+      '<div class="ep-pm__board-head"><div><p class="ep-pm__eyebrow">Cycle plan</p>' +
+        '<h2>Planned plant activities</h2>' +
+        '<p class="ep-pm__empty-copy">These phase days come from each plant’s saved cycle plan; they are not work orders until generated.</p>' +
+        '</div><span>' + number(rows.length) + ' planned</span></div>' +
+      '<div class="ep-pm__table-wrap"><table class="ep-pm__table ep-pm__activity-table">' +
+        '<thead><tr><th>Planned day</th><th>Run day</th><th>Plant</th><th>Phase</th>' +
+          '<th>Work categories</th><th>Schedule</th></tr></thead><tbody>' +
+        rows.map(function (entry) {
+          var runDate = entry.scheduledDate || entry.date;
+          var changed = runDate !== entry.plannedDate;
+          return '<tr class="ep-pm__task-row ep-pm__cycle-plan-row">' +
+            '<td>' + escape(dateLabel(entry.plannedDate || entry.date)) + '</td>' +
+            '<td>' + escape(dateLabel(runDate)) + '</td>' +
+            '<td><strong>' + escape(entry.plantName || entry.plantSiteCode || "Plant") +
+              '</strong><small>' + escape(entry.plantSiteCode || "") + '</small></td>' +
+            '<td>' + escape(entry.planPhase || entry.title) + '</td>' +
+            '<td>' + escape((entry.categories || []).join(", ")) + '</td>' +
+            '<td>' + (changed ? "Chained" : "Planned") + '</td>' +
+          '</tr>';
+        }).join("") +
+        '</tbody></table></div></section>';
+  }
+
   // -- Export ----------------------------------------------------------------
 
   function download(filename, mime, text) {
@@ -1183,7 +1230,7 @@
   }
 
   function periodNotice() {
-    if (state.calendarLoading || state.calendarError || activityRows().length) return "";
+    if (state.calendarLoading || state.calendarError || activityRows().length || plannedCycleRows().length) return "";
     var nearest = nearestWorkMonth(state.month);
     return '<p class="ep-pm__notice" role="status">No PM activities fall in ' +
       escape(monthLabel(state.month)) + '. Use the period selector above to choose another month.' +
@@ -1228,7 +1275,7 @@
         : (noWorkAnywhere() ? emptyPortfolio() : scopeNotice() + periodNotice()) +
           summaryMetrics(rows) +
           '<section class="ep-pm__insights">' + registerPanel(rows) + upcomingPanelCard() +
-          '</section>' + activitySection()) +
+          '</section>' + activitySection() + plannedCycleSection()) +
       '<p class="ep-pm__footnote">Compliance and due counts use the portal’s existing PM rules. ' +
         'Cancelled work is excluded, and a paused plant is never counted as zero.</p>' +
     '</div>';
@@ -1716,6 +1763,7 @@
     state.calendarLoading = true;
     state.rows = [];
     state.entries = [];
+    state.planEntries = [];
     state.error = "";
     state.calendarError = "";
     state.truncated = false;
@@ -1766,7 +1814,9 @@
         { includeMonths: !state.siteCode });
     }), "PM schedule").then(function (result) {
       if (requestId !== state.requestId) return;
-      state.entries = result.entries || [];
+      var allEntries = result.entries || [];
+      state.entries = allEntries.filter(function (entry) { return entry.source !== "cycle_plan"; });
+      state.planEntries = allEntries.filter(function (entry) { return entry.source === "cycle_plan"; });
       state.truncated = !!result.truncated;
       state.limit = result.limit || null;
       state.calendarLoading = false;
@@ -1834,6 +1884,7 @@
           state.calendarLoading = true;
           state.calendarError = "";
           state.entries = [];
+          state.planEntries = [];
           render();
           var requestId = ++state.requestId;
           withTimeout(Promise.resolve().then(function () {
@@ -1841,7 +1892,9 @@
               { includeMonths: !state.siteCode });
           }), "PM schedule").then(function (result) {
             if (requestId !== state.requestId) return;
-            state.entries = result.entries || [];
+            var allEntries = result.entries || [];
+            state.entries = allEntries.filter(function (entry) { return entry.source !== "cycle_plan"; });
+            state.planEntries = allEntries.filter(function (entry) { return entry.source === "cycle_plan"; });
             state.truncated = !!result.truncated;
             state.limit = result.limit || null;
             state.calendarLoading = false;
@@ -1977,6 +2030,7 @@
     state.host = host;
     var nextSiteCode = options && options.siteCode || null;
     if (nextSiteCode !== state.siteCode) {
+      state.cyclePlans = null;
       state.filters.query = "";
       state.filters.plant = "";
       state.filters.equipment = "";

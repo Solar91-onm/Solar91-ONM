@@ -21,11 +21,12 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+from datetime import date
 from pathlib import Path
 
 import pytest
 
-from app.core.models import OMTask, Plant, User
+from app.core.models import OMTask, PMCyclePlan, PMUnitConfig, Plant, User, UserPlantAssignment
 from app.core.timeutil import business_today
 from tests.conftest import login_user
 
@@ -465,6 +466,101 @@ def test_a_pm_work_order_reports_its_assignees_display_name(client, db):
     assert rows["WO-ASG-1"]["title"] == "Inspect inverter · unit 1/4"
 
 
+def test_pm_calendar_includes_cycle_plan_days_and_chained_dates(client, db):
+    login_user(client, db, role="O&M Head", email="calendar-plan@example.com")
+    plant = Plant(site_code="PLAN01", plant_name="Planned Plant")
+    db.add(plant)
+    db.flush()
+    db.add_all([
+        PMUnitConfig(
+            plant_id=plant.id,
+            equipment_type="Inverter",
+            total_units=3,
+            units_per_day=2,
+        ),
+        PMCyclePlan(
+            plant_id=plant.id,
+            phases=[
+                {"phase": "Inverter", "area": "Plant side", "categories": ["Inverter"],
+                 "start_day": 4, "days": None, "step_days": 2},
+                {"phase": "Earth pit", "area": "Plant side", "categories": ["Earthing"],
+                 "start_day": 5, "days": 2, "step_days": 1},
+            ],
+        ),
+        OMTask(
+            plant_id=plant.id,
+            work_order_no="WO-PLAN-EXISTING",
+            task_name="Existing inverter work",
+            task_type="Inverter",
+            frequency="Monthly",
+            due_on=date(2026, 12, 7),
+            status="Scheduled",
+        ),
+    ])
+    db.commit()
+
+    response = client.get(
+        "/api/portal/calendar",
+        params={"kind": "pm", "month": "2026-12", "site_code": "PLAN01"},
+    )
+    assert response.status_code == 200, response.text
+    plans = [row for row in response.json()["entries"] if row["source"] == "cycle_plan"]
+    earth = [row for row in plans if row["planPhase"] == "Earth pit"]
+
+    assert len(plans) == 6
+    saved = next(row for row in response.json()["entries"] if row.get("reference") == "WO-PLAN-EXISTING")
+    assert saved["source"] == "database" and saved["status"] == "Scheduled"
+    assert {(row["date"], row["cyclePlanState"]) for row in earth} == {
+        ("2026-12-05", "planned"),
+        ("2026-12-06", "planned"),
+        ("2026-12-07", "chained"),
+        ("2026-12-08", "chained"),
+    }
+    assert all(row["plantName"] == "Planned Plant" for row in plans)
+    assert all(row["status"] == "Planned" for row in plans)
+
+
+def test_pm_calendar_does_not_expose_cycle_plan_days_to_site_engineers(client, db):
+    engineer = login_user(
+        client, db, role="Site Engineer", name="Calendar Engineer", email="calendar-engineer@example.com"
+    )
+    plant = Plant(site_code="PLAN02", plant_name="Scoped Plan")
+    db.add(plant)
+    db.flush()
+    db.add_all([
+        UserPlantAssignment(user_id=engineer.id, plant_id=plant.id, assignment_role="Site Engineer"),
+        PMCyclePlan(
+            plant_id=plant.id,
+            phases=[{"phase": "VCB", "area": "Plant side", "categories": ["VCB Panel"],
+                     "start_day": 4, "days": 1, "step_days": 1}],
+        ),
+    ])
+    db.commit()
+
+    response = client.get(
+        "/api/portal/calendar",
+        params={"kind": "pm", "month": "2026-12", "site_code": "PLAN02"},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["entries"] == []
+
+
+def test_cycle_plan_markers_stay_separate_from_work_order_metrics_and_are_labeled():
+    overview = _text(OVERVIEW)
+    calendar = _text(CALENDAR)
+
+    assert 'entry.source !== "cycle_plan"' in overview
+    assert 'entry.source === "cycle_plan"' in overview
+    assert "<h2>Planned plant activities</h2>" in overview
+    assert "<th>Planned day</th><th>Run day</th>" in overview
+    assert "event.source === \"cycle_plan\"" in calendar
+    progress = calendar[calendar.index("  function pmDayProgress(dayEvents, context) {"):]
+    progress = progress[:progress.index(chr(10) + "  }" + chr(10))]
+    assert 'if (event.source === "cycle_plan") return;' in progress
+    assert "ep-calendar__event--cycle-plan" in calendar
+    assert "Cycle-plan marker only; no work order has been generated" in calendar
+
+
 # ── driving the real page ──────────────────────────────────────────────────
 
 
@@ -636,6 +732,22 @@ const entries = [
   make('BB-02', 'Bravo', { status: 'Overdue', date: day(7) }),
   make('BB-02', 'Bravo', { status: 'Cancelled', date: day(8) })
 ];
+const cyclePlanMarkers = [
+  {
+    id: 'plan:inverter:planned', planActivityId: 'plan:inverter',
+    source: 'cycle_plan', cyclePlanState: 'planned', status: 'Planned',
+    title: 'Inverter', planPhase: 'Inverter', categories: ['Inverter'],
+    plantSiteCode: 'CC-03', plantName: 'Charlie',
+    plannedDate: day(14), scheduledDate: day(16), date: day(14)
+  },
+  {
+    id: 'plan:inverter:chained', planActivityId: 'plan:inverter',
+    source: 'cycle_plan', cyclePlanState: 'chained', status: 'Planned',
+    title: 'Inverter', planPhase: 'Inverter', categories: ['Inverter'],
+    plantSiteCode: 'CC-03', plantName: 'Charlie',
+    plannedDate: day(14), scheduledDate: day(16), date: day(16)
+  }
+];
 
 const empty = process.argv[1] === 'empty';
 const bands = process.argv[1] === 'bands';
@@ -694,7 +806,8 @@ global.Solar91PortalData = {
     const give = empty
       ? (wanted === nextMonth ? later : [])
       : (wanted === month ? entries : []);
-    return Promise.resolve({ entries: give, truncated: false, limit: 4000, months: months });
+    const plans = !empty && !bands && wanted === month ? cyclePlanMarkers : [];
+    return Promise.resolve({ entries: give.concat(plans), truncated: false, limit: 4000, months: months });
   },
   aggregatePortfolio: (list) => {
     const c = list.reduce((n, r) => n + r.profile.pm.completed, 0);
@@ -768,6 +881,12 @@ const want = (label, ok) => { if (!ok) bad.push(label); };
 
   // 4. Section badges count what they list.
   want('the register badge counts its rows', html.includes('<span>4 plants</span>'));
+  if (!empty && !bands) {
+    want('saved plan activities have their own section', html.includes('data-pm-cycle-activities'));
+    want('the phase row shows planned and chained dates',
+      html.includes('Inverter') && html.includes('>Chained</td>'));
+    want('plan activities do not inflate work-order counts', html.includes('>8 shown</span>'));
+  }
 
   // 3. A paused plant shows dashes, never zeros, and sits after the planned plants.
   const delta = html.slice(html.indexOf('>Delta<'));

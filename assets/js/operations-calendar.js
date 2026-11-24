@@ -1,10 +1,10 @@
 /**
  * Portfolio and plant-scoped PM / Washing calendars.
  *
- * Every entry is a saved record read through the role-scoped portal API:
- * PM entries are om_tasks rows on their due date, washing entries are
- * washing_daily_reports rows. A plant's Washing page additionally loads the
- * full cycle summary from the washing module. Calendar entries are read-only.
+ * Entries are read through the role-scoped portal API: PM includes saved work
+ * orders and cycle-plan markers; washing entries are washing_daily_reports rows.
+ * A plant's Washing page additionally loads the full cycle summary from the
+ * washing module. Calendar entries are read-only.
  * The PM setup dialog is a front-end-only preview and does not create schedules.
  */
 (function (global) {
@@ -235,6 +235,17 @@
   }
 
   function eventCellDescription(event, context) {
+    if (event.source === "cycle_plan") {
+      return [
+        event.planPhase,
+        event.cyclePlanState === "chained" ? "Chained run" : "Planned day",
+        (event.categories || []).join(", "),
+        event.plannedDate !== event.scheduledDate
+          ? "Planned " + displayDate(event.plannedDate) +
+            ", runs " + displayDate(event.scheduledDate)
+          : ""
+      ].filter(Boolean).join(" · ");
+    }
     var title = eventChipTitle(event, context);
     var tables = washingTablesLabel(event, context);
     var description = tables ? title + " · " + tables : title;
@@ -257,6 +268,7 @@
     var done = 0;
     var overdue = 0;
     dayEvents.forEach(function (event) {
+      if (event.source === "cycle_plan") return;
       if (event.status === "Cancelled") return;
       total += 1;
       if (event.status === "Completed") done += 1;
@@ -286,9 +298,15 @@
     var tables = washingTablesLabel(event, context);
     var cycleComplete = isWashingCycleComplete(event, context);
     var deadline = event.kind === "deadline";
+    var cyclePlan = event.source === "cycle_plan";
     var title = eventChipTitle(event, context);
+    var chipTitle = cyclePlan && event.cyclePlanState === "chained"
+      ? title + " · runs"
+      : title;
     var reportChip = '<span class="ep-calendar__event ' + statusClass(event.status) +
       (deadline ? " ep-calendar__event--deadline" : "") +
+      (cyclePlan ? " ep-calendar__event--cycle-plan" +
+        (event.cyclePlanState === "chained" ? " ep-calendar__event--cycle-chained" : "") : "") +
       // Three different things, three treatments. Extra cleaning (purple) is re-cleaning during a
       // running cycle: work done, but not cycle progress, so it must not read like a confirmed cycle
       // day. Cleaning after all three cycles are complete (blue) is ordinary work the month IS
@@ -302,7 +320,7 @@
       (tables
         ? '<span class="ep-calendar__event-title">' + escape(title) + "</span>" +
           '<span class="ep-calendar__event-tables">' + escape(tables) + "</span>"
-        : escape(title)) +
+        : escape(chipTitle)) +
       "</span>";
     if (!cycleComplete) return reportChip;
     return reportChip + '<span class="ep-calendar__event ep-calendar__event--cycle-complete" title="' +
@@ -317,7 +335,8 @@
       if (state.plantFilter && event.plantSiteCode !== state.plantFilter) return false;
       if (state.statusFilter !== "all" && event.status !== state.statusFilter) return false;
       if (!term) return true;
-      return [event.title, event.status, event.plantName, event.plantSiteCode, event.equipmentType]
+      return [event.title, event.status, event.plantName, event.plantSiteCode, event.equipmentType,
+        event.planPhase, (event.categories || []).join(" ")]
         .join(" ").toLowerCase().indexOf(term) !== -1;
     });
   }
@@ -623,38 +642,49 @@
     var plant = state.plants.find(function (item) {
       return item.siteCode === active.context.plantCode;
     });
-    var scheduledCount = jobs.filter(function (event) {
-      return event.status === "Scheduled";
+    var plannedCount = jobs.filter(function (event) {
+      return event.source === "cycle_plan";
     }).length;
+    var savedCount = jobs.length - plannedCount;
     var assignees = [];
     jobs.forEach(function (event) {
+      if (event.source === "cycle_plan") return;
       var name = (event.assignee || "").trim();
       if (name && assignees.indexOf(name) === -1) assignees.push(name);
     });
-    var summary = scheduledCount
-      ? scheduledCount + " scheduled"
-      : jobs.length + (jobs.length === 1 ? " job" : " jobs");
+    var summary = [
+      plannedCount ? plannedCount + " planned" : "",
+      savedCount ? savedCount + (savedCount === 1 ? " saved job" : " saved jobs") : ""
+    ].filter(Boolean).join(" · ");
     var jobCards = jobs.map(function (event) {
+      var isPlan = event.source === "cycle_plan";
       var unit = event.unitNo && event.totalUnits
         ? "Unit " + event.unitNo + " of " + event.totalUnits
-        : event.status;
-      var description = [event.title, event.frequency].filter(Boolean).join(" · ");
-      return '<div class="ep-calendar__pm-tip-job">' +
+        : isPlan
+          ? (event.cyclePlanState === "chained" ? "Chained run" : "Planned day")
+          : event.status;
+      var description = [event.title, event.frequency,
+        isPlan && event.categories ? event.categories.join(", ") : ""].filter(Boolean).join(" · ");
+      return '<div class="ep-calendar__pm-tip-job' +
+        (isPlan ? " ep-calendar__pm-tip-job--cycle-plan" : "") + '">' +
         '<div class="ep-calendar__pm-tip-job-head"><strong>' +
-          escape(equipmentLabel(event, active.context)) + '</strong><span>' +
-          escape(unit) + '</span></div>' +
+          escape(isPlan ? "Planned phase" : equipmentLabel(event, active.context)) +
+          '</strong><span>' + escape(unit) + '</span></div>' +
         '<p>' + escape(description) + '</p>' +
+        (isPlan && event.plannedDate !== event.scheduledDate
+          ? '<small>Planned ' + escape(displayDate(event.plannedDate)) + ' · Runs ' +
+            escape(displayDate(event.scheduledDate)) + '</small>'
+          : "") +
       '</div>';
     }).join("");
-
     return '<div class="ep-calendar__pm-tip-head"><strong>' +
         escape(plant ? plantLabel(plant) : jobs[0].plantName || "Selected plant") + '</strong>' +
         '<span>' + escape(plant ? plant.displayCode : jobs[0].plantSiteCode || "") + '</span></div>' +
       '<p class="ep-calendar__pm-tip-date">' + escape(displayDate(date)) + " · " +
-        jobs.length + (jobs.length === 1 ? " job" : " jobs") + '</p>' +
+        jobs.length + (jobs.length === 1 ? " item" : " items") + '</p>' +
       '<div class="ep-calendar__pm-tip-jobs">' + jobCards + '</div>' +
       '<div class="ep-calendar__pm-tip-foot"><span>' + escape(summary) + '</span>' +
-        '<span>' + escape(assignees.join(", ") || "Not assigned") + '</span></div>';
+        '<span>' + escape(assignees.join(", ") || "No saved work-order assignee") + '</span></div>';
   }
 
   function positionWashingTooltip(host, day) {
@@ -759,7 +789,7 @@
         (inMonth
         ? (hoverEnabled ? ' aria-describedby="' + hoverId + '"' : "") +
           ' aria-label="' + escape(displayDate(date) + ", " + dayEvents.length +
-            " saved records" +
+            " calendar items" +
             (dayProgress
               ? ". " + dayProgress.done + " of " + dayProgress.total + " done" +
                 (dayProgress.overdue ? ", " + dayProgress.overdue + " overdue" : "")
@@ -789,13 +819,15 @@
   function renderEventCards(events, context, state) {
     if (!events.length) {
       return '<p class="ep-calendar__empty">' +
-        "No saved records match this date and filter." + '</p>';
+        "No calendar items match this date and filter." + '</p>';
     }
     return '<div class="ep-calendar__event-list">' + events.map(function (event) {
       var typeLabel = context.type === "pm" ? "Preventive maintenance" : "Module Cleaning";
       var activityDay = Number(event.date.slice(8, 10));
       var cycleNumber = event.cycleNo || (activityDay <= 10 ? 1 : (activityDay <= 20 ? 2 : 3));
-      var cycle = context.type === "washing"
+      var cycle = event.source === "cycle_plan"
+        ? (event.cyclePlanState === "chained" ? "Chained run" : "Planned day")
+        : context.type === "washing"
         ? "Cycle " + cycleNumber + " · " + event.date.slice(0, 7)
         : "Scheduled activity · " + event.date.slice(0, 7);
       var eventIndex = state.events.indexOf(event);
@@ -804,11 +836,14 @@
       // though it were that cycle's work.
       return '<button type="button" class="ep-calendar__event-card' +
         (event.isExtra ? " ep-calendar__event-card--extra"
-          : event.isPostCycle ? " ep-calendar__event-card--after-cycles" : "") +
+          : event.isPostCycle ? " ep-calendar__event-card--after-cycles"
+            : event.source === "cycle_plan" ? " ep-calendar__event-card--cycle-plan" : "") +
         '" data-calendar-event-index="' + eventIndex + '">' +
         '<span class="ep-calendar__event-card-top"><strong>' + escape(equipmentLabel(event, context)) +
           '</strong>' + (event.isExtra ? '<span class="ep-calendar__extra-badge">Extra</span>'
-            : event.isPostCycle ? '<span class="ep-calendar__after-badge">After cycles</span>' : "") +
+            : event.isPostCycle ? '<span class="ep-calendar__after-badge">After cycles</span>'
+              : event.source === "cycle_plan" ? '<span class="ep-calendar__plan-badge">' +
+                (event.cyclePlanState === "chained" ? "Chained run" : "Planned") + '</span>' : "") +
           '<span class="' + statusClass(event.status) + '">' + escape(event.status) + '</span></span>' +
         '<span class="ep-calendar__event-card-title">' + escape(event.title) + '</span>' +
         '<span class="ep-calendar__event-card-meta">' +
@@ -820,6 +855,9 @@
           ? '<span class="ep-calendar__event-card-extra-note">Re-cleaning · calendar record only, never counted</span>'
           : event.isPostCycle
             ? '<span class="ep-calendar__event-card-after-note">Cleaning after the three cycles · counts towards the month</span>'
+            : event.source === "cycle_plan"
+              ? '<span class="ep-calendar__event-card-plan-note">' +
+                escape((event.categories || []).join(", ")) + '</span>'
             : "") +
         '<span class="ep-calendar__event-card-open">View details →</span>' +
       '</button>';
@@ -828,7 +866,7 @@
 
   function renderPlantPMSummaryEvents(events, state) {
     if (!events.length) {
-      return '<p class="ep-calendar__empty">No saved Preventive Maintenance jobs match this search.</p>';
+      return '<p class="ep-calendar__empty">No Preventive Maintenance items match this search.</p>';
     }
     return '<section class="ep-calendar__pm-summary-group">' +
       '<header><span><i aria-hidden="true"></i><strong>Preventive Maintenance</strong></span>' +
@@ -843,11 +881,25 @@
             event.plantName,
             unit,
             event.frequency,
-            event.title
+            event.title,
+            event.source === "cycle_plan" ? (event.categories || []).join(", ") : "",
+            event.source === "cycle_plan"
+              ? (event.cyclePlanState === "chained" ? "Chained run" : "Planned day") +
+                (event.plannedDate !== event.scheduledDate
+                  ? " · Planned " + displayDate(event.plannedDate) +
+                    " · Runs " + displayDate(event.scheduledDate)
+                  : "")
+              : ""
           ].filter(Boolean).join(" · ");
-          return '<button type="button" class="ep-calendar__pm-summary-item" data-calendar-event-index="' +
+          return '<button type="button" class="ep-calendar__pm-summary-item' +
+            (event.source === "cycle_plan" ? " ep-calendar__pm-summary-item--cycle-plan" : "") +
+            '" data-calendar-event-index="' +
             eventIndex + '">' +
-            '<span class="ep-calendar__pm-summary-badge">PM</span>' +
+            '<span class="ep-calendar__pm-summary-badge' +
+              (event.source === "cycle_plan" ? " ep-calendar__pm-summary-badge--cycle-plan" : "") + '">' +
+              (event.source === "cycle_plan"
+                ? (event.cyclePlanState === "chained" ? "RUN" : "PLAN")
+                : "PM") + '</span>' +
             '<strong>' + escape(equipmentLabel(event, { type: "pm" })) + '</strong>' +
             '<span class="ep-calendar__pm-summary-meta">' + escape(meta) + '</span>' +
             '<span class="ep-calendar__pm-summary-status">' + escape(event.status) + '</span>' +
@@ -860,7 +912,7 @@
   function renderPortfolioSummaryEvents(events, context, state) {
     var title = context.type === "pm" ? "Preventive Maintenance" : "Module Cleaning";
     if (!events.length) {
-      return '<p class="ep-calendar__empty">No saved records match these filters.</p>';
+      return '<p class="ep-calendar__empty">No calendar items match these filters.</p>';
     }
 
     return '<section class="ep-calendar__pm-summary-group ep-calendar__portfolio-summary-group">' +
@@ -881,18 +933,29 @@
             event.plantSiteCode,
             unit || cycle,
             event.reference,
-            event.title
+            event.title,
+            event.source === "cycle_plan" ? (event.categories || []).join(", ") : "",
+            event.source === "cycle_plan"
+              ? (event.cyclePlanState === "chained" ? "Chained run" : "Planned day") +
+                (event.plannedDate !== event.scheduledDate
+                  ? " · Planned " + displayDate(event.plannedDate) +
+                    " · Runs " + displayDate(event.scheduledDate)
+                  : "")
+              : ""
           ].filter(Boolean).join(" · ");
           return '<button type="button" class="ep-calendar__pm-summary-item' +
             (event.isExtra ? " ep-calendar__pm-summary-item--extra"
-              : event.isPostCycle ? " ep-calendar__pm-summary-item--after-cycles" : "") +
+              : event.isPostCycle ? " ep-calendar__pm-summary-item--after-cycles"
+                : event.source === "cycle_plan" ? " ep-calendar__pm-summary-item--cycle-plan" : "") +
             '" data-calendar-event-index="' + eventIndex + '">' +
             '<span class="ep-calendar__pm-summary-badge' +
               (event.isExtra ? " ep-calendar__pm-summary-badge--extra"
                 : event.isPostCycle ? " ep-calendar__pm-summary-badge--after-cycles"
-                : context.type === "washing" ? " ep-calendar__pm-summary-badge--washing" : "") + '">' +
+                : event.source === "cycle_plan" ? " ep-calendar__pm-summary-badge--cycle-plan"
+                  : context.type === "washing" ? " ep-calendar__pm-summary-badge--washing" : "") + '">' +
               (event.isExtra ? "EXTRA" : event.isPostCycle ? "AFTER"
-                : context.type === "pm" ? "PM" : "CLEAN") + '</span>' +
+                : event.source === "cycle_plan" ? (event.cyclePlanState === "chained" ? "RUN" : "PLAN")
+                  : context.type === "pm" ? "PM" : "CLEAN") + '</span>' +
             '<strong>' + escape(equipmentLabel(event, context)) + '</strong>' +
             '<span class="ep-calendar__pm-summary-meta">' + escape(meta) + '</span>' +
             '<span class="ep-calendar__pm-summary-status">' + escape(event.status) + '</span>' +
@@ -918,6 +981,11 @@
       ["Unit", event.unitNo && event.totalUnits ? event.unitNo + " of " + event.totalUnits : ""],
       ["Frequency", event.frequency],
       ["Completed on", event.completedOn ? displayDate(event.completedOn) : ""],
+      ["Work categories", event.categories ? event.categories.join(", ") : ""],
+      ["Planned day", event.source === "cycle_plan" && event.plannedDate
+        ? displayDate(event.plannedDate) : ""],
+      ["Run day", event.source === "cycle_plan" && event.scheduledDate
+        ? displayDate(event.scheduledDate) : ""],
       // Extra cleaning belongs to no cycle's progress; naming the cycle plainly would read as if
       // it did. The banner below carries the full explanation.
       ["Cycle", event.cycleNo
@@ -965,6 +1033,8 @@
           (state.extraConvertError ? '<p class="ep-calendar__setup-error" role="alert">' +
             escape(state.extraConvertError) + '</p>' : "");
       }
+    } else if (event.source === "cycle_plan") {
+      extraActions = '<p class="ep-calendar__detail-note">Cycle-plan marker only; no work order has been generated from this phase yet.</p>';
     } else {
       extraActions = '<p class="ep-calendar__detail-note">Saved record, shown read-only.</p>';
     }
@@ -983,7 +1053,9 @@
               '</strong><span>' + escape(event.reference || displayDate(event.date)) + '</span></div>' +
             '<div class="ep-calendar__detail-chips"><span>' + escape(equipmentLabel(event, context)) +
               '</span>' + (event.isExtra ? '<span class="ep-calendar__extra-badge">Extra cleaning</span>'
-                : event.isPostCycle ? '<span class="ep-calendar__after-badge">After the three cycles</span>' : "") +
+                : event.isPostCycle ? '<span class="ep-calendar__after-badge">After the three cycles</span>'
+                  : event.source === "cycle_plan" ? '<span class="ep-calendar__plan-badge">' +
+                    (event.cyclePlanState === "chained" ? "Chained run" : "Planned") + '</span>' : "") +
               '<span>' + escape(event.status) + '</span></div>' +
             (event.isExtra
               ? '<p class="ep-calendar__detail-extra-note">Extra cleaning is a calendar entry only: it never ' +
@@ -1130,7 +1202,7 @@
         filters +
         renderEventCards(events, context, state) +
         '</div><footer class="ep-calendar__drawer-footer"><span>' +
-          "Saved records · Read only" + '</span>' +
+          (context.type === "pm" ? "Saved work orders and plan markers · Read only" : "Saved records · Read only") + '</span>' +
           '<button type="button" class="ep-calendar__close-button" data-calendar-action="close-modal">Close</button></footer>' +
       '</section>' +
     '</div>';

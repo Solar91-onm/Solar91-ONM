@@ -690,6 +690,28 @@ class AppSetting(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
+class InviteRateLimitBucket(Base):
+    __tablename__ = "invite_rate_limit_buckets"
+    bucket_key: Mapped[str] = mapped_column(String(128), primary_key=True)
+    events: Mapped[list[dict[str, Any]]] = mapped_column(JSON, nullable=False, default=list)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+
+class InviteImportReceipt(Base, TimestampMixin):
+    __tablename__ = "invite_import_receipts"
+    id: Mapped[uuid.UUID] = uuid_pk()
+    actor_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    payload_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False)
+    response_json: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    __table_args__ = (
+        UniqueConstraint("actor_id", "payload_hash", name="uq_invite_import_receipts_actor_payload"),
+        Index("ix_invite_import_receipts_created", "created_at"),
+    )
+
+
 class StateRevision(Base):
     __tablename__ = "state_revisions"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)

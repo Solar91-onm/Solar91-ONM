@@ -43,6 +43,13 @@ class Settings(BaseSettings):
     resend_api_key: str = ""
     mail_from: str = ""  # e.g. "Solar91 <invites@yourdomain.com>" (domain must be verified in Resend)
     app_public_url: str = ""  # link used in e-mails, e.g. https://solar91-om.onrender.com
+    invite_direct_per_hour: int = 20
+    invite_profile_per_hour: int = 5
+    invite_bulk_per_hour: int = 500
+    invite_bulk_max_per_import: int = 500
+    invite_recipient_per_hour: int = 3
+    invite_resend_cooldown_seconds: int = 600
+    invite_import_idempotency_hours: int = 24
 
     # Photo Intelligence WebP pipeline (app/photos/imaging.py): stored display copy and gallery thumbnail.
     photo_max_side: int = 2048
@@ -177,6 +184,24 @@ class Settings(BaseSettings):
         ):
             raise ValueError("CLERK_ISSUER must be an HTTPS origin without credentials, a path, query, or fragment.")
         return value.rstrip("/")
+
+    @field_validator(
+        "invite_direct_per_hour", "invite_profile_per_hour", "invite_bulk_per_hour",
+        "invite_bulk_max_per_import", "invite_recipient_per_hour",
+        "invite_import_idempotency_hours",
+    )
+    @classmethod
+    def _validate_positive_invite_limits(cls, value):
+        if value < 1:
+            raise ValueError("Invite rate limits and idempotency retention must be at least 1")
+        return value
+
+    @field_validator("invite_resend_cooldown_seconds")
+    @classmethod
+    def _validate_invite_resend_cooldown(cls, value):
+        if value < 0:
+            raise ValueError("Invite resend cooldown cannot be negative")
+        return value
 
     @property
     def clerk_configured(self) -> bool:
