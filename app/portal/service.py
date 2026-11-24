@@ -1322,12 +1322,58 @@ def _plant_labels(db: Session, plant_ids: list[UUID]) -> tuple[dict[UUID, str], 
     return codes, names
 
 
+# How far either side of the business month the PM month index looks. Bounds the response to at
+# most 2 * PM_MONTH_INDEX_MONTHS + 1 entries however much work is loaded.
+PM_MONTH_INDEX_MONTHS = 36
+
+
+def _shift_month(anchor: date, months: int) -> date:
+    """The first of the month ``months`` away from ``anchor``'s month."""
+    index = anchor.year * 12 + (anchor.month - 1) + months
+    return date(index // 12, index % 12 + 1, 1)
+
+
+def pm_months(db: Session, plant_ids: list[UUID]) -> list[dict[str, Any]]:
+    """Which months hold PM work for these plants, earliest first, as ``[{"month", "count"}]``.
+
+    The PM portfolio page needs this to open on a month that has something in it and to bound its
+    month picker: PM is forward-looking work, and a plan loaded for next year must be reachable.
+    Grouped by due date rather than by a formatted month so the same query runs on PostgreSQL and
+    SQLite; the window keeps the group count in the low hundreds.
+    """
+    if not plant_ids:
+        return []
+    today = business_today()
+    first = _shift_month(today, -PM_MONTH_INDEX_MONTHS)
+    last = _shift_month(today, PM_MONTH_INDEX_MONTHS + 1) - timedelta(days=1)
+    due = func.coalesce(OMTask.planned_due_on, OMTask.due_on)
+    counts: dict[str, int] = {}
+    for row in db.execute(
+        select(due.label("due_on"), func.count().label("total"))
+        .where(OMTask.plant_id.in_(plant_ids), due >= first, due <= last,
+               OMTask.status.not_in(("Cancelled",)))
+        .group_by(due)
+    ).all():
+        if row.due_on is None:
+            continue
+        key = row.due_on.strftime("%Y-%m") if hasattr(row.due_on, "strftime") else str(row.due_on)[:7]
+        counts[key] = counts.get(key, 0) + int(row.total or 0)
+    return [{"month": key, "count": counts[key]} for key in sorted(counts)]
+
+
 def calendar_page(db: Session, user: User, kind: str, month: str, plant_ids: list[UUID],
-                  limit: int = CALENDAR_LIMIT) -> dict[str, Any]:
+                  limit: int = CALENDAR_LIMIT, include_months: bool = False) -> dict[str, Any]:
     """``calendar`` plus whether the month held more than ``limit`` entries, so a capped month is never shown as
-    complete. One extra row is read to tell."""
+    complete. One extra row is read to tell.
+
+    ``include_months`` adds the PM month index (see :func:`pm_months`). It is opt-in so the operations
+    calendar, which asks for one month at a time and does not need it, pays nothing for it.
+    """
     entries = calendar(db, user, kind, month, plant_ids, limit=limit + 1)
-    return {"entries": entries[:limit], "truncated": len(entries) > limit, "limit": limit}
+    page: dict[str, Any] = {"entries": entries[:limit], "truncated": len(entries) > limit, "limit": limit}
+    if include_months and kind == "pm":
+        page["months"] = pm_months(db, plant_ids)
+    return page
 
 
 def calendar(db: Session, user: User, kind: str, month: str, plant_ids: list[UUID],
@@ -1350,10 +1396,15 @@ def calendar(db: Session, user: User, kind: str, month: str, plant_ids: list[UUI
 
     if kind == "pm":
         due = func.coalesce(OMTask.planned_due_on, OMTask.due_on)
+        # The assignee is a user record where one is set; assignee_text is the free-text fallback for
+        # work booked against a name the portal has no account for.
+        assignee = aliased(User)
         rows = db.execute(
             select(OMTask.id, OMTask.plant_id, OMTask.work_order_no, OMTask.task_name,
                    OMTask.task_type, OMTask.frequency, OMTask.status, due.label("due_on"), OMTask.actual_completed_on,
-                   OMTask.assignee_text, OMTask.unit_no, OMTask.total_units)
+                   OMTask.assignee_text, OMTask.unit_no, OMTask.total_units,
+                   assignee.display_name.label("assignee_name"))
+            .outerjoin(assignee, assignee.id == OMTask.assignee_user_id)
             .where(OMTask.plant_id.in_(plant_ids), due >= first, due <= last)
             .order_by(due, OMTask.id)
             .limit(limit)
@@ -1368,13 +1419,14 @@ def calendar(db: Session, user: User, kind: str, month: str, plant_ids: list[UUI
                 "id": str(row.id),
                 "kind": "pm.overdue" if overdue else ("pm.completed" if row.status == "Completed" else "pm.scheduled"),
                 "title": row.task_name + (f" · unit {row.unit_no}/{row.total_units}" if row.unit_no and row.total_units else ""),
+                "taskName": row.task_name,
                 "reference": row.work_order_no,
                 "equipmentType": row.task_type or "",
                 "frequency": row.frequency or "",
                 "unitNo": row.unit_no,
                 "totalUnits": row.total_units,
                 "status": status,
-                "assignee": row.assignee_text or "",
+                "assignee": (row.assignee_name or row.assignee_text or ""),
                 "date": row.due_on.isoformat(),
                 "completedOn": row.actual_completed_on.isoformat() if row.actual_completed_on else None,
                 "plantSiteCode": codes.get(row.plant_id),

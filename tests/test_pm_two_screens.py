@@ -78,8 +78,10 @@ def test_the_tracker_needs_a_plant_and_refuses_to_render_without_one():
 def test_modules_keeps_the_tracker_as_a_component_of_the_pm_page():
     modules = _text(MODULES)
 
-    assert '"pm-overview": ["pm-cycle-plans"]' in modules
+    assert '"pm-overview": ["pm-cycle-plans"' in modules
     assert "component" in modules, "the dependency is documented as a component, not a sibling panel"
+    # The portfolio's two registers use the SHARED sort and column-filter modules, not copies.
+    assert '"pm-overview": ["pm-cycle-plans", "table-sort", "table-column-filter"]' in modules
 
 
 def test_the_orphaned_stylesheet_is_gone_and_its_styles_live_with_the_plant_page():
@@ -145,10 +147,14 @@ def test_a_paused_plant_reads_as_paused_and_never_as_a_zero():
 
     assert "function isPaused(siteCode)" in overview
     assert "function pausedTag(siteCode)" in overview
-    # Both register layouts leave the compliance figure blank rather than showing 0%.
-    assert 'paused || pm.compliancePercent == null ? "—"' in overview
+    # Every layout leaves a paused plant's figures blank rather than showing 0 or 0%.
+    assert 'completion: paused || pm.compliancePercent == null ? null' in overview
     assert 'cardPaused || pm.compliancePercent == null ? "—"' in overview
-    assert 'isPaused(plant.siteCode) || pm.compliancePercent == null' in overview
+    plant_tiles = overview[overview.index("  function plantMetrics(row, entries) {"):]
+    plant_tiles = plant_tiles[:plant_tiles.index("\n  }\n")]
+    assert "var paused = isPaused(row.plant.siteCode);" in plant_tiles
+    assert "paused || pm.compliancePercent == null ? null" in plant_tiles
+    assert 'paused ? "—"' in plant_tiles, "a paused plant's counts are unknown, not zero" 
     assert "ep-pm__paused-badge" in overview
 
 
@@ -362,7 +368,12 @@ def test_a_clear_control_appears_only_while_something_is_narrowing():
                      'state.filters.status !== "all"', 'state.planFilter !== "all"', "narrowedDates()"):
         assert condition in narrowing, condition
 
-    assert "filtersNarrowing()\n                ? '<button type=\"button\" class=\"ep-pm__clear-filters\"" in overview
+    # The control is rendered only while something is narrowing, in the register panel and in the
+    # empty register itself.
+    assert overview.count(
+        '(filtersNarrowing()') >= 2, "both the panel and the empty register ask filtersNarrowing()"
+    assert overview.count(
+        'data-pm-clear-filters>Clear filters</button>') >= 2
 
 
 def test_clearing_puts_every_filter_back_to_the_whole_month():

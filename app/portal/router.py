@@ -163,13 +163,14 @@ def portfolio_activity(db: DB, user: CurrentUser, limit: int = Query(25, ge=1, l
 def calendar(db: DB, user: CurrentUser,
              kind: str = Query(..., pattern="^(pm|washing)$"),
              month: str = Query(..., pattern=r"^\d{4}-\d{2}$"),
-             site_code: str | None = None):
+             site_code: str | None = None,
+             include_months: bool = Query(False)):
     if site_code:
         ids = [_plant_or_404(db, user, site_code).id]
     else:
         ids = [p.id for p in service.visible_plants(db, user)]
     try:
-        page = service.calendar_page(db, user, kind, month, ids)
+        page = service.calendar_page(db, user, kind, month, ids, include_months=include_months)
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
     # "truncated": the month has more entries than were sent; the UI says so instead of showing a partial month as whole.

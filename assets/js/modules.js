@@ -15,7 +15,9 @@
     "washing-board": ["table-sort", "table-column-filter"],
     // A plant's PM page renders its cycle plan as a section of itself, so pm-overview consumes
     // pm-cycle-plans as a component (mountTracker) rather than as a second panel on the page.
-    "pm-overview": ["pm-cycle-plans"],
+    // The portfolio's registers use the SHARED click-to-sort headings and searchable column
+    // filters, not copies of them.
+    "pm-overview": ["pm-cycle-plans", "table-sort", "table-column-filter"],
     settings: ["categories"]
   };
 

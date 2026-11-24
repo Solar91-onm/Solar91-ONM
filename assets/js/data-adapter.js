@@ -275,27 +275,45 @@
 
   /**
    * One month of dated PM / Washing records: every visible plant (siteCode omitted) or one plant.
-   * Resolves to { entries, truncated, limit }. `truncated` = the month holds more entries than the
-   * server sends at once; the calendar says so instead of showing a partial month as complete.
-   * Cached for a minute per (kind, month, plant); a failed read is never cached.
+   * Resolves to { entries, truncated, limit, months }. `truncated` = the month holds more entries
+   * than the server sends at once; the calendar says so instead of showing a partial month as
+   * complete. Cached for a minute per (kind, month, plant); a failed read is never cached.
+   *
+   * `options.includeMonths` asks the same endpoint for its PM month index as well — which months
+   * hold PM work at all — so the PM portfolio can open on a month that has something in it and
+   * bound its month picker without a second round trip. It is opt-in because the operations
+   * calendar does not need it. A page fetched WITH the index also seeds the plain cache entry, so
+   * the calendar reuses it rather than asking for the same month again.
    */
-  function fetchCalendarMonth(kind, month, siteCode) {
+  function fetchCalendarMonth(kind, month, siteCode, options) {
     if (!/^(pm|washing)$/.test(kind) || !/^\d{4}-\d{2}$/.test(String(month))) {
       return Promise.reject(new Error("Calendar activity requires a supported activity type and YYYY-MM month."));
     }
-    const key = kind + ":" + month + ":" + (siteCode || "*");
+    const withMonths = !!(options && options.includeMonths) && kind === "pm";
+    const plainKey = kind + ":" + month + ":" + (siteCode || "*");
+    const key = withMonths ? plainKey + ":+months" : plainKey;
     if (!calendarCache.has(key)) {
-      calendarCache.set(key, api().request(
+      const request = api().request(
         "/api/portal/calendar?kind=" + kind + "&month=" + encodeURIComponent(month) +
-        (siteCode ? "&site_code=" + encodeURIComponent(siteCode) : "")
+        (siteCode ? "&site_code=" + encodeURIComponent(siteCode) : "") +
+        (withMonths ? "&include_months=1" : "")
       ).then(function (body) {
-        return { entries: body.entries || [], truncated: !!body.truncated, limit: body.limit || null };
+        return {
+          entries: body.entries || [], truncated: !!body.truncated, limit: body.limit || null,
+          months: Array.isArray(body.months) ? body.months : null
+        };
       }).catch(function (error) {
         calendarCache.delete(key);
+        if (withMonths && calendarCache.get(plainKey) === request) calendarCache.delete(plainKey);
         throw error;
-      }));
+      });
+      calendarCache.set(key, request);
+      if (withMonths && !calendarCache.has(plainKey)) calendarCache.set(plainKey, request);
       // Calendars should reflect new records within a minute.
-      setTimeout(function () { calendarCache.delete(key); }, PORTFOLIO_TTL_MS);
+      setTimeout(function () {
+        calendarCache.delete(key);
+        if (withMonths && calendarCache.get(plainKey) === request) calendarCache.delete(plainKey);
+      }, PORTFOLIO_TTL_MS);
     }
     return calendarCache.get(key);
   }

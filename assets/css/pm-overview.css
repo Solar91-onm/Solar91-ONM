@@ -54,6 +54,8 @@
   font-weight: 600;
 }
 .ep-pm__header-actions input,
+.ep-pm__header-actions select,
+.ep-pm__panel-filters input,
 .ep-pm__filters input,
 .ep-pm__filters select {
   min-height: 36px;
@@ -116,14 +118,13 @@
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 12px;
 }
-.ep-pm__metrics--plant { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.ep-pm__metrics--plant { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .ep-pm__metric {
   position: relative;
   display: flex;
   min-height: 118px;
-  flex-direction: column;
-  justify-content: center;
-  gap: 8px;
+  align-items: center;
+  gap: 13px;
   padding: 16px 18px;
   overflow: hidden;
   border: 1px solid var(--ep-border);
@@ -154,6 +155,32 @@
   line-height: 1;
 }
 .ep-pm__metric-note { color: var(--ep-text-faint); font-size: 11px; }
+.ep-pm__metric-body {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  justify-content: center;
+  gap: 8px;
+}
+/* The leading icon sits in a square tinted from the tile's own tone token. */
+.ep-pm__metric-icon {
+  display: inline-flex;
+  width: 38px;
+  height: 38px;
+  flex: 0 0 38px;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--ep-radius-md);
+  background: var(--ep-grey-soft);
+  color: var(--ep-text-muted);
+}
+.ep-pm__metric-icon svg { width: 20px; height: 20px; }
+.ep-pm__metric--green .ep-pm__metric-icon { background: var(--ep-accent-soft); color: var(--ep-accent-strong); }
+.ep-pm__metric--blue .ep-pm__metric-icon { background: #EEF5FA; color: #28618B; }
+.ep-pm__metric--red .ep-pm__metric-icon { background: var(--ep-red-soft); color: var(--ep-red); }
+.ep-pm__metric--amber .ep-pm__metric-icon { background: var(--ep-amber-soft); color: var(--ep-amber); }
+.ep-pm__metric-bar { margin-top: 2px; }
 .ep-pm__due-today {
   grid-column: 1 / -1;
   justify-self: end;
@@ -161,11 +188,18 @@
   color: var(--ep-text-muted);
   font-size: 11px;
 }
-.ep-pm__insights,
 .ep-pm__detail-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 16px;
+}
+/* Roughly 60/40, leaning wide enough that the plant register's six columns and its row-open
+   chevron all fit without the chevron falling off the edge of the panel. */
+.ep-pm__insights {
+  display: grid;
+  grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
 }
 .ep-pm__panel {
   min-width: 0;
@@ -258,6 +292,10 @@
 .ep-pm__status--on-track { border-color: #CDE8CF; background: var(--ep-accent-soft); color: var(--ep-accent-strong); }
 .ep-pm__status--completed { border-color: #D8E4EF; background: #EEF5FA; color: #28618B; }
 .ep-pm__status--not-started { border-color: var(--ep-border); background: var(--ep-bg-muted); color: var(--ep-text-muted); }
+.ep-pm__status--paused { border-color: var(--ep-border); background: var(--ep-grey-soft); color: var(--ep-text-muted); }
+/* A work order's own reading in the activity register. Upcoming is neutral: it is not late. */
+.ep-pm__status--upcoming { border-color: var(--ep-border-strong); background: var(--ep-bg-muted); color: var(--ep-text); }
+.ep-pm__status--cancelled { border-color: var(--ep-border); background: var(--ep-bg-subtle); color: var(--ep-text-faint); }
 .ep-pm__category-list,
 .ep-pm__detail-categories {
   display: grid;
@@ -289,6 +327,10 @@
   background: var(--ep-bg-muted);
 }
 .ep-pm__progress span { display: block; height: 100%; border-radius: inherit; background: var(--ep-accent); }
+.ep-pm__progress span.is-good { background: var(--ep-accent); }
+.ep-pm__progress span.is-warn { background: var(--ep-amber); }
+.ep-pm__progress span.is-bad { background: var(--ep-red); }
+.ep-pm__progress span.is-muted { background: var(--ep-border-strong); }
 .ep-pm__board {
   overflow: hidden;
   border: 1px solid var(--ep-border);
@@ -907,3 +949,380 @@
 .ep-pm__clear-filters:hover { border-color: var(--ep-accent); color: var(--ep-accent-strong); }
 .ep-pm__empty .ep-pm__clear-filters,
 .ep-pm__empty-cell .ep-pm__clear-filters { align-self: auto; margin-left: 6px; }
+
+/* ── All-plants Preventive Maintenance ────────────────────────────────────────
+   The portfolio page: four stat tiles, the plant register beside the upcoming
+   list, and the full-width activity register. Built from tokens.css and the
+   components already in the portal — stat tiles, register tables, status pills
+   and filter chips. No new palette and no new table style. */
+
+.ep-pm__primary-button {
+  min-height: 36px;
+  border: 1px solid var(--ep-accent);
+  border-radius: var(--ep-radius-sm);
+  padding: 0 16px;
+  background: var(--ep-accent);
+  color: #fff;
+  font: inherit;
+  font-size: var(--ep-fs-sm);
+  font-weight: 700;
+  cursor: pointer;
+}
+.ep-pm__primary-button:hover { background: var(--ep-accent-strong); border-color: var(--ep-accent-strong); }
+.ep-pm__primary-button:focus-visible { outline: 2px solid var(--ep-accent-ring); outline-offset: 2px; }
+
+.ep-pm__inline-button,
+.ep-pm__view-all {
+  border: 0;
+  background: none;
+  padding: 0;
+  color: var(--ep-accent-strong);
+  font: inherit;
+  font-size: var(--ep-fs-sm);
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.ep-pm__inline-button { text-decoration: underline; }
+.ep-pm__view-all:hover,
+.ep-pm__inline-button:hover { color: var(--ep-accent); }
+
+.ep-pm__panel-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.ep-pm__panel-actions > span { color: var(--ep-text-muted); font-size: 11px; white-space: nowrap; }
+.ep-pm__panel-filters {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 18px;
+  border-bottom: 1px solid var(--ep-border-soft);
+  background: var(--ep-bg-subtle);
+}
+.ep-pm__panel-filters .ep-pm__search { display: flex; min-width: 0; flex: 1 1 auto; }
+.ep-pm__panel-filters input { width: 100%; }
+.ep-pm__panel-filters .ep-pm__clear-filters { align-self: center; }
+
+/* The completion cell: a thin bar banded by status, with the figure beside it. */
+.ep-pm__completion { display: inline-flex; align-items: center; gap: 8px; min-width: 96px; }
+.ep-pm__completion .ep-pm__progress { width: 54px; margin-top: 0; flex: 0 0 54px; }
+.ep-pm__completion b { color: var(--ep-text-strong); font-size: var(--ep-fs-sm); font-variant-numeric: tabular-nums; }
+
+.ep-pm__row-open { width: 36px; text-align: right; }
+.ep-pm__chevron {
+  display: inline-flex;
+  width: 26px;
+  height: 26px;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: var(--ep-radius-sm);
+  background: none;
+  color: var(--ep-text-faint);
+  cursor: pointer;
+}
+.ep-pm__chevron svg { width: 16px; height: 16px; }
+.ep-pm__chevron:hover { background: var(--ep-accent-soft); color: var(--ep-accent-strong); }
+.ep-pm__chevron:focus-visible { outline: 2px solid var(--ep-accent-ring); outline-offset: 1px; }
+
+.ep-pm__register-table td,
+.ep-pm__upcoming-table td { white-space: nowrap; }
+/* The plant register lives in the narrower of the two panels. Its cells stay on one line and the
+   wrapper scrolls, exactly like the portal's other registers, rather than wrapping every plant
+   name over two lines and stretching the rows. */
+.ep-pm__register-table { min-width: 560px; }
+.ep-pm__upcoming-table { min-width: 300px; }
+.ep-pm__activity-table td:nth-child(2) { white-space: normal; }
+.ep-pm__table th.num,
+.ep-pm__table td.num { text-align: right; }
+.ep-pm__table td.num .ep-pm__completion { justify-content: flex-end; }
+.ep-pm__activity-table td:nth-child(2) strong,
+.ep-pm__activity-table td:nth-child(2) small,
+.ep-pm__activity-table td:nth-child(3) strong,
+.ep-pm__activity-table td:nth-child(3) small { display: block; }
+.ep-pm__activity-table td:nth-child(2) small,
+.ep-pm__activity-table td:nth-child(3) small { margin-top: 3px; color: var(--ep-text-muted); font-size: 10px; }
+.ep-pm__activity-table td { white-space: nowrap; }
+
+/* Filter chips: the selected one filled, the others outlined. */
+.ep-pm__chips {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--ep-border-soft);
+  background: var(--ep-bg-subtle);
+}
+.ep-pm__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  border: 1px solid var(--ep-border-strong);
+  border-radius: 999px;
+  padding: 0 13px;
+  background: var(--ep-bg);
+  color: var(--ep-text);
+  font: inherit;
+  font-size: var(--ep-fs-sm);
+  font-weight: 600;
+  cursor: pointer;
+}
+.ep-pm__chip b { color: var(--ep-text-muted); font-variant-numeric: tabular-nums; }
+.ep-pm__chip:hover { border-color: var(--ep-accent); color: var(--ep-accent-strong); }
+.ep-pm__chip[aria-pressed="true"] {
+  border-color: var(--ep-accent);
+  background: var(--ep-accent);
+  color: var(--ep-text-inverse);
+}
+.ep-pm__chip[aria-pressed="true"] b { color: var(--ep-text-inverse); }
+.ep-pm__chip:focus-visible { outline: 2px solid var(--ep-accent-ring); outline-offset: 2px; }
+
+/* Deliberate, not broken: on day one most of this page has nothing to show. */
+.ep-pm__empty--page {
+  max-width: 62ch;
+  margin: 0 auto;
+  padding: 48px 18px;
+  text-align: center;
+}
+.ep-pm__notice--muted {
+  border-color: var(--ep-border);
+  background: var(--ep-bg-muted);
+  color: var(--ep-text-muted);
+}
+
+/* The SHARED searchable column filter (table-column-filter.js), in this page's
+   classes — the same visual rules the Health register and Inverter Health use. */
+.ep-pm__th-filtered { padding: 4px 6px !important; }
+.ep-pm__th-content { display: flex; align-items: center; gap: 2px; min-width: 0; width: 100%; }
+.ep-pm__th-content .ep-sort { min-width: 0; width: auto; flex: 1 1 0; align-items: center; gap: 1px; }
+.ep-pm__th-content .ep-sort__label { min-width: 0; flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ep-pm__filter-toggle {
+  display: inline-flex;
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: var(--ep-radius-xs);
+  background: none;
+  color: var(--ep-text-faint);
+  cursor: pointer;
+}
+.ep-pm__filter-toggle:hover,
+.ep-pm__filter-toggle.is-filtered {
+  background: var(--ep-accent-soft);
+  color: var(--ep-accent-strong);
+}
+.ep-pm__filter-toggle:focus-visible { outline: 2px solid var(--ep-accent-ring); outline-offset: 1px; }
+.ep-pm__filter-toggle svg { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 2; }
+.ep-pm__column-filter-menu[popover] {
+  position: fixed;
+  width: min(260px, calc(100vw - 16px));
+  margin: 0;
+  border: 1px solid var(--ep-border);
+  border-radius: var(--ep-radius-md);
+  padding: 8px;
+  background: var(--ep-bg-elev);
+  box-shadow: var(--ep-shadow-pop);
+  color: var(--ep-text);
+  font-size: var(--ep-fs-sm);
+  inset: auto;
+}
+.ep-pm__column-filter-search {
+  width: 100%;
+  min-height: 30px;
+  border: 1px solid var(--ep-border-strong);
+  border-radius: var(--ep-radius-sm);
+  padding: 5px 8px;
+  background: var(--ep-bg);
+  color: var(--ep-text);
+  font: inherit;
+  font-size: var(--ep-fs-sm);
+}
+.ep-pm__column-filter-search:focus-visible { outline: 2px solid var(--ep-accent-ring); border-color: var(--ep-accent); }
+.ep-pm__column-filter-options { display: grid; max-height: 240px; gap: 2px; margin-top: 6px; overflow-y: auto; }
+.ep-pm__column-filter-option {
+  border: 0;
+  border-radius: var(--ep-radius-sm);
+  padding: 6px 7px;
+  background: none;
+  color: var(--ep-text);
+  font: inherit;
+  font-size: var(--ep-fs-sm);
+  text-align: left;
+  cursor: pointer;
+}
+.ep-pm__column-filter-option:hover,
+.ep-pm__column-filter-option[aria-pressed="true"] { background: var(--ep-accent-soft); color: var(--ep-accent-strong); }
+.ep-pm__column-filter-option[hidden] { display: none; }
+.ep-pm__column-filter-empty { padding: 8px 7px; color: var(--ep-text-faint); }
+.ep-pm__column-filter-empty[hidden] { display: none; }
+
+/* Narrow windows: the two panels stack and the wide register scrolls sideways,
+   exactly like the portal's other registers. */
+@media (max-width: 1180px) {
+  .ep-pm__insights { grid-template-columns: 1fr; }
+}
+@media (max-width: 860px) {
+  .ep-pm__metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ep-pm__panel-filters { flex-wrap: wrap; }
+}
+@media (max-width: 560px) {
+  .ep-pm__metrics { grid-template-columns: 1fr; }
+  .ep-pm__metric { min-height: 92px; }
+  .ep-pm__panel > header { flex-wrap: wrap; gap: 8px; }
+  .ep-pm__chips { padding: 10px 12px; }
+  .ep-pm__chip { flex: 1 1 calc(50% - 8px); justify-content: center; }
+}
+
+/* ── A plant's Preventive Maintenance page ────────────────────────────────────
+   Same components as the portfolio - stat tiles, status pills, register table,
+   shared sort and column filters - at one plant's scope, plus its cycle-plan
+   tracker and the way through to its PM calendar. */
+
+.ep-pm__plant-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 16px 18px;
+  border: 1px solid var(--ep-border);
+  border-radius: var(--ep-radius-lg);
+  background: var(--ep-bg);
+  box-shadow: var(--ep-shadow-sm);
+}
+.ep-pm__plant-identity { display: flex; min-width: 0; align-items: flex-start; gap: 14px; }
+/* A generic tile, not a photograph: the portal holds no picture of a plant, and site evidence is
+   private O&M material that has no business decorating a summary header. */
+.ep-pm__plant-tile {
+  display: inline-flex;
+  width: 52px;
+  height: 52px;
+  flex: 0 0 52px;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--ep-radius-md);
+  background: var(--ep-accent-soft);
+  color: var(--ep-accent-strong);
+}
+.ep-pm__plant-tile svg { width: 28px; height: 28px; }
+.ep-pm__plant-head h1 { margin: 0; color: var(--ep-text-strong); font-size: clamp(19px, 2.2vw, 24px); line-height: 1.25; }
+.ep-pm__plant-head p { margin: 4px 0 0; color: var(--ep-text-muted); font-size: var(--ep-fs-sm); }
+.ep-pm__plant-meta { font-family: var(--ep-font-mono); font-size: var(--ep-fs-xs) !important; color: var(--ep-text-faint) !important; }
+.ep-pm__plant-head .ep-pm__header-actions { align-items: center; }
+.ep-pm__plant-head .ep-pm__paused-tag { margin-top: 6px; }
+
+/* PM compliance as a ring meter: the arc carries the band and the track is a lighter step of that
+   same hue, so the state reads across the whole ring instead of from the arc alone. */
+.ep-pm__metric--ring { gap: 14px; }
+.ep-pm__ring {
+  position: relative;
+  display: inline-flex;
+  width: 76px;
+  height: 76px;
+  flex: 0 0 76px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: conic-gradient(var(--ring-fill) 0deg var(--ring-sweep), var(--ring-track) var(--ring-sweep) 360deg);
+}
+.ep-pm__ring::after {
+  position: absolute;
+  inset: 9px;
+  border-radius: 50%;
+  background: var(--ep-bg);
+  content: "";
+}
+.ep-pm__ring-value {
+  position: relative;
+  z-index: 1;
+  color: var(--ep-text-strong);
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+/* Workload: one stacked column a day. The three segments are STATUS colours, which a red-green
+   colourblind reader cannot separate by hue, so they never have to be: the stacking order is fixed,
+   the legend names them, a 2px surface gap divides them, and each column's tooltip and accessible
+   name give all three counts in words. */
+.ep-pm__workload-peak { margin-left: auto; color: var(--ep-text-faint); }
+.ep-pm__day-bars { align-items: flex-end; }
+.ep-pm__bar-track { gap: 2px; justify-content: flex-start; }
+.ep-pm__bar-track span { flex: 0 0 auto; border-radius: 0; }
+.ep-pm__bar-track span:last-child { border-radius: 4px 4px 0 0; }
+
+/* Task breakdown: identities, not states, so a categorical ramp kept clear of the status colours.
+   Three of these hues sit under 3:1 against the page, so the legend carries every name, count and
+   share in text and the colour is never read on its own. */
+.ep-pm__breakdown {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  flex-wrap: wrap;
+  padding: 16px 18px;
+}
+.ep-pm__donut {
+  position: relative;
+  display: inline-flex;
+  width: 124px;
+  height: 124px;
+  flex: 0 0 124px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: conic-gradient(var(--donut-stops));
+}
+.ep-pm__donut-centre {
+  position: absolute;
+  inset: 26px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  border-radius: 50%;
+  background: var(--ep-bg);
+}
+.ep-pm__donut-centre b { color: var(--ep-text-strong); font-size: 23px; line-height: 1; }
+.ep-pm__donut-centre small { color: var(--ep-text-faint); font-size: 10px; }
+.ep-pm__breakdown-legend { display: grid; min-width: 0; flex: 1 1 190px; gap: 9px; margin: 0; padding: 0; list-style: none; }
+.ep-pm__breakdown-legend li {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: 10px minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 4px 8px;
+}
+.ep-pm__breakdown-legend i { width: 10px; height: 10px; border-radius: 3px; }
+.ep-pm__breakdown-name { min-width: 0; overflow: hidden; color: var(--ep-text); font-size: var(--ep-fs-sm); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.ep-pm__breakdown-name small { color: var(--ep-text-faint); font-size: 10px; font-weight: 400; }
+.ep-pm__breakdown-legend b { color: var(--ep-text-strong); font-size: var(--ep-fs-sm); font-variant-numeric: tabular-nums; }
+.ep-pm__breakdown-legend li > small { grid-column: 2 / -1; color: var(--ep-text-faint); font-size: 10px; }
+
+.ep-pm__plant-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+.ep-pm__calendar-card-body { display: flex; flex-direction: column; gap: 12px; padding: 16px 18px; }
+.ep-pm__calendar-card-body p { margin: 0; color: var(--ep-text-muted); font-size: var(--ep-fs-sm); }
+.ep-pm__calendar-card-counts b { color: var(--ep-text-strong); font-variant-numeric: tabular-nums; }
+.ep-pm__calendar-card .ep-pm__calendar-button { align-self: flex-start; margin-top: auto; }
+.ep-pm__upcoming-table tr.is-today td { background: var(--ep-accent-soft); }
+.ep-pm__plant-head .ep-pm__header-actions label { min-width: 150px; }
+
+@media (max-width: 1180px) {
+  .ep-pm__plant-grid { grid-template-columns: 1fr; }
+}
+@media (max-width: 860px) {
+  .ep-pm__metrics--plant { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 560px) {
+  .ep-pm__metrics--plant { grid-template-columns: 1fr; }
+  .ep-pm__plant-head { flex-direction: column; }
+  .ep-pm__plant-head .ep-pm__header-actions { width: 100%; }
+  .ep-pm__breakdown { justify-content: center; }
+}

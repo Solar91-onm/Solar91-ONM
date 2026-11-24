@@ -429,6 +429,8 @@
 
   function render(container) {
     if (!container) return;
+    var openScroller = container.querySelector('[data-security-table="editor"]');
+    var keepScrollTop = openScroller ? openScroller.scrollTop : 0;
     var editable = canEdit();
     var counts = registerCounts();
     container.innerHTML = "" +
@@ -451,6 +453,10 @@
     applyRegisterFilters(container);
     applyRegisterSort(container);
     if (editing) applyEditorFilters(container);
+    if (keepScrollTop) {
+      var scroller = container.querySelector('[data-security-table="editor"]');
+      if (scroller) scroller.scrollTop = keepScrollTop;
+    }
     wire(container);
   }
 
@@ -467,9 +473,22 @@
     });
   }
 
+  /** The editor's own rows. The read-only register marks its rows the same way and renders first,
+   *  so an unscoped lookup finds the wrong row - one with no inputs in it. */
+  function editorRows(container) {
+    var table = container.querySelector('[data-security-table="editor"]');
+    return table ? table.querySelectorAll("[data-security-row]") : [];
+  }
+
+  function editorRow(container, siteCode) {
+    return Array.prototype.find.call(editorRows(container), function (row) {
+      return row.getAttribute("data-security-row") === siteCode;
+    }) || null;
+  }
+
   function syncDrafts(container) {
     if (!drafts) return;
-    Array.prototype.forEach.call(container.querySelectorAll("[data-security-row]"), function (row) {
+    Array.prototype.forEach.call(editorRows(container), function (row) {
       var siteCode = row.getAttribute("data-security-row");
       var draft = drafts[siteCode];
       if (!draft) return;
@@ -851,12 +870,15 @@
         addList.push(blankContact());
         dirty[addSite] = true;
         render(container);
-        var targetRow = Array.prototype.find.call(container.querySelectorAll("[data-security-row]"), function (row) {
-          return row.getAttribute("data-security-row") === addSite;
-        });
+        // Put the cursor in the box that was just added, and bring it into view: the editor scrolls,
+        // and on a long register a new empty row can otherwise appear well off screen.
+        var targetRow = editorRow(container, addSite);
         var nameInput = targetRow && targetRow.querySelector('[data-security-contact-name="' +
           addKind + '"][data-security-index="' + (addList.length - 1) + '"]');
-        if (nameInput) nameInput.focus();
+        if (nameInput) {
+          if (nameInput.scrollIntoView) nameInput.scrollIntoView({ block: "nearest" });
+          nameInput.focus();
+        }
         return;
       }
       var remove = event.target.closest("[data-security-remove]");

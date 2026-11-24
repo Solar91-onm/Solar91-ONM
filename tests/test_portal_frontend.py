@@ -102,6 +102,41 @@ def test_security_register_supports_multiple_contacts_and_edit_overlay():
     assert ".ep-security__modal .ep-security__scroll {" in styles
 
 
+def test_adding_a_security_contact_puts_the_cursor_in_the_new_box():
+    """Reported from the live portal: "I can't add another person as security or site engineer."
+
+    The row WAS being added -- but the cursor never moved to it. The read-only register table and
+    the editor table both mark their rows with `data-security-row`, and the register renders first,
+    so the container-wide lookup in the add handler returned the register's row, which holds no
+    inputs. `nameInput` came back null, nothing was focused or scrolled to, and on a long register
+    the new empty box appeared off screen. Driven in Chromium before and after the fix.
+    """
+    security = (PORTAL_ASSETS / "js" / "security.js").read_text(encoding="utf-8")
+
+    # Row lookups are scoped to the editor table, never the whole container.
+    assert "function editorRows(container)" in security
+    assert "function editorRow(container, siteCode)" in security
+    assert ('container.querySelector(' + chr(39) + '[data-security-table="editor"]' + chr(39) + ')') in security
+    add = security[security.index('var add = event.target.closest("[data-security-add]");'):]
+    add = add[:add.index('var remove = event.target.closest(')]
+    assert "var targetRow = editorRow(container, addSite);" in add
+    assert "nameInput.focus();" in add
+    assert "nameInput.scrollIntoView" in add, "the new box is brought into view, not just focused"
+    assert 'container.querySelectorAll("[data-security-row]")' not in add,         "an unscoped lookup finds the read-only register row instead of the editor's"
+
+    # syncDrafts reads the editor's inputs for the same reason.
+    sync = security[security.index("function syncDrafts(container) {"):]
+    sync = sync[:sync.index("function checkedContacts")]
+    assert "editorRows(container)" in sync
+    assert 'container.querySelectorAll("[data-security-row]")' not in sync
+
+    # Re-rendering must not throw the editor's scroll position away.
+    render = security[security.index("function render(container) {"):]
+    render = render[:render.index("function readContactList")]
+    assert "var keepScrollTop = openScroller ? openScroller.scrollTop : 0;" in render
+    assert "scroller.scrollTop = keepScrollTop;" in render
+
+
 def test_issue_register_input_handler_never_reads_an_undefined_action():
     """The unit-config Retry once sat in the register's *input* handler, which has no `action`:
     every keystroke threw a ReferenceError, so the search box and custom dates never ran."""
@@ -1685,7 +1720,10 @@ def test_pm_overview_routes_through_role_scoped_portal_data_and_existing_calenda
     assert 'data.fetchPortfolioRange(period.start, period.end, state.siteCode || "")' in overview
     assert "function withTimeout(promise, requestName)" in overview
     assert "state.calendarLoading = false;" in overview
-    assert 'data.fetchCalendarMonth("pm", state.month, state.siteCode || "")' in overview
+    # The month index rides on the SAME request, so the portfolio can open on a month that holds
+    # work and bound its picker without a second round trip.
+    assert 'data.fetchCalendarMonth("pm", state.month, state.siteCode || "",' in overview
+    assert "{ includeMonths: !state.siteCode }" in overview
     # aggregatePortfolio returns the totals object itself (overview.js assigns it straight to
     # state.totals), so the PM page must NOT reach for a .totals property that does not exist.
     assert "data.aggregatePortfolio(rows)" in overview

@@ -2060,3 +2060,49 @@
   background: #1366b0;
   color: #ffffff;
 }
+
+/* ── PM day progress ──────────────────────────────────────────────────────────
+   How much of a day's PM work is done, on a PM calendar only. Module Cleaning
+   prints what each report covered on its own chip; PM is many work orders a day,
+   so the day leads with the count and a bar and the chips follow. The day number
+   keeps its place on the right exactly as it sits on every other calendar. */
+
+.ep-calendar__day-top {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.ep-calendar__day-top .ep-calendar__day-number { margin-left: auto; align-self: center; }
+.ep-calendar__day-count {
+  min-width: 0;
+  overflow: hidden;
+  border-radius: 999px;
+  padding: 1px 6px;
+  background: var(--ep-grey-soft);
+  color: var(--ep-text-muted);
+  font-size: var(--ep-fs-xs);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ep-calendar__day-count--complete { background: var(--ep-accent-soft); color: var(--ep-accent-strong); }
+.ep-calendar__day-count--overdue { background: var(--ep-red-soft); color: var(--ep-red); }
+.ep-calendar__day-bar {
+  display: block;
+  height: 4px;
+  flex: 0 0 auto;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--ep-grey-soft);
+}
+.ep-calendar__day-bar > span { display: block; height: 100%; border-radius: inherit; background: var(--ep-grey); }
+.ep-calendar__day-bar--complete > span { background: var(--ep-accent); }
+.ep-calendar__day-bar--open > span { background: var(--ep-amber); }
+.ep-calendar__day-bar--overdue > span { background: var(--ep-red); }
+
+@media (max-width: 720px) {
+  .ep-calendar__day-count { padding: 0 4px; font-size: 9px; }
+  .ep-calendar__day-bar { height: 3px; }
+}

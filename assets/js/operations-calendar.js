@@ -243,6 +243,45 @@
       : description;
   }
 
+  /**
+   * How much of one day's PM work is done, for the day box on a PM calendar.
+   *
+   * Module Cleaning's plant calendar prints what each report covered ("Tables: 1-12") on its chip;
+   * PM work is many separate work orders a day, so the day leads with the count and a bar instead
+   * and the chips follow. Cancelled work is not counted: it is not work the day owes.
+   * Returns null when the day has no PM work at all.
+   */
+  function pmDayProgress(dayEvents, context) {
+    if (context.type !== "pm") return null;
+    var total = 0;
+    var done = 0;
+    var overdue = 0;
+    dayEvents.forEach(function (event) {
+      if (event.status === "Cancelled") return;
+      total += 1;
+      if (event.status === "Completed") done += 1;
+      else if (event.status === "Overdue") overdue += 1;
+    });
+    if (!total) return null;
+    return {
+      done: done, total: total, overdue: overdue,
+      percent: Math.round(100 * done / total),
+      band: done === total ? "complete" : overdue ? "overdue" : "open"
+    };
+  }
+
+  function renderPMDayCount(progress) {
+    if (!progress) return "";
+    return '<span class="ep-calendar__day-count ep-calendar__day-count--' + progress.band + '">' +
+      progress.done + "/" + progress.total + "</span>";
+  }
+
+  function renderPMDayBar(progress) {
+    if (!progress) return "";
+    return '<span class="ep-calendar__day-bar ep-calendar__day-bar--' + progress.band +
+      '" aria-hidden="true"><span style="width:' + progress.percent + '%"></span></span>';
+  }
+
   function renderCalendarEventChip(event, context) {
     var tables = washingTablesLabel(event, context);
     var cycleComplete = isWashingCycleComplete(event, context);
@@ -699,6 +738,7 @@
         ? state.month + "-" + pad2(dayNumber)
         : "";
       var dayEvents = date ? (eventsByDate[date] || []) : [];
+      var dayProgress = pmDayProgress(dayEvents, context);
       var isToday = date === monthKey(new Date()) + "-" + pad2(new Date().getDate());
       var tooltip = date
         ? (state.tooltips[date] || (dayEvents.length
@@ -720,9 +760,15 @@
         ? (hoverEnabled ? ' aria-describedby="' + hoverId + '"' : "") +
           ' aria-label="' + escape(displayDate(date) + ", " + dayEvents.length +
             " saved records" +
+            (dayProgress
+              ? ". " + dayProgress.done + " of " + dayProgress.total + " done" +
+                (dayProgress.overdue ? ", " + dayProgress.overdue + " overdue" : "")
+              : "") +
             (tooltip ? ". " + tooltip : "")) + '"'
         : ' aria-hidden="true"') +
-        '><span class="ep-calendar__day-number">' + (inMonth ? dayNumber : "") + "</span>" +
+        '><span class="ep-calendar__day-top">' + renderPMDayCount(dayProgress) +
+        '<span class="ep-calendar__day-number">' + (inMonth ? dayNumber : "") + "</span></span>" +
+        renderPMDayBar(dayProgress) +
         (dayEvents.length
           ? '<span class="ep-calendar__day-events">' + (plainDay ? dayEvents : dayEvents.slice(0, 2)).map(function (event) {
               return renderCalendarEventChip(event, context);
