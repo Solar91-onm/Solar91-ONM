@@ -6,6 +6,7 @@ in this view. Only explicitly assigned, checklist-covered rows enter the sequenc
 from __future__ import annotations
 
 import uuid
+import re
 from datetime import date, datetime, timezone
 from calendar import monthrange
 from typing import Annotated, Literal
@@ -171,19 +172,56 @@ def tracking_month(db: Annotated[Session, Depends(get_db)], user: Annotated[User
     if site_code and not plants:
         raise HTTPException(404, "Plant not available in your scope")
     ids = [p.id for p in plants]
-    configured = {r.plant_id for r in db.scalars(select(PMCyclePlan).where(PMCyclePlan.plant_id.in_(ids))) if r.phases} if ids else set()
+    plans = list(db.scalars(select(PMCyclePlan).where(PMCyclePlan.plant_id.in_(ids)))) if ids else []
+    # Only SQL-managed recurring plans carry this marker. Untagged plans retain
+    # their existing behavior, and real work orders are never filtered here.
+    managed = {}
+    for plan in plans:
+        marker = re.search(r"\[PM_TRACKING_START=(\d{4}-\d{2}-\d{2})\]", plan.notes or "")
+        if marker:
+            try:
+                managed[plan.plant_id] = date.fromisoformat(marker.group(1))
+            except ValueError:
+                pass
+    configured = {p.plant_id for p in plans if p.phases and
+                  (p.plant_id not in managed or first >= managed[p.plant_id])}
     rows = _rows(db, ids, first, last, summary=summary)
+    # An authorized page can nudge the background scheduler, never block on it.
+    # Only managed plants with no assignments in this month need the hint.
+    assigned_plants = {row.plant_id for row in rows}
+    if any(first >= starts and plant_id not in assigned_plants
+           for plant_id, starts in managed.items()):
+        from app.pmplan.recurrence import request_schedule_check
+        request_schedule_check(first)
     first_open = {}
     for row in rows:
         if row.status != "Approved":
             first_open.setdefault(row.plant_id, row)
     today = business_today()
     legacy = legacy_calendar(db, user, "pm", month, ids, limit=20001)
+    legacy_truncated = len(legacy) > 20000
+    managed_codes = {p.site_code: (p.id, managed[p.id]) for p in plants if p.id in managed}
+    assigned_categories = {(r.plant_id, r.equipment) for r in rows}
+    def visible_marker(entry):
+        # Keep actual work orders and all untagged cycle plans.
+        scoped = managed_codes.get(entry.get("plantSiteCode"))
+        if entry.get("source") != "cycle_plan" or not scoped:
+            return True
+        plant_id, starts = scoped
+        if first < starts:
+            return False
+        # Explicit SQL assignments replace the old calculated phase markers.
+        if (plant_id, entry.get("planPhase")) in assigned_categories:
+            return False
+        # Retain the nominal dates for remaining plan-only categories, not
+        # artificial chained dates generated from the old uniform intervals.
+        return entry.get("cyclePlanState") != "chained"
+    legacy = [entry for entry in legacy if visible_marker(entry)]
     return {"month": month, "as_of": datetime.now(timezone.utc).isoformat(), "today": _iso(today), "role": user.role, "categories": CATEGORIES,
             "covered": list(CHECKLISTS), "plants": [{"id": str(p.id), "site_code": p.site_code,
                 "name": p.plant_name, "district": p.district or "", "supervisor": p.supervisor or "", "configured": p.id in configured} for p in plants],
             "activities": [_out(r, _blocker(r, first_open.get(r.plant_id)), user, today, summary=summary) for r in rows],
-            "legacy": legacy[:20000], "legacy_truncated": len(legacy) > 20000}
+            "legacy": legacy[:20000], "legacy_truncated": legacy_truncated}
 
 
 @router.post("/{activity_id}/action", dependencies=[Depends(require_csrf)])

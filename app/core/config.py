@@ -65,6 +65,9 @@ class Settings(BaseSettings):
     trust_proxy_headers: bool = False
     max_upload_mb: int = 4
 
+    # Monthly PM generation is independent of the legacy daily reminder job.
+    pm_recurring_job: bool = True
+
     # Per-worker safety limits; tune after measuring deployment capacity.
     traffic_guard_enabled: bool = True
     api_max_active: int = 20

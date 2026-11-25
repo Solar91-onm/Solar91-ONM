@@ -105,3 +105,21 @@ def test_portfolio_summary_omits_details_without_changing_status(client,db,monke
         assert a=={k:b[k] for k in a}
         assert 'checks' not in a and 'checklist' not in a
     assert any(a['label']=='Locked' for a in lite['activities'])
+
+
+def test_recurring_plan_start_and_explicit_dates(client, db, monkeypatch):
+    plant=Plant(site_code="ABH01",plant_name="ABHANERI",status="active")
+    db.add(plant); db.flush()
+    db.add(PMCyclePlan(plant_id=plant.id,notes="Imported\n[PM_TRACKING_START=2026-12-01]",phases=[
+        {"phase":"Inverter","area":"Plant side","categories":["Inverter"],"start_day":1,"days":None,"step_days":2},
+        {"phase":"IDT Transformer","area":"Plant side","categories":["Transformer"],"start_day":17,"days":1,"step_days":1},
+    ]))
+    db.add(PMTrackingActivity(plant_id=plant.id,equipment="Inverter",equipment_id="INV 7",scheduled_on=date(2026,12,8)))
+    db.commit(); engineer(client,db,plant)
+    nov=client.get(BASE,params={"month":"2026-11"}).json()
+    assert not nov["plants"][0]["configured"] and not nov["legacy"] and not nov["activities"]
+    dec=client.get(BASE,params={"month":"2026-12"}).json()
+    assert dec["plants"][0]["configured"]
+    assert [(a["equipment_id"],a["date"]) for a in dec["activities"]]==[("INV 7","2026-12-08")]
+    assert not any(a.get("planPhase")=="Inverter" for a in dec["legacy"])
+    assert any(a.get("planPhase")=="IDT Transformer" and a["date"]=="2026-12-17" for a in dec["legacy"])

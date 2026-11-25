@@ -69,6 +69,16 @@ async def lifespan(app: FastAPI):
     else:
         app.state.bootstrap_ready = True
 
+    # Independent of the old reminder job: default on for PostgreSQL deployments.
+    # The recurring SQL function and transaction lock make multiple replicas safe.
+    if settings.app_env != "test" and settings.pm_recurring_job:
+        from app.pmplan.recurrence import run_recurring_pm_loop
+        app.state.pm_recurring_job = asyncio.create_task(
+            run_recurring_pm_loop(lambda: app.state.bootstrap_ready)
+        )
+    else:
+        app.state.pm_recurring_job = None
+
     if settings.app_env != "test" and os.getenv("PM_DAILY_JOB", "0") == "1":
         app.state.pm_job = asyncio.create_task(_start_pm_daily_job_loop())
     else:
@@ -89,6 +99,7 @@ async def lifespan(app: FastAPI):
                 getattr(app.state, "latency_probe", None),
                 getattr(app.state, "bootstrap_task", None),
                 getattr(app.state, "pm_job", None),
+                getattr(app.state, "pm_recurring_job", None),
                 getattr(app.state, "photo_retention_job", None),
                 getattr(app.state, "washing_recount", None),
             )
