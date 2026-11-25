@@ -113,6 +113,33 @@ class IssueService:
             after_state={"plant": plant.site_code if plant else str(plant_id), "assignee": target.display_name},
         ))
 
+    def _grant_equipment_scope(self, target: User, plant_id, equipment: str) -> None:
+        """Give the equipment's responsible Assignee access to this plant, and record why.
+
+        Equipment responsibility is portfolio-wide and is configured by the O&M Head on the
+        Login Access page, so a ticket routed by it must not land with someone who cannot open
+        it. The plant row is added once, attributed to the responsibility rather than to the
+        person who raised the ticket, and written to the audit log either way.
+        """
+        if plant_scope_matches(self.db, target, plant_id):
+            return
+        self.db.add(UserPlantAssignment(user_id=target.id, plant_id=plant_id, assignment_role="Assignee"))
+        plant = self.db.get(Plant, plant_id)
+        self.db.add(AuditLog(
+            user_id=target.id, actor_name="Equipment responsibility",
+            action="Plant scope added by equipment responsibility", module="Issues",
+            entity_type="user", entity_id=str(target.id),
+            after_state={"plant": plant.site_code if plant else str(plant_id),
+                         "assignee": target.display_name, "equipment": equipment},
+        ))
+
+    def _auto_assignee(self, equipment: str | None, plant_id) -> User | None:
+        """The active primary Assignee configured for this equipment category, if any."""
+        if plant_id is None or not equipment:
+            return None
+        from app.equipment.service import primary_assignee
+        return primary_assignee(self.db, equipment)
+
     DUPLICATE_WINDOW_SECONDS = 120
 
     def _recent_duplicate(self, user: User, payload: dict) -> Issue | None:
@@ -157,6 +184,15 @@ class IssueService:
         assignee = self._resolve_assignee(assigned_to, None) if assigned_to else None
         if assignee:
             self._ensure_assignee_scope(assignee, user, plant_id)
+        # Nobody was chosen: the equipment's configured primary Assignee takes it, on any plant.
+        # Responsibility that is not configured leaves the ticket unassigned and tells the O&M
+        # Head - a ticket is never lost because the mapping is missing.
+        auto_equipment = None
+        if assignee is None:
+            candidate = self._auto_assignee(payload.get("vertical"), plant_id)
+            if candidate is not None:
+                assignee, assignee_id = candidate, candidate.id
+                auto_equipment = payload.get("vertical")
         if payload.get("etc_at") is None:
             # No deadline sent: the priority's default duration, which the O&M Head sets (app/issues/deadlines.py).
             payload["etc_at"] = default_deadline(self.db, payload["severity"])
@@ -184,12 +220,59 @@ class IssueService:
             try:
                 self.db.flush()
                 self._history(row,"issue.created",user,status_to=row.status)
+                if auto_equipment and assignee is not None:
+                    self._history(
+                        row, "issue.auto_assigned", user, status_to=row.status,
+                        note=(f"Assigned automatically to {assignee.display_name}, the responsible "
+                              f"person for {auto_equipment} across all plants."),
+                        metadata={"rule": "equipment_responsibility", "equipment": auto_equipment,
+                                  "assigned_to": str(assignee.id)})
+                elif row.assigned_to is None and payload.get("vertical"):
+                    self._history(
+                        row, "issue.assignment_skipped", user, status_to=row.status,
+                        note=(f"Unassigned - responsibility not configured for "
+                              f"{payload.get('vertical')}. The O&M Head can assign it manually."),
+                        metadata={"rule": "equipment_responsibility",
+                                  "equipment": payload.get("vertical")})
                 self.db.commit(); self.db.refresh(row)
                 break
             except IntegrityError as exc:
                 self.db.rollback()
                 if not auto_number or attempt == 5:
                     raise HTTPException(409,"Ticket number already exists") from exc
+        if auto_equipment and row.assigned_to is not None:
+            # The ticket is saved. Give its new owner access to that plant, in its own
+            # transaction: a failure here must not undo the ticket, and the ticket being
+            # retried under a new number must not leave a half-applied grant behind.
+            try:
+                self._grant_equipment_scope(assignee, row.plant_id, auto_equipment)
+                self.db.commit()
+            except Exception:
+                self.db.rollback()
+                logger.exception("Plant scope for the equipment owner failed; the ticket was created")
+            self._notify(
+                plant_id=row.plant_id, assigned_to=row.assigned_to, event_type="ticket_assigned",
+                title="Ticket assigned to you - " + row.ticket_no,
+                message=f"{auto_equipment} · {row.description[:180]}",
+                target_id=row.ticket_no, dedupe_key=f"issue-auto-assign:{row.id}",
+            )
+        elif row.assigned_to is None and payload.get("vertical"):
+            # Only when an equipment category was chosen and nobody is configured for it: a
+            # ticket raised without a category is not a missing responsibility.
+            try:
+                from app.notifications.service import notify_users, users_with_role
+                notify_users(
+                    self.db, users_with_role(self.db, {"O&M Head"}), event_type="issue_unassigned",
+                    title="Unassigned - responsibility not configured - " + row.ticket_no,
+                    message=(f"{payload.get('vertical') or 'Equipment'} has no responsible person "
+                             f"configured. Assign the ticket manually or set responsibility in Login Access."),
+                    target_type="issue", target_id=row.ticket_no,
+                    dedupe_key=f"issue-unassigned:{row.id}",
+                )
+                self.db.commit()
+            except Exception:
+                self.db.rollback()
+                logger.exception("Unassigned-ticket notification failed; the ticket was created")
         try:
             from app.notifications.service import plant_responsible_users, notify_users
             if row.assigned_to is None:

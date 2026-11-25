@@ -9,12 +9,22 @@
   const statuses = ["Approved","Pending approval","Overdue","Returned","Locked","Due today","Scheduled","Permission requested","Permission granted","Permission denied","Not assigned","Existing work order"];
   const tones = {"Approved":"green","Pending approval":"amber","Overdue":"red","Returned":"red","Locked":"purple","Due today":"today-tone","Scheduled":"blue","Not assigned":"neutral","Existing work order":"neutral","Existing completed":"green","Existing plan":"neutral"};
   const statusTone = a => tones[a.label] || "neutral";
-  let rememberedMonth = "", active = null;
+  let rememberedMonth = "", active = null, portfolioMemo = null;
   const roleName = a => a.role || "";
   const dlabel = v => v ? new Intl.DateTimeFormat("en-IN",{day:"numeric",month:"short",year:"numeric",timeZone:"UTC"}).format(new Date(v.slice(0,10)+"T00:00:00Z")) : "—";
   const mlabel = v => new Intl.DateTimeFormat("en-IN",{month:"long",year:"numeric",timeZone:"UTC"}).format(new Date(v+"-01T00:00:00Z"));
   const monthKey = v => v && /^\d{4}-\d{2}$/.test(v) ? v : "";
   const shift = (v,n) => {const t=new Date(v+"-01T00:00:00Z"); t.setUTCMonth(t.getUTCMonth()+n); return t.toISOString().slice(0,7);};
+  // Opening a plant's calendar leaves the all-plants dashboard behind; coming back puts it back
+  // as it was - same search, filters, layout and scroll position. One-shot: the next portfolio
+  // render consumes it, so an unrelated later visit still opens clean.
+  const keepPortfolio = s => {if(s.siteCode||s.view==="calendar")return;portfolioMemo={query:s.query,status:s.status,equipment:s.equipment,day:s.day,plan:s.plan,layout:s.layout,scroll:global.scrollY||global.pageYOffset||0};};
+  function takePortfolio(s) {
+    if(!portfolioMemo)return;
+    const m=portfolioMemo; portfolioMemo=null;
+    s.query=m.query;s.status=m.status;s.equipment=m.equipment;s.day=m.day;s.plan=m.plan;s.layout=m.layout;s.restoreScroll=m.scroll;
+  }
+  const toTop = () => {if(typeof global.scrollTo==="function")global.scrollTo(0,0);};
   const btn = (label,action,extra="",primary=false) => `<button type="button" class="s91pm-btn${primary?" s91pm-primary":""}" data-pmx="${e(action)}" ${extra}>${e(label)}</button>`;
   const pill = (label,tone) => `<span class="s91pm-pill s91pm-${tone||tones[label]||"neutral"}">${e(label)}</span>`;
   const option = (value,label,current) => `<option value="${e(value)}"${value===current?" selected":""}>${e(label)}</option>`;
@@ -67,7 +77,7 @@
     const title=s.view==="calendar"?(p?p.name+" · PM calendar":"PM calendar"):p?p.name:"Preventive Maintenance";
     const eyebrow=s.view==="calendar"?"PLANT CALENDAR":p?"PLANT PREVENTIVE MAINTENANCE":"PORTFOLIO VIEW";
     const sub=p?`${p.site_code}${p.district?' · '+p.district:''}${p.supervisor?' · Supervisor: '+p.supervisor:''} · ${mlabel(s.month)}`:"Monthly equipment-wise monitoring across all plants";
-    const back=s.view==="calendar"?btn("← Back to plant tracker","back-calendar"):p?btn(s.parent==="plants"?"← Plant details":"← All plants","back-plant"):"";
+    const back=s.view==="calendar"?btn(s.calendarParent==="overview"?"← Back to all plants":"← Back to plant tracker","back-calendar"):p?btn(s.parent==="plants"?"← Plant details":"← All plants","back-plant"):"";
     return `<header class="s91pm-head"><div><div class="s91pm-breadcrumb">${back}</div><small class="s91pm-eyebrow">${eyebrow}</small><h1>${e(title)}</h1><p>${e(sub)} · <span data-pmx-updated>${e(updatedLabel(s))}</span></p></div><div class="s91pm-head-actions"><label>Period<input type="month" data-pmx-filter="month" value="${e(s.month)}" aria-label="Month"></label>${p&&s.view!=="calendar"?btn("Open PM calendar →","calendar","",true):""}${btn("Export","export")}${btn("Refresh","reload")}</div></header>`;
   }
   function legend() {return `<div class="s91pm-legend">${["Approved","Pending approval","Overdue","Returned","Locked","Due today","Scheduled","Not assigned"].map(x=>pill(x)).join("")}${pill("Permission granted","blue")}${pill("Existing plan / work order","neutral")}</div>`;}
@@ -96,12 +106,61 @@
       `<div class="s91pm-scroll"><table class="s91pm-matrix"><thead><tr><th>Plant</th><th>Approved progress</th>${cats.map(c=>`<th title="${e(c)}">${e(short[c]||c)}</th>`).join("")}<th>Attention</th></tr></thead><tbody>${rows.map(p=>{const r=rollup(s,p),n=stats(r),st=plantStatus(r,p);return `<tr><th><button class="s91pm-plant-link" data-pmx="plant" data-code="${e(p.site_code)}">${e(p.name)}<small>${e(p.site_code)} · ${e(p.district)}</small></button></th><td>${progress(r)}</td>${cats.map(c=>`<td>${cell(s,p,c)}</td>`).join("")}<td>${pill(st,plantTone(st))}<small class="s91pm-block">${n.pending} review · ${n.locked} locked</small></td></tr>`;}).join("")}</tbody></table></div>`)+(!rows.length?'<div class="s91pm-empty">No plants match these filters.</div>':"")+`<p class="s91pm-foot">Existing plans/work orders are context, not included in the new checklist approval totals. Unassigned plan markers are not counted as completed.</p></div>`;
   }
   function statusBadges(a) {return pill(a.label,statusTone(a))+(a.permission==="Granted"?pill("Permission granted","blue"):a.permission==="Requested"?pill("Permission requested","amber"):a.permission==="Denied"?pill("Permission denied","red"):"")+(a.late&&a.label!=="Overdue"?pill("Past due","red"):"");}
+  const catTone = status => ({"Completed":"green","On track":"green","Pending approval":"amber","Overdue":"red","Locked":"purple"}[status]||"neutral");
+  function catStatus(n,hasLegacy,covered) {
+    if(!n.total)return hasLegacy?(covered?"Not assigned":"Existing workflow"):"Not scheduled";
+    if(n.approved===n.total)return "Completed";
+    if(n.late)return "Overdue";
+    if(n.pending)return "Pending approval";
+    if(n.locked)return "Locked";
+    return "On track";
+  }
+  /** The activity this equipment is waiting on: the next unapproved one due, else the oldest. */
+  function nextDue(rows,today) {
+    const open=rows.filter(a=>a.status!=="Approved").sort((a,b)=>a.date.localeCompare(b.date));
+    return open.find(a=>a.date>=today)||open[0]||null;
+  }
+  function miniBar(n) {
+    const p=pct(n);
+    return `<div class="s91pm-mini"><b>${p===null?'—':p+'%'}</b><div class="s91pm-bar"><i style="width:${p||0}%"></i></div></div>`;
+  }
+  /** One equipment category's own units, listed inside its register row only once expanded. */
+  function unitRows(s,rows) {
+    if(!rows.length)return '<p class="s91pm-foot">No activity of this equipment matches the selected filters.</p>';
+    return `<table class="s91pm-subtable"><thead><tr><th>Unit ID</th><th>Scheduled date</th><th>Status</th><th>Inspected by</th><th>Inspection date</th><th>Next action</th></tr></thead><tbody>${rows.map(a=>`<tr><td><strong>${e(a.equipment_id)}</strong></td><td>${dlabel(a.date)}</td><td><div class="s91pm-wrap">${statusBadges(a)}</div></td><td>${e(a.submitted_name||"—")}</td><td>${dlabel(a.inspected_on)}</td><td>${btn(a.can_review?"Review":a.can_submit?"Record PM":a.can_request?"Request permission":"Open in calendar","event",`data-id="${e(a.id)}"`)}</td></tr>`).join("")}</tbody></table>`;
+  }
+  /**
+   * Monthly activity register: one row per equipment category, counted from the plant's own
+   * assigned activities, with that equipment's units expanded inline on request. Approved means
+   * O&M Head approved - a submitted checklist awaiting review is never counted as completed.
+   */
+  function registerPanel(s,p,r,filtered) {
+    const narrowing=!!(s.query||s.status||s.day), legacyRows=old(s,p);
+    const cats=(s.equipment?[s.equipment]:s.data.categories).filter(c=>!narrowing||filtered.some(a=>a.equipment===c));
+    const rows=cats.map((c,i)=>{
+      const all=r.filter(a=>a.equipment===c), shown=filtered.filter(a=>a.equipment===c), n=stats(all);
+      const open=s.open.has(c), id="s91pm-reg-"+i, due=nextDue(all,s.data.today);
+      const status=catStatus(n,legacyRows.some(a=>a.equipment===c),s.data.covered.includes(c)), tone=catTone(status);
+      const sub=(all.length?`${all.length} activit${all.length===1?'y':'ies'}`:'No assigned activity')+
+        (narrowing&&shown.length!==all.length?` · ${shown.length} shown`:'')+
+        (c.startsWith('4 Pole')?' · Four Pole · ACDB · Auxiliary TX':'');
+      const dash='<span class="s91pm-muted">—</span>';
+      return `<tr class="s91pm-reg-row s91pm-accent-${tone}${open?' s91pm-reg-on':''}" data-pmx="expand" data-cat="${e(c)}">`+
+        `<th scope="row"><button type="button" class="s91pm-reg-toggle" data-pmx="expand" data-cat="${e(c)}" aria-expanded="${open}" aria-controls="${id}"><span class="s91pm-chev" aria-hidden="true"></span><span><b>${e(c)}</b><small>${e(sub)}</small></span></button></th>`+
+        `<td><b class="s91pm-num">${n.approved} / ${n.total}</b></td><td>${miniBar(n)}</td>`+
+        `<td class="s91pm-num">${n.pending||dash}</td><td class="s91pm-num">${n.late||dash}</td><td class="s91pm-num">${n.locked||dash}</td>`+
+        `<td>${due?`${dlabel(due.date)}<small>${e(due.label)}</small>`:dash}</td>`+
+        `<td>${pill(status,tone)}</td><td>${btn(open?"Hide details":"View details","expand",`data-cat="${e(c)}" aria-expanded="${open}" aria-controls="${id}"`)}</td></tr>`+
+        `<tr class="s91pm-reg-detail" id="${id}"${open?'':' hidden'}><td colspan="9">${open?unitRows(s,shown):''}</td></tr>`;
+    }).join("");
+    return `<section class="s91pm-panel"><div class="s91pm-section-head"><div><h2>Monthly activity register</h2><p>Equipment-wise summary · ${r.length} database-assigned activities · approved completion only</p></div><div class="s91pm-head-actions">${s.open.size?btn("Collapse all","collapse-all"):""}${btn("Open PM calendar →","calendar","",true)}</div></div>${filters(s,false)}${legend()}<div class="s91pm-scroll"><table class="s91pm-reg"><thead><tr><th>Equipment category</th><th>Approved / Scheduled</th><th>Completion</th><th>Pending approval</th><th>Overdue</th><th>Locked</th><th>Next scheduled</th><th>Status</th><th>Details</th></tr></thead><tbody>${rows}</tbody></table>${!cats.length?'<div class="s91pm-empty">No equipment matches the selected filters.</div>':''}</div><p class="s91pm-foot">Open an equipment row for its individual units, their engineers and approval state. An activity's action opens its checklist in the calendar.</p></section>`;
+  }
   function rowTable(s,rows) {
     return `<div class="s91pm-scroll"><table class="s91pm-table"><thead><tr><th>Scheduled date</th><th>Equipment / Unit ID</th><th>Status</th><th>Inspected by</th><th>Inspection date</th><th>Next action</th></tr></thead><tbody>${rows.map(a=>`<tr><td>${dlabel(a.date)}</td><td><strong>${e(a.equipment_id)}</strong><small>${e(a.equipment)}</small></td><td><div class="s91pm-wrap">${statusBadges(a)}</div></td><td>${e(a.submitted_name||"—")}</td><td>${dlabel(a.inspected_on)}</td><td>${btn(a.can_review?"Review":a.can_submit?"Record PM":a.can_request?"Request permission":"View","event",`data-id="${e(a.id)}"`)}</td></tr>`).join("")}</tbody></table>${!rows.length?'<div class="s91pm-empty">No assigned activities match the selected filters.</div>':""}</div>`;
   }
   function plant(s,p) {
     const r=rollup(s,p), n=stats(r), l=old(s,p), first=r.find(a=>a.status!=="Approved"), filtered=r.filter(a=>matches(a,s));
-    return header(s,p)+kpis(s,r,false)+`<div class="s91pm-plant-grid"><section class="s91pm-panel"><div class="s91pm-section-head"><div><h2>Equipment-wise progress</h2><p>Each inverter is an independent database-assigned activity.</p></div>${pill(plantStatus(r,p),plantTone(plantStatus(r,p)))}</div><div class="s91pm-eq-grid">${s.data.categories.map(c=>`<div class="s91pm-eq"><b>${e(c)}</b>${cell(s,p,c)}${!s.data.covered.includes(c)?'<small>Existing workflow</small>':c.startsWith('4 Pole')?'<small>Four Pole · ACDB · Auxiliary TX</small>':""}</div>`).join("")}</div></section><section class="s91pm-panel"><div class="s91pm-section-head"><div><h2>Sequence control</h2><p>Earlier dates must be approved first.</p></div></div>${first?`<div class="s91pm-next"><small>FIRST UNRESOLVED ACTIVITY</small><strong>${e(first.equipment_id)}</strong><span>${dlabel(first.date)} · ${e(first.label)}</span>${btn(first.can_submit?"Record PM":first.can_review?"Review PM":"Open activity","event",`data-id="${e(first.id)}"`,true)}</div>`:`<div class="s91pm-empty">${n.total?'All assigned activities approved.':'No SQL-assigned activities for this month.'}</div>`}<div class="s91pm-totals"><div><b>${n.locked}</b><small>Locked activities</small></div><div><b>${n.requests}</b><small>Permission requests</small></div><div><b>${n.pending}</b><small>Pending reviews</small></div></div><p class="s91pm-foot">An authorised override unlocks one activity, not the missed earlier task.</p></section></div><section class="s91pm-panel"><div class="s91pm-section-head"><div><h2>Monthly activity register</h2><p>${r.length} SQL-assigned activities · approved completion only</p></div>${btn("Open PM calendar →","calendar","",true)}</div>${filters(s,false)}${legend()}${rowTable(s,filtered)}</section><section class="s91pm-panel"><div class="s91pm-section-head"><div><h2>Existing schedule & work orders</h2><p>${l.length} records · planning context; not part of new checklist totals.</p></div></div>${rowTable(s,l.filter(a=>matches(a,s)))}</section>`;
+    return header(s,p)+kpis(s,r,false)+`<div class="s91pm-plant-grid"><section class="s91pm-panel"><div class="s91pm-section-head"><div><h2>Equipment-wise progress</h2><p>Each inverter is an independent database-assigned activity.</p></div>${pill(plantStatus(r,p),plantTone(plantStatus(r,p)))}</div><div class="s91pm-eq-grid">${s.data.categories.map(c=>`<div class="s91pm-eq"><b>${e(c)}</b>${cell(s,p,c)}${!s.data.covered.includes(c)?'<small>Existing workflow</small>':c.startsWith('4 Pole')?'<small>Four Pole · ACDB · Auxiliary TX</small>':""}</div>`).join("")}</div></section><section class="s91pm-panel"><div class="s91pm-section-head"><div><h2>Sequence control</h2><p>Earlier dates must be approved first.</p></div></div>${first?`<div class="s91pm-next"><small>FIRST UNRESOLVED ACTIVITY</small><strong>${e(first.equipment_id)}</strong><span>${dlabel(first.date)} · ${e(first.label)}</span>${btn(first.can_submit?"Record PM":first.can_review?"Review PM":"Open activity","event",`data-id="${e(first.id)}"`,true)}</div>`:`<div class="s91pm-empty">${n.total?'All assigned activities approved.':'No SQL-assigned activities for this month.'}</div>`}<div class="s91pm-totals"><div><b>${n.locked}</b><small>Locked activities</small></div><div><b>${n.requests}</b><small>Permission requests</small></div><div><b>${n.pending}</b><small>Pending reviews</small></div></div><p class="s91pm-foot">An authorised override unlocks one activity, not the missed earlier task.</p></section></div>${registerPanel(s,p,r,filtered)}<section class="s91pm-panel"><div class="s91pm-section-head"><div><h2>Existing schedule & work orders</h2><p>${l.length} records · planning context; not part of new checklist totals.</p></div></div>${rowTable(s,l.filter(a=>matches(a,s)))}</section>`;
   }
   function calendar(s,p) {
     const all=[...s.activities,...s.legacy].filter(a=>!p||a.plant_id===p.id).sort((a,b)=>a.date.localeCompare(b.date)||a.equipment_id.localeCompare(b.equipment_id));
@@ -118,21 +177,23 @@
     if(a.permission_reason)h+=`<div class="s91pm-note"><b>Permission ${e(a.permission.toLowerCase())}</b><p>${e(a.permission_reason)}</p><small>${e(a.requested_name||'')} · ${dlabel(a.requested_at)}</small>${a.authorisation_note?`<p>${e(a.authorisation_note)}</p><small>${e(a.authorised_name||'')} · ${dlabel(a.authorised_at)}</small>`:''}</div>`;
     if(a.review_note)h+=`<div class="s91pm-note"><b>Review note</b><p>${e(a.review_note)}</p><small>${e(a.reviewed_name||'')} · ${dlabel(a.reviewed_at)}</small></div>`;
     if(a.equipment==='GSS visit')h+='<div class="s91pm-note"><b>GSS side only</b><p>Record authorised inspections or verified utility-maintenance records. Do not operate utility-owned equipment without authorisation.</p></div>';
-    if(a.source==='tracking'&&a.can_submit&&s.form==='submit')return h+checkForm(s,a);
+    if(a.source==='tracking'&&s.form==='submit'&&(a.can_submit||a.checks?.length))return h+checkForm(s,a);
     if(a.checklist?.length)h+=`<h3>Recorded checklist</h3><p>${e(a.submitted_name||'')} · ${dlabel(a.inspected_on)}</p><div class="s91pm-results">${a.checklist.map(c=>`<div><b>${e(c.task)}</b>${pill(c.result,c.result==='OK'?'green':c.result==='N/A'?'neutral':'red')}${c.note?`<p>${e(c.note)}</p>`:''}</div>`).join('')}</div>${a.remarks?`<p><b>Remarks:</b> ${e(a.remarks)}</p>`:''}`;
     else h+=`<h3>Monthly checklist · ${a.checks.length} checks</h3><ol class="s91pm-check-preview">${a.checks.map(c=>`<li>${e(c)}</li>`).join('')}</ol>`;
     if(a.equipment.startsWith('4 Pole'))h+='<p class="s91pm-foot">Four Pole, shared ACDB panel checks and Auxiliary Transformer. Each section must be reviewed.</p>';
     if(a.can_submit)h+=btn("Record PM","record","",true);
+    else if(a.source==='tracking'&&a.checks?.length)h+=btn("Open checklist (preview)","record");
     if(a.can_request||a.can_grant||a.can_review){h+=`<form data-pmx-action-form><label>${a.can_request?'Reason for permission':a.can_grant?'Authorisation / denial reason':'Review note (required if returning)'}<textarea name="reason" rows="3" maxlength="4000" ${a.can_review?'':'required'} placeholder="Enter reason"></textarea></label><div class="s91pm-wrap">${a.can_request?`<button class="s91pm-btn s91pm-primary" name="action" value="request">Request permission</button>`:a.can_grant?`<button class="s91pm-btn s91pm-primary" name="action" value="grant">Grant permission</button><button class="s91pm-btn" name="action" value="deny">Deny</button>`:`<button class="s91pm-btn s91pm-primary" name="action" value="approve">Approve PM</button><button class="s91pm-btn s91pm-danger" name="action" value="return">Return for correction</button>`}</div></form>`;}
     if(a.status==='Approved')h+=`<div class="s91pm-note"><b>Approved by ${e(a.reviewed_name||'O&M Head')}</b><p>${dlabel(a.reviewed_at)}</p></div>`;
     if(a.status==='Pending approval'&&!a.can_review)h+='<p class="s91pm-foot">Awaiting O&M Head approval. This activity has not yet been counted as completed.</p>';
-    if(!a.can_submit&&!a.can_request&&!a.can_grant&&!a.can_review&&a.status==='Scheduled'&&a.date>s.data.today)h+='<p class="s91pm-foot">Recording opens on the scheduled date.</p>';
+    if(!a.can_submit&&!a.can_request&&!a.can_grant&&!a.can_review&&a.status==='Scheduled'&&a.date>s.data.today)h+='<p class="s91pm-foot">Recording opens on the scheduled date. The checklist can be opened and read before then; nothing is saved.</p>';
     return h;
   }
   function checkForm(s,a) {
     let section="";
+    const preview=!a.can_submit;
     const checks=a.checks.map((c,i)=>{const prev=a.checklist?.find(x=>x.task===c)||{};const parts=c.split(" — ");const group=parts.length>1?parts[0]:"";const label=group?parts.slice(1).join(" — "):c;const heading=group&&group!==section?`<h3 class="s91pm-check-group">${e(group)}</h3>`:"";section=group;return `${heading}<fieldset><legend>${i+1}. ${e(label)}</legend><select name="result${i}" required aria-label="Result ${i+1}">${option("","Select result",prev.result||"")}${['OK','Not OK','Abnormality','N/A'].map(x=>option(x,x,prev.result||"")).join('')}</select><textarea rows="2" maxlength="2000" name="note${i}" placeholder="Observation / N/A justification (required unless OK)" aria-label="Observation ${i+1}">${e(prev.note||'')}</textarea></fieldset>`;}).join('');
-    return `<form data-pmx-submit-form><div class="s91pm-note"><b>Safety and applicability</b><p>Use approved OEM limits, authorised personnel and applicable isolation/permit-to-work procedures. Mark N/A only for genuinely absent or inapplicable components, with justification. Leave incomplete or deferred work unsubmitted.</p></div><label>Inspection date<input name="inspected_on" type="date" min="${e(a.date)}" max="${e(s.data.today)}" value="${e(a.inspected_on||s.data.today)}" required></label>${checks}<label>General remarks<textarea name="reason" maxlength="4000" rows="3">${e(a.remarks||'')}</textarea></label><div class="s91pm-wrap"><button class="s91pm-btn s91pm-primary" type="submit">Submit for approval</button>${btn("Cancel","cancel-record")}</div><p class="s91pm-foot">Engineer identity and submission time are captured automatically. No photo upload.</p></form>`;
+    return `<form data-pmx-submit-form${preview?' data-pmx-preview':''}>${preview?`<div class="s91pm-callout"><b>Preview only — nothing is saved</b><p>This checklist is not open to you for recording${a.date>s.data.today?' until '+dlabel(a.date):''}. You can read and walk through it; no entry is created and no approval is requested.</p></div>`:''}<div class="s91pm-note"><b>Safety and applicability</b><p>Use approved OEM limits, authorised personnel and applicable isolation/permit-to-work procedures. Mark N/A only for genuinely absent or inapplicable components, with justification. Leave incomplete or deferred work unsubmitted.</p></div><label>Inspection date<input name="inspected_on" type="date" min="${e(a.date)}" max="${e(s.data.today)}" value="${e(a.inspected_on||s.data.today)}" required></label>${checks}<label>General remarks<textarea name="reason" maxlength="4000" rows="3">${e(a.remarks||'')}</textarea></label><div class="s91pm-wrap"><button class="s91pm-btn s91pm-primary" type="submit"${preview?' disabled title="Preview only: this activity is not open to you for recording"':''}>Submit for approval</button>${btn(preview?"Close preview":"Cancel","cancel-record")}</div><p class="s91pm-foot">${preview?'Preview only: the entry is not stored and no approval is requested.':'Engineer identity and submission time are captured automatically. No photo upload.'}</p></form>`;
   }
   function render(s) {
     if(active!==s)return;
@@ -140,6 +201,7 @@
     if(s.loading&&!s.data){s.host.innerHTML='<div class="s91pm"><div class="s91pm-panel s91pm-empty" role="status">Loading monthly PM tracking…</div></div>';return;}
     if(s.error&&!s.data){s.host.innerHTML=`<div class="s91pm"><div class="s91pm-panel s91pm-empty" role="alert"><b>PM tracking unavailable</b><p>${e(s.error)}</p>${btn("Retry","reload")}</div></div>`;return;}
     if(s.siteCode&&!p){s.host.innerHTML='<div class="s91pm s91pm-empty">Plant not available in your assigned scope.</div>';return;}
+    if(s.restoreScroll!=null){const y=s.restoreScroll;s.restoreScroll=null;setTimeout(()=>{if(typeof global.scrollTo==="function")global.scrollTo(0,y);},0);}
     s.host.innerHTML=`<div class="s91pm">${s.notice?`<div class="s91pm-notice" role="status">${e(s.notice)}</div>`:''}${s.error?`<div class="s91pm-callout" role="status">Showing last successful PM data · ${e(s.error)} ${btn("Retry","reload")}</div>`:''}${s.data.legacy_truncated?'<div class="s91pm-callout">Existing record list truncated. Select an individual plant to see its records.</div>':''}${s.view==='calendar'?calendar(s,p):p?plant(s,p):portfolio(s)}</div>`;
   }
   let pollTimer=null;
@@ -163,7 +225,7 @@
   const wired=new WeakSet();
   function wire(host){if(wired.has(host))return;wired.add(host);
     host.addEventListener('click',ev=>{const s=active;if(!s||s.host!==host)return;const b=ev.target.closest('[data-pmx]');if(!b)return;const a=b.dataset.pmx;
-      if(a==='plant'){const p=s.data.plants.find(x=>x.site_code===b.dataset.code);if(p)nav().selectPlantPage(p.site_code,'pm',null,{siteCode:p.site_code,displayName:p.name,plantName:p.name,displayCode:p.site_code},{pmParent:'overview'});}
+      if(a==='plant'){const p=s.data.plants.find(x=>x.site_code===b.dataset.code);if(p){keepPortfolio(s);nav().selectPlantPage(p.site_code,'pm',null,{siteCode:p.site_code,displayName:p.name,plantName:p.name,displayCode:p.site_code},{pmParent:'overview',pmCalendar:true,pmCalendarMonth:s.month});toTop();}}
       else if(a==='calendar')nav().openPMCalendar(s.month,null);
       else if(a==='event'){nav().openPMCalendar(s.month,b.dataset.id);}
       else if(a==='back-calendar')nav().closePMCalendar();
@@ -175,24 +237,36 @@
       else if(a==='clear'){s.query=s.equipment=s.status=s.day='';render(s);}
       else if(a==='layout'){s.layout=b.dataset.layout==='cards'?'cards':'matrix';render(s);}
       else if(a==='select'){s.selected=b.dataset.id;s.form='';s.notice='';render(s);if(global.matchMedia('(max-width: 950px)').matches)host.querySelector('.s91pm-detail')?.scrollIntoView({block:'nearest'});}
+      else if(a==='expand'){const c=b.dataset.cat;if(c){if(s.open.has(c))s.open.delete(c);else s.open.add(c);render(s);}}
+      else if(a==='collapse-all'){s.open.clear();render(s);}
       else if(a==='record'||a==='cancel-record'){s.form=a==='record'?'submit':'';render(s);}
     });
     host.addEventListener('change',ev=>{const s=active,k=ev.target.dataset.pmxFilter;if(!s||s.host!==host||!k||k==='query')return;if(k==='month')changeMonth(s,ev.target.value);else if(['equipment','status','day','plan'].includes(k)){s[k]=ev.target.value;render(s);}});
     host.addEventListener('input',ev=>{const s=active;if(!s||s.host!==host||ev.target.dataset.pmxFilter!=='query')return;const pos=ev.target.selectionStart;s.query=ev.target.value;render(s);const q=host.querySelector('[data-pmx-filter="query"]');q?.focus();try{q?.setSelectionRange(pos,pos);}catch(_){}});
     host.addEventListener('submit',async ev=>{const s=active;if(!s||s.host!==host||!ev.target.matches('[data-pmx-action-form],[data-pmx-submit-form]'))return;ev.preventDefault();if(s.saving)return;
       const form=ev.target, a=s.activities.find(x=>x.id===s.selected);if(!a)return;
-      const fd=new FormData(form), submit=form.matches('[data-pmx-submit-form]'), action=submit?'submit':ev.submitter?.value;
+      const submit=form.matches('[data-pmx-submit-form]');
+      if(submit&&!a.can_submit){
+        // The checklist was opened to be read, not recorded. Nothing is sent; the server would
+        // refuse it in any case, and a refusal must never look like a saved entry.
+        global.Solar91PortalToast?.info('Preview only','This checklist is not open to you for recording, so nothing was saved.');
+        return;
+      }
+      const fd=new FormData(form), action=submit?'submit':ev.submitter?.value;
       if(!action)return;
       const payload={action,reason:String(fd.get('reason')||'')};
       if(submit){payload.inspected_on=fd.get('inspected_on');payload.checks=a.checks.map((_,i)=>({result:fd.get('result'+i),note:String(fd.get('note'+i)||'')}));}
       const errNode=document.createElement('p');errNode.className='s91pm-form-error';errNode.setAttribute('role','alert');form.querySelector('.s91pm-form-error')?.remove();
       s.saving=true;Array.from(form.querySelectorAll('button')).forEach(b=>b.disabled=true);
-      try{await api().request('/api/pm-plan/tracking/'+encodeURIComponent(a.id)+'/action',{method:'POST',body:payload});recent.clear();if(active!==s||!routeMatches(s))return;s.form='';s.notice={submit:'Checklist submitted for O&M Head approval.',approve:'PM approved. Sequence recalculated.',return:'PM returned for correction.',request:'Permission requested.',grant:'Permission granted for this activity only.',deny:'Permission denied.'}[action];await load(s);}
-      catch(err){if(active===s){errNode.textContent=err?.message||'Action could not be saved.';form.append(errNode);}}
+      try{await api().request('/api/pm-plan/tracking/'+encodeURIComponent(a.id)+'/action',{method:'POST',body:payload});recent.clear();if(active!==s||!routeMatches(s))return;s.form='';s.notice={submit:'Checklist submitted for O&M Head approval.',approve:'PM approved. Sequence recalculated.',return:'PM returned for correction.',request:'Permission requested.',grant:'Permission granted for this activity only.',deny:'Permission denied.'}[action];
+      global.Solar91PortalToast?.success(s.notice,`${a.equipment_id} · ${dlabel(a.date)}`);
+      global.Solar91PortalNotifications?.refresh();
+      await load(s);}
+      catch(err){const text=err?.message||'Action could not be saved.';global.Solar91PortalToast?.error('PM action not saved',text);if(active===s){errNode.textContent=text;form.append(errNode);}}
       finally{s.saving=false;Array.from(form.querySelectorAll('button')).forEach(b=>b.disabled=false);}
     });
   }
-  function show(host,opts={}){if(!host)return;const month=monthKey(opts.initialMonth)||rememberedMonth||todayMonth();rememberedMonth=month;const siteCode=opts.siteCode||null;const s={host,siteCode,parent:opts.parent||'overview',view:opts.calendar?'calendar':'overview',month,selected:opts.eventId||'',form:'',query:'',status:'',equipment:'',day:'',plan:'planned',layout:'matrix',loading:true,error:'',notice:'',saving:false,token:0};const cached=recent.get(cacheKey(s));if(cached&&Date.now()-cached.at<60000){s.data=cached.data;enrich(s);}active=s;wire(host);if(s.data)render(s);load(s,!!s.data);}
+  function show(host,opts={}){if(!host)return;const month=monthKey(opts.initialMonth)||rememberedMonth||todayMonth();rememberedMonth=month;const siteCode=opts.siteCode||null;const s={host,siteCode,parent:opts.parent||'overview',view:opts.calendar?'calendar':'overview',calendarParent:opts.calendarParent==='overview'?'overview':'plant',month,selected:opts.eventId||'',form:'',query:'',status:'',equipment:'',day:'',plan:'planned',layout:'matrix',open:new Set(),loading:true,error:'',notice:'',saving:false,token:0};if(!siteCode&&!opts.calendar)takePortfolio(s);const cached=recent.get(cacheKey(s));if(cached&&Date.now()-cached.at<60000){s.data=cached.data;enrich(s);}active=s;wire(host);if(s.data)render(s);load(s,!!s.data);}
   function resume(){if(active&&visible(active)&&!busy(active)&&!active.loading&&global.navigator?.onLine!==false)load(active,true);}
   document.addEventListener('portal:data-invalidated',()=>{recent.clear();});
   document.addEventListener('portal:route-changed',()=>{if(active&&!routeMatches(active)){clearTimeout(pollTimer);active=null;}});

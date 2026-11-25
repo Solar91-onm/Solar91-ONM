@@ -96,6 +96,9 @@
     pmCalendarOpen: false,
     pmCalendarMonth: null,
     pmCalendarEventId: null,
+    // Which page a plant's PM calendar was opened from: "plant" (its own PM tracker) or
+    // "overview" (straight from the all-plants dashboard, which is where Back returns to).
+    pmCalendarParent: "plant",
     expandedGroups: {},          // { plants: true/false, views: true/false }
     expandedPlants: {},          // { siteCode: true } plants whose sub-menu is open (user's choice)
     detailsOpen: { plant: {}, view: false }   // Details sub-sections dropdown: per plant ({siteCode: true}) and for Views; closed until the user opens it
@@ -122,7 +125,8 @@
       pmParent: navState.pmParent,
       pmCalendarOpen: navState.pmCalendarOpen,
       pmCalendarMonth: navState.pmCalendarMonth,
-      pmCalendarEventId: navState.pmCalendarEventId
+      pmCalendarEventId: navState.pmCalendarEventId,
+      pmCalendarParent: navState.pmCalendarParent
     };
   }
 
@@ -160,7 +164,8 @@
         pmParent: "overview",
         pmCalendarOpen: false,
         pmCalendarMonth: null,
-        pmCalendarEventId: null
+        pmCalendarEventId: null,
+        pmCalendarParent: "plant"
       };
     }
     var viewPage = snapshot.selectedViewPage === "health" ? "details" : snapshot.selectedViewPage;
@@ -193,7 +198,8 @@
           typeof snapshot.pmCalendarMonth === "string" &&
           /^\d{4}-\d{2}$/.test(snapshot.pmCalendarMonth) ? snapshot.pmCalendarMonth : null,
         pmCalendarEventId: viewPage === "pm" && typeof snapshot.pmCalendarEventId === "string"
-          ? snapshot.pmCalendarEventId : null
+          ? snapshot.pmCalendarEventId : null,
+        pmCalendarParent: "plant"
       };
     }
     var plantSubPage = normalizePlantPage(snapshot.selectedSubPage);
@@ -217,7 +223,9 @@
           typeof snapshot.pmCalendarMonth === "string" &&
           /^\d{4}-\d{2}$/.test(snapshot.pmCalendarMonth) ? snapshot.pmCalendarMonth : null,
         pmCalendarEventId: plantSubPage === "pm" && typeof snapshot.pmCalendarEventId === "string"
-          ? snapshot.pmCalendarEventId : null
+          ? snapshot.pmCalendarEventId : null,
+        pmCalendarParent: plantSubPage === "pm" && snapshot.pmCalendarParent === "overview"
+          ? "overview" : "plant"
       };
     }
     return null;
@@ -235,6 +243,9 @@
     navState.pmCalendarOpen = snapshot.pmCalendarOpen === true;
     navState.pmCalendarMonth = snapshot.pmCalendarMonth || null;
     navState.pmCalendarEventId = snapshot.pmCalendarEventId || null;
+    navState.pmCalendarParent = snapshot.pmCalendarParent === "overview" ? "overview" : "plant";
+    // This state came from the browser's history, not from an entry this session pushed.
+    pmCalendarPushed = false;
     if (snapshot.activeView === "plant-sub") {
       navState.expandedPlants[snapshot.selectedPlant] = true;
       navState.detailsOpen.plant[snapshot.selectedPlant] = snapshot.selectedDetailSection !== "details";
@@ -257,6 +268,8 @@
     navState.pmCalendarOpen = false;
     navState.pmCalendarMonth = null;
     navState.pmCalendarEventId = null;
+    navState.pmCalendarParent = "plant";
+    pmCalendarPushed = false;
   }
 
   function restoreNavigationHistory(state) {
@@ -475,6 +488,8 @@
     navState.pmCalendarOpen = false;
     navState.pmCalendarMonth = null;
     navState.pmCalendarEventId = null;
+    navState.pmCalendarParent = "plant";
+    pmCalendarPushed = false;
 
     writeNavigationHistory(false);
     renderPlantList(document.querySelector("[data-plant-search]")?.value || "");
@@ -531,9 +546,18 @@
     navState.selectedRange = dateRange || null;
     navState.pmParent = pageId === "pm" && options && options.pmParent === "overview"
       ? "overview" : "plants";
-    navState.pmCalendarOpen = false;
-    navState.pmCalendarMonth = null;
-    navState.pmCalendarEventId = null;
+    // The all-plants PM dashboard opens a plant directly on its PM calendar, with the month it
+    // was showing. Every other route still opens the plant's PM page, which has its own calendar
+    // button. A role without the PM page never gets here: selectedSubPage falls back first.
+    var openCalendar = navState.selectedSubPage === "pm" && !!(options && options.pmCalendar);
+    navState.pmCalendarOpen = openCalendar;
+    navState.pmCalendarMonth = openCalendar && options && typeof options.pmCalendarMonth === "string" &&
+      /^\d{4}-\d{2}$/.test(options.pmCalendarMonth) ? options.pmCalendarMonth : null;
+    // A notification can name the activity itself, so the calendar opens with it selected.
+    navState.pmCalendarEventId = openCalendar && options && typeof options.pmCalendarEventId === "string"
+      ? options.pmCalendarEventId : null;
+    navState.pmCalendarParent = openCalendar && navState.pmParent === "overview" ? "overview" : "plant";
+    pmCalendarPushed = openCalendar;
     setGroupExpanded("plants", true);
     writeNavigationHistory(false);
     renderPlantList(document.querySelector("[data-plant-search]")?.value || "");
@@ -555,14 +579,35 @@
     navState.pmCalendarMonth = typeof month === "string" && /^\d{4}-\d{2}$/.test(month)
       ? month : null;
     navState.pmCalendarEventId = typeof eventId === "string" ? eventId : null;
+    navState.pmCalendarParent = "plant";
+    pmCalendarPushed = true;
     writeNavigationHistory(false);
     updateContentArea();
     updateHighlights();
   }
 
+  // True while the calendar's own history entry was pushed in this session, so Back can simply pop
+  // it and bring back the page underneath exactly as it was — its month, filters and scroll.
+  // A calendar restored from history (a reload, or Forward) has no entry of ours to pop.
+  var pmCalendarPushed = false;
+
   function closePMCalendar() {
     if (!navState.pmCalendarOpen) return;
-    global.history.back();
+    if (pmCalendarPushed) {
+      global.history.back();
+      return;
+    }
+    if (navState.pmCalendarParent === "overview" && !restrictedPages()) {
+      selectView("pm");
+      return;
+    }
+    navState.pmCalendarOpen = false;
+    navState.pmCalendarMonth = null;
+    navState.pmCalendarEventId = null;
+    navState.pmCalendarParent = "plant";
+    writeNavigationHistory(false);
+    updateContentArea();
+    updateHighlights();
   }
 
   // ─── Activate Overview ──────────────────────────────────────────────
@@ -876,6 +921,7 @@
         global.Solar91PMTracking.show(
           document.querySelector(navState.pmCalendarOpen ? "[data-calendar-host]" : "[data-pm-overview-host]"),
           { siteCode: plantCode, parent: navState.pmParent, calendar: navState.pmCalendarOpen,
+            calendarParent: navState.pmCalendarParent,
             initialMonth: navState.pmCalendarOpen ? navState.pmCalendarMonth : null,
             eventId: navState.pmCalendarOpen ? navState.pmCalendarEventId : null }
         );

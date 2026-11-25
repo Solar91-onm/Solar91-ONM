@@ -58,6 +58,7 @@
 <link rel="stylesheet" href="/assets/css/pm-overview.css"/>
 <link rel="stylesheet" href="/assets/css/pm-tracking.css"/>
 <link rel="stylesheet" href="/assets/css/security.css"/>
+<link rel="stylesheet" href="/assets/css/notifications.css"/>
 
 <link rel="manifest" href="/manifest.webmanifest"/>
 <meta name="theme-color" content="#005e09"/>
@@ -232,6 +233,20 @@
           </button>
           <div class="ep-topbar__title" data-topbar-title>Dashboard</div>
           <div class="ep-topbar__spacer"></div>
+          <!-- Notification centre: unread count, recent notifications and Action Required -->
+          <div class="ep-notify" data-notification-centre>
+            <button class="ep-icon-btn ep-notify__button" type="button" data-notification-toggle
+              aria-expanded="false" aria-haspopup="true" aria-label="Notifications">
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path>
+                <path d="M13.73 21a2 2 0 0 1-3.46 0"></path>
+              </svg>
+              <span class="ep-notify__count" data-notification-count hidden>0</span>
+            </button>
+            <div class="ep-note-panel" data-notification-panel role="dialog"
+              aria-label="Notifications" hidden></div>
+          </div>
           <div class="ep-topbar__meta">
             <span class="ep-badge-live" title="Every figure on this page is read from the Solar91 database.">Live data</span>
             <span data-last-updated>Updated —</span>
@@ -462,6 +477,7 @@ window.S91_CONFIG = JSON.parse(document.getElementById("s91-config").textContent
   "operations-calendar": "/assets/js/operations-calendar.js",
   "pm-overview": "/assets/js/pm-overview.js",
   "pm-tracking": "/assets/js/pm-tracking.js",
+  "notifications": "/assets/js/notifications.js",
   "pm-cycle-plans": "/assets/js/pm-cycle-plans.js",
   "photo-evidence": "/assets/js/photo-evidence.js",
   "extra-cleaning": "/assets/js/extra-cleaning.js",

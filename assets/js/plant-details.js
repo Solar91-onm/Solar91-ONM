@@ -23,7 +23,157 @@
     { key: "longitude",       from: "longitude",      label: "Longitude",             type: "number", step: "any" }
   ];
 
+  // ─── Add a plant (POST /api/plants) ──────────────────────────────────
+  //
+  // The same fields the Info table shows, in the same order, and every one of them is required:
+  // a plant added here arrives complete rather than as a row of dashes. Cleaning, PM and Health
+  // Assignees are not here on purpose — those are per-plant responsibilities configured on the
+  // Login Access page, which is also where the permission to set them lives.
+  var CREATE_FIELDS = [
+    { key: "site_code",       label: "Plant code",            type: "text",   hint: "Unique, e.g. ABH01" },
+    { key: "plant_name",      label: "Plant name",            type: "text" },
+    { key: "project_company", label: "SPV / project company", type: "text" },
+    { key: "ac_capacity_kw",  label: "AC capacity (kW)",      type: "number", step: "any" },
+    { key: "dc_capacity_kw",  label: "DC capacity (kWp)",     type: "number", step: "any" },
+    { key: "district",        label: "District",              type: "text" },
+    { key: "discom",          label: "DISCOM",                type: "text" },
+    { key: "assigned_engineer", label: "Site engineer",       type: "text" },
+    { key: "supervisor",      label: "Supervisor",            type: "text" },
+    { key: "commissioned_on", label: "COD",                   type: "date" },
+    { key: "location",        label: "Location",              type: "text" },
+    { key: "latitude",        label: "Latitude",              type: "number", step: "any" },
+    { key: "longitude",       label: "Longitude",             type: "number", step: "any" },
+    { key: "cctv_url",        label: "CCTV link",             type: "url",    custom: true,
+      hint: "https://…" },
+    { key: "status",          label: "Status",                type: "select",
+      options: ["active", "commissioning", "inactive", "decommissioned"] }
+  ];
+
+  function createFieldHTML(field) {
+    var input = field.type === "select"
+      ? '<select name="' + field.key + '" required>' + field.options.map(function (option) {
+          return '<option value="' + option + '"' + (option === "active" ? " selected" : "") + ">" +
+                 option.charAt(0).toUpperCase() + option.slice(1) + "</option>";
+        }).join("") + "</select>"
+      : '<input name="' + field.key + '" type="' + field.type + '"' +
+        (field.step ? ' step="' + field.step + '"' : "") +
+        (field.hint ? ' placeholder="' + esc(field.hint) + '"' : "") + " required />";
+    return '<label class="ep-pd__field"><span>' + esc(field.label) + " *</span>" + input + "</label>";
+  }
+
+  /**
+   * Open the Add New Plant overlay. `onSaved` runs after the server has confirmed the plant,
+   * never before: the table, the sidebar and every cached read are refreshed from that response.
+   */
+  function openCreate(onSaved) {
+    if (!global.Solar91PortalAPI.can("plants.manage")) return;
+    var overlay = document.createElement("div");
+    overlay.className = "ep-pd__overlay";
+    overlay.innerHTML = '' +
+      '<form class="ep-pd__modal ep-pd__modal--wide" role="dialog" aria-modal="true" ' +
+        'aria-labelledby="pd-create-title" novalidate>' +
+        '<header class="ep-pd__modal-head"><div>' +
+          '<h2 id="pd-create-title">Add new plant</h2>' +
+          '<p class="ep-pd__mono">Saved to the plant catalogue and visible across the portal</p></div>' +
+          '<button class="ep-pd__x" type="button" data-pd-close aria-label="Close">×</button>' +
+        "</header>" +
+        '<div class="ep-pd__modal-body ep-pd__modal-body--create">' +
+          CREATE_FIELDS.map(createFieldHTML).join("") +
+        "</div>" +
+        '<p class="ep-pd__create-note">Every field is required. Cleaning, PM and Health Assignees ' +
+          'are assigned afterwards from Login access; Preventive Maintenance and Module Cleaning ' +
+          'schedules are set up separately and are not created here.</p>' +
+        '<p class="ep-pd__form-error" role="alert"></p>' +
+        '<footer class="ep-pd__modal-foot">' +
+          '<button class="ep-pd__btn" type="button" data-pd-close>Cancel</button>' +
+          '<button class="ep-pd__btn ep-pd__btn--primary" type="submit">Add plant</button>' +
+        "</footer>" +
+      "</form>";
+    document.body.appendChild(overlay);
+
+    var form = overlay.querySelector("form");
+    var errorEl = overlay.querySelector(".ep-pd__form-error");
+    var saving = false;
+
+    function close() {
+      if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+      document.removeEventListener("keydown", onKey);
+    }
+    function onKey(ev) { if (ev.key === "Escape" && !saving) close(); }
+    document.addEventListener("keydown", onKey);
+    overlay.addEventListener("click", function (ev) {
+      if (saving) return;
+      if (ev.target === overlay || ev.target.closest("[data-pd-close]")) close();
+    });
+
+    form.addEventListener("submit", function (ev) {
+      ev.preventDefault();
+      if (saving) return;                       // one plant per submission, never two
+      errorEl.textContent = "";
+      var payload = { custom_fields: {} };
+      var problem = "";
+      CREATE_FIELDS.forEach(function (field) {
+        if (problem) return;
+        var raw = String(form.elements[field.key].value || "").trim();
+        if (!raw) { problem = field.label + " is required."; return; }
+        if (field.type === "number") {
+          var num = Number(raw);
+          if (!Number.isFinite(num)) { problem = field.label + " must be a number."; return; }
+          if (field.key === "latitude" && Math.abs(num) > 90) { problem = "Latitude must be between -90 and 90."; return; }
+          if (field.key === "longitude" && Math.abs(num) > 180) { problem = "Longitude must be between -180 and 180."; return; }
+          if ((field.key === "ac_capacity_kw" || field.key === "dc_capacity_kw") && num <= 0) {
+            problem = field.label + " must be greater than zero."; return;
+          }
+          payload[field.key] = num;
+          return;
+        }
+        if (field.type === "url" && !/^https?:\/\//i.test(raw)) {
+          problem = field.label + " must start with http:// or https://"; return;
+        }
+        if (field.custom) payload.custom_fields[field.key] = raw;
+        else payload[field.key] = raw;
+      });
+      if (problem) { errorEl.textContent = problem; return; }
+
+      saving = true;
+      var submit = form.querySelector('[type="submit"]');
+      submit.disabled = true;
+      submit.textContent = "Adding…";
+      global.Solar91PortalAPI.request("/api/plants", { method: "POST", body: payload })
+        .then(function (plant) {
+          // Confirmed by the server: only now is anything said or refreshed.
+          data.invalidate();
+          global.Solar91PortalAPI.plants(true);
+          if (global.Solar91PortalNav && global.Solar91PortalNav.loadPlants) {
+            global.Solar91PortalNav.loadPlants();
+          }
+          if (global.Solar91PortalToast) {
+            global.Solar91PortalToast.success(
+              (plant && plant.site_code ? plant.site_code : "Plant") + " added",
+              "It is now in the plant list across the portal.");
+          }
+          saving = false;
+          close();
+          if (typeof onSaved === "function") onSaved(plant);
+        })
+        .catch(function (error) {
+          saving = false;
+          submit.disabled = false;
+          submit.textContent = "Add plant";
+          errorEl.textContent = "Not added. " + (error && error.message ? error.message : "Please retry.");
+          if (global.Solar91PortalToast) {
+            global.Solar91PortalToast.error("Plant not added",
+              error && error.message ? error.message : "The plant was not saved.");
+          }
+        });
+    });
+
+    var first = form.querySelector("input, select");
+    if (first) first.focus();
+  }
+
   var PlantEditor = {
+    create: openCreate,
     open: function (plant, onSaved) {
       var overlay = document.createElement("div");
       overlay.className = "ep-pd__overlay";

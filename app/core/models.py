@@ -874,3 +874,42 @@ class BomItem(Base, TimestampMixin):
     row_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     updated_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
     __table_args__ = (Index("ix_bom_items_plant_section_order", "plant_id", "section_order", "sort_order"),)
+
+
+class EquipmentResponsibility(Base, TimestampMixin):
+    """Who answers for one equipment category across the whole portfolio.
+
+    Plant access and equipment responsibility are deliberately separate: a row here routes
+    work and notifications for that equipment on every plant, and grants no plant-level
+    administrative permission of its own. ``user_plant_assignments`` still decides which
+    plants a Site Engineer or Assignee may open.
+
+    * ``equipment_key``  — the canonical category key (``app/equipment/service.py``), so the
+      PM module's "4 Pole + ACDB + Aux. TX" and an issue's "VCB Panel" resolve to the same
+      responsibility instead of creating a second category.
+    * ``position``       — ``primary`` (the person work is assigned to) or ``backup``.
+    * ``active``         — responsibility can be paused without losing the history of it.
+
+    One active primary per category is enforced by a partial unique index
+    (database/migrations/055). Changes are written to ``audit_logs`` by the API.
+    """
+    __tablename__ = "equipment_responsibilities"
+    id: Mapped[uuid.UUID] = uuid_pk()
+    equipment_key: Mapped[str] = mapped_column(String(60), nullable=False)
+    equipment_label: Mapped[str] = mapped_column(String(160), nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    position: Mapped[str] = mapped_column(String(10), nullable=False, default="primary")
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    note: Mapped[str | None] = mapped_column(Text)
+    updated_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    __table_args__ = (
+        UniqueConstraint("equipment_key", "user_id", name="uq_equipment_responsibility_user"),
+        Index("ix_equipment_responsibility_user", "user_id", "active"),
+        Index("ix_equipment_responsibility_key", "equipment_key", "active", "position"),
+        # One active primary per equipment category.
+        Index(
+            "uq_equipment_responsibility_primary", "equipment_key", unique=True,
+            postgresql_where=text("active AND position = 'primary'"),
+            sqlite_where=text("active AND position = 'primary'"),
+        ),
+    )

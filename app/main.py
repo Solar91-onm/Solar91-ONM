@@ -31,6 +31,7 @@ from app.core.traffic import TrafficGuard
 from app.imports.router import router as imports_router
 from app.issues.router import router as issues_router
 from app.notifications.router import router as notifications_router
+from app.equipment.router import router as equipment_router
 from app.operations.router import router as operations_router
 from app.plants.router import router as plants_router
 from app.photos.router import router as photos_router
@@ -318,6 +319,10 @@ async def _start_pm_daily_job_loop():
             result["washing_monthly_targets_notified"] = check_missed_monthly_targets(db)
             result["washing_cycle_compliance_alerts"] = check_cycle_compliance_alerts(db)
             result["washing_overdue_alerts"] = check_washing_overdue(db)
+            # Checklist tracking reminders: overdue activities and the approval queue, keyed by
+            # the day so the hourly tick cannot repeat them.
+            from app.pmplan.tracking import check_pm_tracking_reminders
+            result.update(check_pm_tracking_reminders(db))
             return result
 
     while True:
@@ -378,6 +383,7 @@ app.include_router(operations_router)
 app.include_router(services_router)
 app.include_router(imports_router)
 app.include_router(notifications_router)
+app.include_router(equipment_router)
 app.include_router(audit_router)
 app.include_router(scada_router)
 app.include_router(scheduled_router)

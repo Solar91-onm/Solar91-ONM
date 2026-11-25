@@ -39,7 +39,10 @@ LAZY_MODULES = ["table-sort", "table-column-filter", "register-io", "plant-detai
                 # Extra cleaning: shared by the plant calendar and the Module Cleaning board, so it
                 # is fetched with whichever of the two is opened first.
                 "extra-cleaning",
-                "inverter-health", "pm-overview", "pm-cycle-plans", "pm-tracking"]
+                "inverter-health", "pm-overview", "pm-cycle-plans", "pm-tracking",
+                # The notification centre: one bell and one shared poller for the whole portal,
+                # fetched once when the portal boots rather than shipped in the shell.
+                "notifications"]
 
 
 def _script_tags(page: str) -> list[str]:

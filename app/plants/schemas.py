@@ -85,6 +85,7 @@ class PlantBase(BaseModel):
     commissioned_on: date | None = None
     status: str = "active"
     assigned_engineer: str | None = None
+    supervisor: str | None = Field(default=None, max_length=160)
     custom_fields: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("site_code", mode="before")
@@ -131,6 +132,7 @@ class PlantUpdate(BaseModel):
     commissioned_on: date | None = None
     status: str | None = None
     assigned_engineer: str | None = None
+    supervisor: str | None = Field(default=None, max_length=160)
     custom_fields: dict[str, Any] | None = None
 
     @field_validator("custom_fields")

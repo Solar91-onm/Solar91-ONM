@@ -300,6 +300,133 @@ def _rows(db, plant_ids, first, last, summary=False):
         PMTrackingActivity.equipment_id, PMTrackingActivity.id)))
 
 
+# ── Who is told about a checklist step ──────────────────────────────────────
+#
+# Notifications are created AFTER the action's own transaction has committed, and a failure
+# here is logged and swallowed: a workflow step that the database accepted must never be undone
+# or hidden because a notification could not be written. Each one carries a dedupe key derived
+# from the row's own saved timestamps, so a retried request cannot produce a second copy.
+
+_ACTION_TITLE = {
+    "submit": "PM checklist submitted",
+    "approve": "PM checklist approved",
+    "return": "PM checklist returned for correction",
+    "request": "PM sequence permission requested",
+    "grant": "PM sequence permission granted",
+    "deny": "PM sequence permission denied",
+}
+_ACTION_EVENT = {
+    "submit": "pm_submitted", "approve": "pm_approved", "return": "pm_returned",
+    "request": "pm_permission_requested", "grant": "pm_permission_granted",
+    "deny": "pm_permission_denied",
+}
+
+
+def _notify_action(db: Session, row: PMTrackingActivity, plant: Plant, action: str, actor: User) -> None:
+    import logging
+
+    from app.notifications.service import notify_pm_event, pm_plant_recipients
+
+    try:
+        month = row.scheduled_on.strftime("%Y-%m")
+        where = f"{plant.plant_name} · {row.equipment_id} · {_iso(row.scheduled_on)}"
+        # The dedupe key uses the timestamp THIS action wrote, so a repeat of the same step on
+        # the same row (a second permission request after a denial, a resubmission after a
+        # return) is a new notification, while a retry of one request is not.
+        stamps = {"submit": row.submitted_at, "approve": row.reviewed_at, "return": row.reviewed_at,
+                  "request": row.requested_at, "grant": row.authorised_at, "deny": row.authorised_at}
+        stamp = (stamps.get(action) or datetime.now(timezone.utc)).isoformat()
+        if action == "submit":
+            # The approver and the people answerable for this equipment, portfolio-wide.
+            users = pm_plant_recipients(db, plant_id=row.plant_id, equipment=row.equipment)
+            users = [u for u in users if u.id != actor.id]
+            message = f"{where} — submitted by {actor.display_name} for approval."
+        elif action in {"approve", "return"}:
+            engineer = db.get(User, row.submitted_by) if row.submitted_by else None
+            users = [engineer] if engineer and engineer.id != actor.id else []
+            note = (row.review_note or "").strip()
+            message = f"{where} — {'approved' if action == 'approve' else 'returned'} by {actor.display_name}."
+            if action == "return" and note:
+                message += f" Reason: {note[:300]}"
+        elif action == "request":
+            users = [u for u in pm_plant_recipients(db, plant_id=row.plant_id, equipment=row.equipment)
+                     if u.id != actor.id and u.role in {"O&M Head", "Assignee"}]
+            message = (f"{where} — {actor.display_name} asks to proceed out of sequence. "
+                       f"Reason: {(row.permission_reason or '').strip()[:300]}")
+        else:
+            engineer = db.get(User, row.requested_by) if row.requested_by else None
+            users = [engineer] if engineer and engineer.id != actor.id else []
+            message = (f"{where} — permission {'granted' if action == 'grant' else 'denied'} by "
+                       f"{actor.display_name}. {(row.authorisation_note or '').strip()[:300]}")
+        if not users:
+            return
+        notify_pm_event(
+            db, users=[u for u in users if u is not None], event_type=_ACTION_EVENT[action],
+            title=_ACTION_TITLE[action], message=message, activity_id=str(row.id), plant=plant,
+            month=month, equipment=row.equipment,
+            dedupe_key=f"pm-{action}:{row.id}:{stamp}",
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        logging.getLogger("solar91.pm").exception(
+            "PM notification failed; the checklist action itself was saved")
+
+
+def check_pm_tracking_reminders(db: Session, today: date | None = None, *, max_plants: int = 200) -> dict:
+    """Daily reminders for work that is already late or already waiting, for the hourly job.
+
+    Two grouped queries, one notification per plant per day and one for the approver's queue, all
+    keyed by the day so running the job again cannot repeat them. Only activities that are
+    genuinely actionable are counted: a future activity that is merely sequence-locked is not a
+    reminder, which is why nothing here looks at the blocker chain.
+    """
+    from app.notifications.service import notify_pm_event, notify_users, pm_plant_recipients, users_with_role
+
+    day = today or business_today()
+    out = {"overdue_plants_notified": 0, "pending_approval_notified": 0}
+    overdue = db.execute(
+        select(PMTrackingActivity.plant_id, func.count(), func.min(PMTrackingActivity.scheduled_on))
+        .where(PMTrackingActivity.scheduled_on < day,
+               PMTrackingActivity.status.in_(("Scheduled", "Returned")))
+        .group_by(PMTrackingActivity.plant_id)
+        .order_by(func.count().desc())
+        .limit(max_plants)
+    ).all()
+    for plant_id, count, oldest in overdue:
+        plant = db.get(Plant, plant_id)
+        if plant is None or (plant.status or "").casefold() == "inactive":
+            continue
+        users = pm_plant_recipients(db, plant_id=plant_id)
+        if not users:
+            continue
+        notify_pm_event(
+            db, users=users, event_type="pm_overdue",
+            title=f"{count} overdue PM activit{'y' if count == 1 else 'ies'} — {plant.plant_name}",
+            message=f"Oldest scheduled {_iso(oldest)}. Approved completion only; submitted work still needs review.",
+            activity_id="", plant=plant, month=day.strftime("%Y-%m"),
+            dedupe_key=f"pm-overdue:{plant_id}:{day.isoformat()}",
+        )
+        out["overdue_plants_notified"] += 1
+    pending = int(db.scalar(
+        select(func.count()).select_from(PMTrackingActivity)
+        .where(PMTrackingActivity.status == "Pending approval")) or 0)
+    if pending:
+        heads = users_with_role(db, {"O&M Head"})
+        if heads:
+            notify_users(
+                db, heads, event_type="pm_submitted",
+                title=f"{pending} PM checklist{'' if pending == 1 else 's'} awaiting your approval",
+                message="Open Preventive Maintenance to review the submitted checklists.",
+                target_type="pm_day", target_id=day.isoformat(),
+                dedupe_key=f"pm-pending-digest:{day.isoformat()}",
+                payload={"page": "pm", "month": day.strftime("%Y-%m")},
+            )
+            out["pending_approval_notified"] = len(heads)
+    db.commit()
+    return out
+
+
 @router.get("")
 def tracking_month(db: Annotated[Session, Depends(get_db)], user: Annotated[User, Depends(get_current_user)],
                    month: str = Query(...), site_code: str | None = None, summary: bool = False):
@@ -427,4 +554,5 @@ def tracking_action(activity_id: uuid.UUID, payload: TrackingAction,
         before_state=before, after_state=_snapshot(row), metadata_json={"plant_id": str(row.plant_id),
             "equipment_id": row.equipment_id, "scheduled_on": _iso(row.scheduled_on)}))
     db.commit()
+    _notify_action(db, row, plant, action, user)
     return {"id": str(row.id), "status": row.status, "permission": row.permission}

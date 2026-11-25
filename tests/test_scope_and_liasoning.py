@@ -96,7 +96,7 @@ def test_plant_out_carries_pm_and_health_assignee_names():
     plant = SimpleNamespace(
         id="p1", site_code="A1", plant_name="A", project_company=None, district=None, discom=None, location=None,
         latitude=None, longitude=None, dc_capacity_kw=None, ac_capacity_kw=None, commissioned_on=None,
-        status="active", assigned_engineer=None, custom_fields={})
+        status="active", assigned_engineer=None, supervisor=None, custom_fields={})
     head = SimpleNamespace(role="O&M Head", is_active=True)
     out = plant_out(plant, [], "", head, {"pm": "Ravi", "health": "Mina"})
     assert out["pm_assignee"] == "Ravi" and out["health_assignee"] == "Mina"

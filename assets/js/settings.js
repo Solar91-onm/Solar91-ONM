@@ -22,6 +22,13 @@
   var storageLoading = false;
   var storageError = "";
   var storageMessage = "";
+  // Equipment responsibility: who answers for one equipment category on every plant.
+  // The matrix below and a person's own dialog write the same rows through the same API.
+  var equipment = {
+    loading: false, loaded: false, error: "", message: "",
+    categories: [], holders: [], byUser: {}, search: "", saving: "",
+    history: [], historyOpen: false, historyLoading: false
+  };
 
   function escape(value) {
     return global.Solar91PortalFormat.escape(value);
@@ -88,6 +95,10 @@
       'data-settings-action="edit-access" data-user-id="' + escape(person.id) + '">Access &amp; scope</button>' +
       '<button type="button" class="ep-settings__button ep-settings__button--small" ' +
       'data-settings-action="edit-profile" data-user-id="' + escape(person.id) + '">Edit details</button>';
+    if (person.active && (person.role === "Assignee" || person.role === "O&M Head")) {
+      actions += '<button type="button" class="ep-settings__button ep-settings__button--small" ' +
+        'data-settings-action="edit-equipment" data-user-id="' + escape(person.id) + '">Equipment</button>';
+    }
     if (person.invited && person.active) {
       actions += '<button type="button" class="ep-settings__button ep-settings__button--small" ' +
         'data-settings-action="resend" data-user-id="' + escape(person.id) + '">Resend invite</button>';
@@ -193,8 +204,27 @@
           '</div>') : "") +
         '<p class="ep-settings__footnote">Sign-in is provided by Clerk. This page manages Solar91 invitations and database-backed access; it does not display or expose Clerk credentials.</p>' +
       '</section>' +
+      renderEquipmentPanel(canManage) +
       (activeHost.querySelector("[data-settings-modal]") ? activeHost.querySelector("[data-settings-modal]").outerHTML : "") +
     "</div>";
+  }
+
+  // Declared here, not inside loadUsers: renderPage and the toolbar's own buttons call it.
+  function loadStorageUsage(refresh) {
+    if (!api().can("users.manage")) return Promise.resolve();
+    storageLoading = true;
+    storageError = "";
+    render();
+    return api().request("/api/photos/storage-usage" + (refresh ? "?refresh=true" : "")).then(function (result) {
+      storageUsage = result;
+      storageLoading = false;
+      storageError = "";
+      render();
+    }).catch(function (error) {
+      storageLoading = false;
+      storageError = error.message || "Photo storage usage could not be loaded.";
+      render();
+    });
   }
 
   function loadUsers() {
@@ -204,22 +234,6 @@
       return Promise.resolve();
     }
 
-    function loadStorageUsage(refresh) {
-      if (!api().can("users.manage")) return Promise.resolve();
-      storageLoading = true;
-      storageError = "";
-      render();
-      return api().request("/api/photos/storage-usage" + (refresh ? "?refresh=true" : "")).then(function (result) {
-        storageUsage = result;
-        storageLoading = false;
-        storageError = "";
-        render();
-      }).catch(function (error) {
-        storageLoading = false;
-        storageError = error.message || "Photo storage usage could not be loaded.";
-        render();
-      });
-    }
     loading = true;
     render();
     return api().request("/api/users").then(function (result) {
@@ -242,6 +256,196 @@
     }).join("");
   }
 
+  function holderOptions(selected, skip) {
+    return '<option value="">Not configured</option>' + equipment.holders
+      .filter(function (holder) { return holder.id !== skip; })
+      .map(function (holder) {
+        return '<option value="' + escape(holder.id) + '"' +
+          (String(selected || "") === holder.id ? " selected" : "") + ">" +
+          escape(holder.name || "Unnamed") + " · " + escape(holder.role) + "</option>";
+      }).join("");
+  }
+
+  function matchesCategorySearch(category) {
+    var term = equipment.search.trim().toLowerCase();
+    if (!term) return true;
+    return [category.label, category.area,
+            category.primary && category.primary.user_name,
+            category.backup && category.backup.user_name]
+      .filter(Boolean).join(" ").toLowerCase().indexOf(term) !== -1;
+  }
+
+  function equipmentRow(category) {
+    var primaryId = category.primary ? category.primary.user_id : "";
+    var backupId = category.backup ? category.backup.user_id : "";
+    var configured = !!category.primary;
+    return '<div class="ep-eqr__row' + (configured ? " is-configured" : "") +
+      '" role="row" data-eqr-row="' + escape(category.key) + '">' +
+      '<div role="cell"><strong>' + escape(category.label) + "</strong>" +
+        '<span class="ep-eqr__area">' + escape(category.area || "Plant side") + "</span></div>" +
+      '<div role="cell"><select data-eqr-primary="' + escape(category.key) + '" aria-label="Primary responsible for ' +
+        escape(category.label) + '">' + holderOptions(primaryId, backupId) + "</select></div>" +
+      '<div role="cell"><select data-eqr-backup="' + escape(category.key) + '" aria-label="Backup responsible for ' +
+        escape(category.label) + '">' + holderOptions(backupId, primaryId) + "</select></div>" +
+      '<div role="cell"><span class="ep-eqr__coverage">All plants</span></div>' +
+      '<div role="cell"><label class="ep-eqr__active"><input type="checkbox" data-eqr-active="' +
+        escape(category.key) + '"' + (configured && category.primary.active === false ? "" : " checked") +
+        ' />Active</label>' +
+        '<span class="ep-eqr__status' + (configured ? " is-on" : "") + '">' +
+        escape(category.status || (configured ? "Active" : "Not configured")) + "</span></div>" +
+      '<div role="cell"><button type="button" class="ep-settings__button ep-settings__button--small" ' +
+        'data-settings-action="save-equipment" data-equipment-key="' + escape(category.key) + '"' +
+        (equipment.saving === category.key ? " disabled" : "") + ">" +
+        (equipment.saving === category.key ? "Saving…" : "Save") + "</button></div>" +
+    "</div>";
+  }
+
+  function renderEquipmentPanel(canManage) {
+    if (!canManage) return "";
+    var rows = equipment.categories.filter(matchesCategorySearch);
+    var configured = equipment.categories.filter(function (c) { return !!c.primary; }).length;
+    return '<section class="ep-settings__panel ep-eqr" aria-labelledby="settings-equipment-title">' +
+      '<div class="ep-settings__panel-intro"><h2 id="settings-equipment-title">Equipment responsibility</h2>' +
+        '<p>Who answers for one equipment category across every plant. A new site issue for that ' +
+        'equipment is assigned to its primary Assignee automatically, wherever the plant is, and the ' +
+        'same people are notified about its Preventive Maintenance. Plant access, approval authority ' +
+        'and sequence overrides are unchanged by this: they stay with the role and the plant ' +
+        'assignments above. ' + configured + ' of ' + equipment.categories.length +
+        ' categories configured.</p></div>' +
+      '<div class="ep-settings__toolbar">' +
+        '<label class="ep-settings__sr-only" for="settings-equipment-search">Search equipment categories</label>' +
+        '<input id="settings-equipment-search" type="search" placeholder="Search equipment or person" value="' +
+          escape(equipment.search) + '" data-settings-filter="equipment-search" />' +
+        '<button type="button" class="ep-settings__button" data-settings-action="refresh-equipment">Refresh</button>' +
+        '<button type="button" class="ep-settings__button" data-settings-action="toggle-equipment-history">' +
+          (equipment.historyOpen ? "Hide change history" : "Change history") + "</button>" +
+      "</div>" +
+      (equipment.message ? '<p class="ep-settings__message" role="status">' + escape(equipment.message) + "</p>" : "") +
+      (equipment.error ? '<p class="ep-settings__form-error" role="alert">' + escape(equipment.error) + "</p>" : "") +
+      (equipment.loading && !equipment.loaded
+        ? '<p class="ep-settings__empty" role="status">Loading equipment responsibilities…</p>'
+        : '<div class="ep-eqr__table" role="table" aria-label="Equipment responsibility matrix">' +
+          '<div class="ep-eqr__head" role="row"><span role="columnheader">Equipment category</span>' +
+            '<span role="columnheader">Primary Assignee</span><span role="columnheader">Backup Assignee</span>' +
+            '<span role="columnheader">Coverage</span><span role="columnheader">Responsibility</span>' +
+            '<span role="columnheader">Edit</span></div>' +
+          (rows.length ? rows.map(equipmentRow).join("")
+            : '<p class="ep-settings__empty">No equipment category matches this search.</p>') +
+        "</div>") +
+      (equipment.historyOpen
+        ? '<div class="ep-eqr__history">' + (equipment.historyLoading
+          ? '<p class="ep-settings__empty" role="status">Loading change history…</p>'
+          : equipment.history.length
+            ? "<ul>" + equipment.history.map(function (entry) {
+                return "<li><strong>" + escape(entry.equipment_label || entry.equipment_key) + "</strong> · " +
+                  escape(entry.action) + (entry.user_name ? " · " + escape(entry.user_name) : "") +
+                  "<span>" + escape(entry.actor || "Unknown") + " · " +
+                  escape(entry.created_at ? new Date(entry.created_at).toLocaleString("en-IN") : "") +
+                  "</span></li>";
+              }).join("") + "</ul>"
+            : '<p class="ep-settings__empty">No responsibility change has been recorded yet.</p>') + "</div>"
+        : "") +
+      '<p class="ep-settings__footnote">Responsibility is portfolio-wide: management does not assign plants ' +
+        'one by one for it. A category with nobody configured leaves new tickets unassigned and notifies the ' +
+        'O&amp;M Head — a ticket is never discarded.</p>' +
+    "</section>";
+  }
+
+  function loadEquipment(force) {
+    if (!api().can("users.manage")) return Promise.resolve();
+    if (equipment.loading) return Promise.resolve();
+    if (equipment.loaded && !force) return Promise.resolve();
+    equipment.loading = true;
+    equipment.error = "";
+    render();
+    return api().request("/api/equipment-responsibilities").then(function (body) {
+      equipment.categories = Array.isArray(body.categories) ? body.categories : [];
+      equipment.holders = Array.isArray(body.holders) ? body.holders : [];
+      equipment.byUser = body.by_user || {};
+      equipment.loading = false;
+      equipment.loaded = true;
+      render();
+    }).catch(function (error) {
+      equipment.loading = false;
+      equipment.error = error.message || "Equipment responsibilities could not be loaded.";
+      render();
+    });
+  }
+
+  function loadEquipmentHistory() {
+    equipment.historyLoading = true;
+    render();
+    return api().request("/api/equipment-responsibilities/history?limit=40").then(function (body) {
+      equipment.history = Array.isArray(body.entries) ? body.entries : [];
+      equipment.historyLoading = false;
+      render();
+    }).catch(function (error) {
+      equipment.historyLoading = false;
+      equipment.error = error.message || "The change history could not be loaded.";
+      render();
+    });
+  }
+
+  function saveCategory(key, host) {
+    var row = host.querySelector('[data-eqr-row="' + key + '"]');
+    if (!row) return;
+    var primary = row.querySelector("[data-eqr-primary]").value || null;
+    var backup = row.querySelector("[data-eqr-backup]").value || null;
+    var active = row.querySelector("[data-eqr-active]").checked;
+    if (primary && backup && primary === backup) {
+      equipment.error = "The backup must be a different person from the primary.";
+      render();
+      return;
+    }
+    equipment.saving = key;
+    equipment.error = "";
+    equipment.message = "";
+    render();
+    api().request("/api/equipment-responsibilities/category/" + encodeURIComponent(key), {
+      method: "PUT",
+      body: { primary_user_id: primary, backup_user_id: backup, active: active }
+    }).then(function () {
+      equipment.saving = "";
+      equipment.message = "Equipment responsibility saved. It applies to every plant from now on.";
+      if (global.Solar91PortalToast) {
+        global.Solar91PortalToast.success("Equipment responsibility saved");
+      }
+      return loadEquipment(true);
+    }).catch(function (error) {
+      equipment.saving = "";
+      equipment.error = error.message || "The responsibility could not be saved.";
+      render();
+    });
+  }
+
+  function equipmentModalHTML(person) {
+    var mine = equipment.byUser[person.id] || [];
+    var rows = equipment.categories.map(function (category) {
+      var entry = (category.entries || []).find(function (item) { return item.user_id === person.id; });
+      var value = entry && entry.active ? entry.position : "";
+      return '<li class="ep-eqr__pick" data-eqr-pick="' + escape(category.label.toLowerCase()) + '">' +
+        "<span><strong>" + escape(category.label) + "</strong><small>" +
+          escape(category.area || "Plant side") +
+          (category.primary && category.primary.user_id !== person.id
+            ? " · primary: " + escape(category.primary.user_name || "") : "") + "</small></span>" +
+        '<select name="eqr:' + escape(category.key) + '" aria-label="' + escape(category.label) + '">' +
+          '<option value=""' + (value ? "" : " selected") + ">None</option>" +
+          '<option value="primary"' + (value === "primary" ? " selected" : "") + ">Primary</option>" +
+          '<option value="backup"' + (value === "backup" ? " selected" : "") + ">Backup</option>" +
+        "</select></li>";
+    }).join("");
+    return '<p class="ep-eqr__modal-intro">' + escape(person.name || person.email) +
+        " answers for the equipment selected here on <strong>every plant</strong>. This routes new tickets" +
+        " and notifications; it grants no approval or override authority, and currently holds " + mine.length +
+        " categor" + (mine.length === 1 ? "y" : "ies") + ".</p>" +
+      '<div class="ep-eqr__modal-tools">' +
+        '<input type="search" placeholder="Search equipment" data-eqr-search aria-label="Search equipment categories" />' +
+        '<button type="button" class="ep-settings__button ep-settings__button--small" data-eqr-bulk="primary">Select all as primary</button>' +
+        '<button type="button" class="ep-settings__button ep-settings__button--small" data-eqr-bulk="none">Clear all</button>' +
+      "</div>" +
+      '<ul class="ep-eqr__picks">' + rows + "</ul>";
+  }
+
   function modalHTML(mode, person, plantList) {
     var isProfile = mode === "profile";
     var role = person ? person.role : "Viewer";
@@ -251,10 +455,14 @@
     var selectedPmIds = person ? (person.pm_plant_ids || []).map(String) : [];
     var selectedHealthIds = person ? (person.health_plant_ids || []).map(String) : [];
     var isAssignee = role === "Assignee";
-    var title = mode === "invite" ? "Invite a person" : (isProfile ? "Edit person details" : "Change role and plant scope");
+    var title = mode === "invite" ? "Invite a person"
+      : mode === "equipment" ? "Equipment responsibility"
+      : (isProfile ? "Edit person details" : "Change role and plant scope");
     var plantsRequired = role === "Assignee" || role === "Site Engineer";
     var fields;
-    if (isProfile) {
+    if (mode === "equipment") {
+      fields = equipmentModalHTML(person);
+    } else if (isProfile) {
       var isInvited = person.invited;
       fields = '<label>Name<input name="name" required maxlength="255" value="' + escape(person.name || "") + '" /></label>' +
         '<label>Email<input name="email" type="email" maxlength="240" value="' + escape(person.email || "") + '"' +
@@ -355,6 +563,21 @@
     if (wiredHost === host) return;
     wiredHost = host;
     host.addEventListener("input", function (event) {
+      if (event.target.dataset.settingsFilter === "equipment-search") {
+        var where = event.target.selectionStart;
+        equipment.search = event.target.value;
+        render();
+        var box = host.querySelector('[data-settings-filter="equipment-search"]');
+        if (box) { box.focus(); try { box.setSelectionRange(where, where); } catch (_) {} }
+        return;
+      }
+      if (event.target.hasAttribute("data-eqr-search")) {
+        var term = event.target.value.trim().toLowerCase();
+        Array.prototype.forEach.call(host.querySelectorAll("[data-eqr-pick]"), function (item) {
+          item.hidden = !!term && item.getAttribute("data-eqr-pick").indexOf(term) === -1;
+        });
+        return;
+      }
       if (event.target.dataset.settingsFilter !== "search") return;
       var position = event.target.selectionStart;
       filters.search = event.target.value;
@@ -399,6 +622,17 @@
           storageError = error.message || "The retention sweep failed.";
           render();
         });
+      } else if (action === "refresh-equipment") {
+        equipment.message = "";
+        loadEquipment(true);
+      } else if (action === "toggle-equipment-history") {
+        equipment.historyOpen = !equipment.historyOpen;
+        if (equipment.historyOpen) loadEquipmentHistory();
+        else render();
+      } else if (action === "save-equipment") {
+        saveCategory(button.dataset.equipmentKey, host);
+      } else if (action === "edit-equipment" && person) {
+        loadEquipment(false).then(function () { openModal("equipment", person); });
       } else if (action === "invite") {
         openModal("invite");
       } else if (action === "edit-access" && person) {
@@ -435,6 +669,16 @@
         });
       }
     });
+    host.addEventListener("click", function (event) {
+      var bulk = event.target.closest("[data-eqr-bulk]");
+      if (!bulk) return;
+      var value = bulk.getAttribute("data-eqr-bulk") === "primary" ? "primary" : "";
+      Array.prototype.forEach.call(host.querySelectorAll("[data-eqr-pick]"), function (item) {
+        if (item.hidden) return;
+        var select = item.querySelector("select");
+        if (select) select.value = value;
+      });
+    });
     host.addEventListener("submit", function (event) {
       var form = event.target;
       if (!form.matches("[data-settings-form]")) return;
@@ -462,6 +706,23 @@
             ? "Invitation sent to " + result.email + "."
             : "Account saved for " + result.email + ". " + (result.email_note || "Invitation email was not sent.");
         });
+      } else if (mode === "equipment") {
+        var items = [];
+        Array.prototype.forEach.call(form.querySelectorAll("[data-eqr-pick] select"), function (select) {
+          if (!select.value) return;
+          items.push({
+            equipment_key: select.name.slice(4),
+            position: select.value,
+            active: true
+          });
+        });
+        request = api().request("/api/equipment-responsibilities/user/" +
+          encodeURIComponent(form.dataset.userId), { method: "PUT", body: { items: items } })
+          .then(function () {
+            statusMessage = "Equipment responsibility saved for every plant.";
+            equipment.message = "";
+            return loadEquipment(true);
+          });
       } else if (mode === "access") {
         var role = String(values.get("role") || "");
         var plantSelect = form.querySelector("[data-settings-plants]");
@@ -534,6 +795,7 @@
     statusMessage = "";
     loadUsers();
     loadStorageUsage(false);
+    loadEquipment(true);
   }
 
   global.Solar91PortalSettings = { render: renderPage };

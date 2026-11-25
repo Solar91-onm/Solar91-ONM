@@ -34,3 +34,36 @@
 
 /* Group headings for the combined and GSS checklists. */
 .s91pm-check-group{font-size:12px;font-weight:750;line-height:1.4;margin:10px 0 0;padding:8px 10px;border-radius:6px;background:linear-gradient(110deg,#e2f2e7,#f5faf6);border-left:3px solid #168548;color:#14552c;}
+
+/* Monthly activity register: one compact row per equipment category, its units on demand.
+   Same gradient tones and coloured leading edge as the all-plants matrix. */
+.s91pm-reg{min-width:1010px}
+.s91pm-reg thead th{position:sticky;top:0;z-index:2}
+.s91pm-reg th:first-child{position:sticky;left:0;z-index:1;min-width:232px;box-shadow:1px 0 0 var(--ep-border,#e6e8e7)}
+.s91pm-reg thead th:first-child{z-index:3;background:var(--ep-bg-muted,#f7f8f7)}
+.s91pm-reg tbody td{min-width:76px}
+.s91pm-reg .s91pm-reg-row{cursor:pointer;background:linear-gradient(100deg,var(--pm-light,#fff) 0%,var(--pm-bg-row,#fff) 46%)}
+.s91pm-reg .s91pm-reg-row>th:first-child{background:linear-gradient(100deg,var(--pm-wash,#fff) 0%,#fff 78%);border-left:3px solid var(--pm-edge,#dae6f0)}
+.s91pm-reg .s91pm-reg-row:hover>th:first-child,.s91pm-reg .s91pm-reg-row.s91pm-reg-on>th:first-child{background:linear-gradient(100deg,var(--pm-wash,#f3f6f4) 0%,var(--pm-light,#fff) 92%)}
+.s91pm-reg .s91pm-reg-row:hover,.s91pm-reg .s91pm-reg-row.s91pm-reg-on{background:linear-gradient(100deg,var(--pm-light,#f7faf8) 0%,var(--pm-light,#fff) 70%)}
+.s91pm-reg-toggle{display:flex;align-items:center;gap:8px;border:0;background:none;padding:0;margin:0;font:inherit;color:inherit;text-align:left;cursor:pointer;width:100%;min-width:0}
+.s91pm-reg-toggle>span:last-child{min-width:0}
+.s91pm-reg-toggle b{font-size:12.5px;display:block;overflow-wrap:anywhere}
+.s91pm-reg-toggle small{font-size:9.5px;margin-top:2px}
+.s91pm-reg-toggle:hover b{color:var(--ep-accent-strong,#007a0d)}
+.s91pm-chev{flex:none;width:0;height:0;border-left:6px solid var(--pm-edge,#8eafca);border-top:5px solid transparent;border-bottom:5px solid transparent;transition:transform 120ms ease}
+.s91pm-reg-on .s91pm-chev{transform:rotate(90deg) translateX(1px)}
+.s91pm-num{font-variant-numeric:tabular-nums;font-size:13px}
+.s91pm-reg td small{font-size:9.5px;margin-top:3px}
+.s91pm-mini{display:flex;flex-direction:column;gap:3px;min-width:78px}
+.s91pm-mini b{font-size:11px;font-variant-numeric:tabular-nums}
+.s91pm-mini .s91pm-bar{margin-top:0;background:var(--pm-line,#e7ebe8)}
+.s91pm-mini .s91pm-bar i{background:var(--pm-edge,#168548)}
+.s91pm-reg-detail>td{padding:0 10px 12px;background:var(--ep-bg-muted,#f7f8f7)}
+.s91pm-subtable{width:100%;font-size:11.5px;border-collapse:separate;border-spacing:0;background:var(--ep-bg,#fff);border:1px solid var(--ep-border,#e6e8e7);border-radius:8px}
+.s91pm-subtable th,.s91pm-subtable td{padding:7px 9px;border-bottom:1px solid var(--ep-border,#e6e8e7);vertical-align:middle;text-align:left}
+.s91pm-subtable tbody tr:last-child td{border-bottom:0}
+.s91pm-subtable thead th{background:#fbfcfb;font-size:9.5px;text-transform:uppercase;letter-spacing:.02em;color:#506159;font-weight:750;white-space:nowrap}
+.s91pm-subtable td:last-child{width:1%;white-space:nowrap}
+.s91pm-reg-detail .s91pm-foot{margin:8px 0 0!important}
+@media(max-width:600px){.s91pm-reg th:first-child{min-width:186px}.s91pm-reg-detail>td{padding:0 6px 10px}}

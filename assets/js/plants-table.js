@@ -385,6 +385,11 @@
           '<option value="__all">All districts</option>' +
           opts(districts, ui.district) +
         "</select>" +
+        // Adding a plant is an O&M Head action (plants.manage), the same authority the row's
+        // Edit button needs. The API enforces it as well; this only decides what is offered.
+        (canEdit() && mode.kind === "all"
+          ? '<button class="ep-pt__add" type="button" data-pt-add>+ Add New Plant</button>'
+          : "") +
       "</div>";
   }
 
@@ -667,6 +672,17 @@
     });
 
     global.Solar91PortalSort.wire(container, ui.sort, function () { render(container); }, "data-pt-sort");
+
+    var addButton = container.querySelector("[data-pt-add]");
+    if (addButton && global.Solar91PortalPlantEditor) {
+      addButton.addEventListener("click", function () {
+        global.Solar91PortalPlantEditor.create(function () {
+          loadPromise = null;        // the new plant is re-read, not patched into memory
+          loaded = false;
+          show(container, { siteCode: null, section: detailSection, merged: mode.merged });
+        });
+      });
+    }
 
     container.querySelectorAll("[data-pt-export]").forEach(function (btn) {
       btn.addEventListener("click", function () {

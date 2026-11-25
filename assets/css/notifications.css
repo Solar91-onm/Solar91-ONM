@@ -1,0 +1,151 @@
+/* Notification centre: the top-bar bell and its panel, and the bottom-right toasts.
+   Portal palette and surfaces only; the five tones match the rest of the portal —
+   green done, blue information, amber waiting, red critical, purple PM permission. */
+
+.ep-notify { position: relative; display: inline-flex; }
+.ep-notify__button { position: relative; }
+.ep-notify__button.has-unread { border-color: var(--ep-accent, #009710); color: var(--ep-accent-strong, #007a0d); }
+.ep-notify__count {
+  position: absolute; top: -5px; right: -5px; min-width: 18px; height: 18px; padding: 0 4px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 999px; background: linear-gradient(145deg, #d4493d, #9e2c24); color: #fff;
+  font-size: 10px; font-weight: 750; line-height: 1; box-shadow: 0 1px 2px #1018141f;
+}
+.ep-notify__count[hidden] { display: none; }
+
+.ep-note-panel {
+  position: absolute; top: calc(100% + 8px); right: 0; z-index: 60;
+  width: min(390px, calc(100vw - 24px)); max-height: min(560px, calc(100vh - 110px));
+  display: flex; flex-direction: column; overflow: hidden;
+  background: var(--ep-bg, #fff); border: 1px solid var(--ep-border, #e6e8e7);
+  border-radius: var(--ep-radius-lg, 14px); box-shadow: 0 12px 32px #10181422;
+  text-align: left;
+}
+.ep-note-panel[hidden] { display: none; }
+.ep-note-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 12px 14px; border-bottom: 1px solid var(--ep-border, #e6e8e7);
+}
+.ep-note-head strong { font-size: 14px; color: var(--ep-text-strong, #0e1512); }
+.ep-note-allread {
+  border: 0; background: none; padding: 2px; font: inherit; font-size: 11.5px; font-weight: 650;
+  color: var(--ep-accent-strong, #007a0d); cursor: pointer;
+}
+.ep-note-allread:disabled { color: var(--ep-text-muted, #5b6761); cursor: default; }
+.ep-note-tabs { display: flex; gap: 2px; padding: 8px 10px 0; }
+.ep-note-tabs button {
+  flex: 1; border: 0; background: none; padding: 7px 6px; font: inherit; font-size: 11.5px;
+  font-weight: 650; color: var(--ep-text-muted, #5b6761); cursor: pointer;
+  border-bottom: 2px solid transparent; white-space: nowrap;
+}
+.ep-note-tabs button[aria-selected="true"] {
+  color: var(--ep-text-strong, #0e1512); border-bottom-color: var(--ep-accent, #009710);
+}
+.ep-note-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 6px 10px 10px; }
+.ep-note-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+
+.ep-note {
+  --note-edge: #8eafca; --note-wash: #edf4fa; --note-light: #f9fcff;
+  display: flex; align-items: stretch; gap: 6px; border-radius: 9px;
+  border: 1px solid var(--ep-border, #e6e8e7); border-left: 3px solid var(--note-edge);
+  background: linear-gradient(105deg, var(--note-light), #fff 72%);
+}
+.ep-note--green { --note-edge: #168548; --note-wash: #e0f3e5; --note-light: #f3fbf5; }
+.ep-note--blue { --note-edge: #2883c5; --note-wash: #deedf9; --note-light: #f4faff; }
+.ep-note--amber { --note-edge: #d99122; --note-wash: #fcebd1; --note-light: #fffbf2; }
+.ep-note--red { --note-edge: #d4493d; --note-wash: #fce3e0; --note-light: #fff6f4; }
+.ep-note--purple { --note-edge: #9056b2; --note-wash: #efe3f6; --note-light: #fbf7fd; }
+.ep-note.is-unread { background: linear-gradient(105deg, var(--note-wash), var(--note-light) 85%); }
+.ep-note__main {
+  flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 3px;
+  border: 0; background: none; padding: 9px 10px; font: inherit; color: inherit;
+  text-align: left; cursor: pointer;
+}
+.ep-note__head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.ep-note__cat {
+  font-size: 9px; font-weight: 750; letter-spacing: .06em; text-transform: uppercase;
+  color: var(--note-edge);
+}
+.ep-note__priority {
+  font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em;
+  padding: 1px 5px; border-radius: 4px; background: var(--note-wash); color: var(--note-edge);
+}
+.ep-note__time { margin-left: auto; font-size: 10px; color: var(--ep-text-muted, #5b6761); }
+.ep-note__title { font-size: 12.5px; font-weight: 650; line-height: 1.35; overflow-wrap: anywhere; }
+.ep-note__text, .ep-note__where {
+  font-size: 11px; line-height: 1.4; color: var(--ep-text-muted, #5b6761); overflow-wrap: anywhere;
+}
+.ep-note__where { font-weight: 650; }
+.ep-note__read {
+  flex: none; border: 0; border-left: 1px solid var(--ep-border, #e6e8e7); background: none;
+  padding: 0 9px; font: inherit; font-size: 10px; font-weight: 650;
+  color: var(--ep-accent-strong, #007a0d); cursor: pointer; white-space: nowrap;
+}
+.ep-note__main:hover .ep-note__title { color: var(--ep-accent-strong, #007a0d); }
+.ep-note.is-action .ep-note__main { padding: 10px; }
+.ep-note-empty {
+  padding: 26px 14px; text-align: center; color: var(--ep-text-muted, #5b6761); font-size: 12px;
+}
+.ep-note-empty strong { display: block; font-size: 13px; color: var(--ep-text, #101915); margin-bottom: 4px; }
+.ep-note-empty p { margin: 0; font-size: 11.5px; line-height: 1.5; }
+.ep-note-retry, .ep-note-more {
+  margin-top: 10px; width: 100%; min-height: 32px; border: 1px solid var(--ep-border-strong, #d4d7d4);
+  border-radius: 7px; background: var(--ep-bg, #fff); font: inherit; font-size: 11.5px;
+  font-weight: 650; cursor: pointer;
+}
+.ep-note-more:hover, .ep-note-retry:hover { border-color: var(--ep-accent, #009710); color: var(--ep-accent-strong, #007a0d); }
+.ep-note-foot {
+  margin: 0; padding: 8px 12px; border-top: 1px solid var(--ep-border, #e6e8e7);
+  font-size: 10px; line-height: 1.45; color: var(--ep-text-muted, #5b6761);
+  background: var(--ep-bg-muted, #f7f8f7);
+}
+
+/* ── Toasts ───────────────────────────────────────────────────────────────── */
+
+.ep-toasts {
+  position: fixed; right: 16px; bottom: 16px; z-index: 90;
+  display: flex; flex-direction: column; gap: 8px; align-items: flex-end;
+  width: min(360px, calc(100vw - 32px)); pointer-events: none;
+}
+.ep-toast {
+  --toast-edge: #2883c5; --toast-light: #f4faff;
+  pointer-events: auto; width: 100%; display: flex; align-items: flex-start; gap: 8px;
+  padding: 10px 10px 10px 12px; border-radius: 10px;
+  border: 1px solid var(--ep-border, #e6e8e7); border-left: 3px solid var(--toast-edge);
+  background: linear-gradient(130deg, var(--toast-light), #fff 70%);
+  box-shadow: 0 8px 24px #1018141f;
+  animation: ep-toast-in 160ms ease-out;
+}
+.ep-toast--success { --toast-edge: #168548; --toast-light: #f3fbf5; }
+.ep-toast--info { --toast-edge: #2883c5; --toast-light: #f4faff; }
+.ep-toast--alert { --toast-edge: #d99122; --toast-light: #fffbf2; }
+.ep-toast--error, .ep-toast--critical { --toast-edge: #d4493d; --toast-light: #fff6f4; }
+.ep-toast__body { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.ep-toast__title { font-size: 12.5px; font-weight: 650; line-height: 1.35; overflow-wrap: anywhere; }
+.ep-toast__text { font-size: 11.5px; line-height: 1.4; color: var(--ep-text-muted, #5b6761); overflow-wrap: anywhere; }
+.ep-toast__actions { flex: none; display: flex; align-items: center; gap: 4px; }
+.ep-toast__view {
+  border: 1px solid var(--toast-edge); border-radius: 6px; background: #fff; padding: 4px 8px;
+  font: inherit; font-size: 11px; font-weight: 650; color: var(--toast-edge); cursor: pointer;
+}
+.ep-toast__close {
+  border: 0; background: none; padding: 0 4px; font-size: 17px; line-height: 1;
+  color: var(--ep-text-muted, #5b6761); cursor: pointer;
+}
+.ep-toast.is-leaving { animation: ep-toast-out 150ms ease-in forwards; }
+.ep-toast.is-repeat { animation: ep-toast-pulse 320ms ease-out; }
+@keyframes ep-toast-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+@keyframes ep-toast-out { to { opacity: 0; transform: translateY(6px); } }
+@keyframes ep-toast-pulse { 0% { transform: scale(1); } 45% { transform: scale(1.015); } 100% { transform: scale(1); } }
+@media (prefers-reduced-motion: reduce) {
+  .ep-toast, .ep-toast.is-leaving, .ep-toast.is-repeat { animation: none; }
+}
+
+/* Phones: the toasts sit above the content, full width, clear of the top bar. */
+@media (max-width: 600px) {
+  .ep-toasts { left: 12px; right: 12px; bottom: 12px; width: auto; align-items: stretch; }
+  .ep-note-panel {
+    position: fixed; top: 58px; right: 8px; left: 8px; width: auto;
+    max-height: calc(100vh - 76px);
+  }
+}

@@ -93,6 +93,15 @@
 .ep-pd__field input:focus,
 .ep-pd__field select:focus { outline: 2px solid var(--ep-accent-ring); outline-offset: 1px; border-color: var(--ep-accent); }
 .ep-pd__form-error { min-height: 1.2em; margin: var(--ep-s-3) var(--ep-s-5) 0; color: var(--ep-red); font-size: var(--ep-fs-sm); }
+/* Add New Plant: every column of the Info table, so the form is wider than the edit dialog. */
+.ep-pd__modal--wide { width: min(880px, 100%); }
+.ep-pd__modal-body--create { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.ep-pd__create-note {
+  margin: var(--ep-s-3) var(--ep-s-5) 0; font-size: var(--ep-fs-sm); line-height: 1.5;
+  color: var(--ep-text-muted);
+}
+@media (max-width: 860px) { .ep-pd__modal-body--create { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 560px) { .ep-pd__modal-body--create { grid-template-columns: 1fr; } }
 .ep-pd__modal-foot {
   display: flex; justify-content: flex-end; gap: var(--ep-s-2);
   padding: var(--ep-s-4) var(--ep-s-5) var(--ep-s-5);

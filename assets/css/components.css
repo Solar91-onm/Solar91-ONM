@@ -1067,6 +1067,17 @@
 }
 .ep-pt__export:hover { background: var(--ep-accent-soft); }
 
+/* Add New Plant: the toolbar's one primary action, beside the search box. */
+.ep-pt__add {
+  flex: none; display: inline-flex; align-items: center; gap: 6px;
+  padding: 8px 14px; border: 1px solid var(--ep-accent-strong); border-radius: var(--ep-radius-md);
+  background: var(--ep-accent-strong); color: #fff; cursor: pointer;
+  font-family: inherit; font-size: var(--ep-fs-md); font-weight: 650; white-space: nowrap;
+}
+.ep-pt__add:hover { background: #00610b; border-color: #00610b; }
+.ep-pt__add:focus-visible { outline: 2px solid var(--ep-accent-ring); outline-offset: 2px; }
+@media (max-width: 700px) { .ep-pt__add { width: 100%; justify-content: center; } }
+
 .ep-nav-detail-sub { padding: 0 0 2px; display: none; }
 .ep-nav-detail-sub.is-open { display: block; }
 .ep-nav-details-row { display: flex; align-items: center; }

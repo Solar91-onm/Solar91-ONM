@@ -2678,9 +2678,22 @@
       state.statusFilter = "Active";
       state.search = "";
       renderView();
+      if (global.Solar91PortalToast && saved) {
+        global.Solar91PortalToast.success(
+          "Ticket " + saved.id + " created",
+          saved.assignee
+            ? "Assigned to " + saved.assignee + "."
+            : "Not assigned yet: the O&M Head has been notified."
+        );
+      }
+      // A new ticket notifies other people; refresh this user's own badge too.
+      if (global.Solar91PortalNotifications) global.Solar91PortalNotifications.refresh();
     }).catch(function (error) {
       state.submitting = false;
       state.submitError = error.message || "Could not save this issue ticket.";
+      if (global.Solar91PortalToast) {
+        global.Solar91PortalToast.error("Ticket not saved", state.submitError);
+      }
       renderWizardView();
     });
   }

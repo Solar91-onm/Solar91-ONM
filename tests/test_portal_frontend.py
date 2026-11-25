@@ -1238,9 +1238,14 @@ def test_site_issue_register_places_id_before_action_and_labels_description():
 
 def test_portal_scripts_do_not_reference_removed_endpoints():
     offenders = []
+    # The asset register's own route is gone. The pattern stops at a word boundary so the live
+    # /api/equipment-responsibilities endpoint (Login access) is not mistaken for it.
+    dead_routes = re.compile(r"/api/equipment(?![\w-])")
     for path in sorted(PORTAL_ASSETS.rglob("*.js")):
         body = path.read_text(encoding="utf-8")
-        for dead in ("/api/equipment", "Solar91PortalAssets", "Solar91PortalMock"):
+        if dead_routes.search(body):
+            offenders.append(f"{path.name}: /api/equipment")
+        for dead in ("Solar91PortalAssets", "Solar91PortalMock"):
             if dead in body:
                 offenders.append(f"{path.name}: {dead}")
     assert offenders == [], offenders
@@ -1770,7 +1775,10 @@ def test_pm_overview_routes_through_role_scoped_portal_data_and_existing_calenda
     assert 'entry.status !== "Cancelled"' in overview
     assert 'data-pm-open-plant="' in overview
     assert 'data-pm-open-event="' in overview
-    assert 'navState.pmCalendarOpen ? ["operations-calendar"] : ["pm-overview"]' in navigation
+    # Both PM screens are now one module (pm-tracking): the portfolio, a plant's page and the
+    # calendar are states of it, which is what test_pm_two_screens.py pins. The washing calendar
+    # still routes to operations-calendar.
+    assert 'if (pageId === "pm") return ["pm-tracking"];' in navigation
     assert 'initialMonth: calendarType === "pm" && navState.pmCalendarOpen' in navigation
     assert "function focusPMEvent(state, eventId)" in calendar
     assert 'data-calendar-action="return-to-pm-overview"' in calendar

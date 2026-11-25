@@ -82,6 +82,15 @@
     setText("[data-last-updated]", "Updated —");
     wireUserMenu();
 
+    // The notification centre is portal-wide: one bell, one shared poller, started once for the
+    // session. It is fetched as a module rather than shipped in the shell, so the first paint
+    // carries no extra bytes; the bell's markup is already in the top bar either way.
+    if (global.Solar91Modules) {
+      global.Solar91Modules.load(["notifications"]).then(function () {
+        if (global.Solar91PortalNotifications) global.Solar91PortalNotifications.init();
+      }).catch(function () { /* the portal works without the bell; nothing else depends on it */ });
+    }
+
     global.Solar91PortalNav.wire();
     global.Solar91PortalNav.applyRoleVisibility(user.role || "Viewer");
     global.Solar91PortalNav.loadPlants();
