@@ -50,7 +50,7 @@ def test_approval_sequence_override_and_scopes(client,db,monkeypatch):
     assert submit(client,rows[4]).status_code==404
     assert submit(client,rows[1]).status_code==409
     assert submit(client,rows[0],[]).status_code==422
-    assert submit(client,rows[0],[{'result':'Not OK'}]*5).status_code==422
+    assert submit(client,rows[0],[{'result':'Not OK'}]*len(CHECKLISTS['Inverter'])).status_code==422
     assert submit(client,rows[0]).status_code==200
     assert state(client)['INV-01']['status']=='Pending approval'
     assert state(client)['INV-02']['label']=='Locked'
@@ -88,9 +88,9 @@ def test_unassigned_marker_and_future_activity(client,db,monkeypatch):
     assert len(body['plants'])==1 and body['plants'][0]['configured']
     assert any(x['source']=='cycle_plan' for x in body['legacy'])
     assert not state(client)['EARTH-01']['can_submit']
-    assert 'VCB' not in CHECKLISTS and 'IDT Transformer' not in CHECKLISTS
+    assert len(CHECKLISTS['VCB']) == 11 and len(CHECKLISTS['IDT Transformer']) == 17
     assert 'Weather Station & UPS' not in CHECKLISTS and 'Fire & Safety' not in CHECKLISTS
-    assert len(CHECKLISTS['4 Pole + ACDB + Aux. TX'])==1
+    assert len(CHECKLISTS['4 Pole + ACDB + Aux. TX'])==32
 
 
 def test_portfolio_summary_omits_details_without_changing_status(client,db,monkeypatch):
@@ -123,3 +123,35 @@ def test_recurring_plan_start_and_explicit_dates(client, db, monkeypatch):
     assert [(a["equipment_id"],a["date"]) for a in dec["activities"]]==[("INV 7","2026-12-08")]
     assert not any(a.get("planPhase")=="Inverter" for a in dec["legacy"])
     assert any(a.get("planPhase")=="IDT Transformer" and a["date"]=="2026-12-17" for a in dec["legacy"])
+
+
+def test_new_equipment_and_large_combined_checklist(client, db, monkeypatch):
+    from app.pmplan.tracking import CATEGORIES
+    assert set(CATEGORIES) == set(CHECKLISTS)
+    combined=CHECKLISTS['4 Pole + ACDB + Aux. TX']
+    assert [c.removeprefix('Auxiliary Transformer — ') for c in combined if c.startswith('Auxiliary Transformer — ')] == CHECKLISTS['IDT Transformer']
+    assert len(combined)==32 and len(CHECKLISTS['GSS visit'])==23
+    assert all(c.startswith('GSS-side ') for c in CHECKLISTS['GSS visit'])
+    monkeypatch.setattr('app.pmplan.tracking.business_today', lambda: date(2026,11,25))
+    plant=Plant(site_code='ABH01',plant_name='ABHANERI',status='active'); db.add(plant); db.flush()
+    row=PMTrackingActivity(plant_id=plant.id,equipment='4 Pole + ACDB + Aux. TX',equipment_id='4 Pole — structure inspection',scheduled_on=date(2026,11,1))
+    db.add(row); db.commit(); engineer(client,db,plant)
+    assert len(state(client)[row.equipment_id]['checks'])==32
+    data=[{'result':'OK'} for _ in combined]; data[-1]={'result':'N/A'}
+    assert submit(client,row,data).status_code==422
+    data[-1]['note']='Breather is not fitted on this dry-type transformer'
+    assert submit(client,row,[{'result':'N/A','note':'not applicable'} for _ in combined]).status_code==422
+    assert submit(client,row,data).status_code==200
+    saved=state(client)[row.equipment_id]['checklist']
+    assert len(saved)==32 and saved[-1]['result']=='N/A'
+    login_user(client,db,role='O&M Head',email='reviewer@example.com')
+    assert act(client,row,'approve').status_code==200
+
+
+def test_returned_legacy_checklist_keeps_original_task_version(client,db,monkeypatch):
+    plant,_,rows=setup_rows(db,monkeypatch)
+    row=rows[0]; row.status='Returned'; row.checklist=[{'task':'Original monthly task','result':'Not OK','note':'Review requested'}]; db.commit()
+    engineer(client,db,plant)
+    assert state(client)[row.equipment_id]['checks']==['Original monthly task']
+    assert submit(client,row,[{'result':'OK'}]).status_code==200
+    assert state(client)[row.equipment_id]['checklist'][0]['task']=='Original monthly task'

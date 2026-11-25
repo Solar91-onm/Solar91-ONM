@@ -31,3 +31,6 @@
 .s91pm .s91pm-cellbar i{background:var(--pm-edge,#8eafca)}
 .s91pm :is(.s91pm-kpi,.s91pm-plantcard){background:linear-gradient(175deg,var(--pm-light,#f9fcff),#fff 64%);border-top-color:var(--pm-edge,var(--pm-tone))}
 .s91pm .s91pm-next{background:linear-gradient(145deg,#fffafa,#fce9e5)}
+
+/* Group headings for the combined and GSS checklists. */
+.s91pm-check-group{font-size:12px;font-weight:750;line-height:1.4;margin:10px 0 0;padding:8px 10px;border-radius:6px;background:linear-gradient(110deg,#e2f2e7,#f5faf6);border-left:3px solid #168548;color:#14552c;}
