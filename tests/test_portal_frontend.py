@@ -322,6 +322,8 @@ def test_login_access_uses_real_users_and_hides_categories_from_settings(client)
     # The Photo storage card carries the retention window and the one-off sweep.
     assert "/api/photos/retention" in settings
     assert "data-settings-retention-days" in settings and "data-settings-purge-days" in settings
+    settings_render = settings.split("function render() {", 1)[1].split("// Declared here", 1)[0]
+    assert settings_render.index("renderEquipmentPanel(canManage)") < settings_render.index("renderStorageCard(canManage)")
 
 
 def test_login_access_sidebar_icon_and_toggle_are_sized_and_scoped():

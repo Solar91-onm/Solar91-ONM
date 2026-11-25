@@ -236,7 +236,6 @@
       '<header class="ep-settings__page-head"><div><h1>Login access</h1>' +
         '<p>Manage Clerk sign-in invitations, account status, roles, and equipment responsibility.</p></div>' +
         '<span class="ep-settings__access-badge"><i></i>Clerk sign-in</span></header>' +
-      renderStorageCard(canManage) +
       '<section class="ep-settings__panel" aria-labelledby="settings-team-title">' +
         '<div class="ep-settings__panel-intro"><h2 id="settings-team-title">Team &amp; access</h2>' +
           '<p>Assignees and O&amp;M Heads can work across all plants and equipment. Equipment responsibility routes work automatically; Site Engineers remain assigned to one plant.</p></div>' +
@@ -266,6 +265,7 @@
         '<p class="ep-settings__footnote">Sign-in is provided by Clerk. This page manages Solar91 invitations and database-backed access; it does not display or expose Clerk credentials.</p>' +
       '</section>' +
       renderEquipmentPanel(canManage) +
+      renderStorageCard(canManage) +
       (activeHost.querySelector("[data-settings-modal]") ? activeHost.querySelector("[data-settings-modal]").outerHTML : "") +
     "</div>";
   }
