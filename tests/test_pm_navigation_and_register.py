@@ -375,6 +375,12 @@ def test_the_checklist_can_be_opened_for_a_walkthrough_but_never_records_an_entr
 
         fire(host, 'click', { pmx: 'record', id: 'inv4' });
         const html = host.html;
+        // It opens as its own box over the page, not as a column that stretches it.
+        assert(html.indexOf('s91pm-modal-card') !== -1, 'the checklist did not open in a dialog box');
+        assert(html.indexOf('s91pm-modal-body') !== -1, 'the dialog has no scrolling body');
+        assert(html.indexOf('s91pm-cal-grid') !== -1, 'the page behind the dialog is gone');
+        const aside = html.slice(html.indexOf('s91pm-detail'), html.indexOf('s91pm-modal'));
+        assert(aside.indexOf('data-pmx-submit-form') === -1, 'the form is still inline in the detail panel');
         assert(html.indexOf('data-pmx-preview') !== -1, 'the form did not open in preview mode');
         assert(html.indexOf('Preview only') !== -1, 'the form does not say that nothing is saved');
         assert(/type="submit" disabled/.test(html), 'the submit button must be disabled in a preview');
@@ -392,6 +398,12 @@ def test_the_checklist_can_be_opened_for_a_walkthrough_but_never_records_an_entr
         });
         await settle();
         assert(urls.length === before, 'a preview must never reach the API');
+
+        // A click inside the box must not close it; the backdrop must.
+        fire(host, 'click', { pmx: 'dialog' });
+        assert(host.html.indexOf('s91pm-modal-card') !== -1, 'a click inside the box closed it');
+        fire(host, 'click', { pmx: 'cancel-record' });
+        assert(host.html.indexOf('s91pm-modal-card') === -1, 'the box did not close');
 
         // The one the user may record still offers the real button.
         fire(host, 'click', { pmx: 'select', id: 'inv3' });

@@ -67,3 +67,26 @@
 .s91pm-subtable td:last-child{width:1%;white-space:nowrap}
 .s91pm-reg-detail .s91pm-foot{margin:8px 0 0!important}
 @media(max-width:600px){.s91pm-reg th:first-child{min-width:186px}.s91pm-reg-detail>td{padding:0 6px 10px}}
+
+/* The checklist opens as its own box — the Module Cleaning record sheet's shape — so a 32-check
+   sheet never stretches the page. Header and footer stay put; only the checks scroll. */
+.s91pm-modal{position:fixed;inset:0;z-index:70;display:grid;place-items:center;padding:16px;background:rgba(14,21,18,.42)}
+.s91pm-modal-card{position:relative;display:flex;flex-direction:column;overflow:hidden;width:min(760px,100%);max-height:min(88vh,840px);border:1px solid var(--ep-border,#e6e8e7);border-radius:var(--ep-radius-lg,14px);background:var(--ep-bg,#fff);box-shadow:0 18px 44px #10181433;text-align:left}
+.s91pm-modal-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex:none;padding:13px 16px;border-bottom:1px solid var(--ep-border,#e6e8e7);background:linear-gradient(135deg,#f3fbf5,#fff 62%)}
+.s91pm-modal-head h2{font-size:17px;margin:3px 0 2px;overflow-wrap:anywhere}
+.s91pm-modal-head p{font-size:11.5px}
+.s91pm-modal-x{flex:none;width:30px;height:30px;border:0;border-radius:7px;background:none;font-size:21px;line-height:1;color:var(--ep-text-muted,#5b6761);cursor:pointer}
+.s91pm-modal-x:hover{background:var(--ep-bg-muted,#f2f5f2)}
+.s91pm-modal-form{display:flex;flex-direction:column;min-height:0;flex:1 1 auto;gap:0}
+.s91pm-modal-body{min-height:0;flex:1 1 auto;overflow-y:auto;overscroll-behavior:contain;padding:13px 16px 16px;display:flex;flex-direction:column;gap:10px}
+.s91pm-modal-foot{flex:none;display:flex;flex-direction:column;gap:6px;padding:11px 16px 13px;border-top:1px solid var(--ep-border,#e6e8e7);background:var(--ep-bg-muted,#f7f8f7)}
+.s91pm-modal-foot .s91pm-foot{margin-top:0!important}
+.s91pm-modal .s91pm-check-group{position:sticky;top:-13px;z-index:1}
+.s91pm-modal .s91pm-form-error{margin:0 16px 10px}
+@media(max-width:600px){
+  .s91pm-modal{padding:0;place-items:stretch}
+  .s91pm-modal-card{width:100%;max-height:100vh;border-radius:0;border:0}
+  .s91pm-modal-body{padding:12px}
+}
+@media(prefers-reduced-motion:no-preference){.s91pm-modal-card{animation:s91pm-pop 140ms ease-out}}
+@keyframes s91pm-pop{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}

@@ -177,7 +177,6 @@
     if(a.permission_reason)h+=`<div class="s91pm-note"><b>Permission ${e(a.permission.toLowerCase())}</b><p>${e(a.permission_reason)}</p><small>${e(a.requested_name||'')} · ${dlabel(a.requested_at)}</small>${a.authorisation_note?`<p>${e(a.authorisation_note)}</p><small>${e(a.authorised_name||'')} · ${dlabel(a.authorised_at)}</small>`:''}</div>`;
     if(a.review_note)h+=`<div class="s91pm-note"><b>Review note</b><p>${e(a.review_note)}</p><small>${e(a.reviewed_name||'')} · ${dlabel(a.reviewed_at)}</small></div>`;
     if(a.equipment==='GSS visit')h+='<div class="s91pm-note"><b>GSS side only</b><p>Record authorised inspections or verified utility-maintenance records. Do not operate utility-owned equipment without authorisation.</p></div>';
-    if(a.source==='tracking'&&s.form==='submit'&&(a.can_submit||a.checks?.length))return h+checkForm(s,a);
     if(a.checklist?.length)h+=`<h3>Recorded checklist</h3><p>${e(a.submitted_name||'')} · ${dlabel(a.inspected_on)}</p><div class="s91pm-results">${a.checklist.map(c=>`<div><b>${e(c.task)}</b>${pill(c.result,c.result==='OK'?'green':c.result==='N/A'?'neutral':'red')}${c.note?`<p>${e(c.note)}</p>`:''}</div>`).join('')}</div>${a.remarks?`<p><b>Remarks:</b> ${e(a.remarks)}</p>`:''}`;
     else h+=`<h3>Monthly checklist · ${a.checks.length} checks</h3><ol class="s91pm-check-preview">${a.checks.map(c=>`<li>${e(c)}</li>`).join('')}</ol>`;
     if(a.equipment.startsWith('4 Pole'))h+='<p class="s91pm-foot">Four Pole, shared ACDB panel checks and Auxiliary Transformer. Each section must be reviewed.</p>';
@@ -193,7 +192,23 @@
     let section="";
     const preview=!a.can_submit;
     const checks=a.checks.map((c,i)=>{const prev=a.checklist?.find(x=>x.task===c)||{};const parts=c.split(" — ");const group=parts.length>1?parts[0]:"";const label=group?parts.slice(1).join(" — "):c;const heading=group&&group!==section?`<h3 class="s91pm-check-group">${e(group)}</h3>`:"";section=group;return `${heading}<fieldset><legend>${i+1}. ${e(label)}</legend><select name="result${i}" required aria-label="Result ${i+1}">${option("","Select result",prev.result||"")}${['OK','Not OK','Abnormality','N/A'].map(x=>option(x,x,prev.result||"")).join('')}</select><textarea rows="2" maxlength="2000" name="note${i}" placeholder="Observation / N/A justification (required unless OK)" aria-label="Observation ${i+1}">${e(prev.note||'')}</textarea></fieldset>`;}).join('');
-    return `<form data-pmx-submit-form${preview?' data-pmx-preview':''}>${preview?`<div class="s91pm-callout"><b>Preview only — nothing is saved</b><p>This checklist is not open to you for recording${a.date>s.data.today?' until '+dlabel(a.date):''}. You can read and walk through it; no entry is created and no approval is requested.</p></div>`:''}<div class="s91pm-note"><b>Safety and applicability</b><p>Use approved OEM limits, authorised personnel and applicable isolation/permit-to-work procedures. Mark N/A only for genuinely absent or inapplicable components, with justification. Leave incomplete or deferred work unsubmitted.</p></div><label>Inspection date<input name="inspected_on" type="date" min="${e(a.date)}" max="${e(s.data.today)}" value="${e(a.inspected_on||s.data.today)}" required></label>${checks}<label>General remarks<textarea name="reason" maxlength="4000" rows="3">${e(a.remarks||'')}</textarea></label><div class="s91pm-wrap"><button class="s91pm-btn s91pm-primary" type="submit"${preview?' disabled title="Preview only: this activity is not open to you for recording"':''}>Submit for approval</button>${btn(preview?"Close preview":"Cancel","cancel-record")}</div><p class="s91pm-foot">${preview?'Preview only: the entry is not stored and no approval is requested.':'Engineer identity and submission time are captured automatically. No photo upload.'}</p></form>`;
+    return `<form class="s91pm-modal-form" data-pmx-submit-form${preview?' data-pmx-preview':''}><div class="s91pm-modal-body">${preview?`<div class="s91pm-callout"><b>Preview only — nothing is saved</b><p>This checklist is not open to you for recording${a.date>s.data.today?' until '+dlabel(a.date):''}. You can read and walk through it; no entry is created and no approval is requested.</p></div>`:''}<div class="s91pm-note"><b>Safety and applicability</b><p>Use approved OEM limits, authorised personnel and applicable isolation/permit-to-work procedures. Mark N/A only for genuinely absent or inapplicable components, with justification. Leave incomplete or deferred work unsubmitted.</p></div><label>Inspection date<input name="inspected_on" type="date" min="${e(a.date)}" max="${e(s.data.today)}" value="${e(a.inspected_on||s.data.today)}" required></label>${checks}<label>General remarks<textarea name="reason" maxlength="4000" rows="3">${e(a.remarks||'')}</textarea></label></div><footer class="s91pm-modal-foot"><div class="s91pm-wrap"><button class="s91pm-btn s91pm-primary" type="submit"${preview?' disabled title="Preview only: this activity is not open to you for recording"':''}>Submit for approval</button>${btn(preview?"Close preview":"Cancel","cancel-record")}</div><p class="s91pm-foot">${preview?'Preview only: the entry is not stored and no approval is requested.':'Engineer identity and submission time are captured automatically. No photo upload.'}</p></footer></form>`;
+  }
+  /**
+   * The checklist as an overlay box, not a column that grows down the page. One per page, over
+   * whichever view is open, closed by its × button, the backdrop or Escape. The form inside is
+   * the same one as before, so the preview guard and the submit path are unchanged.
+   */
+  function formOverlay(s,p) {
+    if(s.form!=='submit')return "";
+    const a=s.activities.find(x=>x.id===s.selected);
+    if(!a||a.source!=='tracking'||!a.checks?.length)return "";
+    const preview=!a.can_submit, plant=p||s.data.plants.find(x=>x.id===a.plant_id);
+    return `<div class="s91pm-modal" data-pmx="cancel-record"><section class="s91pm-modal-card" role="dialog" aria-modal="true" aria-labelledby="s91pm-modal-title" data-pmx="dialog">`+
+      `<header class="s91pm-modal-head"><div><small class="s91pm-eyebrow">${preview?'CHECKLIST PREVIEW':'RECORD PM'}</small>`+
+      `<h2 id="s91pm-modal-title">${e(a.equipment_id)}</h2><p>${e(a.equipment)} · ${dlabel(a.date)}${plant?' · '+e(plant.name):''}</p></div>`+
+      `<button type="button" class="s91pm-modal-x" data-pmx="cancel-record" aria-label="Close">×</button></header>`+
+      `${checkForm(s,a)}</section></div>`;
   }
   function render(s) {
     if(active!==s)return;
@@ -202,7 +217,7 @@
     if(s.error&&!s.data){s.host.innerHTML=`<div class="s91pm"><div class="s91pm-panel s91pm-empty" role="alert"><b>PM tracking unavailable</b><p>${e(s.error)}</p>${btn("Retry","reload")}</div></div>`;return;}
     if(s.siteCode&&!p){s.host.innerHTML='<div class="s91pm s91pm-empty">Plant not available in your assigned scope.</div>';return;}
     if(s.restoreScroll!=null){const y=s.restoreScroll;s.restoreScroll=null;setTimeout(()=>{if(typeof global.scrollTo==="function")global.scrollTo(0,y);},0);}
-    s.host.innerHTML=`<div class="s91pm">${s.notice?`<div class="s91pm-notice" role="status">${e(s.notice)}</div>`:''}${s.error?`<div class="s91pm-callout" role="status">Showing last successful PM data · ${e(s.error)} ${btn("Retry","reload")}</div>`:''}${s.data.legacy_truncated?'<div class="s91pm-callout">Existing record list truncated. Select an individual plant to see its records.</div>':''}${s.view==='calendar'?calendar(s,p):p?plant(s,p):portfolio(s)}</div>`;
+    s.host.innerHTML=`<div class="s91pm">${s.notice?`<div class="s91pm-notice" role="status">${e(s.notice)}</div>`:''}${s.error?`<div class="s91pm-callout" role="status">Showing last successful PM data · ${e(s.error)} ${btn("Retry","reload")}</div>`:''}${s.data.legacy_truncated?'<div class="s91pm-callout">Existing record list truncated. Select an individual plant to see its records.</div>':''}${s.view==='calendar'?calendar(s,p):p?plant(s,p):portfolio(s)}${formOverlay(s,p)}</div>`;
   }
   let pollTimer=null;
   const recent=new Map();
@@ -268,6 +283,7 @@
   }
   function show(host,opts={}){if(!host)return;const month=monthKey(opts.initialMonth)||rememberedMonth||todayMonth();rememberedMonth=month;const siteCode=opts.siteCode||null;const s={host,siteCode,parent:opts.parent||'overview',view:opts.calendar?'calendar':'overview',calendarParent:opts.calendarParent==='overview'?'overview':'plant',month,selected:opts.eventId||'',form:'',query:'',status:'',equipment:'',day:'',plan:'planned',layout:'matrix',open:new Set(),loading:true,error:'',notice:'',saving:false,token:0};if(!siteCode&&!opts.calendar)takePortfolio(s);const cached=recent.get(cacheKey(s));if(cached&&Date.now()-cached.at<60000){s.data=cached.data;enrich(s);}active=s;wire(host);if(s.data)render(s);load(s,!!s.data);}
   function resume(){if(active&&visible(active)&&!busy(active)&&!active.loading&&global.navigator?.onLine!==false)load(active,true);}
+  document.addEventListener('keydown',ev=>{if(ev.key==='Escape'&&active&&active.form==='submit'&&!active.saving){active.form='';render(active);}});
   document.addEventListener('portal:data-invalidated',()=>{recent.clear();});
   document.addEventListener('portal:route-changed',()=>{if(active&&!routeMatches(active)){clearTimeout(pollTimer);active=null;}});
   document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')resume();else clearTimeout(pollTimer);});
