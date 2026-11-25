@@ -16,6 +16,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
 from PIL import Image, ImageDraw
 from sqlalchemy import and_, case, func, or_, select
 from sqlalchemy.exc import IntegrityError
@@ -268,12 +269,50 @@ def storage_usage(db: Annotated[Session, Depends(get_db)], user: Annotated[User,
     }
 
 
+class RetentionWindow(BaseModel):
+    days: int = Field(ge=7, le=365)
+
+
+class RetentionPurge(BaseModel):
+    """An optional age for this one sweep, and a dry run to show what it would remove."""
+    older_than_days: int | None = Field(default=None, ge=1, le=365)
+    dry_run: bool = False
+
+
+@router.get("/retention")
+def photo_retention(db: Annotated[Session, Depends(get_db)], user: Annotated[User, Depends(get_current_user)]):
+    """The window originals are kept for, where it came from and who last changed it."""
+    _admin(user)
+    from app.photos.retention import retention_settings
+
+    return retention_settings(db)
+
+
+@router.put("/retention", dependencies=[Depends(require_csrf)])
+def set_photo_retention(payload: RetentionWindow, db: Annotated[Session, Depends(get_db)],
+                        user: Annotated[User, Depends(get_current_user)]):
+    """Change how long originals are kept. Only the O&M Head, and nothing is deleted here."""
+    if user.role != "O&M Head":
+        raise HTTPException(403, "Only the O&M Head can change the photo retention window")
+    from app.photos.retention import set_retention_days
+
+    try:
+        return set_retention_days(db, user, payload.days)
+    except ValueError as error:
+        raise HTTPException(422, str(error)) from error
+
+
 @router.post("/retention/purge", dependencies=[Depends(require_csrf)])
-def manual_retention_purge(db: Annotated[Session, Depends(get_db)], user: Annotated[User, Depends(get_current_user)]):
+def manual_retention_purge(db: Annotated[Session, Depends(get_db)], user: Annotated[User, Depends(get_current_user)],
+                           payload: RetentionPurge | None = None):
     _admin(user)
     from app.photos.retention import purge_photo_originals
 
-    return purge_photo_originals(db, dry_run=False)
+    request = payload or RetentionPurge()
+    try:
+        return purge_photo_originals(db, dry_run=request.dry_run, older_than_days=request.older_than_days)
+    except ValueError as error:
+        raise HTTPException(422, str(error)) from error
 
 
 @router.delete("/{photo_id}", dependencies=[Depends(require_csrf)])

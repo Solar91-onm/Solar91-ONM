@@ -41,8 +41,11 @@ def test_pm_assignee_dates_only_and_site_engineer_blocked(client, db):
     assert ok.status_code == 200, ok.text
     assert ok.json()["task"]["start"] == "2026-11-02" and ok.json()["task"]["due"] == "2026-11-12"
     assert client.patch("/api/scheduled/tasks/WO-DT-INV/schedule", json={"name": "Renamed"}).status_code == 403
-    # a job at a plant outside their scope stays closed to them
-    assert client.patch("/api/scheduled/tasks/WO-DT-TR/schedule", json={"due_on": "2026-11-12"}).status_code == 403
+    # Assignees work portfolio-wide: a job at another plant is theirs to reschedule as well, and
+    # it is the task's own date rules that answer now, not a plant-scope gate.
+    other = client.patch("/api/scheduled/tasks/WO-DT-TR/schedule",
+                         json={"start_on": "2026-11-02", "due_on": "2026-11-12"})
+    assert other.status_code == 200, other.text
     se = login_user(client, db, role="Site Engineer", name="SE", email="dt-se@example.com")
     db.add(UserPlantAssignment(user_id=se.id, plant_id=plant.id, assignment_role="Site Engineer")); db.commit()
     assert client.patch("/api/scheduled/tasks/WO-DT-INV/schedule", json={"due_on": "2026-11-12"}).status_code == 403

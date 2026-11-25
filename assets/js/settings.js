@@ -22,6 +22,10 @@
   var storageLoading = false;
   var storageError = "";
   var storageMessage = "";
+  // How long full-size originals are kept, and what a one-off sweep would remove. Only the
+  // originals are ever deleted: thumbnails and the photo records stay, so every gallery keeps
+  // its evidence.
+  var retention = { loaded: false, saving: false, days: null, settings: null, purgeDays: null, preview: null };
   // Equipment responsibility: who answers for one equipment category on every plant.
   // The matrix below and a person's own dialog write the same rows through the same API.
   var equipment = {
@@ -166,7 +170,62 @@
                 formatBytes(block) + '</span></div>'
             : '<p class="ep-settings__storage-status" role="status">Storage usage is not available yet.</p>') +
       (storageMessage ? '<p class="ep-settings__storage-status" role="status">' + escape(storageMessage) + '</p>' : "") +
+      renderRetention() +
       '</section>';
+  }
+
+  /** The retention window and the on-demand sweep, inside the Photo storage card. */
+  function renderRetention() {
+    var info = retention.settings;
+    if (!info) {
+      return '<div class="ep-settings__retention"><p class="ep-settings__storage-status" role="status">' +
+        (retention.loaded ? "Retention settings are not available." : "Reading the retention window…") + "</p></div>";
+    }
+    var days = retention.days == null ? info.days : retention.days;
+    var purgeDays = retention.purgeDays == null ? info.days : retention.purgeDays;
+    var preview = retention.preview;
+    return '<div class="ep-settings__retention">' +
+      '<div class="ep-settings__retention-row">' +
+        '<label for="settings-retention-days">Keep full-size originals for' +
+          '<span>Older originals are deleted automatically each day. Thumbnails and photo records stay.</span></label>' +
+        '<div class="ep-settings__retention-controls">' +
+          '<input id="settings-retention-days" type="number" inputmode="numeric" min="' + info.min_days +
+            '" max="' + info.max_days + '" step="1" value="' + escape(days) + '" data-settings-retention-days />' +
+          '<span class="ep-settings__retention-unit">days</span>' +
+          '<button type="button" class="ep-settings__button ep-settings__button--primary"' +
+            (retention.saving ? " disabled" : "") + ' data-settings-action="save-retention">' +
+            (retention.saving ? "Saving…" : "Save window") + "</button>" +
+        "</div>" +
+      "</div>" +
+      '<p class="ep-settings__retention-note">In force: <strong>' + escape(info.days) + ' days</strong> · ' +
+        (info.source === "portal"
+          ? "set in the portal" + (info.updated_by ? " by " + escape(info.updated_by) : "") +
+            (info.updated_at ? " on " + escape(new Date(info.updated_at).toLocaleDateString("en-IN")) : "")
+          : "the deployment default (" + escape(info.default_days) + " days)") + "</p>" +
+      '<div class="ep-settings__retention-row">' +
+        '<label for="settings-purge-days">Clear space now' +
+          '<span>Deletes originals older than this many days, ahead of the standing window.</span></label>' +
+        '<div class="ep-settings__retention-controls">' +
+          '<input id="settings-purge-days" type="number" inputmode="numeric" min="' + info.min_purge_days +
+            '" max="' + info.max_days + '" step="1" value="' + escape(purgeDays) + '" data-settings-purge-days />' +
+          '<span class="ep-settings__retention-unit">days</span>' +
+          '<button type="button" class="ep-settings__button"' + (storageLoading ? " disabled" : "") +
+            ' data-settings-action="preview-purge">Check what this removes</button>' +
+          (preview && preview.photos
+            ? '<button type="button" class="ep-settings__remove" data-settings-action="purge-older">Delete ' +
+              escape(preview.photos) + ' original' + (preview.photos === 1 ? "" : "s") + "</button>"
+            : "") +
+        "</div>" +
+      "</div>" +
+      (preview
+        ? '<p class="ep-settings__retention-note" role="status">' + (preview.photos
+          ? escape(preview.photos) + " original" + (preview.photos === 1 ? "" : "s") + " older than " +
+            escape(preview.retention_days) + " days · " + formatBytes(preview.bytes_reclaimed) +
+            " would be reclaimed. Thumbnails and photo records are kept." +
+            (preview.more_remaining ? " More remain after this run." : "")
+          : "Nothing is older than " + escape(preview.retention_days) + " days.") + "</p>"
+        : "") +
+      "</div>";
   }
 
   function render() {
@@ -227,6 +286,114 @@
       storageError = error.message || "Photo storage usage could not be loaded.";
       render();
     });
+  }
+
+  function loadRetention() {
+    if (!api().can("users.manage")) return Promise.resolve();
+    return api().request("/api/photos/retention").then(function (info) {
+      retention.settings = info;
+      retention.loaded = true;
+      if (retention.days == null) retention.days = info.days;
+      if (retention.purgeDays == null) retention.purgeDays = info.days;
+      render();
+    }).catch(function (error) {
+      retention.loaded = true;
+      storageError = error.message || "The photo retention window could not be read.";
+      render();
+    });
+  }
+
+  function saveRetention(host) {
+    var input = host.querySelector("[data-settings-retention-days]");
+    if (!input || !retention.settings) return;
+    var days = Number(input.value);
+    var info = retention.settings;
+    if (!Number.isFinite(days) || days < info.min_days || days > info.max_days) {
+      storageError = "Keep originals for " + info.min_days + "-" + info.max_days + " days.";
+      render();
+      return;
+    }
+    retention.saving = true;
+    storageError = "";
+    storageMessage = "";
+    render();
+    api().request("/api/photos/retention", { method: "PUT", body: { days: days } })
+      .then(function (saved) {
+        retention.saving = false;
+        retention.settings = saved;
+        retention.days = saved.days;
+        retention.preview = null;
+        storageMessage = "Originals are now kept for " + saved.days + " days. Nothing was deleted by this change.";
+        if (global.Solar91PortalToast) {
+          global.Solar91PortalToast.success("Retention window saved", saved.days + " days");
+        }
+        render();
+      })
+      .catch(function (error) {
+        retention.saving = false;
+        storageError = error.message || "The retention window could not be saved.";
+        render();
+      });
+  }
+
+  /** Ask the server what a sweep would remove. Nothing is deleted by this call. */
+  function previewPurge(host) {
+    var input = host.querySelector("[data-settings-purge-days]");
+    if (!input || !retention.settings) return;
+    var days = Number(input.value);
+    var info = retention.settings;
+    if (!Number.isFinite(days) || days < info.min_purge_days || days > info.max_days) {
+      storageError = "Choose between " + info.min_purge_days + " and " + info.max_days + " days.";
+      render();
+      return;
+    }
+    retention.purgeDays = days;
+    storageLoading = true;
+    storageError = "";
+    storageMessage = "";
+    render();
+    api().request("/api/photos/retention/purge", {
+      method: "POST", body: { older_than_days: days, dry_run: true }
+    }).then(function (result) {
+      storageLoading = false;
+      retention.preview = result;
+      render();
+    }).catch(function (error) {
+      storageLoading = false;
+      storageError = error.message || "The sweep could not be checked.";
+      render();
+    });
+  }
+
+  function purgeOlderThan() {
+    var preview = retention.preview;
+    var days = retention.purgeDays;
+    if (!preview || !preview.photos || days == null) return;
+    if (!global.confirm("Delete " + preview.photos + " full-size original(s) older than " + days +
+        " days? Thumbnails and photo records are kept, and this cannot be undone.")) return;
+    storageLoading = true;
+    storageError = "";
+    storageMessage = "";
+    retention.preview = null;
+    render();
+    api().request("/api/photos/retention/purge", { method: "POST", body: { older_than_days: days } })
+      .then(function (result) {
+        storageMessage = "Deleted " + Number(result.photos || 0) + " original(s); " +
+          formatBytes(result.bytes_reclaimed) + " reclaimed." +
+          (result.more_remaining ? " More remain: run it again to continue." : "");
+        if (global.Solar91PortalToast) {
+          global.Solar91PortalToast.success("Originals deleted", formatBytes(result.bytes_reclaimed) + " reclaimed");
+        }
+        return loadStorageUsage(true);
+      })
+      .catch(function (error) {
+        storageLoading = false;
+        storageError = error.message || "The sweep failed.";
+        if (global.Solar91PortalToast) {
+          global.Solar91PortalToast.error("Originals not deleted", storageError);
+        }
+        render();
+      });
   }
 
   function loadUsers() {
@@ -586,8 +753,17 @@
       } else if (action === "refresh-storage") {
         storageMessage = "";
         loadStorageUsage(true);
+      } else if (action === "save-retention") {
+        saveRetention(host);
+      } else if (action === "preview-purge") {
+        previewPurge(host);
+      } else if (action === "purge-older") {
+        purgeOlderThan();
       } else if (action === "purge-originals") {
-        if (!global.confirm("Delete only full-size originals older than the configured retention window? Thumbnails and photo records will remain.")) return;
+        var window_days = retention.settings ? retention.settings.days : null;
+        if (!global.confirm("Delete full-size originals older than " +
+            (window_days ? window_days + " days" : "the retention window") +
+            "? Thumbnails and photo records are kept, and this cannot be undone.")) return;
         storageLoading = true;
         storageError = "";
         storageMessage = "";
@@ -764,6 +940,7 @@
     statusMessage = "";
     loadUsers();
     loadStorageUsage(false);
+    loadRetention();
     loadEquipment(true);
   }
 

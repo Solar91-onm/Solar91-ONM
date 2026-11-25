@@ -687,3 +687,40 @@
   .ep-eqr__row > div:last-child { grid-column: 1 / -1; }
   .ep-eqr__row > div:last-child button { width: 100%; }
 }
+
+/* ── Photo retention, inside the Photo storage card ───────────────────────────
+   The standing window, and a one-off sweep that only ever deletes full-size
+   originals: thumbnails and photo records stay, so galleries keep their evidence. */
+.ep-settings__retention {
+  margin-top: var(--ep-s-4); padding-top: var(--ep-s-4);
+  border-top: 1px solid var(--ep-border-soft);
+  display: flex; flex-direction: column; gap: var(--ep-s-3);
+}
+.ep-settings__retention-row {
+  display: flex; align-items: flex-end; justify-content: space-between;
+  gap: var(--ep-s-4); flex-wrap: wrap;
+}
+.ep-settings__retention-row label {
+  display: flex; flex-direction: column; gap: 3px; min-width: 220px;
+  font-size: var(--ep-fs-sm); font-weight: 650; color: var(--ep-text-strong);
+}
+.ep-settings__retention-row label span {
+  font-size: var(--ep-fs-xs); font-weight: 400; line-height: 1.45; color: var(--ep-text-muted);
+}
+.ep-settings__retention-controls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.ep-settings__retention-controls input {
+  width: 92px; min-height: 36px; padding: 0 10px; font: inherit;
+  border: 1px solid var(--ep-border-strong); border-radius: var(--ep-radius-md);
+  background: var(--ep-bg); color: var(--ep-text);
+}
+.ep-settings__retention-controls input:focus {
+  outline: 2px solid var(--ep-accent-ring); outline-offset: 1px; border-color: var(--ep-accent);
+}
+.ep-settings__retention-unit { font-size: var(--ep-fs-sm); color: var(--ep-text-muted); margin-left: -4px; }
+.ep-settings__retention-note { margin: 0; font-size: var(--ep-fs-xs); line-height: 1.5; color: var(--ep-text-muted); }
+.ep-settings__retention-note strong { color: var(--ep-text-strong); }
+@media (max-width: 700px) {
+  .ep-settings__retention-row { align-items: stretch; }
+  .ep-settings__retention-controls { width: 100%; }
+  .ep-settings__retention-controls input { flex: 1 1 90px; width: auto; }
+}
