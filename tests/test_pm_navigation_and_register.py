@@ -347,6 +347,24 @@ def test_the_register_keeps_the_filters_and_the_portals_own_design():
     assert "@media(max-width:600px){.s91pm-reg th:first-child" in css
 
 
+def test_the_calendar_stays_in_frame_while_a_long_checklist_is_read():
+    """A 32-check sheet must scroll inside its own box, not push the calendar off the page."""
+    css = CSS.read_text(encoding="utf-8")
+    tracking = TRACKING.read_text(encoding="utf-8")
+
+    # The preview list and the recorded results are boxes with their own scrollbar.
+    assert ".s91pm-check-preview,.s91pm-results{max-height:290px;overflow-y:auto" in css
+    assert 'class="s91pm-check-preview"' in tracking
+    # On a desktop the side panel holds its place beside the calendar and scrolls internally.
+    sticky = css[css.index("@media(min-width:951px){"):]
+    assert ".s91pm-cal-layout>.s91pm-detail{position:sticky" in sticky
+    assert "max-height:calc(100vh - 34px);overflow-y:auto" in sticky
+    # And the form itself is a dialog with its own scrolling body, not part of the column.
+    assert ".s91pm-modal{position:fixed" in css
+    assert ".s91pm-modal-body{min-height:0;flex:1 1 auto;overflow-y:auto" in css
+    assert ".s91pm-modal-foot{flex:none" in css, "the submit button must stay in view"
+
+
 def test_approved_is_the_only_completion_the_register_counts():
     tracking = TRACKING.read_text(encoding="utf-8")
 

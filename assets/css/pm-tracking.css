@@ -90,3 +90,18 @@
 }
 @media(prefers-reduced-motion:no-preference){.s91pm-modal-card{animation:s91pm-pop 140ms ease-out}}
 @keyframes s91pm-pop{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+
+/* The side panel keeps the calendar in frame. A 32-check sheet used to push the page down:
+   the checklist preview and the recorded results are now their own boxes that scroll inside
+   themselves, and on a desktop the panel itself stays put and scrolls rather than growing. */
+.s91pm-check-preview,.s91pm-results{max-height:290px;overflow-y:auto;overscroll-behavior:contain;border:1px solid var(--ep-border,#e6e8e7);border-radius:8px;background:#fbfcfb}
+.s91pm-check-preview{padding:10px 10px 10px 30px;margin:0}
+.s91pm-check-preview li{margin-bottom:7px}
+.s91pm-check-preview li:last-child,.s91pm-results>div:last-child{margin-bottom:0}
+.s91pm-results{padding:8px;gap:7px}
+.s91pm-detail :is(.s91pm-check-preview,.s91pm-results)::-webkit-scrollbar{width:9px}
+.s91pm-detail :is(.s91pm-check-preview,.s91pm-results)::-webkit-scrollbar-thumb{background:#d7ded9;border-radius:999px;border:2px solid #fbfcfb}
+.s91pm-detail :is(.s91pm-check-preview,.s91pm-results)::-webkit-scrollbar-track{background:transparent}
+@media(min-width:951px){
+  .s91pm-cal-layout>.s91pm-detail{position:sticky;top:12px;max-height:calc(100vh - 34px);overflow-y:auto;overscroll-behavior:contain}
+}
