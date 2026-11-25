@@ -1103,7 +1103,7 @@
 .ep-pt__detail-empty { min-height: 120px; }
 
 /* ─── Table ───────────────────────────────────────────────────────── */
-.ep-pt__table-wrap { width: 100%; }
+.ep-pt__table-wrap { width: 100%; min-width: 0; }
 .ep-pt__scroll {
   width: 100%; max-height: 70vh; overflow-y: auto; overflow-x: auto;
 }
@@ -1112,23 +1112,24 @@
 .ep-pt__table {
   width: 100%; min-width: 0; table-layout: fixed; border-collapse: collapse;
 }
-/* Details table, 15 columns: code, SPV, AC, DC, district, discom, site engineer, cleaning / PM / health
+/* Details table, 16 columns: code, SPV, AC, DC, district, discom, site engineer, cleaning / PM / health
    assignee, COD, location, CCTV, last activity, edit. */
-.ep-pt__table th:nth-child(1), .ep-pt__table td:nth-child(1) { width: 11%; }
-.ep-pt__table th:nth-child(2), .ep-pt__table td:nth-child(2) { width: 5%; }
+.ep-pt__table th:nth-child(1), .ep-pt__table td:nth-child(1) { width: 10%; }
+.ep-pt__table th:nth-child(2), .ep-pt__table td:nth-child(2) { width: 4%; }
 .ep-pt__table th:nth-child(3), .ep-pt__table td:nth-child(3) { width: 5%; }
 .ep-pt__table th:nth-child(4), .ep-pt__table td:nth-child(4) { width: 5%; }
-.ep-pt__table th:nth-child(5), .ep-pt__table td:nth-child(5) { width: 7%; }
+.ep-pt__table th:nth-child(5), .ep-pt__table td:nth-child(5) { width: 6%; }
 .ep-pt__table th:nth-child(6), .ep-pt__table td:nth-child(6) { width: 6%; }
 .ep-pt__table th:nth-child(7), .ep-pt__table td:nth-child(7) { width: 8%; }
-.ep-pt__table th:nth-child(8), .ep-pt__table td:nth-child(8) { width: 8%; }
-.ep-pt__table th:nth-child(9), .ep-pt__table td:nth-child(9) { width: 8%; }
-.ep-pt__table th:nth-child(10), .ep-pt__table td:nth-child(10) { width: 8%; }
-.ep-pt__table th:nth-child(11), .ep-pt__table td:nth-child(11) { width: 6%; }
-.ep-pt__table th:nth-child(12), .ep-pt__table td:nth-child(12) { width: 7%; }
-.ep-pt__table th:nth-child(13), .ep-pt__table td:nth-child(13) { width: 5%; }
-.ep-pt__table th:nth-child(14), .ep-pt__table td:nth-child(14) { width: 6%; }
-.ep-pt__table th:nth-child(15), .ep-pt__table td:nth-child(15) { width: 5%; }
+.ep-pt__table th:nth-child(8), .ep-pt__table td:nth-child(8) { width: 6%; }
+.ep-pt__table th:nth-child(9), .ep-pt__table td:nth-child(9) { width: 7%; }
+.ep-pt__table th:nth-child(10), .ep-pt__table td:nth-child(10) { width: 6%; }
+.ep-pt__table th:nth-child(11), .ep-pt__table td:nth-child(11) { width: 7%; }
+.ep-pt__table th:nth-child(12), .ep-pt__table td:nth-child(12) { width: 5%; }
+.ep-pt__table th:nth-child(13), .ep-pt__table td:nth-child(13) { width: 6%; }
+.ep-pt__table th:nth-child(14), .ep-pt__table td:nth-child(14) { width: 5%; }
+.ep-pt__table th:nth-child(15), .ep-pt__table td:nth-child(15) { width: 7%; }
+.ep-pt__table th:nth-child(16), .ep-pt__table td:nth-child(16) { width: 7%; }
 .ep-pt__scroll:focus { outline: 2px solid var(--ep-accent); outline-offset: -2px; }
 .ep-pt__table thead th {
   position: sticky; top: 0; z-index: 1;

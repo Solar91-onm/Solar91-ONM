@@ -1610,11 +1610,12 @@ def test_plant_table_uses_balanced_shared_columns_and_numeric_spv_label():
             styles,
         )
     ]
-    assert len(widths) == 15      # + PM Assignee and Health Assignee
+    assert len(widths) == 16      # includes Cleaning, PM, and Health Assignee plus Edit
     assert sum(widths) == 100
-    assert widths[11] >= 7, "the Location column should not wrap its heading"
+    assert widths[12] >= 6, "the Location column should not wrap its heading"
+    assert widths[15] >= 6, "the Edit column should remain visible"
     # Every column shares the frame on a desktop: no table minimum width, so nothing scrolls sideways.
-    # A phone is too narrow to fit 15 columns legibly, so the scroll fallback lives in that media query only.
+    # A phone is too narrow to fit 16 columns legibly, so the scroll fallback lives in that media query only.
     assert "width: 100%; min-width: 0; table-layout: fixed" in styles
     assert "min-width: 1200px" not in styles
     assert "@media (max-width: 700px) {\n  .ep-pt__table { min-width: 1080px; }" in styles
