@@ -1603,3 +1603,7 @@ async def import_plan(db: Annotated[Session, Depends(get_db)], user: Annotated[U
             _create_tasks(db, user, tpl, items, start, str(row.id), str(cell.get("remarks") or "").strip() or None)
     db.commit()
     return result
+
+# Monthly checklist execution; separate from planning/import and existing work orders.
+from app.pmplan.tracking import router as tracking_router
+router.include_router(tracking_router)

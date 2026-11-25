@@ -87,8 +87,10 @@
     if (prefetched) return;
     prefetched = true;
     var connection = global.navigator && global.navigator.connection;
-    if (connection && (connection.saveData || /(^|-)2g$/.test(String(connection.effectiveType || "")))) return;
-    Object.keys(urls).forEach(function (name) {
+    if (connection && (connection.saveData || /(^|-)[23]g$/.test(String(connection.effectiveType || "")))) return;
+    // Warm only common field pages; do not compete with live dashboard reads.
+    ["pm-tracking", "operations-calendar", "site-issues", "washing-board"].forEach(function (name) {
+      if (!urls[name]) return;
       if (pending[name]) return;
       var link = document.createElement("link");
       link.rel = "prefetch";

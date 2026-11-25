@@ -65,6 +65,24 @@ class Settings(BaseSettings):
     trust_proxy_headers: bool = False
     max_upload_mb: int = 4
 
+    # Per-worker safety limits; tune after measuring deployment capacity.
+    traffic_guard_enabled: bool = True
+    api_max_active: int = 20
+    api_ip_per_minute: int = 600
+    api_ip_burst: int = 100
+    api_global_per_minute: int = 1800
+    api_global_burst: int = 150
+    api_user_reads_per_minute: int = 180
+    api_user_writes_per_minute: int = 60
+
+    @field_validator("api_max_active", "api_ip_per_minute", "api_ip_burst", "api_global_per_minute",
+                     "api_global_burst", "api_user_reads_per_minute", "api_user_writes_per_minute")
+    @classmethod
+    def _positive_traffic_limits(cls, value):
+        if value < 1:
+            raise ValueError("Traffic limits must be positive")
+        return value
+
     # Persistent hosted service: keep the application-side DB pool deliberately small.
     db_pool_size: int = 5
     db_max_overflow: int = 2
@@ -72,7 +90,7 @@ class Settings(BaseSettings):
     # login), so recycling every few minutes made page loads pay for reconnects. Dead connections are still caught by
     # the health check below, whatever this value is.
     db_pool_recycle_seconds: int = 1800
-    db_pool_timeout_seconds: int = 30  # how long a request waits for a free connection before failing
+    db_pool_timeout_seconds: int = 8  # how long a request waits for a free connection before failing
     # True = test each pooled connection before use (one extra round trip per request; safest). Set DB_POOL_PRE_PING=false
     # only after measuring that the round trip matters AND the pooler does not drop idle connections.
     db_pool_pre_ping: bool = True

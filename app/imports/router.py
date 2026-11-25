@@ -20,6 +20,7 @@ ALIASES={
  "site_code":{"site code","site_code","sitecode","plant code","plant/site code","code"},
  "plant_name":{"plant name","plant_name","name","site name"},
  "project_company":{"project company","project_company","project company name","project","company","spv name","spv/project"},
+ "supervisor":{"supervisor","supervisor name","site supervisor"},
  "district":{"district"},"discom":{"discom"},"location":{"location","city","village"},
  "dc_capacity_kw":{"dc capacity kw","dc_capacity_kw","dc capacity","capacitykw","capacity kw","dc capacity kwp","dc capacity (kwp)","dc kwp","dc (kwp)","installed dc capacity (kwp)"},
  "ac_capacity_kw":{"ac capacity kw","ac_capacity_kw","ac capacity","ac capacity (kw)","ac kw","ac (kw)","installed ac capacity (kw)"},
@@ -80,6 +81,8 @@ async def import_plants(file:UploadFile=File(...),db:Session=Depends(get_db),use
         lat=parse_float(val("latitude")); lon=parse_float(val("longitude"))
         if lat is not None and not -90<=lat<=90: errors.append({"row":idx,"site_code":site,"error":"Invalid latitude"}); continue
         if lon is not None and not -180<=lon<=180: errors.append({"row":idx,"site_code":site,"error":"Invalid longitude"}); continue
+        supervisor=str(val("supervisor") or "").strip()
+        if len(supervisor)>160: errors.append({"row":idx,"site_code":site,"error":"Supervisor must be 160 characters or fewer"}); continue
         p=existing_by_code.get(site); is_new=p is None
         if not p and not name: errors.append({"row":idx,"site_code":site,"error":"Plant Name is required for a new plant"}); continue
         if not p:
@@ -88,6 +91,7 @@ async def import_plants(file:UploadFile=File(...),db:Session=Depends(get_db),use
         else:
             p.site_code=site
         if name: p.plant_name=name
+        if supervisor: p.supervisor=supervisor
         for field in ("project_company","district","discom","location"):
             value=val(field)
             if value is not None and str(value).strip(): setattr(p,field,str(value).strip())

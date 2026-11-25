@@ -120,7 +120,7 @@
     const stale = Date.now() - portfolioLoadedAt > PORTFOLIO_TTL_MS;
     if (!portfolioPromise || force || stale) {
       portfolioLoadedAt = Date.now();
-      portfolioPromise = api().request("/api/portal/overview").then(function (body) {
+      const request = api().request("/api/portal/overview").then(function (body) {
         const rows = (body.rows || []).map(normalizeRow);
         return {
           rows: rows,
@@ -132,9 +132,10 @@
           warnings: body.warnings || []
         };
       }).catch(function (error) {
-        portfolioPromise = null;
+        if (portfolioPromise === request) portfolioPromise = null;
         throw error;
       });
+      portfolioPromise = request;
     }
     return portfolioPromise;
   }
@@ -152,13 +153,14 @@
     const key = "period:" + period;
     if (force) periodCache.delete(key);
     if (!periodCache.has(key)) {
-      periodCache.set(key, api().request("/api/portal/overview/range?period=" + encodeURIComponent(period))
+      const request = api().request("/api/portal/overview/range?period=" + encodeURIComponent(period))
         .then(normalizeRangeBody)
         .catch(function (error) {
-          periodCache.delete(key);
+          if (periodCache.get(key) === request) periodCache.delete(key);
           throw error;
-        }));
-      setTimeout(function () { periodCache.delete(key); }, PORTFOLIO_TTL_MS);
+        });
+      periodCache.set(key, request);
+      setTimeout(function () { if (periodCache.get(key) === request) periodCache.delete(key); }, PORTFOLIO_TTL_MS);
     }
     return periodCache.get(key);
   }
@@ -303,15 +305,16 @@
           months: Array.isArray(body.months) ? body.months : null
         };
       }).catch(function (error) {
-        calendarCache.delete(key);
+        if (calendarCache.get(key) === request) calendarCache.delete(key);
         if (withMonths && calendarCache.get(plainKey) === request) calendarCache.delete(plainKey);
         throw error;
       });
       calendarCache.set(key, request);
       if (withMonths && !calendarCache.has(plainKey)) calendarCache.set(plainKey, request);
+      while (calendarCache.size > 48) calendarCache.delete(calendarCache.keys().next().value);
       // Calendars should reflect new records within a minute.
       setTimeout(function () {
-        calendarCache.delete(key);
+        if (calendarCache.get(key) === request) calendarCache.delete(key);
         if (withMonths && calendarCache.get(plainKey) === request) calendarCache.delete(plainKey);
       }, PORTFOLIO_TTL_MS);
     }
@@ -415,6 +418,14 @@
 
     const pmTotal = totals.pmCompleted + totals.pmPending + totals.pmOverdue;
     totals.pmCompliancePercent = pmTotal === 0 ? null : Math.round((totals.pmCompleted / pmTotal) * 100);
+    const checks = rows.map(row => row.profile.pmChecklist).filter(Boolean);
+    totals.pmChecklist = null;
+    if (checks.length) {
+      const pm = {month: checks[0].month, scheduled: 0, approved: 0, pendingApproval: 0, overdue: 0};
+      checks.forEach(c => ["scheduled", "approved", "pendingApproval", "overdue"].forEach(k => { pm[k] += Number(c[k]) || 0; }));
+      pm.approvedPercent = pm.scheduled ? Math.round(100 * pm.approved / pm.scheduled) : null;
+      totals.pmChecklist = pm;
+    }
     // A period with no planned cleaning activity is 0%; the dashboard labels the empty schedule.
     function workPercent(work) {
       if (!work.plants) return null;

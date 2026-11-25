@@ -78,7 +78,8 @@
     var avatar = document.querySelector(".ep-avatar");
     if (avatar) avatar.textContent = (user.name || user.email || "S").trim().charAt(0).toUpperCase();
 
-    stampUpdated();
+    // Do not claim fresh figures before the first successful database read.
+    setText("[data-last-updated]", "Updated —");
     wireUserMenu();
 
     global.Solar91PortalNav.wire();

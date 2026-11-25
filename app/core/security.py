@@ -10,6 +10,10 @@ from sqlalchemy.orm import Session
 
 from app.auth.service import upsert_user_for_claims, verify_session_token
 from app.core.database import get_db
+from app.core.config import get_settings
+from app.core.traffic import TokenBuckets
+
+_user_buckets = TokenBuckets()
 from app.core.models import User, UserPlantAssignment
 
 
@@ -25,6 +29,14 @@ def get_current_user(request: Request, db: Annotated[Session, Depends(get_db)]) 
     if not token:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
     claims = verify_session_token(token)
+    settings = get_settings()
+    if settings.traffic_guard_enabled and settings.app_env != "test":
+        # Claims are verified before using the stable Clerk subject, never token text or user input.
+        read = request.method in {"GET", "HEAD", "OPTIONS"}
+        limit = settings.api_user_reads_per_minute if read else settings.api_user_writes_per_minute
+        wait = _user_buckets.take(f"{claims['sub']}:{read}", limit, min(limit, 40 if read else 12))
+        if wait:
+            raise HTTPException(429, "Too many requests. Please try again shortly.", headers={"Retry-After": str(wait)})
     return upsert_user_for_claims(db, claims, access_token=token)
 
 

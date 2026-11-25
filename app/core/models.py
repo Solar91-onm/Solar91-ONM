@@ -51,6 +51,7 @@ class Plant(Base, TimestampMixin):
     commissioned_on: Mapped[date | None] = mapped_column(Date)
     status: Mapped[str] = mapped_column(String(60), default="active")
     assigned_engineer: Mapped[str | None] = mapped_column(String(255))
+    supervisor: Mapped[str | None] = mapped_column(String(160), nullable=True)
     source: Mapped[str] = mapped_column(String(60), default="database")
     custom_fields: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     legacy_payload: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)

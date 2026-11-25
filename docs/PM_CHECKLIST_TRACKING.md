@@ -1,0 +1,58 @@
+# Solar91 — PM checklist tracking (changes-only deployment)
+
+## Install
+
+1. Back up your Supabase database and test on staging. Run `database/migrations/051_pm_checklist_tracking.sql` in the Supabase SQL editor before deploying the application files. It creates the new `pm_tracking_activities` table; existing work orders, cycle plans and equipment schedules are not modified.
+2. Overlay the changed files from this archive onto the matching paths in the original Solar91-ONM project, then deploy the existing application normally. No new Python or JavaScript dependencies are required.
+3. Populate the new table using your actual plant IDs, scheduled dates, equipment types and individual equipment identifiers through SQL. The frontend does not schedule or assign equipment. No sample records have been inserted into your live database.
+4. Sign in as a Site Engineer assigned to one plant to record a checklist. Sign in as O&M Head to approve/return it. An O&M Head or an Assignee scoped to that plant can grant/deny a permission request. Existing portal authentication and role scope are used.
+
+## SQL scheduling
+
+Allowed `equipment` values (exact case/spelling):
+
+- `Inverter`
+- `ACCB`
+- `4 Pole + ACDB + Aux. TX` (four-pole structure inspection only; use an equipment ID such as the actual four-pole structure ID)
+- `Transmission line`
+- `Earth pit`
+- `Miscellaneous`
+
+Use your actual database values. The following is a **commented example**, not a preloaded schedule:
+
+```sql
+-- Verify the plant ID and site code first:
+SELECT id, site_code, plant_name FROM plants ORDER BY site_code;
+
+-- Replace the example site code, equipment IDs and dates with the approved actual schedule.
+-- INSERT INTO pm_tracking_activities (plant_id, equipment, equipment_id, scheduled_on)
+-- SELECT p.id, v.equipment, v.equipment_id, v.scheduled_on::date
+-- FROM plants p
+-- CROSS JOIN (VALUES
+--   ('Inverter', 'REPLACE_WITH_ACTUAL_INVERTER_ID_1', '2026-11-01'),
+--   ('Inverter', 'REPLACE_WITH_ACTUAL_INVERTER_ID_2', '2026-11-03'),
+--   ('ACCB', 'REPLACE_WITH_ACTUAL_ACCB_ID', '2026-11-15')
+-- ) AS v(equipment, equipment_id, scheduled_on)
+-- WHERE p.site_code = 'REPLACE_WITH_ACTUAL_SITE_CODE';
+
+-- Review the resulting monthly assignments:
+SELECT p.site_code, a.equipment, a.equipment_id, a.scheduled_on, a.status, a.permission
+FROM pm_tracking_activities a JOIN plants p ON p.id = a.plant_id
+WHERE a.scheduled_on >= DATE '2026-11-01' AND a.scheduled_on < DATE '2026-12-01'
+ORDER BY p.site_code, a.scheduled_on, a.equipment_id;
+```
+
+Enter one row for each physical inverter. The migration prohibits repeating the same inverter ID (ignoring case and surrounding spaces) in the same plant/calendar month. Other equipment can have multiple independent visits where the schedule calls for them. Do not edit workflow fields or delete submitted activities through SQL. For schedule changes, coordinate with the O&M Head and use a maintenance window; application actions serialize by plant row lock, but direct SQL writes must explicitly acquire the same lock if done concurrently. The database administrator is trusted.
+
+## Workflow and metrics
+
+- The new PM pages read the SQL-assigned checklist activities. All-plant matrix/cards, plant tracker and calendar use the same API and data. A scheduled date must arrive before an engineer can submit. Actual inspection dates can be later than the scheduled date, but cannot be future dates or earlier than the scheduled date.
+- Only Site Engineers scoped to the plant can submit. Every applicable Monthly worksheet check must have an OK / Not OK / Abnormality result. Non-OK checks require observations. No photo upload.
+- Submission is `Pending approval`. Only O&M Head can approve or return for correction. Approval is the only status included in the new checklist completion percentage. Overdue includes any unapproved activity past its scheduled date, so overdue, pending approval and locked counts can overlap.
+- Within a plant and calendar month, any earlier-date unapproved assigned activity blocks subsequent assigned activities. Same-date activities can proceed together. A grant from the O&M Head or scoped Assignee allows only that requested activity to proceed; it does not complete or move the earlier activity. All writes enforce role/state and sequence server-side and save an audit log. The existing cycle-plan and work-order systems are not changed.
+- Existing cycle-plan markers stay visible if there is no corresponding tracking assignment for the same plant/category/date. Unassigned checklist-covered markers show `Not assigned`; they do not enter the tracking denominator or sequence. Populate **every** checklist-covered planned activity through SQL before using the new workflow operationally. For IDT Transformer, VCB and GSS visit, no checklist was invented. Their existing records remain visible separately and are not included in the new locking/approval system. Legacy work orders remain separate, with their original statuses and history; do not duplicate work by creating new tracking assignments for already completed legacy jobs without reconciling them first. The combined four-pole category tracks the four-pole check only, not completion of ACDB or auxiliary transformer. Weather Station & UPS, Fire & Safety and separate module/structure/robot schedules are excluded. The five inverter-group checks remain as in the Monthly worksheet.
+- The new CSV export includes assigned records and existing schedule/work-order context, with source and status distinguished. The main Overview displays the new monthly scoped checklist progress when assigned records exist, with legacy work-order counts labelled separately. Legacy trend and health calculations still use their original data sources to avoid silently mixing metrics. Existing schedule editors are no longer surfaced through the new PM pages; scheduling is SQL-only for this workflow.
+
+## Validation
+
+`pytest -q tests/test_pm_tracking.py` exercises cross-plant scope, incomplete/abnormal check validation, locked submission, independent inverter approval, permission override, return/resubmit, same-date unlock and legacy marker visibility. The new frontend was rendered using a browser with representative mock API data. The standalone design preview is illustrative and is not a live database or an authentication system. Run the complete project test suite and verify on a staging Supabase/PostgreSQL instance before production. No live Supabase credentials were provided and no migration has been executed against your database.

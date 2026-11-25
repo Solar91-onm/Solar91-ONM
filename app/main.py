@@ -17,7 +17,7 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import SQLAlchemyError, TimeoutError as DBPoolTimeout
 
 from app.audit.router import router as audit_router
 from app.calendar.router import router as calendar_router
@@ -27,6 +27,7 @@ from app.auth.router import router as auth_router
 from app.core.assets import asset_hash_for_url, build_info, version_static_urls
 from app.core.compression import TextGZipMiddleware
 from app.core.config import get_settings
+from app.core.traffic import TrafficGuard
 from app.imports.router import router as imports_router
 from app.issues.router import router as issues_router
 from app.notifications.router import router as notifications_router
@@ -112,13 +113,17 @@ app=FastAPI(
 if settings.app_env == "production":
     app.add_middleware(HTTPSRedirectMiddleware)
 app.state.bootstrap_ready = settings.app_env != "production"
+if settings.traffic_guard_enabled and settings.app_env != "test":
+    app.add_middleware(TrafficGuard, max_active=settings.api_max_active,
+                       ip_per_minute=settings.api_ip_per_minute, ip_burst=settings.api_ip_burst,
+                       global_per_minute=settings.api_global_per_minute, global_burst=settings.api_global_burst)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["Content-Type", "Authorization", "X-Request-ID", "Rndr-Id"],
-    expose_headers=["X-Request-ID", "Rndr-Id", "Server-Timing"],
+    expose_headers=["X-Request-ID", "Rndr-Id", "Server-Timing", "Retry-After"],
 )
 
 # Compress big text responses (the 740 KB page shrinks to roughly 130 KB) so pages load fast on site-office mobile
@@ -159,12 +164,18 @@ async def security_headers(request: Request, call_next):
 
 @app.middleware("http")
 async def drop_washing_cache_after_writes(request: Request, call_next):
+    response = None
     try:
-        return await call_next(request)
-    finally:  # also runs if the write fails half-way, so the cached overview is never left stale
-        if request.method not in ("GET", "HEAD", "OPTIONS") and request.url.path.startswith("/api/"):
+        response = await call_next(request)
+        return response
+    finally:
+        # Rejected requests must not flush caches under a request flood. Uncertain server
+        # failures still invalidate: a mutation might have committed before the error.
+        if (request.method not in ("GET", "HEAD", "OPTIONS") and request.url.path.startswith("/api/")
+                and (response is None or response.status_code != 429)
+                and not (response is not None and response.headers.get("X-Solar91-Overload") == "1")):
             invalidate_overview_cache()
-            invalidate_pulse_cache()  # issue pulse: a change made here shows on the next poll
+            invalidate_pulse_cache()
 
 from app.core.database import engine as _engine_for_timing
 from app.core.observability import install_connection_timing, install_query_counter, make_timing_middleware
@@ -485,6 +496,9 @@ def _missing_schema_object(message:str)->str|None:
 
 @app.exception_handler(SQLAlchemyError)
 async def database_error(request:Request,exc:SQLAlchemyError):
+    if isinstance(exc, DBPoolTimeout):
+        logger.warning("Database pool exhausted on %s", request.url.path)
+        return JSONResponse(status_code=503, content={"detail":"The server is busy. Please retry shortly."}, headers={"Retry-After":"3"})
     text=str(getattr(exc,"orig",exc)).lower()
     if _is_missing_core_table(text):
         # One concise line per minute instead of a full traceback on every page refresh.

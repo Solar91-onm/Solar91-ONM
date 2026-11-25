@@ -37,12 +37,13 @@
   function plants(force) {
     if (force) plantsPromise = null;
     if (!plantsPromise) {
-      plantsPromise = request("/api/portal/plants").then(function (body) {
+      const pending = request("/api/portal/plants").then(function (body) {
         return (body.plants || []).map(normalizePlant);
       }).catch(function (error) {
-        plantsPromise = null;
+        if (plantsPromise === pending) plantsPromise = null;
         throw error;
       });
+      plantsPromise = pending;
     }
     return plantsPromise;
   }
@@ -74,6 +75,7 @@
       commissionedOn: plant.commissioned_on || null,
       status: plant.status || "active",
       assignedEngineer: plant.assigned_engineer || "",
+      supervisor: plant.supervisor || "",
       siteEngineers: plant.site_engineers || [],
       siteEngineerContacts: Array.isArray(plant.site_engineer_contacts) ? plant.site_engineer_contacts : [],
       washingAssignee: plant.washing_assignee || "",
@@ -206,6 +208,7 @@
     can: can,
     currentUser: currentUser,
     plants: plants,
+    clearPlants: function () { plantsPromise = null; },
     normalizePlant: normalizePlant,
     isPortalRoute: isPortalRoute,
     downloadFile: downloadFile,

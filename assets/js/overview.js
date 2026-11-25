@@ -601,7 +601,9 @@
 
     // Three big neutral metric cards: PM, Washing, Issues. Status is signalled
     // only by a 6px dot in the pill — number stays in primary text colour.
-    const pmPct   = totals.pmCompliancePercent;
+    const checklistPM = totals.pmChecklist && totals.pmChecklist.scheduled ? totals.pmChecklist : null;
+    const pmPct   = checklistPM ? checklistPM.approvedPercent : totals.pmCompliancePercent;
+    const pmLate = checklistPM ? checklistPM.overdue : totals.pmOverdue;
     const wshPct = Number(totals.washingCompliancePercent) || 0;
     const washingWork = totals.washingWork || { done: 0, due: 0, pending: 0, overdue: 0, plants: 0 };
     const washingHasPlan = washingWork.due > 0;
@@ -644,7 +646,7 @@
         ? { dot: "red", tag: "Attention" }
         : { dot: "green", tag: "All working" };
 
-    const pmP  = pill("PM", pmPct, totals.pmOverdue);
+    const pmP  = pill("PM", pmPct, pmLate);
     const wshP = washingHasPlan ? pill("Module Cleaning", wshPct, totals.washingOverdue)
       : { dot: "", tag: "N/A" };
     const isP  = issuePill(totals.criticalIssues, openIss);
@@ -660,7 +662,8 @@
     // thresholds are the pills' above: this only names the colour they already decided.
     const toneOfPill = (pill) => pill.dot === "red" ? "red" : pill.dot === "amber" ? "amber"
       : pill.dot === "green" ? "accent" : "neutral";
-    const pmScheduled = totals.pmCompleted + totals.pmPending + totals.pmOverdue;
+    const legacyPmScheduled = totals.pmCompleted + totals.pmPending + totals.pmOverdue;
+    const pmScheduled = checklistPM ? checklistPM.scheduled : legacyPmScheduled;
     const pmEmpty = pmPct === null || pmScheduled === 0;
     const issueUnsolved = totals.unsolvedIssues;
     const clamp = (value) => Math.max(0, Math.min(100, Number(value) || 0));
@@ -673,12 +676,17 @@
         tone: pmEmpty ? "neutral" : toneOfPill(pmP),
         // Nothing scheduled is not 0% — a bare dash there reads as a broken tile.
         empty: pmEmpty ? "No activities this month" : "",
-        figure: pmEmpty ? null : { value: String(pmPct), unit: "%", caption: "of activities completed" },
+        figure: pmEmpty ? null : { value: String(pmPct), unit: "%", caption: checklistPM ? "of assigned checklists approved" : "of legacy work orders completed" },
+        subline: checklistPM ? ("Checklist month " + checklistPM.month + " · " + checklistPM.approved + "/" + checklistPM.scheduled + " approved · Overdue may include awaiting review · Legacy work orders (separate): " + totals.pmCompleted + "/" + legacyPmScheduled) : "",
         meter: pmEmpty ? [] : [
           { width: clamp(pmPct), tone: "accent" },
           { width: 100 - clamp(pmPct), tone: "short" }
         ],
-        legend: [
+        legend: checklistPM ? [
+          { dot: "green", label: "Approved", value: fmt.formatNumber(checklistPM.approved) },
+          { dot: "amber", label: "Awaiting review", value: fmt.formatNumber(checklistPM.pendingApproval) },
+          { dot: pmLate ? "red" : "", label: "Overdue", value: fmt.formatNumber(pmLate), bad: pmLate > 0 }
+        ] : [
           { dot: pmEmpty ? "" : "green", label: "Completed", value: fmt.formatNumber(totals.pmCompleted) },
           { dot: "", label: "Pending", value: fmt.formatNumber(totals.pmPending) },
           { dot: totals.pmOverdue > 0 ? "red" : "", label: "Overdue", value: fmt.formatNumber(totals.pmOverdue), bad: totals.pmOverdue > 0 }
@@ -1140,8 +1148,8 @@
 
   function stampDataTime(asOf) {
     const el = document.querySelector("[data-last-updated]");
-    const when = asOf ? new Date(asOf) : new Date();
-    if (!el || isNaN(when.getTime())) return;
+    const when = asOf ? new Date(asOf) : null;
+    if (!el || !when || isNaN(when.getTime())) return;
     el.textContent = "Updated " + new Intl.DateTimeFormat("en-IN", {
       hour: "2-digit", minute: "2-digit", day: "2-digit", month: "short"
     }).format(when);
@@ -1247,8 +1255,8 @@
       showWarnings(portfolio.warnings);
       updated = true;
     }).catch((error) => {
-      if (!background && requestId === portfolioRefreshId) {
-        overviewNotice("The Dashboard could not be refreshed after the update. " +
+      if (requestId === portfolioRefreshId) {
+        overviewNotice("Showing last successful figures. Refresh could not be completed. " +
           '<button type="button" data-overview-retry>Retry</button>', "warning");
         if (global.console && global.console.warn) {
           global.console.warn("Dashboard refresh after a local update failed.", error);
@@ -1262,7 +1270,7 @@
       if (overviewIsShowing() && document.visibilityState === "visible") {
         updatePortfolioPoller(REFRESH_AFTER_MS);
       }
-      if (localRefreshPending && document.visibilityState === "visible" &&
+      if (updated && localRefreshPending && document.visibilityState === "visible" &&
           overviewIsShowing() && !userIsBusy()) {
         localRefreshPending = false;
         refreshPortfolioInPlace(false);
@@ -1291,17 +1299,20 @@
   function schedulePortfolioPoll(delay) {
     stopPortfolioPoller();
     if (!state || document.visibilityState !== "visible" || !overviewIsShowing()) return;
-    pollTimer = global.setTimeout(checkPortfolioVersion, delay);
+    const slow = global.navigator && global.navigator.connection && (global.navigator.connection.saveData || /2g|3g/.test(global.navigator.connection.effectiveType || ""));
+    pollTimer = global.setTimeout(checkPortfolioVersion, Math.max(delay, slow ? 120000 : 0) + Math.random() * 5000);
   }
 
   function checkPortfolioVersion() {
     pollTimer = null;
     if (!state || document.visibilityState !== "visible" || !overviewIsShowing() || pollInFlight) return;
+    if (global.navigator && global.navigator.onLine === false) { schedulePortfolioPoll(120000); return; }
     pollInFlight = true;
     data.fetchOverviewVersion().then((version) => {
       pollInFlight = false;
       if (!state || document.visibilityState !== "visible" || !overviewIsShowing()) return;
-      if (version !== state.dataVersion && !userIsBusy()) {
+      if ((version !== state.dataVersion || Date.now() - lastLoadedAt >= 5 * 60 * 1000 || localRefreshPending) && !userIsBusy()) {
+        localRefreshPending = false;
         return refreshPortfolioInPlace(true, version).then((updated) => {
           pollBackoffMs = updated ? REFRESH_AFTER_MS : Math.min(5 * 60 * 1000, pollBackoffMs * 2);
           schedulePortfolioPoll(pollBackoffMs);

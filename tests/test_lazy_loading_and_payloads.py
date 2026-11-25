@@ -39,7 +39,7 @@ LAZY_MODULES = ["table-sort", "table-column-filter", "register-io", "plant-detai
                 # Extra cleaning: shared by the plant calendar and the Module Cleaning board, so it
                 # is fetched with whichever of the two is opened first.
                 "extra-cleaning",
-                "inverter-health", "pm-overview", "pm-cycle-plans"]
+                "inverter-health", "pm-overview", "pm-cycle-plans", "pm-tracking"]
 
 
 def _script_tags(page: str) -> list[str]:
@@ -129,7 +129,7 @@ def test_navigation_loads_a_pages_module_before_it_renders():
     nav = (PORTAL_ASSETS / "js" / "navigation.js").read_text(encoding="utf-8")
     # Every page names the module(s) it needs.
     for fragment in ('if (pageId === "health") return ["site-issues"];',
-                     'if (pageId === "pm") return navState.pmCalendarOpen ? ["operations-calendar"] : ["pm-overview"];',
+                     'if (pageId === "pm") return ["pm-tracking"];',
                      'if (pageId === "washing") return plantCode ? ["operations-calendar"] : ["washing-board"];',
                      'if (section === "liasoning") return ["plants-table", "liasoning"];'):
         assert fragment in nav, fragment

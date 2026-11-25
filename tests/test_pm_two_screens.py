@@ -52,7 +52,8 @@ def test_navigation_does_not_mount_the_tracker_itself():
     navigation = _text(NAVIGATION)
 
     assert "Solar91PortalPMCyclePlans" not in navigation
-    assert "Solar91PortalPMOverview" in navigation, "the PM page is still pm-overview's"
+    assert "Solar91PMTracking.show" in navigation, "the PM pages share the checklist tracking module"
+    assert 'if (pageId === "pm") return ["pm-tracking"];' in navigation
 
 
 def test_the_plant_page_mounts_the_tracker_as_a_section_of_itself():

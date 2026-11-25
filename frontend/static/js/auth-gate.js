@@ -379,6 +379,50 @@ function s91ApiErrorMessage(status,data){
    cleared on sign-out, so no response outlives its request or crosses to another account. */
 const S91_INFLIGHT=new Map();
 function s91ClearInflight(){S91_INFLIGHT.clear();}
+// A small bounded read queue prevents navigation bursts from exhausting the server pool.
+let s91Reads=0;
+const s91ReadQueue=[];
+let s91CooldownUntil=0;
+function s91Connection(state){
+  if(typeof document==='undefined')return;
+  const badge=document.querySelector('.ep-badge-live');
+  if(!badge)return;
+  const value=typeof navigator!=='undefined'&&navigator.onLine===false?'offline':state;
+  badge.dataset.connection=value;
+  badge.textContent={online:'Connected',offline:'Offline · last available data',slow:'Connection interrupted',busy:'Server busy'}[value]||'Connected';
+  badge.title='Connection status only. Figures reflect the last successful data read.';
+}
+function s91ReadSlot(run,signal){
+  return new Promise((resolve,reject)=>{
+    if(s91ReadQueue.length>=64){reject(new Error('Too many pages loading. Please retry shortly.'));return;}
+    let queueTimeout;
+    const job=()=>{
+      clearTimeout(queueTimeout);
+      if(signal&&signal.aborted){reject(new DOMException('Aborted','AbortError'));return;}
+      s91Reads++;
+      Promise.resolve().then(run).then(resolve,reject).finally(()=>{s91Reads--;s91DrainReads();});
+    };
+    queueTimeout=setTimeout(()=>{const i=s91ReadQueue.indexOf(job);if(i>=0){s91ReadQueue.splice(i,1);reject(new Error('Page request is waiting for a busy connection. Retry shortly.'));}},15000);
+    s91ReadQueue.push(job);s91DrainReads();
+  });
+}
+function s91DrainReads(){
+  const slow=typeof navigator!=='undefined'&&navigator.connection&&(navigator.connection.saveData||/2g|3g/.test(navigator.connection.effectiveType||''));
+  while(s91Reads<(slow?2:5)&&s91ReadQueue.length)s91ReadQueue.shift()();
+}
+let s91NotifyTimer=null;
+function s91WriteCommitted(){
+  s91ClearInflight();
+  window.Solar91PortalData?.invalidate();
+  window.Solar91PortalAPI?.clearPlants?.();
+  clearTimeout(s91NotifyTimer);
+  s91NotifyTimer=setTimeout(()=>window.Solar91PortalData?.invalidate(true),180);
+}
+if(typeof window!=='undefined'&&typeof window.addEventListener==='function'){
+  window.addEventListener('offline',()=>s91Connection('offline'));
+  window.addEventListener('online',()=>{s91Connection('slow');window.Solar91PortalData?.invalidate(true);});
+}
+
 async function apiFetch(url,opts,latency){
   const now=()=>typeof performance!=="undefined"&&performance.now?performance.now():Date.now();
   const started=now();
@@ -386,6 +430,12 @@ async function apiFetch(url,opts,latency){
   const method=String(opts.method||"GET").toUpperCase();
   const isRead=method==="GET"||method==="HEAD";
   const externalSignal=opts.signal;
+  const managed=typeof s91ReadSlot==='function';
+  if(!isRead&&typeof s91ClearInflight==='function')s91ClearInflight();
+  if(typeof navigator!=='undefined'&&navigator.onLine===false){
+    if(managed)s91Connection('offline');
+    throw new Error('You are offline. Reconnect before '+(isRead?'loading this page.':'saving; no request was sent.'));
+  }
   const inflight=method==="GET"&&!externalSignal&&!latency&&typeof S91_INFLIGHT!=="undefined"?S91_INFLIGHT:null;
   async function transport(){
     const token=await clerkToken();
@@ -406,23 +456,38 @@ async function apiFetch(url,opts,latency){
       try{
         const response=await fetch(url,{...opts,signal:controller.signal});
         if(latency){latency.status=response.status;latency.serverTiming=response.headers.get("Server-Timing")||"";latency.contentLength=Number(response.headers.get("Content-Length"))||null}
-        return response;
+        // The deadline includes the body download, not merely response headers.
+        const body=response.status===204?'':typeof response.text==='function'?await response.text():JSON.stringify(await response.json());
+        return {status:response.status,ok:response.ok,headers:response.headers,body};
       }finally{
         if(latency&&fetchStarted)latency.fetchMs+=performance.now()-fetchStarted;
         clearTimeout(timeout);if(externalSignal)externalSignal.removeEventListener("abort",abortFromCaller);
       }
     }
-    let res;
+    let res, retried=false;
+    const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+    if(managed&&isRead&&s91CooldownUntil>Date.now()){
+      const wait=s91CooldownUntil-Date.now();
+      if(wait>8000)throw new Error('Server busy. Please retry shortly.');
+      await pause(wait);
+    }
     try{res=await attempt();}
     catch(error){
       if(externalSignal&&externalSignal.aborted)throw error;
-      if(!isRead)throw new Error(error?.name==="AbortError"?"Request timed out. Check the record before retrying to avoid duplicates.":"No connection. Check connectivity and verify whether the change was saved.");
-      await new Promise(resolve=>setTimeout(resolve,600));
-      try{res=await attempt();}catch(retryError){if(externalSignal&&externalSignal.aborted)throw retryError;throw new Error("The server is unreachable or timed out. Retry the page once connectivity returns.");}
+      if(!isRead){if(managed)s91Connection('slow');throw new Error('Connection interrupted. Check the record before retrying; the change may have been saved.');}
+      retried=true;
+      await pause(700+Math.random()*700);
+      try{res=await attempt();}catch(retryError){if(externalSignal&&externalSignal.aborted)throw retryError;if(managed)s91Connection('slow');throw new Error('The server is unreachable or timed out. Retry once connectivity returns.');}
     }
-    if(isRead&&[502,503,504].includes(res.status)){
-      await new Promise(resolve=>setTimeout(resolve,600));
-      try{res=await attempt();}catch(error){if(externalSignal&&externalSignal.aborted)throw error;throw new Error("The server did not respond. Please retry.");}
+    if([429,502,503,504].includes(res.status)){
+      const header=res.headers.get('Retry-After');
+      const seconds=header&&/^\d+$/.test(header)?Number(header)*1000:header?Math.max(0,Date.parse(header)-Date.now()):0;
+      const delay=Math.max(Number.isFinite(seconds)?seconds:0,1000)+Math.random()*700;
+      if(managed){s91CooldownUntil=Math.max(s91CooldownUntil,Date.now()+delay);s91Connection('busy');}
+      if(isRead&&!retried&&delay<=8000){
+        await pause(delay);
+        try{res=await attempt();}catch(error){if(externalSignal&&externalSignal.aborted)throw error;if(managed)s91Connection('slow');throw new Error('The server did not respond. Please retry.');}
+      }
     }
     // Expired-on-arrival token: retry once with a fresh one before signing out (401 happens before any write runs).
     if(res.status===401){
@@ -433,21 +498,18 @@ async function apiFetch(url,opts,latency){
       }
     }
     if(res.status===401){
+      if(typeof s91ClearInflight==='function')s91ClearInflight();
       try{await window.Clerk?.signOut();}catch(e){}
       showClerkSignIn();
       throw new Error("Authentication required");
     }
-    let text="";
-    if(res.status!==204){
-      text=typeof res.text==="function"?await res.text().catch(()=>""):JSON.stringify(await res.json().catch(()=>({})));
-    }
-    return {status:res.status,ok:res.ok,text,serverTiming:res.headers.get("Server-Timing")||"",
+    return {status:res.status,ok:res.ok,text:res.body,serverTiming:res.headers.get("Server-Timing")||"",
             transferBytes:Number(res.headers.get("Content-Length"))||null};
   }
   let pending=inflight?inflight.get(url):null;
   const shared=!!pending;
   if(!pending){
-    pending=transport();
+    pending=managed&&isRead?s91ReadSlot(transport,externalSignal):transport();
     if(inflight){
       inflight.set(url,pending);
       const done=()=>{if(inflight.get(url)===pending)inflight.delete(url);};
@@ -463,12 +525,16 @@ async function apiFetch(url,opts,latency){
   }
   const parseStarted=now();
   let data=null;
-  if(result.status!==204){try{data=JSON.parse(result.text);}catch(e){data={};}}
+  if(result.status!==204){try{data=JSON.parse(result.text);}catch(e){
+    if(result.ok){if(managed)s91Connection('slow');throw new Error(isRead?'Invalid server response. Please reload this page.':'Could not verify the saved response. Check the record before retrying.');}
+    data={};
+  }}
   if(perf)perf.recordRequest(method,url,{status:result.status,clientMs:now()-started,networkMs:parseStarted-started,
     parseMs:now()-parseStarted,bytes:result.text.length,transferBytes:result.transferBytes,serverTiming:result.serverTiming,shared});
   if(!result.ok){
     const err=new Error(s91ApiErrorMessage(result.status,data));err.status=result.status;err.data=data;throw err;
   }
+  if(managed){s91Connection('online');if(!isRead)s91WriteCommitted();}
   return data;
 }
 

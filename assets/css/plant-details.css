@@ -251,3 +251,8 @@
 .ep-bom__confirm-body { padding: 0 var(--ep-s-5) var(--ep-s-3); color: var(--ep-text-muted); }
 .ep-bom__confirm-item { font-weight: 600; color: var(--ep-text-strong); overflow-wrap: anywhere; margin: 0 0 4px; }
 .ep-bom__confirm-where { margin: 0 0 var(--ep-s-3); font-size: .92em; }
+
+/* Calm, persistent connection feedback: no flashing or overlay. */
+.ep-badge-live[data-connection="offline"], .ep-badge-live[data-connection="slow"], .ep-badge-live[data-connection="busy"] { background: #fff1d7; color: #835007; }
+.ep-badge-live[data-connection="offline"]::before, .ep-badge-live[data-connection="slow"]::before, .ep-badge-live[data-connection="busy"]::before { background: #bc7818; }
+@media (prefers-reduced-motion: reduce) { .ep-skeleton, .ep-skeleton * { animation: none !important; transition: none !important; } }

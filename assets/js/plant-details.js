@@ -15,6 +15,7 @@
     { key: "commissioned_on", from: "commissionedOn", label: "COD",                   type: "date" },
     { key: "dc_capacity_kw",  from: "dcCapacityKw",   label: "DC capacity (kWp)",     type: "number" },
     { key: "ac_capacity_kw",  from: "acCapacityKw",   label: "AC capacity (kW)",      type: "number" },
+    { key: "supervisor",      from: "supervisor",     label: "Supervisor (optional)", type: "text" },
     { key: "district",        from: "district",       label: "District",              type: "text" },
     { key: "discom",          from: "discom",         label: "DISCOM",                type: "text" },
     { key: "location",        from: "location",       label: "Location",              type: "text" },

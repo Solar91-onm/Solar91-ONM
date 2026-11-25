@@ -25,7 +25,7 @@ else:
     # connection pool. Supabase Session Pooler (port 5432) is the recommended
     # connection mode for this deployment model.
     url = make_url(settings.database_url)
-    connect_args: dict[str, object] = {}
+    connect_args: dict[str, object] = {"connect_timeout": 8}
     # Defensive compatibility if somebody accidentally supplies Supabase's
     # transaction pooler (6543), which does not support prepared statements.
     if url.port == 6543:

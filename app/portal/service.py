@@ -304,12 +304,49 @@ def _last_activity(db: Session, plant_ids: list[UUID]) -> dict[UUID, datetime]:
     return latest
 
 
+def _checklist_scope(db: Session, user: User, plant_ids: list[UUID]) -> list[UUID]:
+    # The Overview is wider than the PM page for Assignees; do not leak checklist data.
+    if user.role not in {"O&M Head", "Assignee", "Site Engineer"}:
+        return []
+    if user.role == "Assignee":
+        allowed = user_scoped_plant_ids(db, user)
+        return [plant_id for plant_id in plant_ids if allowed is None or plant_id in allowed]
+    # O&M Head has portfolio scope, and every caller already scopes Site Engineers.
+    return plant_ids
+
+
+def _checklist_counts(db: Session, user: User, plant_ids: list[UUID], month_day: date) -> dict[UUID, dict[str, Any]]:
+    """Monthly SQL-assigned checklist progress, separate from legacy work orders."""
+    from app.pmplan.tracking import PMTrackingActivity as Activity
+    ids = _checklist_scope(db, user, plant_ids)
+    if not ids:
+        return {}
+    first = month_day.replace(day=1)
+    following = (first.replace(day=28) + timedelta(days=4)).replace(day=1)
+    today = business_today()
+    results = db.execute(select(
+        Activity.plant_id, func.count().label("scheduled"),
+        func.sum(case((Activity.status == "Approved", 1), else_=0)).label("approved"),
+        func.sum(case((Activity.status == "Pending approval", 1), else_=0)).label("pending_approval"),
+        func.sum(case((and_(Activity.status != "Approved", Activity.scheduled_on < today), 1), else_=0)).label("overdue"),
+    ).join(Plant, Plant.id == Activity.plant_id).where(
+        Activity.plant_id.in_(ids), Activity.scheduled_on >= first, Activity.scheduled_on < following,
+        or_(Plant.status.is_(None), func.lower(Plant.status) != "inactive"),
+    ).group_by(Activity.plant_id)).all()
+    return {r.plant_id: {"month": first.strftime("%Y-%m"), "scheduled": int(r.scheduled),
+        "approved": int(r.approved or 0), "pendingApproval": int(r.pending_approval or 0),
+        "overdue": int(r.overdue or 0)} for r in results}
+
+
 def overview_version(db: Session, user: User, plant_ids: list[UUID] | None = None) -> str:
     """Small, role-scoped change token for the Dashboard's conditional refresh check."""
     ids = plant_ids if plant_ids is not None else _plant_ids(overview_plants(db, user))
     if not ids:
         return business_today().isoformat()
+    from app.pmplan.tracking import PMTrackingActivity as Activity
+    checklist_ids = _checklist_scope(db, user, ids)
     latest = db.execute(select(
+        select(func.max(Activity.updated_at)).where(Activity.plant_id.in_(checklist_ids)).scalar_subquery(),
         select(func.max(Plant.updated_at)).where(Plant.id.in_(ids)).scalar_subquery(),
         select(func.max(Issue.updated_at)).where(Issue.plant_id.in_(ids)).scalar_subquery(),
         select(func.max(OMTask.updated_at)).where(OMTask.plant_id.in_(ids)).scalar_subquery(),
@@ -530,6 +567,7 @@ def plant_out(
         "commissioned_on": plant.commissioned_on.isoformat() if plant.commissioned_on else None,
         "status": plant.status,
         "assigned_engineer": plant.assigned_engineer,
+        "supervisor": plant.supervisor,
         "site_engineers": engineers,
         "site_engineer_contacts": site_contacts,
         "washing_assignee": washing_assignee,
@@ -638,6 +676,7 @@ def portfolio(db: Session, user: User) -> dict[str, Any]:
 
     issues = _issue_counts(db, ids)
     pm = _pm_counts(db, ids, today)
+    checklist = _checklist_counts(db, user, ids, today)
     washing_rows = _washing_rows(db, user)
     washing = washing_rows or {}
     last_at = _last_activity(db, ids)
@@ -651,6 +690,7 @@ def portfolio(db: Session, user: User) -> dict[str, Any]:
             washing.get(str(plant.id)),
             last_at.get(plant.id),
         )
+        profile["pmChecklist"] = checklist.get(plant.id)
         rows.append({
             "plant": plant_out(plant, engineers, washer, user, responsible),
             "profile": profile,
@@ -838,6 +878,7 @@ def portfolio_for_range(db: Session, user: User, start: date, end: date,
     # past today). Picking a range inside an earlier month reports that month's cleaning, and the
     # figures still come from the one calculation the Module Cleaning page uses.
     range_month = min(end, business_today()).strftime("%Y-%m")
+    checklist = _checklist_counts(db, user, plant_ids, min(end, business_today()))
     washing_monthly = _washing_rows(db, user, month=range_month)
     monthly_washing_by_plant = washing_monthly or {}
     engineers = site_engineers_by_plant(db, plant_ids)
@@ -864,6 +905,7 @@ def portfolio_for_range(db: Session, user: User, start: date, end: date,
                 and profile["washing"].get("compliancePercent") is not None:
             profile["washing"]["compliancePercent"] = None
             profile["washing"]["cycleCompliancePercent"] = None
+        profile["pmChecklist"] = checklist.get(plant.id)
         rows.append({
             "plant": plant_out(plant, engineers.get(plant.id, []), washers.get(plant.id, ""), user, responsible.get(plant.id)),
             "profile": profile,
@@ -1195,6 +1237,13 @@ def aggregate(rows: list[dict[str, Any]]) -> dict[str, Any]:
 
     pm_total = totals["pmCompleted"] + totals["pmPending"] + totals["pmOverdue"]
     totals["pmCompliancePercent"] = _percent(totals["pmCompleted"], pm_total)
+    checks = [row["profile"]["pmChecklist"] for row in rows if row["profile"].get("pmChecklist")]
+    totals["pmChecklist"] = None
+    if checks:
+        totals["pmChecklist"] = {"month": checks[0]["month"], **{
+            key: sum(item[key] for item in checks) for key in ("scheduled", "approved", "pendingApproval", "overdue")}}
+        item = totals["pmChecklist"]
+        item["approvedPercent"] = _percent(item["approved"], item["scheduled"])
     # The tile reads one calculation, the same one the Module Cleaning page shows: each plant's
     # monthly activity counts, aggregated. (The per-row completed/pending above may have been
     # narrowed to the selected date range, which would not agree with the monthly percentage.)
@@ -1390,7 +1439,7 @@ def _cycle_plan_calendar(
     limit: int,
 ) -> list[dict[str, Any]]:
     """Calendar markers for authorized plans, including nominal and chained work days."""
-    if user.role not in {"O&M Head", "Assignee"} or not plant_ids or limit <= 0:
+    if user.role not in {"O&M Head", "Assignee", "Site Engineer"} or not plant_ids or limit <= 0:
         return []
 
     derived: dict[UUID, dict[str, int]] = {}

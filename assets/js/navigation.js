@@ -601,7 +601,7 @@
     if (!pageId) return [];
 
     if (pageId === "washing") return plantCode ? ["operations-calendar"] : ["washing-board"];
-    if (pageId === "pm") return navState.pmCalendarOpen ? ["operations-calendar"] : ["pm-overview"];
+    if (pageId === "pm") return ["pm-tracking"];
     if (pageId === "health") return ["site-issues"];
     if (pageId === "movable-assets") return ["movable-assets"];
     if (pageId === "details") {
@@ -670,11 +670,11 @@
    */
   function updateContentArea() {
     enforceRolePages();
+    var token = ++navToken; // invalidate older loads even when the new route is already loaded
     var needed = modulesForState();
     if (!global.Solar91Modules || !needed.length || needed.every(global.Solar91Modules.isLoaded)) {
       return timedRender();
     }
-    var token = ++navToken;
     var host = hostForState();
     if (host && !host.childElementCount) host.innerHTML = SKELETON;
     renderContentArea();                       // the page frame and title appear at once
@@ -869,17 +869,15 @@
       return;
     }
 
-    if (pageId === "pm" && !navState.pmCalendarOpen) {
-      showOnly(pmOverviewEl);
+    if (pageId === "pm") {
+      showOnly(navState.pmCalendarOpen ? calendarEl : pmOverviewEl);
       if (titleEl) titleEl.textContent = "Preventive Maintenance";
-      if (global.Solar91PortalPMOverview) {
-        global.Solar91PortalPMOverview.show(
-          document.querySelector("[data-pm-overview-host]"),
-          {
-            siteCode: plantCode,
-            parent: navState.pmParent,
-            plant: plantCode && allPlants.find(function (item) { return item.siteCode === plantCode; })
-          }
+      if (global.Solar91PMTracking) {
+        global.Solar91PMTracking.show(
+          document.querySelector(navState.pmCalendarOpen ? "[data-calendar-host]" : "[data-pm-overview-host]"),
+          { siteCode: plantCode, parent: navState.pmParent, calendar: navState.pmCalendarOpen,
+            initialMonth: navState.pmCalendarOpen ? navState.pmCalendarMonth : null,
+            eventId: navState.pmCalendarOpen ? navState.pmCalendarEventId : null }
         );
       }
     } else if (calendarType && global.Solar91PortalCalendar) {
