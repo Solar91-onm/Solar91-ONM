@@ -82,7 +82,7 @@ def test_unit_plan_can_expand_shrink_and_keeps_removed_tasks_as_history(client, 
     assert db.query(AuditLog).filter(AuditLog.action == 'Cancelled scheduled unit outside revised PM plan').count() == 2
 
 
-def test_assignee_can_only_edit_units_at_their_assigned_plants(client, db):
+def test_assignee_can_edit_units_across_plants_without_assignments(client, db):
     assignee = login_user(client, db, role='Assignee', name='Ravi', email='unit-assignee@example.com')
     plant = Plant(site_code='UNIT-2', plant_name='Unit Scope Plant')
     db.add(plant)
@@ -101,8 +101,8 @@ def test_assignee_can_only_edit_units_at_their_assigned_plants(client, db):
 
     allowed = client.patch('/api/scheduled/tasks/WO-UNIT-INV/units', json={'total_units': 3, 'units_per_day': 1})
     assert allowed.status_code == 200, allowed.text
-    denied = client.patch('/api/scheduled/tasks/WO-UNIT-TR/units', json={'total_units': 3, 'units_per_day': 1})
-    assert denied.status_code == 403
+    across_portfolio = client.patch('/api/scheduled/tasks/WO-UNIT-TR/units', json={'total_units': 3, 'units_per_day': 1})
+    assert across_portfolio.status_code == 200, across_portfolio.text
 
 
 def test_head_can_delete_open_task_and_similar_but_not_completed(client, db):

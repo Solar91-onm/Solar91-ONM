@@ -44,23 +44,16 @@ def test_head_can_edit_security_contacts_without_touching_other_fields(client, d
     assert "security_guard" not in fields
 
 
-def test_assignee_can_edit_only_within_their_scope(client, db):
+def test_assignee_can_edit_contacts_without_plant_assignments(client, db):
     plant = _plant(db)
     assignee = login_user(client, db, role="Assignee", email="sec-assignee@example.com")
 
-    # Outside scope until the plant is assigned.
-    outside = client.patch(f"/api/plants/{plant.id}/security-contacts", json={
-        "site_engineers": [], "guards": [],
-    })
-    assert outside.status_code == 403
-
-    grant_assignee_plants(db, assignee.id, plant.id)
-    inside = client.patch(f"/api/plants/{plant.id}/security-contacts", json={
+    response = client.patch(f"/api/plants/{plant.id}/security-contacts", json={
         "site_engineers": [{"name": "Chandan", "mobile_no": "9000000003", "shift": "day"}],
         "guards": [],
     })
-    assert inside.status_code == 200, inside.text
-    assert inside.json()["custom_fields"]["security_contacts"]["site_engineers"][0]["name"] == "Chandan"
+    assert response.status_code == 200, response.text
+    assert response.json()["custom_fields"]["security_contacts"]["site_engineers"][0]["name"] == "Chandan"
 
 
 def test_other_roles_and_bad_input_are_rejected(client, db):

@@ -71,14 +71,13 @@ def test_requirement_create_rejects_unassigned_plants_and_empty_demands(client, 
     assert client.get("/api/requirements").json()["total"] == 0
 
 
-def test_assignee_manages_priority_and_completion_with_plant_scope(client, db):
+def test_assignee_manages_priority_and_completion_without_plant_assignment(client, db):
     plant = _plant(db, "REQ04")
     engineer = login_user(client, db, role="Site Engineer", email="requirements-create@example.com")
     grant_assignee_plants(db, engineer.id, plant.id)
     created = _ticket(client, plant)
 
     assignee = login_user(client, db, role="Assignee", email="requirements-assignee@example.com")
-    grant_assignee_plants(db, assignee.id, plant.id)
     priority = client.patch(
         f"/api/requirements/{created['id']}/priority",
         json={"priority": "Low"},
@@ -107,7 +106,7 @@ def test_assignee_manages_priority_and_completion_with_plant_scope(client, db):
     assert head_priority.json()["completedByName"] == assignee.display_name
 
 
-def test_site_engineer_cannot_manage_ticket_and_assignee_cannot_cross_plant_scope(client, db):
+def test_site_engineer_cannot_manage_ticket_and_assignee_can_manage_across_plants(client, db):
     plant = _plant(db, "REQ05")
     other = _plant(db, "REQ06")
     engineer = login_user(client, db, role="Site Engineer", email="requirements-create-2@example.com")
@@ -120,12 +119,12 @@ def test_site_engineer_cannot_manage_ticket_and_assignee_cannot_cross_plant_scop
     ).status_code == 403
 
     assignee = login_user(client, db, role="Assignee", email="requirements-assignee-scope@example.com")
-    grant_assignee_plants(db, assignee.id, other.id)
-    assert client.get("/api/requirements").json()["total"] == 0
-    assert client.patch(
+    assert client.get("/api/requirements").json()["total"] == 1
+    cross_plant = client.patch(
         f"/api/requirements/{created['id']}/priority",
         json={"priority": "Critical"},
-    ).status_code == 404
+    )
+    assert cross_plant.status_code == 200, cross_plant.text
 
 
 def test_requirement_priority_is_limited_to_supported_levels(client, db):
@@ -134,7 +133,6 @@ def test_requirement_priority_is_limited_to_supported_levels(client, db):
     grant_assignee_plants(db, engineer.id, plant.id)
     created = _ticket(client, plant)
     assignee = login_user(client, db, role="Assignee", email="requirements-priority-assignee@example.com")
-    grant_assignee_plants(db, assignee.id, plant.id)
 
     invalid = client.patch(
         f"/api/requirements/{created['id']}/priority",
@@ -150,7 +148,6 @@ def test_administrator_and_assignee_can_edit_requirement(client, db):
     created = _ticket(client, plant)
 
     assignee = login_user(client, db, role="Assignee", email="requirements-edit-assignee@example.com")
-    grant_assignee_plants(db, assignee.id, plant.id)
     assignee_edit = client.patch(f"/api/requirements/{created['id']}", json={
         "description": "Demand one\nDemand two",
         "priority": "Critical",

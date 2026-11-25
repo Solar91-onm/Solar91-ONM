@@ -103,26 +103,30 @@ def test_people_folding_rules(client, db):
     assert by_code["CHARLIE"] == _jsonish([service.plant_out(charlie, [], "", head)])[0]
 
 
-def test_scoped_assignee_still_sees_only_assigned_plants(client, db):
-    alpha, _bravo, _charlie, _helper = _seed(db)
+def test_assignee_sees_portfolio_without_plant_assignment(client, db):
+    alpha, bravo, charlie, _helper = _seed(db)
     assignee = login_user(client, db, role="Assignee", name="Scoped", email="scoped@example.com")
     db.add(UserPlantAssignment(user_id=assignee.id, plant_id=alpha.id))
     db.commit()
 
     response, statements = _count_statements(lambda: client.get("/api/portal/plants"))
 
-    assert [p["site_code"] for p in response.json()["plants"]] == ["ALPHA"]
-    assert statements == 2  # scope lookup + the one plant/people select
+    assert {p["site_code"] for p in response.json()["plants"]} == {
+        alpha.site_code, bravo.site_code, charlie.site_code,
+    }
+    assert statements == 1
 
 
-def test_assignee_without_plants_sees_none_and_skips_the_select(client, db):
-    _seed(db)
+def test_assignee_without_plant_rows_still_sees_the_portfolio(client, db):
+    alpha, bravo, charlie, _helper = _seed(db)
     login_user(client, db, role="Assignee", name="Unscoped", email="unscoped@example.com")
 
     response, statements = _count_statements(lambda: client.get("/api/portal/plants"))
 
-    assert response.json() == {"plants": []}
-    assert statements == 1  # the scope lookup only
+    assert {p["site_code"] for p in response.json()["plants"]} == {
+        alpha.site_code, bravo.site_code, charlie.site_code,
+    }
+    assert statements == 1
 
 
 def test_overview_rows_carry_the_same_plant_records(client, db):

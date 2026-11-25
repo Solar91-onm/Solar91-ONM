@@ -275,14 +275,15 @@ def _scope_state(db:Session,user:User,state:dict[str,Any],issue_rows:list[Issue]
     """Server-side least-privilege projection for the rev14 production role model."""
     if has_portfolio_scope(user):
         # Administration gets portfolio data for dashboards/reports but mutating endpoints remain permission-gated.
-        if user.role=="Administration":
+        if user.role in {"Administration", "Assignee"}:
             state["handovers"]=[]
             state["inventory"]=[]; state["movements"]=[]; state["ptw"]=[]; state["incidents"]=[]
             state["vendors"]=[]; state["serviceRequests"]=[]; state["sla"]=[]; state["offlineQueue"]=[]; state["audit"]=[]
             state["docs"]=[]
         return state
 
-    allowed_ids=user_scoped_plant_ids(db,user) or set()
+    allowed=user_scoped_plant_ids(db,user)
+    allowed_ids=allowed if allowed is not None else set()
     allowed_ids_str={str(x) for x in allowed_ids}
     allowed_plants=[p for p in state.get("plants",[]) if str(p.get("dbId")) in allowed_ids_str]
     allowed_names={str(p.get("name") or "") for p in allowed_plants}
@@ -321,8 +322,9 @@ def _scope_state(db:Session,user:User,state:dict[str,Any],issue_rows:list[Issue]
 
 def _sync_state_scoped(db:Session,state:dict[str,Any],expected_revision:int|None,user:User)->int:
     """Compatibility sync for non-admin roles. Only role-appropriate deltas can reach persistent data."""
-    allowed_ids=user_scoped_plant_ids(db,user) or set()
+    allowed=user_scoped_plant_ids(db,user)
     plants,by_name,by_code=_plant_maps(db)
+    allowed_ids=allowed if allowed is not None else {plant.id for plant in plants}
     changed=False
 
     if user.role in {"Site Engineer","Assignee"}:

@@ -14,7 +14,7 @@ from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from app.core.database import Base, SessionLocal, engine
-from app.core.models import Plant, User, UserPlantAssignment, WorkCategory
+from app.core.models import User, UserPlantAssignment, WorkCategory
 from app.core.security import get_current_user
 from app.main import app
 
@@ -72,21 +72,18 @@ def client():
 
 
 def grant_assignee_plants(db, user_id, *plant_ids) -> None:
-    """Give an Assignee their plant scope.
-
-    Replaces the removed ``UserEquipmentTypeAssignment``: an Assignee used to be scoped
-    by equipment type, which exposed every plant. Scope is now explicit plant rows, so
-    with no ``plant_ids`` this assigns every plant that currently exists — the same
-    visibility the equipment-type setup produced.
-    """
-    from sqlalchemy import select
-    ids = list(plant_ids) or list(db.scalars(select(Plant.id)))
-    existing = set(db.scalars(
-        select(UserPlantAssignment.plant_id).where(UserPlantAssignment.user_id == user_id)
-    ))
-    for plant_id in ids:
-        if plant_id not in existing:
-            db.add(UserPlantAssignment(user_id=user_id, plant_id=plant_id, assignment_role="Assignee"))
+    """Keep legacy setup calls useful for scoped Site Engineers, never Assignees."""
+    user = db.get(User, user_id)
+    if user and user.role == "Site Engineer":
+        existing = {
+            row.plant_id
+            for row in db.query(UserPlantAssignment).filter_by(user_id=user_id).all()
+        }
+        db.add_all(
+            UserPlantAssignment(user_id=user_id, plant_id=plant_id, assignment_role="Site Engineer")
+            for plant_id in plant_ids
+            if plant_id not in existing
+        )
     db.commit()
 
 

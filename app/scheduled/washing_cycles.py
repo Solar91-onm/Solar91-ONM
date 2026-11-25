@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 
 from app.core.timeutil import BUSINESS_TZ, business_today
 from app.core.config import get_settings
-from app.core.models import AppSetting, AuditLog, Notification, Plant, User, UserPlantAssignment, WashingConfig, WashingDailyReport, WashingHistory, WashingTable
+from app.core.models import AppSetting, AuditLog, Notification, Plant, User, WashingConfig, WashingDailyReport, WashingHistory, WashingTable
 from app.core.security import user_scoped_plant_ids
 from app.notifications.service import notify_users, users_with_role
 from app.scheduled.schemas import (
@@ -725,32 +725,10 @@ def _set_table_count(db: Session, plant: Plant, table_count: int) -> int:
     return len(tables)
 
 
-def _ensure_washing_assignee(db: Session, user: User, assignee: User, plant_id: UUID | None = None) -> None:
-    """The washing assignee must be an active Assignee scoped to the plant.
-
-    Washing scope used to be the "Modules cleaning" equipment type across every
-    plant. It is now the plant assignment, so setting someone up for a plant's
-    washing grants them that plant if they do not have it yet.
-    """
+def _ensure_washing_assignee(assignee: User) -> None:
+    """The configured washing reviewer must be an active Assignee."""
     if not assignee.is_active or assignee.role != "Assignee":
         raise HTTPException(422, "Choose an active Assignee")
-    if plant_id is None:
-        return
-    already = db.scalar(select(UserPlantAssignment.plant_id).where(
-        UserPlantAssignment.user_id == assignee.id, UserPlantAssignment.plant_id == plant_id,
-    ))
-    if already is None:
-        db.add(UserPlantAssignment(user_id=assignee.id, plant_id=plant_id, assignment_role="Assignee"))
-        plant = db.get(Plant, plant_id)
-        db.add(AuditLog(
-            user_id=user.id,
-            actor_name=user.display_name,
-            action="Plant scope added while setting up plant washing",
-            module="Washing",
-            entity_type="user",
-            entity_id=str(assignee.id),
-            metadata_json={"plant": plant.site_code if plant else str(plant_id), "assignee": assignee.display_name},
-        ))
 
 
 def setup_plant(db: Session, user: User, payload: WashingSetupRequest) -> dict:
@@ -760,7 +738,7 @@ def setup_plant(db: Session, user: User, payload: WashingSetupRequest) -> dict:
     assignee = db.get(User, payload.assignee_user_id)
     if not assignee:
         raise HTTPException(422, "Choose an active Assignee")
-    _ensure_washing_assignee(db, user, assignee, plant.id)
+    _ensure_washing_assignee(assignee)
 
     config = db.scalar(select(WashingConfig).where(WashingConfig.plant_id == plant.id).with_for_update())
     if not config:
@@ -801,8 +779,7 @@ def list_assignees(db: Session, user: User) -> list[dict]:
     users = db.execute(
         select(User.id, User.display_name).where(User.role == "Assignee", User.is_active.is_(True)).order_by(User.display_name)
     ).all()
-    scoped = set(db.scalars(select(UserPlantAssignment.user_id)))
-    return [{"id": str(user_id), "name": name, "has_washing_scope": user_id in scoped} for user_id, name in users]
+    return [{"id": str(user_id), "name": name, "has_washing_scope": True} for user_id, name in users]
 
 
 def _overview_as_of(month: str | None) -> date | None:

@@ -94,8 +94,6 @@ def _validate_access(role: str, plant_ids: list[UUID]) -> None:
         raise HTTPException(422, "Unsupported role")
     if role == "Site Engineer" and len(plant_ids) != 1:
         raise HTTPException(422, "A Site Engineer must be assigned to exactly one plant")
-    if role == "Assignee" and not plant_ids:
-        raise HTTPException(422, "An Assignee must be assigned at least one plant")
 
 
 @router.get("")
@@ -133,10 +131,10 @@ def list_users(
     result = []
     for u in db.scalars(select(User).order_by(User.display_name)):
         item = out(u)
-        item["plants"] = by_user.get(u.id, [])
-        item["washing_plant_ids"] = washing_by_user.get(u.id, [])
-        item["pm_plant_ids"] = responsibility_by_user.get(u.id, {}).get("pm", [])
-        item["health_plant_ids"] = responsibility_by_user.get(u.id, {}).get("health", [])
+        item["plants"] = [] if u.role == "Assignee" else by_user.get(u.id, [])
+        item["washing_plant_ids"] = [] if u.role == "Assignee" else washing_by_user.get(u.id, [])
+        item["pm_plant_ids"] = [] if u.role == "Assignee" else responsibility_by_user.get(u.id, {}).get("pm", [])
+        item["health_plant_ids"] = [] if u.role == "Assignee" else responsibility_by_user.get(u.id, {}).get("health", [])
         item["created_at"] = u.created_at.isoformat() if getattr(u, "created_at", None) else None
         item["is_self"] = u.id == user.id
         result.append(item)
@@ -155,20 +153,25 @@ def update_access(
     if not target:
         raise HTTPException(404, "User not found")
     unique_ids = list(dict.fromkeys(data.plant_ids))
-    washing_ids = list(dict.fromkeys(data.washing_plant_ids))
-    pm_ids = list(dict.fromkeys(data.pm_plant_ids))
-    health_ids = list(dict.fromkeys(data.health_plant_ids))
+    if data.role == "Assignee" and data.plant_ids:
+        raise HTTPException(422, "Assignees have portfolio-wide plant access; plant assignments are not applicable")
+    fields_set = data.model_fields_set
+    washing_ids = list(dict.fromkeys(data.washing_plant_ids)) if "washing_plant_ids" in fields_set else None
+    pm_ids = list(dict.fromkeys(data.pm_plant_ids)) if "pm_plant_ids" in fields_set else None
+    health_ids = list(dict.fromkeys(data.health_plant_ids)) if "health_plant_ids" in fields_set else None
     if washing_ids and data.role != "Assignee":
         raise HTTPException(422, "Washing scope can only be assigned to an Assignee")
     if (pm_ids or health_ids) and data.role != "Assignee":
         raise HTTPException(422, "Preventive Maintenance and Health scope can only be assigned to an Assignee")
     if data.role == "Assignee":
-        unique_ids = list(dict.fromkeys(unique_ids + washing_ids + pm_ids + health_ids))
+        unique_ids = []
     _validate_access(data.role, unique_ids)
     # Portfolio roles see every plant; keeping per-plant rows for them would only confuse.
     if data.role in PORTFOLIO_ROLES:
         unique_ids = []
-    all_requested_ids = list(dict.fromkeys(unique_ids + washing_ids + pm_ids + health_ids))
+    all_requested_ids = list(dict.fromkeys(
+        unique_ids + (washing_ids or []) + (pm_ids or []) + (health_ids or [])
+    ))
     if all_requested_ids:
         valid = set(db.scalars(select(Plant.id).where(Plant.id.in_(all_requested_ids))))
         missing = [str(x) for x in all_requested_ids if x not in valid]
@@ -191,12 +194,12 @@ def update_access(
         select(WashingConfig)
         .where(
             (WashingConfig.assigned_user_id == target.id)
-            | WashingConfig.plant_id.in_(washing_ids)
+            | WashingConfig.plant_id.in_(washing_ids or [])
         )
         .with_for_update()
     ))
     config_by_plant = {config.plant_id: config for config in washing_configs}
-    unconfigured = [str(plant_id) for plant_id in washing_ids if plant_id not in config_by_plant]
+    unconfigured = [str(plant_id) for plant_id in (washing_ids or []) if plant_id not in config_by_plant]
     if unconfigured:
         raise HTTPException(
             422,
@@ -228,21 +231,24 @@ def update_access(
     db.execute(delete(UserPlantAssignment).where(UserPlantAssignment.user_id == user_id))
     for pid in unique_ids:
         db.add(UserPlantAssignment(user_id=user_id, plant_id=pid, assignment_role=data.role))
-    selected_washing_ids = set(washing_ids)
-    for config in washing_configs:
-        if config.assigned_user_id == target.id and config.plant_id not in selected_washing_ids:
-            config.assigned_user_id = None
-    for plant_id in washing_ids:
-        config_by_plant[plant_id].assigned_user_id = target.id
-    _set_responsibility(db, "pm", target.id, pm_ids)
-    _set_responsibility(db, "health", target.id, health_ids)
+    if washing_ids is not None:
+        selected_washing_ids = set(washing_ids)
+        for config in washing_configs:
+            if config.assigned_user_id == target.id and config.plant_id not in selected_washing_ids:
+                config.assigned_user_id = None
+        for plant_id in washing_ids:
+            config_by_plant[plant_id].assigned_user_id = target.id
+    if pm_ids is not None:
+        _set_responsibility(db, "pm", target.id, pm_ids)
+    if health_ids is not None:
+        _set_responsibility(db, "health", target.id, health_ids)
     after = {
         "role": target.role,
         "active": target.is_active,
         "plant_ids": [str(x) for x in unique_ids],
-        "washing_plant_ids": [str(x) for x in washing_ids],
-        "pm_plant_ids": [str(x) for x in pm_ids],
-        "health_plant_ids": [str(x) for x in health_ids],
+        "washing_plant_ids": [str(x) for x in washing_ids] if washing_ids is not None else before_washing_ids,
+        "pm_plant_ids": [str(x) for x in pm_ids] if pm_ids is not None else before_responsibilities["pm"],
+        "health_plant_ids": [str(x) for x in health_ids] if health_ids is not None else before_responsibilities["health"],
     }
     db.add(AuditLog(
         user_id=user.id, actor_name=user.display_name, action="Changed user access",
@@ -320,7 +326,7 @@ def update_role(
         # Only an Assignee can hold Preventive Maintenance or Health responsibility for a plant.
         db.execute(delete(PlantResponsibility).where(PlantResponsibility.assigned_user_id == row.id))
     # Portfolio roles see every plant, so their per-plant rows are dropped.
-    if data.role in PORTFOLIO_ROLES:
+    if data.role in PORTFOLIO_ROLES or data.role == "Assignee":
         db.execute(delete(UserPlantAssignment).where(UserPlantAssignment.user_id == row.id))
     db.add(AuditLog(
         user_id=user.id, actor_name=user.display_name, action="Changed user role",
@@ -339,8 +345,11 @@ def get_plant_assignments(
     db: Annotated[Session, Depends(get_db)],
     user: Annotated[User, Depends(require_permission("users.manage"))],
 ):
-    if not db.get(User, user_id):
+    target = db.get(User, user_id)
+    if not target:
         raise HTTPException(404, "User not found")
+    if target.role != "Site Engineer":
+        return []
     rows = db.execute(
         select(UserPlantAssignment, Plant)
         .join(Plant, Plant.id == UserPlantAssignment.plant_id)
@@ -365,10 +374,12 @@ def replace_plant_assignments(
     db: Annotated[Session, Depends(get_db)],
     user: Annotated[User, Depends(require_permission("users.manage"))],
 ):
-    if not db.get(User, user_id):
+    target_user = db.get(User, user_id)
+    if not target_user:
         raise HTTPException(404, "User not found")
     unique_ids = list(dict.fromkeys(data.plant_ids))
-    target_user = db.get(User, user_id)
+    if target_user.role != "Site Engineer" and unique_ids:
+        raise HTTPException(422, "Plant assignments are only applicable to Site Engineers")
     if target_user and target_user.role == "Site Engineer" and len(unique_ids) != 1:
         raise HTTPException(422, "Site Engineer must be assigned to exactly one plant")
     before_ids = list(db.scalars(

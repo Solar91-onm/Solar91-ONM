@@ -10,7 +10,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy import select, text, update
 from sqlalchemy.orm import Session
 
-from app.core.models import AuditLog, UserPlantAssignment, InventoryItem, InventoryMovement, Issue, IssueETCChange, IssueHistory, IssueStep, Plant, User
+from app.core.models import AuditLog, InventoryItem, InventoryMovement, Issue, IssueETCChange, IssueHistory, IssueStep, Plant, User
 from app.core.security import plant_scope_matches
 from app.issues.deadlines import default_deadline
 from app.issues.repository import IssueRepository
@@ -92,46 +92,9 @@ class IssueService:
         return target
 
     def _ensure_assignee_scope(self, target: User, actor: User, plant_id) -> None:
-        """An Assignee can only work tickets of the plants in their scope.
-
-        The O&M Head may extend that scope while assigning (so a ticket can never be
-        left with someone who cannot open it); nobody else can. Before the asset
-        register was removed this checked equipment types; it now checks plants.
-        """
+        """Validate that an assigned ticket has a plant; Assignees have portfolio access."""
         if plant_id is None:
             raise HTTPException(422, "Choose the plant before assigning the ticket")
-        if plant_scope_matches(self.db, target, plant_id):
-            return
-        if actor.role != "O&M Head":
-            raise HTTPException(422, "The selected Assignee is not assigned to this plant")
-        self.db.add(UserPlantAssignment(user_id=target.id, plant_id=plant_id, assignment_role="Assignee"))
-        plant = self.db.get(Plant, plant_id)
-        self.db.add(AuditLog(
-            user_id=actor.id, actor_name=actor.display_name,
-            action="Plant scope added while assigning a ticket", module="Issues",
-            entity_type="user", entity_id=str(target.id),
-            after_state={"plant": plant.site_code if plant else str(plant_id), "assignee": target.display_name},
-        ))
-
-    def _grant_equipment_scope(self, target: User, plant_id, equipment: str) -> None:
-        """Give the equipment's responsible Assignee access to this plant, and record why.
-
-        Equipment responsibility is portfolio-wide and is configured by the O&M Head on the
-        Login Access page, so a ticket routed by it must not land with someone who cannot open
-        it. The plant row is added once, attributed to the responsibility rather than to the
-        person who raised the ticket, and written to the audit log either way.
-        """
-        if plant_scope_matches(self.db, target, plant_id):
-            return
-        self.db.add(UserPlantAssignment(user_id=target.id, plant_id=plant_id, assignment_role="Assignee"))
-        plant = self.db.get(Plant, plant_id)
-        self.db.add(AuditLog(
-            user_id=target.id, actor_name="Equipment responsibility",
-            action="Plant scope added by equipment responsibility", module="Issues",
-            entity_type="user", entity_id=str(target.id),
-            after_state={"plant": plant.site_code if plant else str(plant_id),
-                         "assignee": target.display_name, "equipment": equipment},
-        ))
 
     def _auto_assignee(self, equipment: str | None, plant_id) -> User | None:
         """The active primary Assignee configured for this equipment category, if any."""
@@ -241,15 +204,6 @@ class IssueService:
                 if not auto_number or attempt == 5:
                     raise HTTPException(409,"Ticket number already exists") from exc
         if auto_equipment and row.assigned_to is not None:
-            # The ticket is saved. Give its new owner access to that plant, in its own
-            # transaction: a failure here must not undo the ticket, and the ticket being
-            # retried under a new number must not leave a half-applied grant behind.
-            try:
-                self._grant_equipment_scope(assignee, row.plant_id, auto_equipment)
-                self.db.commit()
-            except Exception:
-                self.db.rollback()
-                logger.exception("Plant scope for the equipment owner failed; the ticket was created")
             self._notify(
                 plant_id=row.plant_id, assigned_to=row.assigned_to, event_type="ticket_assigned",
                 title="Ticket assigned to you - " + row.ticket_no,

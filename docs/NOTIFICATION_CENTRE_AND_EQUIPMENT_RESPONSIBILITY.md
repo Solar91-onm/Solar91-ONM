@@ -150,9 +150,8 @@ authority: those stay with the role, and the PM approval requirement is unchange
 
 When a site issue is created and no assignee was chosen, the equipment's active primary Assignee
 takes it, whatever plant it is on. The ticket's history records why
-(`issue.auto_assigned`), the new owner is notified, and — because an Assignee's visibility comes
-from plant assignments — that plant is added to their scope with an audit entry attributed to the
-responsibility, not to the person who raised the ticket.
+(`issue.auto_assigned`), and the new owner is notified. Assignees have portfolio-wide plant
+visibility, so equipment responsibility routes work without granting plant access.
 
 With nobody configured, the ticket is still created, marked in its history as
 `issue.assignment_skipped` ("Unassigned — responsibility not configured"), and the O&M Head is
@@ -160,12 +159,11 @@ notified so it can be assigned by hand. Existing tickets keep their assignees; c
 applies to tickets created after it. An Assignee raising their own ticket still keeps it, and the
 O&M Head can still reassign anything manually.
 
-### Not included
+### Plant access
 
-Read **scope** is unchanged: an Assignee still sees the plants assigned to them (plus any plant a
-ticket routed to them, as above). Portfolio-wide *browsing* of every plant's PM or Module Cleaning
-records for one's equipment is a change to the authorization boundary of every module and is
-deliberately left out of this change; it needs its own review and tests.
+Assignees have portfolio-wide plant visibility. Plant assignments are not required for Assignees
+and equipment responsibility does not grant or restrict plant access. Site Engineers remain
+restricted to their assigned plants.
 
 ---
 

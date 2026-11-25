@@ -14,7 +14,7 @@ from app.core.timeutil import business_today, log_stamp, utc_now
 from app.core.config import get_settings
 from app.core.database import get_db, release_connection
 from app.core.models import AuditLog, Issue, OMTask, PMAlertLog, PMDueChange, PMFollowUp, Plant, User, WashingHistory, WashingTable, WashingConfig, Permit, StateRevision
-from app.core.security import get_current_user, require_csrf, require_permission, user_scoped_plant_ids
+from app.core.security import get_current_user, plant_scope_matches, require_csrf, require_permission, user_scoped_plant_ids
 from app.photos.imaging import header_matches
 from app.plants.codes import find_plant_by_code, normalize_site_code
 from app.pmplan.units import distribute, next_cycle_id
@@ -61,8 +61,8 @@ def _task(db: Session, work_order_no: str, *, for_update: bool = False) -> OMTas
 def _ensure_washing_scope(db: Session, user: User, table: WashingTable) -> None:
     if user.role == "O&M Head":
         return
-    allowed = user_scoped_plant_ids(db, user) or set()
-    if table.plant_id not in allowed:
+    allowed = user_scoped_plant_ids(db, user)
+    if allowed is not None and table.plant_id not in allowed:
         raise HTTPException(403, "This module cleaning table is outside your assigned scope")
 
 
@@ -70,8 +70,7 @@ def _can_view_task(db: Session, user: User, task: OMTask) -> bool:
     if user.role in {"O&M Head", "Administration"}:
         return True
     if user.role in {"Site Engineer", "Assignee"}:
-        allowed = user_scoped_plant_ids(db, user) or set()
-        return task.plant_id in allowed
+        return plant_scope_matches(db, user, task.plant_id)
     return False
 
 
@@ -79,8 +78,7 @@ def _can_execute_task(db: Session, user: User, task: OMTask) -> bool:
     if user.role == "O&M Head":
         return True
     if user.role in {"Site Engineer", "Assignee"}:
-        allowed = user_scoped_plant_ids(db, user) or set()
-        return task.plant_id in allowed
+        return plant_scope_matches(db, user, task.plant_id)
     return False
 
 
@@ -161,9 +159,9 @@ def list_tasks(db: Annotated[Session, Depends(get_db)], user: Annotated[User, De
     plant_names = {task.plant_id: name for task, name in task_rows if task.plant_id and name}
 
     list_lookups = None
-    if user.role in {"O&M Head", "Administration"}:
+    if user.role in {"O&M Head", "Administration", "Assignee"}:
         visible = rows
-    elif user.role in {"Site Engineer", "Assignee"}:
+    elif user.role == "Site Engineer":
         allowed_plants = user_scoped_plant_ids(db, user) or set()
         visible = [task for task in rows if task.plant_id in allowed_plants]
     else:
@@ -196,7 +194,7 @@ def _require_pm_follow_up_access(db: Session, user: User, task: OMTask) -> None:
         return
     if user.role == "Assignee" and (
         task.assignee_user_id == user.id
-        or task.plant_id in (user_scoped_plant_ids(db, user) or set())
+        or plant_scope_matches(db, user, task.plant_id)
     ):
         return
     raise HTTPException(403,"Only the O&M Head or an assigned/in-scope Assignee can access follow-ups")
@@ -285,7 +283,7 @@ def create_problem_task(payload: ProblemTaskCreate, db: Annotated[Session, Depen
     if user.role not in CREATOR_ROLES:
         raise HTTPException(403, "Only O&M Head and Assignee/O&M Team can create Preventive Maintenance tasks")
     plant = _plant(db, payload.plant_id)
-    if user.role == "Assignee" and plant.id not in (user_scoped_plant_ids(db, user) or set()):
+    if user.role == "Assignee" and not plant_scope_matches(db, user, plant.id):
         raise HTTPException(403, "This plant is outside your assigned scope")
     assigned_user = None
     if payload.assignee:
@@ -294,9 +292,7 @@ def create_problem_task(payload: ProblemTaskCreate, db: Annotated[Session, Depen
             (User.display_name.ilike(payload.assignee.strip())) | (User.email.ilike(payload.assignee.strip()))
         ))
     _require_assignee_role(assigned_user)
-    if assigned_user and assigned_user.role == "Assignee" and plant.id not in (
-        user_scoped_plant_ids(db, assigned_user) or set()
-    ):
+    if assigned_user and assigned_user.role == "Assignee" and not plant_scope_matches(db, assigned_user, plant.id):
         raise HTTPException(422, "The selected Assignee is not assigned to this plant")
     task = OMTask(
         work_order_no="WO-" + uuid.uuid4().hex[:10].upper(), plant_id=plant.id,
@@ -887,7 +883,7 @@ def edit_task_schedule(work_order_no: str, payload: TaskScheduleEdit, db: Annota
     work category (other plants / units); their due dates move by the same number of days."""
     task = _task(db, work_order_no)
     is_head = user.role == "O&M Head"
-    in_scope = lambda t: user.role == "Assignee" and t.plant_id in (user_scoped_plant_ids(db, user) or set())
+    in_scope = lambda t: user.role == "Assignee" and plant_scope_matches(db, user, t.plant_id)
     if not is_head and not in_scope(task):
         raise HTTPException(403, "Only the O&M Head or an Assignee for this plant can change a task's schedule")
     if not is_head:
@@ -962,7 +958,7 @@ def edit_task_schedule(work_order_no: str, payload: TaskScheduleEdit, db: Annota
             t.quantity=payload.quantity
             notes.append(f"quantity → {payload.quantity if payload.quantity is not None else DASH}")
         if who and who != (t.assignee_text or ""):
-            if target_user and target_user.role == "Assignee" and t.plant_id not in (user_scoped_plant_ids(db, target_user) or set()):
+            if target_user and target_user.role == "Assignee" and not plant_scope_matches(db, target_user, t.plant_id):
                 if is_main:
                     raise HTTPException(422, "The selected Assignee is not assigned to this plant")
             else:
@@ -1041,7 +1037,7 @@ def link_task_issue(
 def edit_task_unit_plan(work_order_no: str, payload: TaskUnitPlanEdit, db: Annotated[Session, Depends(get_db)], user: Annotated[User, Depends(get_current_user)]):
     task = _task(db, work_order_no)
     if user.role != "O&M Head" and not (
-        user.role == "Assignee" and task.plant_id in (user_scoped_plant_ids(db, user) or set())
+        user.role == "Assignee" and plant_scope_matches(db, user, task.plant_id)
     ):
         raise HTTPException(403, "Only the O&M Head or an Assignee for this plant can change its unit plan")
     if task.status != "Scheduled":
@@ -1132,9 +1128,7 @@ def reassign_task(work_order_no: str, payload: TaskReassign, db: Annotated[Sessi
             (User.display_name.ilike(payload.assignee.strip())) | (User.email.ilike(payload.assignee.strip()))
         ))
     _require_assignee_role(target)
-    if target and target.role == "Assignee" and task.plant_id not in (
-        user_scoped_plant_ids(db, target) or set()
-    ):
+    if target and target.role == "Assignee" and not plant_scope_matches(db, target, task.plant_id):
         raise HTTPException(422, "The selected Assignee is not assigned to this plant")
     task.assignee_text = payload.assignee
     task.assignee_user_id = target.id if target else None

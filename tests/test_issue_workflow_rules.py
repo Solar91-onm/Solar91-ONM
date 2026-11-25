@@ -35,13 +35,13 @@ def test_assignees_endpoint_lists_every_active_assignee(client, db):
     assert str(assignee.id) in {r["id"] for r in rows}      # no equipment scope yet, still listed
 
 
-def test_head_assigning_an_unscoped_assignee_grants_the_plant_scope(client, db):
+def test_head_assigning_an_assignee_does_not_create_plant_scope(client, db):
     assignee, _, issue = _head_with_issue(client, db)
     resp = client.post(f"/api/issues/{issue['id']}/assign", json={"assigned_to": str(assignee.id)})
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["assigned_to"] == str(assignee.id) and body["assignee_text"] == "Ravi Assignee" and body["status"] == "Assigned"
-    assert db.query(UserPlantAssignment).filter_by(user_id=assignee.id).count() == 1
+    assert db.query(UserPlantAssignment).filter_by(user_id=assignee.id).count() == 0
 
 
 def test_assignment_by_name_only_resolves_to_the_database_user(client, db):

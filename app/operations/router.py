@@ -46,10 +46,7 @@ def bootstrap(
     result["scope"] = scope
     result["permissions"] = sorted(ROLE_PERMISSIONS.get(user.role, set()))
     result["modules"] = ROLE_MODULES.get(user.role, [])
-    # Every scoped role now waits on a plant assignment (Assignees used to wait on equipment types).
-    result["pending_access"] = (
-        user.role in {"Site Engineer", "Assignee"} and len(scope["plant_ids"]) == 0
-    )
+    result["pending_access"] = user.role == "Site Engineer" and len(scope["plant_ids"]) == 0
     return json_response(result)
 
 

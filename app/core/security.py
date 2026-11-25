@@ -63,7 +63,7 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
         "reports.view", "performance.view", "services.view", "requirements.view", "requirements.create",
         "requirements.manage",
     },
-    # Assignee = Solar91 O&M team member, scoped to their assigned plants.
+    # Assignees have portfolio-wide plant access; equipment responsibility routes work, not visibility.
     "Assignee": {
         "plants.view", "issues.view", "issues.create", "issues.progress", "issues.resolve",
         "tasks.view", "tasks.create", "tasks.execute", "washing.log", "handover.execute", "documents.view",
@@ -131,7 +131,7 @@ def is_head(user: User) -> bool:
 
 
 def has_portfolio_scope(user: User) -> bool:
-    return user.role in {"O&M Head", "Administration"}
+    return user.role in {"O&M Head", "Assignee", "Administration"}
 
 
 def _identity_values(user: User) -> list[str]:
@@ -187,20 +187,14 @@ def is_work_category(db: Session, value: str | None) -> bool:
 def user_scoped_plant_ids(db: Session, user: User) -> set[UUID] | None:
     """Plants visible to a role. ``None`` means the whole portfolio.
 
-    Scope is plant-based for every non-portfolio role, resolved only from the
-    ``user_plant_assignments`` table. A plant's free-text ``assigned_engineer``
+    Assignees and O&M Heads see the whole portfolio. Site Engineers are limited
+    to their explicit plant assignment; a plant's free-text ``assigned_engineer``
     field is never treated as an authorization boundary.
 
-    * **Assignee** — one or more assigned plants. An Assignee with no assignment
-      sees nothing (a pending-access state), never the whole fleet.
     * **Site Engineer** — deliberately strict: exactly one plant. Zero is a
       pending-access state and more than one is a configuration error.
-
-    Before the asset register was removed, an Assignee's scope came from
-    assigned equipment *types* and therefore spanned every plant. Scope is now
-    explicit, so an Assignee must be given the plants they are responsible for.
     """
-    if has_portfolio_scope(user):
+    if user.role in {"O&M Head", "Administration", "Assignee"}:
         return None
     explicit = set(
         db.scalars(
@@ -219,11 +213,10 @@ def user_scoped_plant_ids(db: Session, user: User) -> set[UUID] | None:
 
 def plant_scope_matches(db: Session, user: User, plant_id: UUID | None) -> bool:
     """Does a record's plant fall inside this user's scope?"""
-    if has_portfolio_scope(user):
-        return True
     if plant_id is None:
         return False
-    return plant_id in (user_scoped_plant_ids(db, user) or set())
+    allowed = user_scoped_plant_ids(db, user)
+    return allowed is None or plant_id in allowed
 
 
 ROLE_MODULES: dict[str, list[str]] = {
@@ -262,8 +255,8 @@ def text_is_current_user(value: str | None, user: User) -> bool:
 
 
 def ensure_plant_scope(db: Session, user: User, plant_id: UUID | None) -> None:
-    if has_portfolio_scope(user):
+    allowed = user_scoped_plant_ids(db, user)
+    if allowed is None:
         return
-    allowed = user_scoped_plant_ids(db, user) or set()
     if plant_id is None or plant_id not in allowed:
         raise HTTPException(status_code=403, detail="This plant is outside your assigned scope")

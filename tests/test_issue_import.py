@@ -46,7 +46,7 @@ def test_head_uploads_tickets_with_assignee_scope_and_no_duplicates(client, db):
     assert preview.status_code == 200, preview.text
     body = preview.json()
     assert (body["new"], body["problems"], body["critical"], body["assigned"]) == (2, [], 1, 1)
-    assert "will be given access to" in body["rows"][0]["detail"]
+    assert body["rows"][0]["detail"] == ""
     assert db.query(Issue).count() == 0
 
     saved = _upload(client, text, False)
@@ -58,7 +58,7 @@ def test_head_uploads_tickets_with_assignee_scope_and_no_duplicates(client, db):
         "Critical", "Assigned", assignee.id, "Inverter", "Fault code")
     assert (second.status, second.assigned_to, second.etc_at is not None) == ("Open", None, True)
     assert db.query(IssueHistory).filter_by(action="issue.created").count() == 2
-    assert db.query(UserPlantAssignment).filter_by(user_id=assignee.id, plant_id=plant.id).count() == 1
+    assert db.query(UserPlantAssignment).filter_by(user_id=assignee.id, plant_id=plant.id).count() == 0
     assert db.query(Notification).filter_by(user_id=assignee.id, event_type="critical_issue").count() == 1
     assert db.query(Notification).filter_by(user_id=head.id, title="2 issues uploaded").count() == 1
 
@@ -105,12 +105,13 @@ def test_scope_rules_for_engineer_and_assignee(client, db):
     assert _upload(client, HEAD + "ISSUP01,Inverter,,My plant fault,Low,,,\n", False).json()["saved"] == 1
 
     worker = login_user(client, db, role="Assignee", name="Upload Worker", email="upload-worker@example.com")
-    grant_assignee_plants(db, worker.id, other.id)      # scoped to the OTHER plant only
+    grant_assignee_plants(db, worker.id, other.id)      # legacy Assignee plant rows do not limit visibility
     db.commit()
     conftest._CURRENT_USER = worker
     body = _upload(client, HEAD + f"{plant.site_code},Inverter,,Not my plant,Low,,,\n", True).json()
-    assert "outside your plant scope" in body["problems"][0]["errors"][0]
-    # any category at their own plant is fine: scope is the plant, not the category
+    assert body["problems"] == []
+    assert body["new"] == 1
+    # Assignees can upload at any plant; plant assignments are not an access boundary.
     assert _upload(client, HEAD + f"{other.site_code},Transformer,,Oil leak,Medium,,,\n", False).json()["saved"] == 1
 
     login_user(client, db, role="Administration", name="Upload Admin", email="upload-admin@example.com")

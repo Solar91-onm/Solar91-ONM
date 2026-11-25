@@ -130,13 +130,11 @@ def _validate_person(
         raise ValueError("Invalid email address")
     if role not in {"O&M Head", "Assignee", "Administration", "Site Engineer", "Viewer"}:
         raise ValueError("Unknown role")
-    plants = _resolve_plants(plant_tokens, index) if role in {"Site Engineer", "Assignee"} else []
+    plants = _resolve_plants(plant_tokens, index) if role == "Site Engineer" else []
     if role in PORTFOLIO_ROLES or role == "Viewer":
         _resolve_plants(plant_tokens, index)
     if role == "Site Engineer" and len(plants) != 1:
         raise ValueError("A Site Engineer needs exactly one plant")
-    if role == "Assignee" and not plants:
-        raise ValueError("An Assignee needs at least one plant")
 
     existing = _existing_user_for_email(db, email)
     if existing:
@@ -194,8 +192,7 @@ def _upsert_person(
 
 def _scope_text(db: Session, user: User) -> str:
     if user.role == "Assignee":
-        names = list(db.scalars(select(Plant.plant_name).join(UserPlantAssignment, UserPlantAssignment.plant_id == Plant.id).where(UserPlantAssignment.user_id == user.id)))
-        return ", ".join(names) if names else "Plants to be assigned by your O&M Head"
+        return "All plants"
     if user.role == "Site Engineer":
         names = list(db.scalars(select(Plant.plant_name).join(UserPlantAssignment, UserPlantAssignment.plant_id == Plant.id).where(UserPlantAssignment.user_id == user.id)))
         return names[0] if names else "Your plant"

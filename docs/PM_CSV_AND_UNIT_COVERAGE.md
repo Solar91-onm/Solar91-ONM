@@ -26,7 +26,7 @@
 | Assignee | Optional assignee name(s) |
 | Remarks | Optional; the current situation in plain words. Added to the log of every task the row creates |
 
-All fields are validated before writes. Review the dry-run confirmation. Only the O&M Head can import; an Assignee can create PM work only within their assigned scope. Administration is limited to Command Center and Reports.
+All fields are validated before writes. Review the dry-run confirmation. Only the O&M Head can import; Assignees can create PM work across the portfolio. Administration is limited to Command Center and Reports.
 
 ## Unit coverage interpretation
 

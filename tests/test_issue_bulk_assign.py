@@ -42,8 +42,8 @@ def test_head_assigns_many_tickets_in_one_request(client, db):
         row = db.get(Issue, rows[key].id)
         assert (row.assigned_to, row.assignee_text, row.status) == (worker.id, "Worker", "Assigned")
     assert db.get(Issue, rows["taken"].id).assigned_to == other.id
-    # the O&M Head extends the Assignee's scope to the ticket's plant, exactly like single assignment
-    assert db.query(UserPlantAssignment).filter_by(user_id=worker.id).count() >= 1
+    # Assigning a ticket must not create plant access assignments for the Assignee.
+    assert db.query(UserPlantAssignment).filter_by(user_id=worker.id).count() == 0
     assert db.query(IssueHistory).filter_by(issue_id=rows["open1"].id, action="issue.assigned").count() == 1
     notes = db.query(Notification).filter_by(user_id=worker.id).all()
     assert len(notes) == 1 and notes[0].title == "3 tickets assigned to you"

@@ -76,11 +76,7 @@ def test_scope_filters_and_detail_enforced(client,db):
     assert client.get(f'/api/operations-calendar/washing/{wash.id}').status_code==200
 
 
-def test_assignee_sees_every_category_and_washing_at_their_plants(client,db):
-    """An Assignee is scoped by plant, so washing is part of their calendar too.
-
-    It used to be hidden unless they held the "Modules cleaning" equipment type.
-    """
+def test_assignee_sees_portfolio_calendar_without_plant_assignments(client,db):
     a,b,issues,tasks,wash=fixtures(db)
     user=login_user(client,db,role='Assignee',name='O&M Team',email='calendar-assignee@example.com')
     grant_assignee_plants(db, user.id);db.commit()
@@ -88,10 +84,10 @@ def test_assignee_sees_every_category_and_washing_at_their_plants(client,db):
     assert len(rows)==6 and any(r['kind']=='washing' for r in rows)
     assert client.get(f'/api/operations-calendar/washing/{wash.id}').status_code==200
 
-    # An Assignee with no plant assigned is in the pending-access state and sees nothing.
+    # Legacy plant rows do not control Assignee visibility.
     from app.core.models import UserPlantAssignment
     db.query(UserPlantAssignment).filter_by(user_id=user.id).delete();db.commit()
-    assert fetch(client).json()['events']==[]
+    assert len(fetch(client).json()['events'])==6
 
 
 def test_query_filters_and_range_validation(client,db):

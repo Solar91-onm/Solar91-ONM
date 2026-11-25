@@ -4,7 +4,7 @@
 
 `Operations Calendar` is a read-only, role-scoped view of **existing** operational entities. It adds no new operational database table, form, or migration. Site Issues, Preventive Maintenance and Washing retain their own authoritative record workflows. Event detail and edit actions open those modules.
 
-The calendar follows the application's shared top-level plant scope (`S.dashPlant`/the locked Site Engineer plant). Its Plant filter is a control for that same scope (it calls `setPlantScope`), not a separate calendar-only scope; it is disabled for Site Engineers. Each day cell shows one chip per activity type (Site Issues, Washing, Preventive Maintenance) with its count; the chip or day opens a searchable summary with one collapsible list per type. It can display multiple plants and individual PM equipment work orders independently. It is available to O&M Head, Assignee, Site Engineer, and Administration accounts; the unapproved `Viewer` role is not granted calendar access. Administration can see the permitted issue/PM data but not washing records. Assignee records are additionally scoped to their assigned equipment types, and the backend rechecks scope for individual popups, not just for listing.
+The calendar follows the application's shared top-level plant scope (`S.dashPlant`/the locked Site Engineer plant). Its Plant filter is a control for that same scope (it calls `setPlantScope`), not a separate calendar-only scope; it is disabled for Site Engineers. Each day cell shows one chip per activity type (Site Issues, Washing, Preventive Maintenance) with its count; the chip or day opens a searchable summary with one collapsible list per type. It can display multiple plants and individual PM equipment work orders independently. It is available to O&M Head, Assignee, Site Engineer, and Administration accounts; the unapproved `Viewer` role is not granted calendar access. Administration can see the permitted issue/PM data but not washing records. Assignees have portfolio-wide plant visibility; Site Engineers remain restricted to assigned plants. The backend rechecks plant scope for individual popups, not just for listing.
 
 ## Actual database mappings
 
@@ -66,7 +66,7 @@ python scripts/preflight.py                # requires configured staging environ
 python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 ```
 
-Open `http://127.0.0.1:8000/#/calendar` and sign in with a role-scoped **staging** user. Inspect a date with issue, PM and washing entries. Switch All Plants to a single plant, then back. Confirm counts, source IDs, colour changes on closing issues and confirming washing, scheduled cycles, `+N more`, filtering, browser back/forward and full-details navigation. Repeat as Site Engineer (must not see another plant), Assignee (must not see unassigned equipment), and Administration (must not see washing). Check the mobile viewport and event popup at the right/bottom edges.
+Open `http://127.0.0.1:8000/#/calendar` and sign in with a role-scoped **staging** user. Inspect a date with issue, PM and washing entries. Switch All Plants to a single plant, then back. Confirm counts, source IDs, colour changes on closing issues and confirming washing, scheduled cycles, `+N more`, filtering, browser back/forward and full-details navigation. Repeat as Site Engineer (must not see another plant), Assignee (can see portfolio plants), and Administration (must not see washing). Check the mobile viewport and event popup at the right/bottom edges.
 
 Automated tests:
 

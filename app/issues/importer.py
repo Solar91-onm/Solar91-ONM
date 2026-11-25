@@ -23,7 +23,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.core.models import AuditLog, Issue, IssueHistory, Plant, User, UserPlantAssignment
+from app.core.models import AuditLog, Issue, IssueHistory, Plant, User
 from app.core.security import has_portfolio_scope, user_scoped_plant_ids, work_categories
 from app.core.spreadsheet import cell_text, map_columns, neutralise_formulas, parse_sheet_date, read_upload_rows
 from app.issues.deadlines import deadline_hours
@@ -254,12 +254,6 @@ def import_issues(db: Session, user: User, filename: str, content: bytes, *, dry
     by_name: dict[str, list[User]] = {}
     for person in assignees:
         by_name.setdefault(_norm(person.display_name), []).append(person)
-    # Plants each candidate Assignee is already assigned to (scope is plant-based).
-    owned: dict[Any, set[Any]] = {}
-    if assignees:
-        for user_id, plant_id in db.execute(select(UserPlantAssignment.user_id, UserPlantAssignment.plant_id)
-                                            .where(UserPlantAssignment.user_id.in_([p.id for p in assignees]))):
-            owned.setdefault(user_id, set()).add(plant_id)
     now = datetime.now(timezone.utc)
     today = issue_local_today()
 
@@ -342,11 +336,6 @@ def import_issues(db: Session, user: User, filename: str, content: bytes, *, dry
                     errors.append(f"More than one Assignee is called {assignee_text}; use their email")
                 else:
                     errors.append(f"{assignee_text} is not an active Assignee")
-            if assignee is not None and plant is not None and plant.id not in owned.get(assignee.id, set()):
-                if user.role == "O&M Head":
-                    notes.append(f"{assignee.display_name} will be given access to {plant.site_code}")
-                else:
-                    errors.append(f"{assignee.display_name} is not assigned to {plant.site_code}")
         records.append({
             "row": number, "plant": plant, "site_text": site_text, "category": category, "description": description,
             "severity": severity, "problem": problem or None,
@@ -411,17 +400,9 @@ def import_issues(db: Session, user: User, filename: str, content: bytes, *, dry
     hours = deadline_hours(db)
     try:
         number = int(next_issue_ticket_no(db)[4:])
-        granted: set[tuple] = set()
         created: list[tuple[dict[str, Any], Issue]] = []
         for record in to_create:
             assignee = record["assignee"]
-            if assignee is not None and record["plant"].id not in owned.get(assignee.id, set()) \
-                    and (assignee.id, record["plant"].id) not in granted:
-                granted.add((assignee.id, record["plant"].id))
-                db.add(UserPlantAssignment(user_id=assignee.id, plant_id=record["plant"].id, assignment_role="Assignee"))
-                db.add(AuditLog(user_id=user.id, actor_name=user.display_name, action="Plant scope added while assigning a ticket",
-                                module="Issues", entity_type="user", entity_id=str(assignee.id),
-                                after_state={"plant": record["plant"].site_code, "assignee": assignee.display_name}))
             occurred_at = _occurred_at(record["occurred"], now) if record["occurred"] else now
             issue = Issue(
                 ticket_no=f"ISS-{number:04d}", plant_id=record["plant"].id,

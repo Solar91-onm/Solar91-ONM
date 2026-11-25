@@ -122,8 +122,7 @@ def test_site_engineer_is_plant_scoped_and_cannot_manage_plants(client, db):
     assert denied.status_code == 403
 
 
-def test_assignee_issue_list_is_scoped_to_their_assigned_plants(client, db):
-    """An Assignee sees every category at their plants, and nothing at other plants."""
+def test_assignee_issue_list_and_creation_are_portfolio_wide(client, db):
     assigned = Plant(site_code='EQ-A', plant_name='Assigned Plant A')
     elsewhere = Plant(site_code='EQ-B', plant_name='Unassigned Plant B')
     db.add_all([assigned, elsewhere]); db.commit()
@@ -137,11 +136,13 @@ def test_assignee_issue_list_is_scoped_to_their_assigned_plants(client, db):
         Issue(ticket_no='T-NONE', plant_id=elsewhere.id, description='No category', severity='Low'),
     ])
     db.commit()
-    # Both categories at the assigned plant; nothing from the other plant.
-    assert {row['ticket_no'] for row in client.get('/api/issues').json()} == {'T-INV-A', 'T-TR-A'}
-    denied = client.post('/api/issues', json={'ticket_no': 'T-NEW', 'plant_id': str(elsewhere.id), 'vertical': 'Transformer',
-                                              'description': 'x', 'severity': 'Low'})
-    assert denied.status_code == 403
+    # All categories at all plants; equipment responsibility controls routing, not visibility.
+    assert {row['ticket_no'] for row in client.get('/api/issues').json()} == {
+        'T-INV-A', 'T-TR-A', 'T-INV-B', 'T-NONE',
+    }
+    across_portfolio = client.post('/api/issues', json={'ticket_no': 'T-NEW', 'plant_id': str(elsewhere.id), 'vertical': 'Transformer',
+                                                       'description': 'x', 'severity': 'Low'})
+    assert across_portfolio.status_code == 201, across_portfolio.text
     ok = client.post('/api/issues', json={'ticket_no': 'T-NEW2', 'plant_id': str(assigned.id), 'vertical': 'Inverter',
                                           'description': 'x', 'severity': 'Low'})
     assert ok.status_code == 201, ok.text
@@ -271,7 +272,7 @@ def test_issue_create_assigns_assignee_and_returns_intake_fields(client, db):
 
     options = client.get('/api/issues/assignees')
     assert options.status_code == 200
-    assert {'id':str(assignee.id),'name':'Inverter Assignee','plants':['INTAKE01']} in options.json()
+    assert {'id':str(assignee.id),'name':'Inverter Assignee','plants':[]} in options.json()
 
     response = client.post('/api/issues', json={
         'plant_id':plant['id'],'vertical':'Inverter','description':'Intake details',

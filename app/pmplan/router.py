@@ -28,7 +28,7 @@ from app.core.timeutil import business_today, log_stamp
 from app.core.database import get_db
 from app.core.models import (AuditLog, OMTask, NotificationPreference, PMCyclePlan, PMScopeConfig, PMTemplate,
                              PMUnitConfig, Plant, User)
-from app.core.security import get_current_user, require_csrf, user_scoped_plant_ids
+from app.core.security import get_current_user, plant_scope_matches, require_csrf, user_scoped_plant_ids
 from app.plants.codes import find_plant_by_code
 from app.pmplan.alerts import PM_ALERT_EVENTS, PM_TEAM_RECIPIENT_MODES, default_pm_preferences, get_pm_preferences
 from app.pmplan.cycle import (CYCLE, CYCLE_DAYS, NAMED_TYPES, NOT_IN_PM, ONE_JOB_TYPES, chained_window,
@@ -270,13 +270,12 @@ def _plan_tasks(db: Session, user: User, plants: list[Plant], tpl: dict[str, Any
         # One assignee looks after every unit of the equipment at a plant; several assignees share plants.
         who, who_user = people[plant_idx % len(people)] if people else (None, None)
         cycle_id = uuid.uuid4().hex[:8]
-        if user.role == "Assignee" and plant.id not in (user_scoped_plant_ids(db, user) or set()):
+        if user.role == "Assignee" and not plant_scope_matches(db, user, plant.id):
             raise HTTPException(403, f"{plant.plant_name} is outside your assigned plants")
         for p_name, p_user in people:
             if p_user and p_user.role != "Assignee":
                 raise HTTPException(422, f"PM work can only be assigned to a user with the Assignee role ({p_name} is {p_user.role})")
-            if p_user and p_user.role == "Assignee" and plant.id not in (
-                    user_scoped_plant_ids(db, p_user) or set()):
+            if p_user and p_user.role == "Assignee" and not plant_scope_matches(db, p_user, plant.id):
                 raise HTTPException(422, f"{p_name} is not assigned to {plant.plant_name}")
         for u in _units_for(db, plant, tpl, per_unit, units_hint, plan):
             ref = u["ref"]
@@ -857,7 +856,7 @@ def list_unit_config(db: Annotated[Session, Depends(get_db)], user: Annotated[Us
 def save_unit_config(payload: UnitConfigIn, db: Annotated[Session, Depends(get_db)], user: Annotated[User, Depends(get_current_user)]):
     _require(user, {"O&M Head", "Assignee"}, "Only the O&M Head or an Assignee can edit plant unit configuration")
     plant = _resolve_plants(db, [payload.plant])[0]
-    if user.role == "Assignee" and plant.id not in (user_scoped_plant_ids(db, user) or set()):
+    if user.role == "Assignee" and not plant_scope_matches(db, user, plant.id):
         raise HTTPException(403, f"{plant.plant_name} is outside your assigned plants")
     sent = payload.model_fields_set
     row = _save_config(db, user, plant, payload.equipment_type, payload.total_units, payload.units_per_day,
@@ -881,7 +880,7 @@ def delete_unit_config(config_id: uuid.UUID, db: Annotated[Session, Depends(get_
     row = db.get(PMUnitConfig, config_id)
     if not row:
         raise HTTPException(404, "Configuration not found")
-    if user.role == "Assignee" and row.plant_id not in (user_scoped_plant_ids(db, user) or set()):
+    if user.role == "Assignee" and not plant_scope_matches(db, user, row.plant_id):
         raise HTTPException(403, "This plant is outside your assigned plants")
     db.delete(row)      # tasks already scheduled keep their unit numbers
     db.commit()

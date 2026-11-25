@@ -15,13 +15,13 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.models import Plant, User
-from app.core.security import has_portfolio_scope, user_scoped_plant_ids
+from app.core.security import user_scoped_plant_ids
 from app.plants.codes import normalize_site_code
 
 
 def scoped_plant_ids(db: Session, user: User) -> set | None:
     """The plant ids this user is limited to, or ``None`` when they may see the whole portfolio."""
-    return None if has_portfolio_scope(user) else (user_scoped_plant_ids(db, user) or set())
+    return user_scoped_plant_ids(db, user)
 
 
 def visible_plants(db: Session, user: User) -> list[Plant]:
