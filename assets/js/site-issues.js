@@ -192,7 +192,7 @@
     issuePhotos: {},
     photoBusy: {},
     photoError: "",
-    expandedIssuePlantCode: "",
+    selectedIssuePlantCode: "",
     // A ticket whose photos failed to upload. The ticket itself is already saved, so the retry
     // re-sends the same files under the SAME submission id: the server treats a repeat as the
     // one submission it is, and never stores a second copy.
@@ -290,6 +290,7 @@
       status: issue.status,
       assignee: issue.assignee_text || "",
       reportedAt: String(issue.created_at || "").slice(0, 10),
+      reportedAtSort: String(issue.created_at || ""),
       reportedBy: "",
       evidenceFiles: [],
       photoCount: Number(issue.photo_count || 0),
@@ -329,9 +330,11 @@
       ].join(" ").toLowerCase().indexOf(term) !== -1;
     });
     rows = rows.sort(function (a, b) {
+      var aReportedAt = a.reportedAtSort || a.reportedAt;
+      var bReportedAt = b.reportedAtSort || b.reportedAt;
       var dateOrder = state.sort === "oldest"
-        ? a.reportedAt.localeCompare(b.reportedAt)
-        : b.reportedAt.localeCompare(a.reportedAt);
+        ? aReportedAt.localeCompare(bReportedAt)
+        : bReportedAt.localeCompare(aReportedAt);
       return dateOrder || STATUSES.indexOf(a.status) - STATUSES.indexOf(b.status) || a.id.localeCompare(b.id);
     });
     // A column heading, once clicked, orders the register instead of the date.
@@ -615,31 +618,24 @@
     });
     return '<div class="ep-issues__table-wrap"><table class="ep-issues__table"><thead><tr>' +
       COLUMNS.map(issueColumnHeader).join("") +
-      '</tr></thead><tbody>' + groups.map(function (group) {
-        var expanded = state.expandedIssuePlantCode === group.siteCode;
-        var code = escape(group.siteCode);
-        var groupRow = '<tr class="ep-issues__plant-group' + (expanded ? " is-expanded" : "") + '">' +
-          '<td colspan="' + headers.length + '" data-label="Plant"><button type="button" class="ep-issues__plant-group-toggle" ' +
-            'data-issue-plant-toggle="' + code + '" aria-expanded="' + String(expanded) +
-            '" aria-label="' + (expanded ? "Collapse" : "Expand") + " issues for " +
-            escape(group.plantName) + '">' +
-            '<span class="ep-issues__plant-group-name"><strong>' + code + '</strong><span>' +
-            escape(group.plantName) + '</span></span><span class="ep-issues__plant-group-count">' +
-            group.issues.length + (group.issues.length === 1 ? " issue" : " issues") + '</span>' +
-            '<svg class="ep-issues__plant-group-chevron' + (expanded ? " is-expanded" : "") +
-            '" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" ' +
-            'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg>' +
-          '</button></td></tr>';
-        return groupRow + (expanded ? group.issues.map(function (issue) {
+      '</tr></thead><tbody>' + groups.filter(function (group) {
+        return !state.selectedIssuePlantCode || group.siteCode === state.selectedIssuePlantCode;
+      }).map(function (group) {
+        return group.issues.map(function (issue) {
           return renderIssueRow(issue, headers);
-        }).join("") : "");
+        }).join("");
       }).join("") + '</tbody></table></div>';
   }
 
   function renderIssueRow(issue, labels) {
+    var selectedPlant = state.selectedIssuePlantCode === issue.plantCode;
     return '<tr class="ep-issues__row">' +
-          '<td data-label="' + labels[0] + '"><span class="ep-issues__plant-name"><strong>' +
-            escape(issue.plantCode) + '</strong><small>' + escape(issue.plantName) + '</small></span></td>' +
+          '<td data-label="' + labels[0] + '"><button type="button" class="ep-issues__plant-code-filter' +
+            (selectedPlant ? ' is-selected' : '') + '" data-issue-plant-toggle="' + escape(issue.plantCode) +
+            '" aria-pressed="' + String(selectedPlant) + '" aria-label="' +
+            (selectedPlant ? "Show issues for all plants" : "Show only issues for " + escape(issue.plantName)) +
+            '"><strong>' + escape(issue.plantCode) + '</strong><small>' + escape(issue.plantName) +
+            '</small></button></td>' +
           '<td data-label="' + labels[1] + '"><strong>' + escape(issue.equipment) + '</strong></td>' +
           '<td data-label="' + labels[2] + '">' + (issue.subpart
             ? escape(issue.subpart)
@@ -1274,7 +1270,7 @@
       state.issuePhotos = {};
       state.photoBusy = {};
       state.photoError = "";
-      state.expandedIssuePlantCode = "";
+      state.selectedIssuePlantCode = "";
     }
     // Opened from the Overview's Inverters tile: that preset survives this render and
     // is shown as a removable chip, then cleared.
@@ -1823,7 +1819,7 @@
       var plantToggle = event.target.closest("[data-issue-plant-toggle]");
       if (plantToggle) {
         var plantCode = plantToggle.getAttribute("data-issue-plant-toggle");
-        state.expandedIssuePlantCode = state.expandedIssuePlantCode === plantCode ? "" : plantCode;
+        state.selectedIssuePlantCode = state.selectedIssuePlantCode === plantCode ? "" : plantCode;
         renderView();
         return;
       }

@@ -887,17 +887,21 @@ def test_plant_links_open_the_matching_module_or_default_plant_page():
     assert 'data-open-plant-page="' + "' + context.type +" in calendar
 
 
-def test_site_issue_plant_code_groups_issues_without_bom_or_navigation():
+def test_site_issue_plant_codes_filter_issue_rows_grouped_by_plant():
     issues = (PORTAL_ASSETS / "js" / "site-issues.js").read_text(encoding="utf-8")
     assert '"/api/bom?site_code="' not in issues
     assert "BOM_PAGE_SIZE" not in issues
     assert "data-issue-bom-" not in issues
     assert "groupsByCode[code]" in issues
     assert "group.issues.map" in issues
-    assert 'state.expandedIssuePlantCode === group.siteCode' in issues
-    assert 'state.expandedIssuePlantCode = state.expandedIssuePlantCode === plantCode ? "" : plantCode' in issues
-    assert 'aria-expanded="' + "' + String(expanded)" in issues
-    assert 'class="ep-issues__plant-group-toggle"' in issues
+    assert 'selectedIssuePlantCode: ""' in issues
+    assert 'return !state.selectedIssuePlantCode || group.siteCode === state.selectedIssuePlantCode' in issues
+    assert 'state.selectedIssuePlantCode = state.selectedIssuePlantCode === plantCode ? "" : plantCode' in issues
+    assert "reportedAtSort: String(issue.created_at || \"\")" in issues
+    assert "bReportedAt.localeCompare(aReportedAt)" in issues
+    assert 'class="ep-issues__plant-group-toggle"' not in issues
+    assert 'class="ep-issues__plant-code-filter' in issues
+    assert 'aria-pressed="' + "' + String(selectedPlant)" in issues
     assert "renderIssueRow(issue, headers)" in issues
 
     # A single plant's own page has nothing to link to, so it keeps a plain cell.

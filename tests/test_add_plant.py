@@ -1,9 +1,9 @@
-"""Add New Plant: the Info page's button, its overlay, and who the API lets create a plant.
+"""Plant record creation/editing: Info page controls and API permissions.
 
-The button sits next to the Info page's search box and is offered only to the role that may
-manage plants (O&M Head). The API enforces the same thing, so hiding the button is never what
-keeps anyone out. Everything the overlay collects is a column of the plant record itself; the
-Cleaning, PM and Health Assignee columns stay in Login access, where they are configured.
+The button sits next to the Info page's search box and is offered to O&M Heads and Assignees.
+The API enforces the same permissions, while deleting plant records remains O&M Head-only.
+Everything the overlay collects is a column of the plant record itself; the Cleaning, PM and
+Health Assignee columns stay in Login access, where they are configured.
 """
 from __future__ import annotations
 
@@ -58,7 +58,7 @@ def test_a_head_creates_a_plant_with_every_column_the_info_page_shows(client, db
     assert client.post("/api/plants", json=FULL).status_code == 409
 
 
-def test_only_the_head_may_create_a_plant(client, db):
+def test_head_and_assignee_may_create_and_edit_plants_but_other_roles_may_not(client, db):
     plant = Plant(site_code="EXI01", plant_name="Existing")
     db.add(plant)
     db.commit()
@@ -66,17 +66,26 @@ def test_only_the_head_may_create_a_plant(client, db):
     assignee = login_user(client, db, role="Assignee", email="add-assignee@example.com")
     db.add(UserPlantAssignment(user_id=assignee.id, plant_id=plant.id, assignment_role="Assignee"))
     db.commit()
-    refused = client.post("/api/plants", json=dict(FULL, site_code="ASG01"))
-    assert refused.status_code == 403, refused.text
+    created = client.post("/api/plants", json=dict(FULL, site_code="ASG01"))
+    assert created.status_code == 201, created.text
+    assert db.scalar(select(Plant).where(Plant.site_code == "ASG01")) is not None
+    # Assignees can edit plant fields, but cannot delete plant records.
+    plant_id = created.json()["id"]
+    updated = client.patch(f"/api/plants/{plant_id}", json={"district": "Changed"})
+    assert updated.status_code == 200, updated.text
+    assert updated.json()["district"] == "Changed"
+    assert client.delete(f"/api/plants/{plant_id}").status_code == 403
 
     engineer = login_user(client, db, role="Site Engineer", email="add-engineer@example.com")
     db.add(UserPlantAssignment(user_id=engineer.id, plant_id=plant.id))
     db.commit()
     assert client.post("/api/plants", json=dict(FULL, site_code="SEN01")).status_code == 403
+    assert client.patch(f"/api/plants/{plant_id}", json={"district": "No access"}).status_code == 403
 
     login_user(client, db, role="Administration", email="add-admin@example.com")
     assert client.post("/api/plants", json=dict(FULL, site_code="ADM01")).status_code == 403
-    assert db.scalar(select(Plant).where(Plant.site_code.in_(("ASG01", "SEN01", "ADM01")))) is None
+    assert client.patch(f"/api/plants/{plant_id}", json={"district": "No access"}).status_code == 403
+    assert db.scalar(select(Plant).where(Plant.site_code.in_(("SEN01", "ADM01")))) is None
 
 
 def test_an_invalid_plant_is_refused_by_the_api_not_only_by_the_form(client, db):
@@ -91,15 +100,16 @@ def test_an_invalid_plant_is_refused_by_the_api_not_only_by_the_form(client, db)
 # ── the button and its overlay ─────────────────────────────────────────────
 
 
-def test_the_button_sits_with_the_search_box_and_only_for_the_role_that_may_use_it():
+def test_the_button_sits_with_the_search_box_and_is_offered_to_heads_and_assignees():
     table = TABLE.read_text(encoding="utf-8")
 
     toolbar = table[table.index('ep-pt__toolbar'):table.index("// ─── Render")]
     assert "data-pt-search" in toolbar and "data-pt-add" in toolbar, "the button belongs on the toolbar"
     assert '+ Add New Plant' in toolbar
-    # Offered to the role that may manage plants, and only on the all-plants Info table.
-    assert 'canEdit() && mode.kind === "all"' in toolbar
-    assert 'function canEdit() {\n    return !!(global.Solar91PortalAPI && global.Solar91PortalAPI.can("plants.manage"));' in table
+    # Offered to O&M Heads and Assignees, and only on the all-plants Info table.
+    assert 'canCreatePlant() && mode.kind === "all"' in toolbar
+    assert '["O&M Head", "Assignee"].indexOf(user.role) !== -1' in table
+    assert "function canEdit() {\n    return canCreatePlant();" in table
     # Clicking it opens the shared editor module's create overlay and re-reads the catalogue.
     assert "global.Solar91PortalPlantEditor.create(" in table
     wiring = table[table.index('container.querySelector("[data-pt-add]")'):]
@@ -123,9 +133,11 @@ def test_the_overlay_collects_every_plant_column_and_requires_all_of_them():
     create = editor[editor.index("function openCreate("):editor.index("var PlantEditor = {")]
     assert 'if (!raw) { problem = field.label + " is required."; return; }' in create
     # Role gate on the client too, and the overlay's own guards.
-    assert 'if (!global.Solar91PortalAPI.can("plants.manage")) return;' in create
+    assert '["O&M Head", "Assignee"].indexOf(user.role) === -1' in create
     assert "Math.abs(num) > 90" in create and "Math.abs(num) > 180" in create
     assert "if (saving) return;" in create, "a double submission must not create two plants"
+    edit = editor[editor.index("open: function (plant, onSaved) {"):]
+    assert '["O&M Head", "Assignee"].indexOf(user.role) === -1' in edit
 
 
 def test_the_plant_is_announced_only_after_the_server_confirms_it():

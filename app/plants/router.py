@@ -26,6 +26,7 @@ settings=get_settings()
 # Inverter Health unit-config save allows (app/pmplan/router.py); every other role reads the
 # register only.
 SECURITY_MOVE_ROLES={"O&M Head","Assignee"}
+PLANT_WRITE_ROLES={"O&M Head","Assignee"}
 
 
 @router.get("/plants", response_model=list[PlantOut])
@@ -86,11 +87,20 @@ def update_security_contacts(plant_id:UUID,data:SecurityContactsUpdate,db:Annota
 
 
 @router.post("/plants", response_model=PlantOut, status_code=201, dependencies=[Depends(require_csrf)])
-def create_plant(data:PlantCreate,db:Annotated[Session,Depends(get_db)],user:Annotated[User,Depends(require_permission("plants.manage"))]): return PlantService(db).create(data,user)
+def create_plant(data:PlantCreate,db:Annotated[Session,Depends(get_db)],user:Annotated[User,Depends(get_current_user)]):
+    if user.role not in PLANT_WRITE_ROLES:
+        raise HTTPException(403,"Only the O&M Head or an Assignee can add a plant")
+    return PlantService(db).create(data,user)
 
 
 @router.patch("/plants/{plant_id}", response_model=PlantOut, dependencies=[Depends(require_csrf)])
-def update_plant(plant_id:UUID,data:PlantUpdate,db:Annotated[Session,Depends(get_db)],user:Annotated[User,Depends(require_permission("plants.manage"))]): return PlantService(db).update(plant_id,data)
+def update_plant(plant_id:UUID,data:PlantUpdate,db:Annotated[Session,Depends(get_db)],user:Annotated[User,Depends(get_current_user)]):
+    if user.role not in PLANT_WRITE_ROLES:
+        raise HTTPException(403,"Only the O&M Head or an Assignee can edit a plant")
+    plant=PlantService(db).update(plant_id,data)
+    out=PlantOut.model_validate(plant)
+    out.custom_fields=visible_custom_fields(out.custom_fields,user)
+    return out
 
 
 @router.delete("/plants/{plant_id}", status_code=204, dependencies=[Depends(require_csrf)])

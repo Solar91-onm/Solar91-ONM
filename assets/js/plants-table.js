@@ -198,7 +198,12 @@
   ];
 
   function canEdit() {
-    return !!(global.Solar91PortalAPI && global.Solar91PortalAPI.can("plants.manage"));
+    return canCreatePlant();
+  }
+
+  function canCreatePlant() {
+    var user = global.Solar91PortalAPI && global.Solar91PortalAPI.currentUser();
+    return !!(user && ["O&M Head", "Assignee"].indexOf(user.role) !== -1);
   }
 
   function canUseColumnFilters() {
@@ -385,9 +390,8 @@
           '<option value="__all">All districts</option>' +
           opts(districts, ui.district) +
         "</select>" +
-        // Adding a plant is an O&M Head action (plants.manage), the same authority the row's
-        // Edit button needs. The API enforces it as well; this only decides what is offered.
-        (canEdit() && mode.kind === "all"
+        // The API separately allows O&M Heads and Assignees to create and edit plant records.
+        (canCreatePlant() && mode.kind === "all"
           ? '<button class="ep-pt__add" type="button" data-pt-add>+ Add New Plant</button>'
           : "") +
       "</div>";

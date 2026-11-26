@@ -66,7 +66,8 @@
    * never before: the table, the sidebar and every cached read are refreshed from that response.
    */
   function openCreate(onSaved) {
-    if (!global.Solar91PortalAPI.can("plants.manage")) return;
+    var user = global.Solar91PortalAPI.currentUser();
+    if (!user || ["O&M Head", "Assignee"].indexOf(user.role) === -1) return;
     var overlay = document.createElement("div");
     overlay.className = "ep-pd__overlay";
     overlay.innerHTML = '' +
@@ -175,6 +176,8 @@
   var PlantEditor = {
     create: openCreate,
     open: function (plant, onSaved) {
+      var user = global.Solar91PortalAPI.currentUser();
+      if (!user || ["O&M Head", "Assignee"].indexOf(user.role) === -1) return;
       var overlay = document.createElement("div");
       overlay.className = "ep-pd__overlay";
       overlay.innerHTML = '' +
