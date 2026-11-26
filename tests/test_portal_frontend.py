@@ -870,7 +870,7 @@ def test_plant_links_open_the_matching_module_or_default_plant_page():
     assert "Solar91PortalNav.selectPlantPage(openBtn.getAttribute(\"data-open-plant\"), pageId)" in app
     assert "Solar91PortalNav.selectPlant(openBtn.getAttribute(\"data-open-plant\"))" in app
 
-    for module in ("plants-table.js", "site-issues.js"):
+    for module in ("plants-table.js",):
         source = (PORTAL_ASSETS / "js" / module).read_text(encoding="utf-8")
         assert 'class="ep-plantlink"' in source or 'ep-plantlink ep-plantlink--name' in source, module
         assert "data-open-plant=" in source, module
@@ -880,9 +880,21 @@ def test_plant_links_open_the_matching_module_or_default_plant_page():
 
     issues = (PORTAL_ASSETS / "js" / "site-issues.js").read_text(encoding="utf-8")
     calendar = (PORTAL_ASSETS / "js" / "operations-calendar.js").read_text(encoding="utf-8")
-    assert 'data-open-plant-page="health"' in issues
+    assert 'data-open-plant=' not in issues
+    assert 'data-issue-bom-toggle=' in issues
+    assert 'data-open-plant-page="health"' not in issues
+    assert 'global.Solar91PortalNav.selectPlantPage(plantRow.dataset.issuePlant, "health")' not in issues
     assert 'data-open-plant-page="' + "' + context.type +" in calendar
-    assert 'global.Solar91PortalNav.selectPlantPage(plantRow.dataset.issuePlant, "health")' in issues
+
+
+def test_site_issue_plant_code_expands_on_demand_bom_details():
+    issues = (PORTAL_ASSETS / "js" / "site-issues.js").read_text(encoding="utf-8")
+    assert '"/api/bom?site_code="' in issues
+    assert "BOM_PAGE_SIZE = 200" in issues
+    assert "data-issue-bom-more" in issues
+    assert "data-issue-bom-retry" in issues
+    assert 'aria-expanded="' + "' + String(expanded)" in issues
+    assert 'class="ep-issues__bom-row"' in issues
 
     # A single plant's own page has nothing to link to, so it keeps a plain cell.
     table = (PORTAL_ASSETS / "js" / "plants-table.js").read_text(encoding="utf-8")
