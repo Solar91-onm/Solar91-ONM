@@ -39,18 +39,18 @@ def test_pm_and_health_scope_is_saved_listed_and_one_assignee_per_plant(client, 
     ravi, mina = _person(db, "Ravi", "ravi@example.com"), _person(db, "Mina", "mina@example.com")
     login_user(client, db, role="O&M Head")
 
-    r = _put_access(client, ravi, plant_ids=[str(alpha.id)], pm_plant_ids=[str(alpha.id), str(bravo.id)],
+    r = _put_access(client, ravi, pm_plant_ids=[str(alpha.id), str(bravo.id)],
                     health_plant_ids=[str(bravo.id)])
     assert r.status_code == 200, r.text
-    # the chosen plants are added to plant access too
-    assert set(db.scalars(select(UserPlantAssignment.plant_id).where(UserPlantAssignment.user_id == ravi.id))) == {alpha.id, bravo.id}
+    # Assignees have portfolio-wide plant access, so responsibility creates no per-plant access rows.
+    assert set(db.scalars(select(UserPlantAssignment.plant_id).where(UserPlantAssignment.user_id == ravi.id))) == set()
 
     listed = {u["email"]: u for u in client.get("/api/users").json()}
     assert set(listed["ravi@example.com"]["pm_plant_ids"]) == {str(alpha.id), str(bravo.id)}
     assert listed["ravi@example.com"]["health_plant_ids"] == [str(bravo.id)]
 
     # Mina takes over BRAVO's PM; Ravi keeps ALPHA only. One Assignee per plant per area.
-    assert _put_access(client, mina, plant_ids=[str(bravo.id)], pm_plant_ids=[str(bravo.id)]).status_code == 200
+    assert _put_access(client, mina, pm_plant_ids=[str(bravo.id)]).status_code == 200
     db.expire_all()
     rows = {(r.plant_id, r.area): r.assigned_user_id for r in db.scalars(select(PlantResponsibility))}
     assert rows[(alpha.id, "pm")] == ravi.id and rows[(bravo.id, "pm")] == mina.id
@@ -61,8 +61,8 @@ def test_pm_and_health_scope_is_saved_listed_and_one_assignee_per_plant(client, 
     assert plants["ALPHA"]["pm_assignee"] == "Ravi" and plants["BRAVO"]["pm_assignee"] == "Mina"
     assert plants["BRAVO"]["health_assignee"] == "Ravi" and plants["ALPHA"]["health_assignee"] == ""
 
-    # Saving the same person with empty lists releases their plants.
-    assert _put_access(client, ravi, plant_ids=[str(alpha.id)]).status_code == 200
+    # Saving the same person with empty responsibility lists releases their plants.
+    assert _put_access(client, ravi, pm_plant_ids=[], health_plant_ids=[]).status_code == 200
     db.expire_all()
     assert not [r for r in db.scalars(select(PlantResponsibility)) if r.assigned_user_id == ravi.id]
 

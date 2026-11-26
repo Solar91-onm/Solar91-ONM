@@ -305,12 +305,17 @@ def _last_activity(db: Session, plant_ids: list[UUID]) -> dict[UUID, datetime]:
 
 
 def _checklist_scope(db: Session, user: User, plant_ids: list[UUID]) -> list[UUID]:
-    # The Overview is wider than the PM page for Assignees; do not leak checklist data.
     if user.role not in {"O&M Head", "Assignee", "Site Engineer"}:
         return []
     if user.role == "Assignee":
-        allowed = user_scoped_plant_ids(db, user)
-        return [plant_id for plant_id in plant_ids if allowed is None or plant_id in allowed]
+        assigned = set(db.scalars(
+            select(PlantResponsibility.plant_id).where(
+                PlantResponsibility.area == "pm",
+                PlantResponsibility.assigned_user_id == user.id,
+                PlantResponsibility.plant_id.in_(plant_ids),
+            )
+        ))
+        return [plant_id for plant_id in plant_ids if plant_id in assigned]
     # O&M Head has portfolio scope, and every caller already scopes Site Engineers.
     return plant_ids
 

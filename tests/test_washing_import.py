@@ -77,7 +77,7 @@ def test_import_dry_run_then_create_setup_and_write_audit(client, db):
     assert config.compliance_threshold_percent == 90
     assert config.active is True and config.notes == "Use south gate"
     assert config.tables_per_cycle == 11 and db.query(WashingTable).filter_by(plant_id=plant.id).count() == 0
-    assert db.query(UserPlantAssignment).filter_by(user_id=assignee.id, plant_id=plant.id).count() == 1
+    assert db.query(UserPlantAssignment).filter_by(user_id=assignee.id, plant_id=plant.id).count() == 0
     audit = db.query(AuditLog).filter_by(user_id=head.id, action="Imported washing setup").one()
     assert audit.metadata_json == {"created": 1, "updated": 0, "unchanged": 0}
 

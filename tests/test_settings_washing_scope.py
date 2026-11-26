@@ -25,7 +25,7 @@ def _assignee(db):
     return person
 
 
-def test_access_update_persists_washing_assignment_and_grants_plant_scope(client, db):
+def test_access_update_persists_washing_assignment(client, db):
     plant = _plant(db)
     login_user(client, db)
     person = _assignee(db)
@@ -42,9 +42,8 @@ def test_access_update_persists_washing_assignment_and_grants_plant_scope(client
     )
 
     assert response.status_code == 200, response.text
-    assert db.query(UserPlantAssignment).filter_by(
-        user_id=person.id, plant_id=plant.id
-    ).one()
+    # Assignees have portfolio-wide access, so a washing assignment grants no per-plant access row.
+    assert db.query(UserPlantAssignment).filter_by(user_id=person.id).count() == 0
     assert db.query(WashingConfig).filter_by(
         plant_id=plant.id, assigned_user_id=person.id
     ).one()
@@ -60,13 +59,12 @@ def test_access_update_clears_removed_washing_assignment(client, db):
     plant = _plant(db)
     login_user(client, db)
     person = _assignee(db)
-    db.add(UserPlantAssignment(user_id=person.id, plant_id=plant.id, assignment_role="Assignee"))
     db.add(WashingConfig(plant_id=plant.id, assigned_user_id=person.id))
     db.commit()
 
     response = client.put(
         f"/api/users/{person.id}/access",
-        json={"role": "Assignee", "plant_ids": [str(plant.id)], "washing_plant_ids": []},
+        json={"role": "Assignee", "plant_ids": [], "washing_plant_ids": []},
     )
 
     assert response.status_code == 200, response.text

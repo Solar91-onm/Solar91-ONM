@@ -7,9 +7,10 @@ import uuid
 from uuid import UUID
 
 from fastapi import HTTPException
-from sqlalchemy import delete, or_, select
+from sqlalchemy import delete, or_, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 from app.core.timeutil import business_today, log_stamp, utc_now
@@ -392,22 +393,63 @@ def _sync_state_scoped(db:Session,state:dict[str,Any],expected_revision:int|None
     rev=db.get(StateRevision,1)
     return rev.revision if rev else 0
 
+def _lock_collection_rows(db:Session,keys:list[str]) -> dict[str,StateCollectionRevision]:
+    """Lock the named collection-revision rows FOR UPDATE, always in collection order.
+
+    The deterministic ``ORDER BY collection`` is the deadlock guard: every sync takes these row
+    locks in the same order, so two concurrent syncs can never grab them crosswise. SQLite ignores
+    FOR UPDATE, which is fine — the tests there run single-threaded.
+    """
+    return {row.collection:row for row in db.scalars(
+        select(StateCollectionRevision)
+        .where(StateCollectionRevision.collection.in_(keys))
+        .order_by(StateCollectionRevision.collection)
+        .with_for_update()
+    ).all()}
+
+
+def _is_lock_timeout(exc:OperationalError) -> bool:
+    """True when PostgreSQL aborted a statement for waiting past ``lock_timeout`` (SQLSTATE 55P03)."""
+    orig=getattr(exc,"orig",None)
+    code=getattr(orig,"pgcode",None) or getattr(orig,"sqlstate",None)
+    return code=="55P03"
+
+
 def _lock_and_advance_collection_revisions(
     db:Session,state:dict[str,Any],expected_revisions:dict[str,int]
 ) -> dict[str,int]:
     collections=sorted(key for key in state if key in BUSINESS_KEYS or key in SETTING_KEYS)
     if not collections:
         return {}
-    values=[{"collection":key,"revision":0} for key in collections]
     dialect=db.bind.dialect.name if db.bind else ""
-    statement=pg_insert(StateCollectionRevision) if dialect=="postgresql" else sqlite_insert(StateCollectionRevision)
-    db.execute(statement.values(values).on_conflict_do_nothing(index_elements=["collection"]))
-    rows={row.collection:row for row in db.scalars(
-        select(StateCollectionRevision)
-        .where(StateCollectionRevision.collection.in_(collections))
-        .order_by(StateCollectionRevision.collection)
-        .with_for_update()
-    ).all()}
+    # Fail fast instead of hanging behind another sync holding these row locks; the caller turns the
+    # resulting 55P03 into a retriable 409 below. PostgreSQL only — SQLite has no SET LOCAL.
+    if dialect=="postgresql":
+        db.execute(text("SET LOCAL lock_timeout = '3s'"))
+    try:
+        # Steady state: every collection already has a row, so the common path is a pure SELECT ...
+        # FOR UPDATE with no write. Only a collection's very first sync inserts anything.
+        rows=_lock_collection_rows(db,collections)
+        missing=[key for key in collections if key not in rows]
+        if missing:
+            statement=pg_insert(StateCollectionRevision) if dialect=="postgresql" else sqlite_insert(StateCollectionRevision)
+            db.execute(
+                statement.values([{"collection":key,"revision":0} for key in missing])
+                .on_conflict_do_nothing(index_elements=["collection"])
+            )
+            # Lock the just-created rows FOR UPDATE too, in collection order like the rest.
+            rows.update(_lock_collection_rows(db,missing))
+    except OperationalError as exc:
+        if not _is_lock_timeout(exc):
+            raise
+        db.rollback()
+        raise HTTPException(
+            409,
+            detail={
+                "message":"Another save is in progress. Please retry.",
+                "changed_collections":{},
+            },
+        ) from exc
     conflicts={
         key:rows[key].revision
         for key in collections

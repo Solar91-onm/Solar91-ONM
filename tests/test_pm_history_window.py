@@ -55,18 +55,19 @@ def test_zero_days_sends_every_record_as_before(client, db, monkeypatch):
 
 def test_window_keeps_role_scope(client, db):
     _tasks(db)
-    login_user(client, db, role="Assignee", name="No Scope", email="hist-assignee@example.com")
-    # an Assignee without the Inverter type sees none of it, with or without full history
-    assert client.get("/api/scheduled/tasks?history=all").json() == []
-    assert client.get("/api/bootstrap").json()["state"]["tasks"] == []
+    login_user(client, db, role="Assignee", name="Portfolio", email="hist-assignee@example.com")
+    # Assignees have portfolio-wide scope, so they see the same windowed work as an O&M Head.
+    assert {t["id"] for t in client.get("/api/scheduled/tasks").json()} == {"RECENT-DONE", "LATE-DONE", "OLD-OPEN", "NEXT"}
+    assert {t["id"] for t in client.get("/api/scheduled/tasks?history=all").json()} == {"OLD-DONE", "OLD-CANCELLED", "RECENT-DONE", "LATE-DONE", "OLD-OPEN", "NEXT"}
 
 
-def test_single_work_order_lookup_reaches_old_history_and_keeps_scope(client, db):
+def test_single_work_order_lookup_reaches_old_history_for_portfolio_roles(client, db):
     login_user(client, db, role="O&M Head", name="Head", email="hist-head-one@example.com")
     _tasks(db)
     one = client.get("/api/scheduled/tasks", params={"work_order": "OLD-DONE"})
     assert one.status_code == 200
     assert [t["id"] for t in one.json()] == ["OLD-DONE"]  # outside the window, still only this record
     assert client.get("/api/scheduled/tasks", params={"work_order": "MISSING"}).json() == []
-    login_user(client, db, role="Assignee", name="No Scope", email="hist-assignee-one@example.com")
-    assert client.get("/api/scheduled/tasks", params={"work_order": "OLD-DONE"}).json() == []
+    login_user(client, db, role="Assignee", name="Portfolio", email="hist-assignee-one@example.com")
+    assignee_result = client.get("/api/scheduled/tasks", params={"work_order": "OLD-DONE"})
+    assert [task["id"] for task in assignee_result.json()] == ["OLD-DONE"]

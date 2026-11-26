@@ -12,8 +12,8 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.spreadsheet import neutralise_formulas
-from app.core.models import AuditLog, Plant, User, UserPlantAssignment, WashingConfig, WashingDailyReport, WashingHistory, WashingTable
-from app.core.security import WASHING_TYPE, user_scoped_plant_ids
+from app.core.models import AuditLog, Plant, User, WashingConfig, WashingDailyReport, WashingHistory, WashingTable
+from app.core.security import user_scoped_plant_ids
 from app.plants.codes import find_plant_by_code, normalize_site_code, plant_code_index
 from app.scheduled.washing_cycles import (
     _ensure_washing_assignee,
@@ -358,7 +358,7 @@ def import_setup(db: Session, user: User, filename: str, content: bytes, *, dry_
             if config is None:
                 config = WashingConfig(plant_id=item["plant"].id, team=[], frequency_days=14)
             if item["assignee"]:
-                _ensure_washing_assignee(db, user, item["assignee"], item["plant"].id)
+                _ensure_washing_assignee(item["assignee"])
                 config.assigned_user_id = item["assignee"].id
             config.compliance_threshold_percent = item["threshold"]
             config.fast_window_days = item["fast_window_days"]

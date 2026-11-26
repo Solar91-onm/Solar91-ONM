@@ -131,10 +131,12 @@ def list_users(
     result = []
     for u in db.scalars(select(User).order_by(User.display_name)):
         item = out(u)
+        # Assignees have portfolio-wide visibility, so they keep no per-plant access rows. But
+        # Washing/PM/Health responsibility is an Assignee-only assignment, so it is reported as held.
         item["plants"] = [] if u.role == "Assignee" else by_user.get(u.id, [])
-        item["washing_plant_ids"] = [] if u.role == "Assignee" else washing_by_user.get(u.id, [])
-        item["pm_plant_ids"] = [] if u.role == "Assignee" else responsibility_by_user.get(u.id, {}).get("pm", [])
-        item["health_plant_ids"] = [] if u.role == "Assignee" else responsibility_by_user.get(u.id, {}).get("health", [])
+        item["washing_plant_ids"] = washing_by_user.get(u.id, [])
+        item["pm_plant_ids"] = responsibility_by_user.get(u.id, {}).get("pm", [])
+        item["health_plant_ids"] = responsibility_by_user.get(u.id, {}).get("health", [])
         item["created_at"] = u.created_at.isoformat() if getattr(u, "created_at", None) else None
         item["is_self"] = u.id == user.id
         result.append(item)

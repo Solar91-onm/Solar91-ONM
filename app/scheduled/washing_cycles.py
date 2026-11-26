@@ -776,10 +776,18 @@ def list_assignees(db: Session, user: User) -> list[dict]:
     """Every active user with the Assignee role (from the database), with whether they already hold the washing scope."""
     if not _is_washing_manager(db, user):
         raise HTTPException(403, "Only the O&M team can assign plant washing")
+    assigned_ids = set(db.scalars(
+        select(WashingConfig.assigned_user_id)
+        .where(WashingConfig.assigned_user_id.is_not(None))
+        .distinct()
+    ))
     users = db.execute(
         select(User.id, User.display_name).where(User.role == "Assignee", User.is_active.is_(True)).order_by(User.display_name)
     ).all()
-    return [{"id": str(user_id), "name": name, "has_washing_scope": True} for user_id, name in users]
+    return [
+        {"id": str(user_id), "name": name, "has_washing_scope": user_id in assigned_ids}
+        for user_id, name in users
+    ]
 
 
 def _overview_as_of(month: str | None) -> date | None:

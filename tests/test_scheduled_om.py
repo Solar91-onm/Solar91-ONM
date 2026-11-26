@@ -139,39 +139,37 @@ def test_administration_cannot_create_problem_based_scheduled_task(client, db):
     assert response.status_code == 403, response.text
 
 
-def test_assignee_problem_task_creation_is_limited_to_their_assigned_plants(client, db):
-    own = Plant(site_code='AS01', plant_name='Assigned Plant')
-    other = Plant(site_code='AS02', plant_name='Also Assigned Plant')
-    db.add_all([own, other]); db.commit(); db.refresh(own); db.refresh(other)
-    elsewhere = Plant(site_code='AS03', plant_name='Unassigned Plant')
-    db.add(elsewhere); db.commit(); db.refresh(elsewhere)
-    user = login_user(client, db, role='Assignee', name='O&M Member', email='om.member@example.com')
-    grant_assignee_plants(db, user.id, own.id, other.id)        # not `elsewhere`
+def test_assignee_can_create_problem_tasks_across_the_portfolio(client, db):
+    # Assignees now have portfolio-wide scope, so problem-task creation is no longer plant-limited
+    # and the task can be assigned to any active Assignee whatever plant it is on.
+    first = Plant(site_code='AS01', plant_name='First Plant')
+    second = Plant(site_code='AS02', plant_name='Second Plant')
+    third = Plant(site_code='AS03', plant_name='Third Plant')
+    db.add_all([first, second, third]); db.commit()
+    for p in (first, second, third):
+        db.refresh(p)
+    login_user(client, db, role='Assignee', name='O&M Member', email='om.member@example.com')
     other_assignee = User(
         auth_provider='supabase', external_subject='other-assignee',
         email='other-assignee@example.com', display_name='Other User',
         role='Assignee', is_active=True,
     )
     db.add(other_assignee); db.commit()
-    grant_assignee_plants(db, other_assignee.id, own.id); db.commit()   # only `own`
 
     payload = {
         'asset': 'CCTV', 'problem': 'Camera offline', 'task_name': 'CCTV preventive inspection',
         'frequency': 'Weekly', 'due_on': '2026-10-02',
         'assignee': 'O&M Member', 'sop': 'CCTV-PM-01', 'safety': '—',
     }
-    # a plant outside their scope is refused
-    denied_plant = client.post('/api/scheduled/tasks/problem', json={**payload, 'plant_id': str(elsewhere.id)})
-    assert denied_plant.status_code == 403, denied_plant.text
-    # any category at either of their own plants is allowed
-    for plant in (own, other):
+    # any category at any plant is allowed
+    for plant in (first, second, third):
         for asset in ('CCTV', 'Transformer'):
             allowed = client.post('/api/scheduled/tasks/problem',
                                   json={**payload, 'asset': asset, 'plant_id': str(plant.id)})
             assert allowed.status_code == 201, allowed.text
-    # assigning to someone who does not hold that plant is refused
-    denied_assignment = client.post('/api/scheduled/tasks/problem', json={**payload, 'assignee': 'Other User', 'plant_id': str(other.id)})
-    assert denied_assignment.status_code == 422, denied_assignment.text
+    # and it can be assigned to any other active Assignee
+    assigned = client.post('/api/scheduled/tasks/problem', json={**payload, 'assignee': 'Other User', 'plant_id': str(second.id)})
+    assert assigned.status_code == 201, assigned.text
 
 
 def test_scheduled_before_after_evidence_is_private_and_required(client, db, monkeypatch):

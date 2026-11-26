@@ -14,7 +14,8 @@ from __future__ import annotations
 
 from sqlalchemy import select
 
-from app.core.models import AuditLog, EquipmentResponsibility, Issue, Notification, Plant, User, UserPlantAssignment
+from app.core.models import EquipmentResponsibility, Issue, Notification, Plant, User, UserPlantAssignment
+from app.core.security import user_scoped_plant_ids
 from app.equipment.service import canonical_key, invalidate_responsibility_cache, pm_keys, primary_assignee
 from tests import conftest
 from tests.conftest import login_user, seed_work_categories
@@ -222,12 +223,11 @@ def test_a_new_ticket_goes_to_the_equipment_owner_whatever_the_plant(client, db)
     assert body["assignee_text"] == owner.display_name, "the ticket shows who holds it"
     assert body["status"] == "Assigned"
 
-    # The person who now holds it can open that plant, and that grant is audited.
+    # The owner can work that plant without a per-plant grant: Assignees now have portfolio-wide
+    # scope, so equipment routing no longer writes a UserPlantAssignment or a scope-grant audit row.
+    assert user_scoped_plant_ids(db, db.get(User, owner.id)) is None
     assert db.scalar(select(UserPlantAssignment).where(
-        UserPlantAssignment.user_id == owner.id, UserPlantAssignment.plant_id == south.id)) is not None
-    grants = [row for row in db.scalars(select(AuditLog))
-              if row.action == "Plant scope added by equipment responsibility"]
-    assert len(grants) == 1 and grants[0].after_state["equipment"] == "Inverter"
+        UserPlantAssignment.user_id == owner.id, UserPlantAssignment.plant_id == south.id)) is None
 
     # The ticket's own history says why, and the owner is told.
     entries = _history(client, body["id"])

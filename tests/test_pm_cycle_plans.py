@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 
-from app.core.models import OMTask, PMCyclePlan, PMUnitConfig, Plant, UserPlantAssignment
+from app.core.models import OMTask, PMCyclePlan, PMUnitConfig, Plant, PlantResponsibility
 from app.pmplan.cycle import CYCLE, CYCLE_DAYS, chained_window, phase_for, phase_index, plan_problem, resolve_cycle
 from app.pmplan.units import distribute
 from tests.conftest import login_user
@@ -430,7 +430,7 @@ def test_the_head_and_the_plants_assignee_can_edit_a_cycle_plan(client, db):
     assert client.put(f"/api/pm-plan/cycle-plans/{plant.site_code}", json={"phases": phases}).status_code == 200
 
     mine = login_user(client, db, role="Assignee", email="mine@example.com")
-    db.add(UserPlantAssignment(user_id=mine.id, plant_id=plant.id, assignment_role="Assignee"))
+    db.add(PlantResponsibility(plant_id=plant.id, area="pm", assigned_user_id=mine.id))
     db.commit()
     moved = [_phase("VCB", ["VCB Panel"], 6, 1)]
     saved = client.put(f"/api/pm-plan/cycle-plans/{plant.site_code}", json={"phases": moved})
@@ -440,7 +440,7 @@ def test_the_head_and_the_plants_assignee_can_edit_a_cycle_plan(client, db):
 
     other = login_user(client, db, role="Assignee", email="other@example.com")
     elsewhere = _plant(db, code="OTH_01", name="Other Park")
-    db.add(UserPlantAssignment(user_id=other.id, plant_id=elsewhere.id, assignment_role="Assignee"))
+    db.add(PlantResponsibility(plant_id=elsewhere.id, area="pm", assigned_user_id=other.id))
     db.commit()
     assert client.get("/api/pm-plan/cycle-plans").status_code == 200          # the team reads the list
     assert client.put(f"/api/pm-plan/cycle-plans/{plant.site_code}", json={"phases": phases}).status_code == 403

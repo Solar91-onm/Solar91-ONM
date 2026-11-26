@@ -1,10 +1,10 @@
 """Work Radar and live search must remain truthful, scoped, and non-mutating."""
 from datetime import date, datetime, timedelta
-from tests.conftest import grant_assignee_plants
 from uuid import UUID
 from zoneinfo import ZoneInfo
 from app.core.timeutil import business_today
 from app.core.models import Issue, OMTask, User, UserPlantAssignment, WashingConfig, WashingDailyReport, WashingTable
+from tests.conftest import grant_assignee_plants
 from tests import conftest
 from tests.test_field_desk import fixture_data
 
@@ -31,10 +31,7 @@ def test_washing_worklist_distinguishes_tables_from_other_work(client, db):
     worker = User(auth_provider='test',external_subject='washer-assignee',email='washing@solar91.test',display_name='Washing worker',role='Assignee',is_active=True)
     db.add(worker);db.commit()
     conftest._CURRENT_USER=worker
-    assert client.get('/api/field/overview').json()['washing']==[]   # no plant assigned yet
-    grant_assignee_plants(db, worker.id);db.commit()
-    conftest._CURRENT_USER=db.get(User,worker.id)
-    assert len(client.get('/api/field/overview').json()['washing'])==2
+    assert len(client.get('/api/field/overview').json()['washing'])==2   # Assignees see portfolio-wide work
 
 
 def test_live_search_scopes_plant_records(client, db):
@@ -73,11 +70,9 @@ def test_assistant_is_live_role_scoped_and_read_only(client, db, monkeypatch):
     assert client.post('/api/field/ask',json={'question':'Inspect combiner'}).status_code==403  # no Ask Solar91 for Site Engineers
     other_plant_worker=User(auth_provider='test',external_subject='ask-module',email='ask-module@solar91.test',display_name='Other plant worker',role='Assignee',is_active=True)
     db.add(other_plant_worker);db.commit()
-    # Assigned only to FE02, so FE01's records must not reach them.
-    grant_assignee_plants(db, other_plant_worker.id, UUID(plants[1]['id']));db.commit()
     conftest._CURRENT_USER=db.get(User,other_plant_worker.id)
     scoped=client.post('/api/field/ask',json={'question':'Inspect combiner at FE01'}).json()
-    assert all(x.get('site_code')!='FE01' for x in scoped['records'])  # FE01 is outside their plant scope
+    assert scoped['records'] and all(x.get('site_code')=='FE01' for x in scoped['records'])
     conftest._CURRENT_USER=db.get(User,head.id)
     before=db.query(__import__('app.core.models',fromlist=['Issue']).Issue).count()
     response=client.post('/api/field/ask',json={'question':'Inspect combiner at FE01','recent_questions':['Show issues']})
@@ -116,7 +111,7 @@ def test_assistant_exact_overdue_issue_count_is_scoped_and_bounded(client, db):
     db.add(unassigned_worker);db.commit()
     conftest._CURRENT_USER=db.get(User,unassigned_worker.id)
     scoped=client.post('/api/field/ask',json={'question':'How many overdue issues?'}).json()
-    assert scoped['total']==0 and scoped['records']==[]  # no plant assigned: pending access, sees nothing
+    assert scoped['total']==503 and len(scoped['records'])==20 and scoped['limited'] is True
 
 
 def test_assistant_washing_counts_are_date_accurate_and_permission_scoped(client, db):

@@ -1,7 +1,7 @@
-from app.core.models import Plant
+from app.core.models import Plant, PlantResponsibility
 from app.core.timeutil import business_today
 from app.pmplan.tracking import PMTrackingActivity
-from tests.conftest import grant_assignee_plants, login_user
+from tests.conftest import login_user
 
 
 def test_overview_checklist_counts_and_scope(client, db):
@@ -26,7 +26,8 @@ def test_overview_checklist_counts_and_scope(client, db):
     after = client.get('/api/portal/overview?version_only=true').json()['dataVersion']
     assert before != after
     user = login_user(client, db, role='Assignee', email='checklist-scope@example.com')
-    grant_assignee_plants(db,user.id,p.id)
+    db.add(PlantResponsibility(plant_id=p.id, area="pm", assigned_user_id=user.id))
+    db.commit()
     r = client.get('/api/portal/overview/range?period=month')
     assert r.status_code == 200, r.text
     assert r.json()['totals']['pmChecklist']['scheduled'] == 1

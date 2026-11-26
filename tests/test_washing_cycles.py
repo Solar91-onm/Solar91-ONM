@@ -284,7 +284,7 @@ def test_setup_lists_every_assignee_and_grants_the_washing_scope(client, db):
     assert row["has_washing_scope"] is False                 # listed even though they have no washing scope yet
     setup = client.post(f"{BASE}/setup", json={"plant_id": str(plant.id), "table_count": 6, "assignee_user_id": str(assignee.id)})
     assert setup.status_code == 200, setup.text
-    assert db.query(UserPlantAssignment).filter_by(user_id=assignee.id, plant_id=plant.id).count() == 1
+    assert db.query(UserPlantAssignment).filter_by(user_id=assignee.id, plant_id=plant.id).count() == 0
     again = client.get(f"{BASE}/assignees").json()
     assert next(a for a in again if a["id"] == str(assignee.id))["has_washing_scope"] is True
 

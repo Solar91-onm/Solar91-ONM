@@ -525,7 +525,10 @@ def test_pm_calendar_includes_cycle_plan_days_and_chained_dates(client, db):
     assert all(row["status"] == "Planned" for row in plans)
 
 
-def test_pm_calendar_does_not_expose_cycle_plan_days_to_site_engineers(client, db):
+def test_pm_calendar_shows_a_site_engineer_their_own_plant_cycle_plan(client, db):
+    # A Site Engineer works their plant's PM, so they see that plant's cycle-plan days (the forward
+    # projection), scoped to their one assignment. Cross-plant access is blocked by the endpoint's
+    # plant-scope check and is covered in test_site_engineer_scope.py.
     engineer = login_user(
         client, db, role="Site Engineer", name="Calendar Engineer", email="calendar-engineer@example.com"
     )
@@ -547,7 +550,11 @@ def test_pm_calendar_does_not_expose_cycle_plan_days_to_site_engineers(client, d
         params={"kind": "pm", "month": "2026-12", "site_code": "PLAN02"},
     )
     assert response.status_code == 200, response.text
-    assert response.json()["entries"] == []
+    plans = [row for row in response.json()["entries"] if row["source"] == "cycle_plan"]
+    assert plans, "a Site Engineer sees their assigned plant's cycle plan"
+    assert all(row["planPhase"] == "VCB" for row in plans)
+    assert {row["cyclePlanState"] for row in plans} <= {"planned", "chained"}
+    assert all(row["plantName"] == "Scoped Plan" for row in plans)
 
 
 def test_cycle_plan_markers_stay_separate_from_work_order_metrics_and_are_labeled():

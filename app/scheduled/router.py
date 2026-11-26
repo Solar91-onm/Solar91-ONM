@@ -762,7 +762,7 @@ def upload_washing_evidence(
         db, user, plant_id=report.plant_id,
         category="washing" if phase else "other", description="",
         tags="[]", link_type="washing", link_id=str(report.id),
-        submission_id=None, phase=phase, slot=slot, files=files,
+        submission_id=None, phase=phase, slot=slot, checklist_item_id=None, files=files,
     )
     return [{
         "id": item["id"],

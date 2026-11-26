@@ -60,16 +60,12 @@ def test_pulse_is_shared_briefly_and_dropped_after_a_write(client, db):
     assert client.get('/api/issues/pulse').json()['count'] == 2
 
 
-def test_assignee_pulse_needs_an_equipment_type(client, db):
-    from app.core.models import UserPlantAssignment
+def test_assignee_sees_the_portfolio_pulse(client, db):
+    # Assignees have portfolio-wide scope, so the pulse counts every plant's issues immediately.
     plant = make_plant(db, 'PULSE-QD')
     login_user(client, db, role='O&M Head', name='Pulse Manager 5', email='pulse-manager5@example.com')
     assert client.post('/api/issues', json={'plant_id': str(plant.id), 'description': 'Trip', 'severity': 'Low', 'vertical': 'Inverter'}).status_code == 201
-    assignee = login_user(client, db, role='Assignee', name='Pulse Assignee', email='pulse-assignee@example.com')
-    assert client.get('/api/issues/pulse').json() == {'count': 0, 'latest': None, 'tasks': '0|'}
-    grant_assignee_plants(db, assignee.id); db.commit()
-    from app.issues import router as issues_router
-    issues_router._pulse_cache.clear()
+    login_user(client, db, role='Assignee', name='Pulse Assignee', email='pulse-assignee@example.com')
     assert client.get('/api/issues/pulse').json()['count'] == 1
 
 

@@ -27,7 +27,7 @@ from sqlalchemy.orm import Session
 from app.core.timeutil import business_today, log_stamp
 from app.core.database import get_db
 from app.core.models import (AuditLog, OMTask, NotificationPreference, PMCyclePlan, PMScopeConfig, PMTemplate,
-                             PMUnitConfig, Plant, User)
+                             PMUnitConfig, Plant, PlantResponsibility, User)
 from app.core.security import get_current_user, plant_scope_matches, require_csrf, user_scoped_plant_ids
 from app.plants.codes import find_plant_by_code
 from app.pmplan.alerts import PM_ALERT_EVENTS, PM_TEAM_RECIPIENT_MODES, default_pm_preferences, get_pm_preferences
@@ -973,20 +973,25 @@ def _chained_preview(cycle: list[dict[str, Any]], cycle_start: date) -> list[dic
 
 
 def _cycle_plan_scope(db: Session, user: User, plant: Plant) -> None:
-    allowed = user_scoped_plant_ids(db, user)
-    if allowed is not None and plant.id not in allowed:
+    if user.role == "Assignee":
+        responsibility = db.get(PlantResponsibility, {"plant_id": plant.id, "area": "pm"})
+        if responsibility is None or responsibility.assigned_user_id != user.id:
+            raise HTTPException(403, f"{plant.plant_name} is outside your assigned PM plants")
+    elif user.role != "O&M Head":
         raise HTTPException(403, f"{plant.plant_name} is outside your assigned plants")
 
 
 def _can_edit_cycle_plan(db: Session, user: User, plant: Plant) -> bool:
     """Whether this caller may change THIS plant's days: the O&M Head, or its own Assignee.
 
-    The write endpoints enforce the same thing (`CREATOR_ROLES` + `_cycle_plan_scope`); this is what
-    the page reads to decide between an editor and a read-only tracker."""
+    The write endpoints enforce the same thing (`CREATOR_ROLES` + `_cycle_plan_scope`); an Assignee
+    edits only plants assigned to them for PM, while the O&M Head can edit the full portfolio."""
     if user.role not in CREATOR_ROLES:
         return False
-    allowed = user_scoped_plant_ids(db, user)
-    return allowed is None or plant.id in allowed
+    if user.role == "O&M Head":
+        return True
+    responsibility = db.get(PlantResponsibility, {"plant_id": plant.id, "area": "pm"})
+    return responsibility is not None and responsibility.assigned_user_id == user.id
 
 
 def _updated_by_name(db: Session, row: PMCyclePlan | None) -> str | None:
@@ -1051,10 +1056,9 @@ def save_cycle_plan(plant_key: str, payload: CyclePlanIn, db: Annotated[Session,
                     user: Annotated[User, Depends(get_current_user)], cycle_start: date | None = None):
     """Store a plant's cycle plan. Takes effect from the NEXT cycle; work already generated is never rewritten.
 
-    The Assignee runs the month, so they edit the days for their own plants as well as the O&M Head
-    (CREATOR_ROLES, the same check every other Assignee-level PM action uses). `_cycle_plan_scope`
-    keeps an Assignee to their assigned plants; a read-only UI is never the only thing stopping a
-    write."""
+    The Assignee runs the month, so they edit the days for their PM-responsibility plants as well as
+    the O&M Head. `_cycle_plan_scope` enforces that assignment; a read-only UI is never the only
+    thing stopping a write."""
     _require(user, CREATOR_ROLES, "Only the O&M Head or the plant's Assignee can edit a cycle plan")
     plant = _resolve_plants(db, [plant_key])[0]
     _cycle_plan_scope(db, user, plant)

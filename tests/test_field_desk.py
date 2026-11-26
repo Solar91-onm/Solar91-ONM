@@ -70,8 +70,6 @@ def test_role_access_and_read_only_viewer(client,db):
     assignee=User(auth_provider='test',external_subject='field-assignee',email='assignee@example.com',
                   display_name='O&M Team',role='Assignee',is_active=True)
     db.add_all([admin,pending,assignee]);db.commit()
-    # Scoped to the first plant only, so the second plant's PM job stays out of their worklist.
-    grant_assignee_plants(db, assignee.id, UUID(plants[0]['id']));db.commit()
     conftest._CURRENT_USER=db.get(User,admin.id)
     assert len(client.get('/api/field/overview').json()['issues'])==2
     issue=head_overview['issues'][0]
@@ -80,9 +78,11 @@ def test_role_access_and_read_only_viewer(client,db):
     assert client.get('/api/field/overview').status_code==403
     conftest._CURRENT_USER=db.get(User,assignee.id)
     scoped=client.get('/api/field/overview').json()
-    assert [x['id'] for x in scoped['issues']]  # their plant's issues are visible
-    assert all(x['plant']=='Field FE01' for x in scoped['issues'])
-    assert [x['id'] for x in scoped['tasks']]==['FIELD-PM-1']
+    # Assignees now have portfolio-wide visibility (equipment responsibility routes work, not what
+    # they can see), so the field worklist spans every plant, not a single assignment.
+    assert scoped['scope']=='assigned-types'
+    assert {x['plant'] for x in scoped['issues']}=={'Field FE01','Field FE02'}
+    assert [x['id'] for x in scoped['tasks']]==['FIELD-PM-1','FIELD-PM-2']
     assert client.post(f'/api/field/issues/{issue["id"]}/updates',json={'note':'Forbidden note'}).status_code==403
 
 

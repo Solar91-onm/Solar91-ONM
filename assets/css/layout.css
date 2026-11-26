@@ -281,6 +281,9 @@ button { font: inherit; cursor: pointer; }
   min-width: 0;
   padding: var(--ep-s-6) var(--ep-s-6) var(--ep-s-8);
   background: var(--ep-bg-page);
+  /* Keep stray wide content (e.g. the PM matrix at high zoom) from pushing the
+     whole shell sideways; wide tables scroll inside their own overflow:auto box. */
+  overflow-x: clip;
 }
 .ep-page__inner {
   max-width: var(--ep-content-max);
