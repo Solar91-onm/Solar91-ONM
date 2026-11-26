@@ -822,13 +822,15 @@
 
 .ep-issues__table tbody tr:hover { background: #fbfdfb; }
 .ep-issues__row { cursor: default; }
-.ep-issues__bom-toggle {
+.ep-issues__plant-group { background: #f5f8f6; }
+.ep-issues__plant-group > td { padding: 8px 10px; }
+.ep-issues__plant-group-toggle {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 5px;
+  gap: 10px;
   width: 100%;
-  padding: 0;
+  min-height: 28px;
+  padding: 3px 4px;
   border: 0;
   background: transparent;
   color: inherit;
@@ -836,22 +838,15 @@
   text-align: left;
   cursor: pointer;
 }
-.ep-issues__bom-toggle:hover strong { color: #17643f; text-decoration: underline; }
-.ep-issues__bom-toggle:focus-visible { outline: 2px solid #4a9b70; outline-offset: 2px; border-radius: 3px; }
-.ep-issues__bom-toggle > span { min-width: 0; }
-.ep-issues__bom-chevron { flex: 0 0 12px; transition: transform 140ms ease; }
-.ep-issues__bom-chevron.is-expanded { transform: rotate(180deg); }
-.ep-issues__bom-row > td { padding: 0; background: #f7faf8; }
-.ep-issues__bom-panel { padding: 10px; text-align: left; }
-.ep-issues__bom-panel > strong { display: block; margin: 0 0 8px; color: #34443a; font-size: 10px; }
-.ep-issues__bom-scroll { overflow-x: auto; }
-.ep-issues__bom-table { min-width: 900px; }
-.ep-issues__bom-table thead th,
-.ep-issues__bom-table tbody td { padding: 7px 6px; font-size: 9px; text-align: left; }
-.ep-issues__bom-message { margin: 8px 0; color: #68776d; font-size: 10px; }
-.ep-issues__bom-message.is-error { color: #a62e2a; }
-.ep-issues__bom-empty { color: #89958d; }
-.ep-issues__bom-more { display: flex; align-items: center; justify-content: center; gap: 8px; padding-top: 8px; color: #68776d; font-size: 10px; }
+.ep-issues__plant-group-toggle:hover .ep-issues__plant-group-name strong { color: #17643f; text-decoration: underline; }
+.ep-issues__plant-group-toggle:focus-visible { outline: 2px solid #4a9b70; outline-offset: 2px; border-radius: 3px; }
+.ep-issues__plant-group-name { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.ep-issues__plant-group-name > span { color: #758279; font-size: 9px; }
+.ep-issues__plant-group-count { margin-left: auto; color: #68776d; font-size: 9px; white-space: nowrap; }
+.ep-issues__plant-group-chevron { flex: 0 0 13px; transition: transform 140ms ease; }
+.ep-issues__plant-group-chevron.is-expanded { transform: rotate(180deg); }
+.ep-issues__plant-name { display: block; }
+.ep-issues__plant-name small { display: block; margin-top: 3px; color: #8a968e; font-size: 9px; }
 .ep-issues__table td strong { color: #2e3c33; font-size: 9px; font-weight: 650; }
 .ep-issues__table td small { display: block; margin-top: 3px; color: #8a968e; font-size: 9px; }
 .ep-issues__table td .ep-issues__date-age {
@@ -1210,13 +1205,10 @@
   .ep-issues__table td { display: grid; grid-template-columns: minmax(90px, 34%) 1fr; gap: 8px; max-width: none; min-width: 0 !important; padding: 7px 0; border: 0; font-size: 10px; }
   .ep-issues__table td::before { content: attr(data-label); color: #819087; font-size: 9px; font-weight: 650; }
   .ep-issues__table td:last-child { padding-bottom: 3px; }
-  .ep-issues__table .ep-issues__bom-table { display: table; width: 100%; min-width: 900px; }
-  .ep-issues__table .ep-issues__bom-table thead { position: static; width: auto; height: auto; overflow: visible; clip: auto; }
-  .ep-issues__table .ep-issues__bom-table tbody { display: table-row-group; }
-  .ep-issues__table .ep-issues__bom-table tr { display: table-row; width: auto; padding: 0; border: 0; border-radius: 0; }
-  .ep-issues__table .ep-issues__bom-table th,
-  .ep-issues__table .ep-issues__bom-table td:nth-child(n) { display: table-cell; width: auto !important; padding: 7px 6px; }
-  .ep-issues__table .ep-issues__bom-table td::before { display: none; content: none; }
+  .ep-issues__plant-group > td { display: block; padding: 4px 0; }
+  .ep-issues__plant-group > td::before { display: none; content: none; }
+  .ep-issues__plant-group-toggle { flex-wrap: wrap; gap: 5px 8px; }
+  .ep-issues__plant-group-count { margin-left: auto; }
   .ep-issues__triage-item { grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
   .ep-issues__triage-assign { display: none; }
   .ep-issues__section-head { align-items: flex-start; }

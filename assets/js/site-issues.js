@@ -192,8 +192,7 @@
     issuePhotos: {},
     photoBusy: {},
     photoError: "",
-    expandedBomIssueId: "",
-    bomByPlant: {},
+    expandedIssuePlantCode: "",
     // A ticket whose photos failed to upload. The ticket itself is already saved, so the retry
     // re-sends the same files under the SAME submission id: the server treats a repeat as the
     // one submission it is, and never stores a second copy.
@@ -604,21 +603,43 @@
         '<button type="button" class="ep-issues__button" data-issue-action="clear">Clear filters</button></div>';
     }
     var headers = COLUMNS.map(function (c) { return c.label; });
+    var groups = [], groupsByCode = Object.create(null);
+    rows.forEach(function (issue) {
+      var code = issue.plantCode || "";
+      var group = groupsByCode[code];
+      if (!group) {
+        group = groupsByCode[code] = { siteCode: code, plantName: issue.plantName || code, issues: [] };
+        groups.push(group);
+      }
+      group.issues.push(issue);
+    });
     return '<div class="ep-issues__table-wrap"><table class="ep-issues__table"><thead><tr>' +
       COLUMNS.map(issueColumnHeader).join("") +
-      '</tr></thead><tbody>' + rows.map(function (issue) {
-        var labels = headers;
-        var expanded = state.expandedBomIssueId === issue.id;
-        var siteCode = escape(issue.plantCode);
-        var codeLabel = escape(issue.plantName || issue.plantCode);
-        return '<tr class="ep-issues__row">' +
-          '<td data-label="' + labels[0] + '"><button type="button" class="ep-issues__bom-toggle" data-issue-bom-toggle="' +
-            escape(issue.id) + '" data-site-code="' + siteCode + '" aria-expanded="' + String(expanded) +
-            '" aria-label="' + (expanded ? "Collapse" : "Expand") + ' BOM details for ' + codeLabel + '">' +
-            '<span><strong>' + siteCode + '</strong><small>' + escape(issue.plantName) + '</small></span>' +
-            '<svg class="ep-issues__bom-chevron' + (expanded ? " is-expanded" : "") +
-            '" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" ' +
-            'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg></button></td>' +
+      '</tr></thead><tbody>' + groups.map(function (group) {
+        var expanded = state.expandedIssuePlantCode === group.siteCode;
+        var code = escape(group.siteCode);
+        var groupRow = '<tr class="ep-issues__plant-group' + (expanded ? " is-expanded" : "") + '">' +
+          '<td colspan="' + headers.length + '" data-label="Plant"><button type="button" class="ep-issues__plant-group-toggle" ' +
+            'data-issue-plant-toggle="' + code + '" aria-expanded="' + String(expanded) +
+            '" aria-label="' + (expanded ? "Collapse" : "Expand") + " issues for " +
+            escape(group.plantName) + '">' +
+            '<span class="ep-issues__plant-group-name"><strong>' + code + '</strong><span>' +
+            escape(group.plantName) + '</span></span><span class="ep-issues__plant-group-count">' +
+            group.issues.length + (group.issues.length === 1 ? " issue" : " issues") + '</span>' +
+            '<svg class="ep-issues__plant-group-chevron' + (expanded ? " is-expanded" : "") +
+            '" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" ' +
+            'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg>' +
+          '</button></td></tr>';
+        return groupRow + (expanded ? group.issues.map(function (issue) {
+          return renderIssueRow(issue, headers);
+        }).join("") : "");
+      }).join("") + '</tbody></table></div>';
+  }
+
+  function renderIssueRow(issue, labels) {
+    return '<tr class="ep-issues__row">' +
+          '<td data-label="' + labels[0] + '"><span class="ep-issues__plant-name"><strong>' +
+            escape(issue.plantCode) + '</strong><small>' + escape(issue.plantName) + '</small></span></td>' +
           '<td data-label="' + labels[1] + '"><strong>' + escape(issue.equipment) + '</strong></td>' +
           '<td data-label="' + labels[2] + '">' + (issue.subpart
             ? escape(issue.subpart)
@@ -652,91 +673,7 @@
               '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" ' +
               'stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
               '<path d="m5 13 4 4L19 7"></path></svg></button>') + '</td>' +
-        '</tr>' + (expanded ? renderIssueBomRow(issue, headers.length) : "");
-      }).join("") + '</tbody></table></div>';
-  }
-
-  var BOM_PAGE_SIZE = 200;
-  var BOM_COLUMNS = [
-    ["section", "Section"], ["itemName", "Item Description"], ["specs", "Specs"],
-    ["maker", "Maker"], ["supplier", "Supplier"], ["quantity", "Quantity"],
-    ["unit", "Unit"], ["testReport", "T.R."], ["warrantyCert", "W.C."],
-    ["serialNo", "Item Serial No."], ["invoice", "Invoice"]
-  ];
-
-  function renderIssueBomRow(issue, colspan) {
-    var entry = state.bomByPlant[issue.plantCode];
-    var body = "";
-    if (!entry || entry.loading && !entry.items.length) {
-      body = '<p class="ep-issues__bom-message" role="status">Loading BOM items…</p>';
-    } else if (entry.error && !entry.items.length) {
-      body = '<p class="ep-issues__bom-message is-error" role="alert">Could not load BOM items. ' +
-        escape(entry.error) + ' <button type="button" class="ep-issues__button" data-issue-bom-retry="' +
-        escape(issue.plantCode) + '">Try again</button></p>';
-    } else if (!entry.items.length) {
-      body = '<p class="ep-issues__bom-message">No BOM lines are recorded for this plant.</p>';
-    } else {
-      var head = BOM_COLUMNS.map(function (column) { return "<th scope=\"col\">" + column[1] + "</th>"; }).join("");
-      var rows = entry.items.map(function (item) {
-        return "<tr>" + BOM_COLUMNS.map(function (column) {
-          var value = item[column[0]];
-          if (column[0] === "quantity" && value !== null && value !== undefined && value !== "") {
-            value = format.decimalText(value);
-          }
-          return "<td>" + (value === null || value === undefined || value === ""
-            ? '<span class="ep-issues__bom-empty">—</span>' : escape(value)) + "</td>";
-        }).join("") + "</tr>";
-      }).join("");
-      body = '<div class="ep-issues__bom-scroll"><table class="ep-pt__table ep-bom__table ep-issues__bom-table" aria-label="BOM items for ' +
-        escape(issue.plantCode) + '"><thead><tr>' + head + '</tr></thead><tbody>' + rows + "</tbody></table></div>";
-      if (entry.error) {
-        body += '<p class="ep-issues__bom-message is-error" role="alert">' + escape(entry.error) +
-          ' <button type="button" class="ep-issues__button" data-issue-bom-retry="' +
-          escape(issue.plantCode) + '">Retry</button></p>';
-      } else if (entry.loading || entry.more) {
-        body += '<div class="ep-issues__bom-more">' + (entry.loading ? "Loading…" : "") +
-          '<button type="button" class="ep-issues__button" data-issue-bom-more="' +
-          escape(issue.plantCode) + '"' + (entry.loading ? " disabled" : "") + ">" +
-          (entry.loading ? "Loading…" : "Load more (" + (entry.total - entry.items.length) + " left)") +
-          "</button></div>";
-      }
-    }
-    return '<tr class="ep-issues__bom-row"><td colspan="' + colspan +
-      '" data-label="BOM details"><div class="ep-issues__bom-panel"><strong>BOM details · ' +
-      escape(issue.plantCode) + "</strong>" + body + "</div></td></tr>";
-  }
-
-  function loadIssueBom(siteCode, append) {
-    var entry = state.bomByPlant[siteCode];
-    if (!entry) {
-      entry = { items: [], total: 0, loading: false, error: "", more: false, requestId: 0 };
-      state.bomByPlant[siteCode] = entry;
-    }
-    if (entry.loading) return;
-    var requestId = ++entry.requestId;
-    var offset = append ? entry.items.length : 0;
-    if (!append) {
-      entry.items = [];
-      entry.total = 0;
-      entry.more = false;
-    }
-    entry.loading = true;
-    entry.error = "";
-    renderView();
-    global.Solar91PortalAPI.request("/api/bom?site_code=" + encodeURIComponent(siteCode) +
-      "&limit=" + BOM_PAGE_SIZE + "&offset=" + offset).then(function (result) {
-      if (state.bomByPlant[siteCode] !== entry || entry.requestId !== requestId) return;
-      entry.items = append ? entry.items.concat(result.items || []) : (result.items || []);
-      entry.total = result.total || 0;
-      entry.more = entry.items.length < entry.total;
-      entry.loading = false;
-    }).catch(function (error) {
-      if (state.bomByPlant[siteCode] !== entry || entry.requestId !== requestId) return;
-      entry.loading = false;
-      entry.error = error.message || "Please retry.";
-    }).then(function () {
-      if (active && state.bomByPlant[siteCode] === entry && entry.requestId === requestId) renderView();
-    });
+        '</tr>';
   }
 
   // The workflow is a state machine (app/issues/service.py :: transition), so a
@@ -1337,8 +1274,7 @@
       state.issuePhotos = {};
       state.photoBusy = {};
       state.photoError = "";
-      state.expandedBomIssueId = "";
-      state.bomByPlant = {};
+      state.expandedIssuePlantCode = "";
     }
     // Opened from the Overview's Inverters tile: that preset survives this render and
     // is shown as a removable chip, then cleared.
@@ -1884,33 +1820,11 @@
         compactToggle.textContent = expanded ? "Less" : "More";
         return;
       }
-      var bomToggle = event.target.closest("[data-issue-bom-toggle]");
-      if (bomToggle) {
-        var issueId = bomToggle.getAttribute("data-issue-bom-toggle");
-        var siteCode = bomToggle.getAttribute("data-site-code");
-        if (state.expandedBomIssueId === issueId) {
-          state.expandedBomIssueId = "";
-          renderView();
-        } else {
-          state.expandedBomIssueId = issueId;
-          renderView();
-          if (!state.bomByPlant[siteCode]) loadIssueBom(siteCode, false);
-        }
-        return;
-      }
-      var bomMore = event.target.closest("[data-issue-bom-more]");
-      if (bomMore) {
-        var moreEntry = state.bomByPlant[bomMore.getAttribute("data-issue-bom-more")];
-        if (moreEntry && moreEntry.more && !moreEntry.loading) {
-          loadIssueBom(bomMore.getAttribute("data-issue-bom-more"), true);
-        }
-        return;
-      }
-      var bomRetry = event.target.closest("[data-issue-bom-retry]");
-      if (bomRetry) {
-        var retryCode = bomRetry.getAttribute("data-issue-bom-retry");
-        var retryEntry = state.bomByPlant[retryCode];
-        if (retryEntry && !retryEntry.loading) loadIssueBom(retryCode, retryEntry.items.length > 0);
+      var plantToggle = event.target.closest("[data-issue-plant-toggle]");
+      if (plantToggle) {
+        var plantCode = plantToggle.getAttribute("data-issue-plant-toggle");
+        state.expandedIssuePlantCode = state.expandedIssuePlantCode === plantCode ? "" : plantCode;
+        renderView();
         return;
       }
       if (event.target.closest("[data-issue-date-clear]")) {

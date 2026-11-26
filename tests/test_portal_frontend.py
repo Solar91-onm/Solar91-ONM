@@ -881,20 +881,24 @@ def test_plant_links_open_the_matching_module_or_default_plant_page():
     issues = (PORTAL_ASSETS / "js" / "site-issues.js").read_text(encoding="utf-8")
     calendar = (PORTAL_ASSETS / "js" / "operations-calendar.js").read_text(encoding="utf-8")
     assert 'data-open-plant=' not in issues
-    assert 'data-issue-bom-toggle=' in issues
+    assert 'data-issue-plant-toggle=' in issues
     assert 'data-open-plant-page="health"' not in issues
     assert 'global.Solar91PortalNav.selectPlantPage(plantRow.dataset.issuePlant, "health")' not in issues
     assert 'data-open-plant-page="' + "' + context.type +" in calendar
 
 
-def test_site_issue_plant_code_expands_on_demand_bom_details():
+def test_site_issue_plant_code_groups_issues_without_bom_or_navigation():
     issues = (PORTAL_ASSETS / "js" / "site-issues.js").read_text(encoding="utf-8")
-    assert '"/api/bom?site_code="' in issues
-    assert "BOM_PAGE_SIZE = 200" in issues
-    assert "data-issue-bom-more" in issues
-    assert "data-issue-bom-retry" in issues
+    assert '"/api/bom?site_code="' not in issues
+    assert "BOM_PAGE_SIZE" not in issues
+    assert "data-issue-bom-" not in issues
+    assert "groupsByCode[code]" in issues
+    assert "group.issues.map" in issues
+    assert 'state.expandedIssuePlantCode === group.siteCode' in issues
+    assert 'state.expandedIssuePlantCode = state.expandedIssuePlantCode === plantCode ? "" : plantCode' in issues
     assert 'aria-expanded="' + "' + String(expanded)" in issues
-    assert 'class="ep-issues__bom-row"' in issues
+    assert 'class="ep-issues__plant-group-toggle"' in issues
+    assert "renderIssueRow(issue, headers)" in issues
 
     # A single plant's own page has nothing to link to, so it keeps a plain cell.
     table = (PORTAL_ASSETS / "js" / "plants-table.js").read_text(encoding="utf-8")
