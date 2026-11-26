@@ -306,11 +306,14 @@
       : '<td class="ep-pt__codecell"><button type="button" class="ep-plantlink" data-open-plant="' +
         fmt.escape(p.siteCode) + '" title="Open ' + fmt.escape(p.displayName || p.plantName) +
         ' in the Plants tab">' + codeInner + "</button></td>";
-    var locationCell = "<td>" + (p.mapsUrl
-        ? '<a class="ep-pt__loc" href="' + fmt.escape(p.mapsUrl) + '" target="_blank" rel="noopener" aria-label="View plant location" title="' +
-            fmt.escape(p.location || p.district || "View plant location") + '">' +
-            "View</a>"
-        : dash()) + "</td>";
+    var locationCell = '<td><div class="ep-pt__loccell ep-compact-cell" data-compact-cell>' +
+      '<div class="ep-compact-cell__content is-collapsed" data-compact-content>' +
+        (p.location ? fmt.escape(p.location) : dash("No location recorded")) +
+      '</div><button type="button" class="ep-compact-cell__toggle" data-compact-cell-toggle ' +
+        'aria-expanded="false" hidden>More</button>' +
+      (p.mapsUrl
+        ? '<a class="ep-pt__loc" href="' + fmt.escape(p.mapsUrl) + '" target="_blank" rel="noopener" aria-label="View plant location" title="Open plant location in Maps">View map</a>'
+        : "") + "</div></td>";
     var cameraUrl = cctvUrl(p);
     var cctvCell = "<td>" + (cameraUrl
         ? '<a class="ep-pt__loc" href="' + fmt.escape(cameraUrl) + '" target="_blank" rel="noopener" aria-label="Open CCTV feed for ' +

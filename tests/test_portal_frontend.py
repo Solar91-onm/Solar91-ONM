@@ -1682,6 +1682,9 @@ def test_plant_table_uses_balanced_shared_columns_and_numeric_spv_label():
     assert 'url.protocol === "http:" || url.protocol === "https:"' in table
     assert '<span class="ep-pt__cctv-placeholder">Add link</span>' in table
     assert 'class="ep-pt__loc" href="' in table
+    assert 'class="ep-pt__loccell ep-compact-cell" data-compact-cell' in table
+    assert 'p.location ? fmt.escape(p.location)' in table
+    assert 'data-compact-cell-toggle' in table
     assert 'aria-label="Open CCTV feed for ' in table
     assert "cctvUrl(p)" in table
 

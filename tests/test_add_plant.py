@@ -58,6 +58,17 @@ def test_a_head_creates_a_plant_with_every_column_the_info_page_shows(client, db
     assert client.post("/api/plants", json=FULL).status_code == 409
 
 
+def test_plant_can_be_created_without_supervisor_or_cctv_link(client, db):
+    login_user(client, db, role="O&M Head", email="add-optional-fields@example.com")
+
+    created = client.post("/api/plants", json=dict(FULL, site_code="OPT01", supervisor=None, custom_fields={}))
+    assert created.status_code == 201, created.text
+    assert created.json()["supervisor"] is None
+    assert created.json()["custom_fields"].get("cctv_url") is None
+    row = db.scalar(select(Plant).where(Plant.site_code == "OPT01"))
+    assert row is not None and row.supervisor is None
+
+
 def test_head_and_assignee_may_create_and_edit_plants_but_other_roles_may_not(client, db):
     plant = Plant(site_code="EXI01", plant_name="Existing")
     db.add(plant)
@@ -125,13 +136,16 @@ def test_the_overlay_collects_every_plant_column_and_requires_all_of_them():
                 "location", "latitude", "longitude", "cctv_url", "status"):
         assert '"' + key + '"' in fields, "missing field: " + key
     # The CCTV link is a custom field, not a column.
-    assert '{ key: "cctv_url",        label: "CCTV link",             type: "url",    custom: true,' in fields
-    # Every input is required, in the markup and again before anything is sent.
+    assert '{ key: "cctv_url",        label: "CCTV link",             type: "url",    custom: true, optional: true,' in fields
+    assert '{ key: "supervisor",      label: "Supervisor",            type: "text", optional: true }' in fields
+    # Supervisor and CCTV link are optional in both markup and submission validation.
     markup = editor[editor.index("function createFieldHTML("):editor.index("function openCreate(")]
-    assert 'required />' in markup and '<select name="' in markup and 'required>' in markup
-    assert 'esc(field.label) + " *</span>"' in markup
+    assert 'field.optional !== true' in markup
+    assert 'required ? " required" : ""' in markup
+    assert 'required ? " *" : " (optional)"' in markup
     create = editor[editor.index("function openCreate("):editor.index("var PlantEditor = {")]
-    assert 'if (!raw) { problem = field.label + " is required."; return; }' in create
+    assert "if (field.optional) return;" in create
+    assert 'problem = field.label + " is required."' in create
     # Role gate on the client too, and the overlay's own guards.
     assert '["O&M Head", "Assignee"].indexOf(user.role) === -1' in create
     assert "Math.abs(num) > 90" in create and "Math.abs(num) > 180" in create

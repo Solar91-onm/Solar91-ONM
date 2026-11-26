@@ -25,10 +25,8 @@
 
   // ─── Add a plant (POST /api/plants) ──────────────────────────────────
   //
-  // The same fields the Info table shows, in the same order, and every one of them is required:
-  // a plant added here arrives complete rather than as a row of dashes. Cleaning, PM and Health
-  // Assignees are not here on purpose — those are per-plant responsibilities configured on the
-  // Login Access page, which is also where the permission to set them lives.
+  // The same fields the Info table shows, in the same order. Only Supervisor and CCTV link are
+  // optional; Cleaning, PM and Health Assignees are configured on the Login Access page.
   var CREATE_FIELDS = [
     { key: "site_code",       label: "Plant code",            type: "text",   hint: "Unique, e.g. ABH01" },
     { key: "plant_name",      label: "Plant name",            type: "text" },
@@ -38,27 +36,30 @@
     { key: "district",        label: "District",              type: "text" },
     { key: "discom",          label: "DISCOM",                type: "text" },
     { key: "assigned_engineer", label: "Site engineer",       type: "text" },
-    { key: "supervisor",      label: "Supervisor",            type: "text" },
+    { key: "supervisor",      label: "Supervisor",            type: "text", optional: true },
     { key: "commissioned_on", label: "COD",                   type: "date" },
     { key: "location",        label: "Location",              type: "text" },
     { key: "latitude",        label: "Latitude",              type: "number", step: "any" },
     { key: "longitude",       label: "Longitude",             type: "number", step: "any" },
-    { key: "cctv_url",        label: "CCTV link",             type: "url",    custom: true,
+    { key: "cctv_url",        label: "CCTV link",             type: "url",    custom: true, optional: true,
       hint: "https://…" },
     { key: "status",          label: "Status",                type: "select",
       options: ["active", "commissioning", "inactive", "decommissioned"] }
   ];
 
   function createFieldHTML(field) {
+    var required = field.optional !== true;
     var input = field.type === "select"
-      ? '<select name="' + field.key + '" required>' + field.options.map(function (option) {
+      ? '<select name="' + field.key + '"' + (required ? " required" : "") + ">" + field.options.map(function (option) {
           return '<option value="' + option + '"' + (option === "active" ? " selected" : "") + ">" +
                  option.charAt(0).toUpperCase() + option.slice(1) + "</option>";
         }).join("") + "</select>"
       : '<input name="' + field.key + '" type="' + field.type + '"' +
         (field.step ? ' step="' + field.step + '"' : "") +
-        (field.hint ? ' placeholder="' + esc(field.hint) + '"' : "") + " required />";
-    return '<label class="ep-pd__field"><span>' + esc(field.label) + " *</span>" + input + "</label>";
+        (field.hint ? ' placeholder="' + esc(field.hint) + '"' : "") +
+        (required ? " required" : "") + " />";
+    return '<label class="ep-pd__field"><span>' + esc(field.label) +
+      (required ? " *" : " (optional)") + "</span>" + input + "</label>";
   }
 
   /**
@@ -81,7 +82,7 @@
         '<div class="ep-pd__modal-body ep-pd__modal-body--create">' +
           CREATE_FIELDS.map(createFieldHTML).join("") +
         "</div>" +
-        '<p class="ep-pd__create-note">Every field is required. Cleaning, PM and Health Assignees ' +
+        '<p class="ep-pd__create-note">Only Supervisor and CCTV link are optional. Cleaning, PM and Health Assignees ' +
           'are assigned afterwards from Login access; Preventive Maintenance and Module Cleaning ' +
           'schedules are set up separately and are not created here.</p>' +
         '<p class="ep-pd__form-error" role="alert"></p>' +
@@ -116,7 +117,11 @@
       CREATE_FIELDS.forEach(function (field) {
         if (problem) return;
         var raw = String(form.elements[field.key].value || "").trim();
-        if (!raw) { problem = field.label + " is required."; return; }
+        if (!raw) {
+          if (field.optional) return;
+          problem = field.label + " is required.";
+          return;
+        }
         if (field.type === "number") {
           var num = Number(raw);
           if (!Number.isFinite(num)) { problem = field.label + " must be a number."; return; }

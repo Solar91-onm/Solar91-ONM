@@ -1183,6 +1183,7 @@
 .ep-pt__eng-name { font-size: var(--ep-fs-sm); color: var(--ep-text-strong); }
 .ep-pt__eng-no { font-size: var(--ep-fs-xs); color: var(--ep-text-muted); }
 .ep-compact-cell { min-width: 0; }
+.ep-pt__loccell { line-height: 1.35; }
 .ep-compact-cell__content { width: 100%; line-height: 1.4; overflow-wrap: anywhere; }
 .ep-compact-cell__content.is-collapsed { max-height: 1.4em; overflow: hidden; }
 .ep-compact-cell__toggle {
