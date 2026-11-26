@@ -14,7 +14,7 @@ def _head_with_issue(client, db, *, vertical="Inverter", code="WR01"):
                     display_name="Ravi Assignee", role="Assignee", is_active=True)
     db.add(assignee); db.commit(); db.refresh(assignee)
     login_user(client, db, role="O&M Head", name="Head", email="wr-head@example.com")
-    plant = client.post("/api/plants", json={"site_code": code, "plant_name": "Workflow Rules Plant"}).json()
+    plant = client.post("/api/plants", json={"site_code": code, "plant_name": "Workflow Rules Plant", "address": "Workflow test address"}).json()
     issue = client.post("/api/issues", json={"plant_id": plant["id"], "vertical": vertical,
                                              "description": "Inverter tripping", "severity": "High"}).json()
     return assignee, plant, issue

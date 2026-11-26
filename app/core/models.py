@@ -43,6 +43,7 @@ class Plant(Base, TimestampMixin):
     project_company: Mapped[str | None] = mapped_column(String(255))
     district: Mapped[str | None] = mapped_column(String(120))
     discom: Mapped[str | None] = mapped_column(String(120))
+    address: Mapped[str | None] = mapped_column(Text)
     location: Mapped[str | None] = mapped_column(String(255))
     latitude: Mapped[float | None] = mapped_column(Numeric(10, 7))
     longitude: Mapped[float | None] = mapped_column(Numeric(10, 7))

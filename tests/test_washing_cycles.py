@@ -364,15 +364,33 @@ def test_overdue_alerts_fire_once_per_level(client, db):
 
 def test_overview_lists_unconfigured_plants_and_daily_status(client, db):
     configured = _plant(db)
-    spare = Plant(site_code="SPARE01", plant_name="Spare Plant")
+    spare = Plant(site_code="SPARE01", plant_name="Spare Plant", district="Dausa")
     db.add(spare); db.commit()
     head, _assignee = _setup_cycle_users(client, db, configured)
     _act_as(head)
     overview = client.get(f"{BASE}/overview").json()
     assert [p["site_code"] for p in overview["unconfigured"]] == ["SPARE01"]
+    assert overview["unconfigured"][0]["district"] == "Dausa"
     assert set(overview["overdue_matrix"]) == {"on_track", "1d", "3d", "7d"}
     row = overview["plants"][0]
     assert len(row["daily_status"]) == business_today().day and row["daily_status"][-1]["status"] in {"Not reported yet", "Awaiting review", "Confirmed", "Exception"}
+
+
+def test_adding_a_plant_invalidates_cached_washing_overview(client, db):
+    from app.scheduled import washing_cycles
+
+    login_user(client, db, role="O&M Head", email="plant-wash-cache@example.com")
+    key = ("stale plant list",)
+    washing_cycles._OVERVIEW_CACHE[key] = (0, {"unconfigured": []})
+
+    response = client.post("/api/plants", json={
+        "site_code": "WASHNEW01",
+        "plant_name": "New Washing Plant",
+        "address": "New Washing Plant Road",
+    })
+
+    assert response.status_code == 201, response.text
+    assert key not in washing_cycles._OVERVIEW_CACHE
 
 
 def test_summary_overview_includes_cycle_grades_from_distinct_non_rejected_codes(client, db):

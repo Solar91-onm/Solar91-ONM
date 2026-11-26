@@ -13,6 +13,12 @@ from app.plants.schemas import PlantCreate, PlantUpdate, SecurityContactMove
 SECURITY_GROUPS = {"engineer": "site_engineers", "guard": "guards"}
 
 
+def _invalidate_washing_overview_cache() -> None:
+    from app.scheduled.washing_cycles import invalidate_overview_cache
+
+    invalidate_overview_cache()
+
+
 class PlantService:
     def __init__(self, db: Session): self.db=db; self.repo=PlantRepository(db)
 
@@ -22,20 +28,26 @@ class PlantService:
         if find_plant_by_code(self.db, values["site_code"]):
             raise HTTPException(409, "A plant with this site code already exists")
         row = Plant(**values, source="api", created_by=user.id, legacy_payload={})
-        try: return self.repo.add(row)
+        try:
+            created = self.repo.add(row)
         except IntegrityError as exc:
             self.db.rollback(); raise HTTPException(409, "A plant with this site code already exists") from exc
+        _invalidate_washing_overview_cache()
+        return created
 
     def update(self, plant_id, data: PlantUpdate):
         row=self.repo.by_id(plant_id)
         if not row: raise HTTPException(404,"Plant not found")
         for k,v in data.model_dump(exclude_unset=True).items(): setattr(row,k,v)
-        return self.repo.save(row)
+        updated = self.repo.save(row)
+        _invalidate_washing_overview_cache()
+        return updated
 
     def delete(self, plant_id):
         row=self.repo.by_id(plant_id)
         if not row: raise HTTPException(404,"Plant not found")
         self.repo.delete(row)
+        _invalidate_washing_overview_cache()
 
     def set_security_contacts(self, plant_id, contacts: dict):
         """Replace only one plant's ``custom_fields.security_contacts``, leaving every other key.

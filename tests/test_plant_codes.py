@@ -43,14 +43,14 @@ def test_api_rejects_formatted_duplicate_and_preserves_existing_plant(
     login_user(client, db)
     created = client.post(
         "/api/plants",
-        json={"site_code": first, "plant_name": "Canonical Plant"},
+        json={"site_code": first, "plant_name": "Canonical Plant", "address": "Canonical plant address"},
     )
     assert created.status_code == 201, created.text
     plant_id = UUID(created.json()["id"])
 
     duplicate = client.post(
         "/api/plants",
-        json={"site_code": second, "plant_name": "Duplicate Plant"},
+        json={"site_code": second, "plant_name": "Duplicate Plant", "address": "Duplicate plant address"},
     )
     assert duplicate.status_code == 409
 

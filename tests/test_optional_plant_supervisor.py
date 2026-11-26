@@ -4,7 +4,7 @@ from tests.conftest import login_user
 
 def test_optional_supervisor_create_edit_clear_and_validation(client, db):
     login_user(client, db)
-    res = client.post('/api/plants', json={'site_code': 'SUP01', 'plant_name': 'Test plant'})
+    res = client.post('/api/plants', json={'site_code': 'SUP01', 'plant_name': 'Test plant', 'address': 'Test plant address'})
     assert res.status_code == 201, res.text
     assert res.json()['supervisor'] is None
     url = '/api/plants/' + res.json()['id']

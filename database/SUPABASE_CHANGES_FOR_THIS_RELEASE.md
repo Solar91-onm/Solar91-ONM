@@ -162,11 +162,15 @@ WHERE u.role = 'Assignee' AND u.is_active
 
 The new **Plants → Details** page shows the stored plant record. It shows
 "Not available" for anything empty rather than inventing a value, so any column
-you fill in appears immediately. These are the ones worth checking:
+you fill in appears immediately. Migration `057_plant_address.sql` adds the
+separate written-address field; apply it manually after taking a backup or on
+staging first. Existing plants are not backfilled because the legacy `location`
+values may only be city or district names. Verify and enter full addresses
+through **Edit details**. These are the ones worth checking:
 
 ```sql
 SELECT site_code, plant_name,
-       district, discom, location, latitude, longitude,
+       district, discom, address, location, latitude, longitude,
        dc_capacity_kw, ac_capacity_kw, commissioned_on, status, project_company
 FROM plants
 ORDER BY plant_name;
@@ -174,9 +178,10 @@ ORDER BY plant_name;
 
 | Column | Used for |
 |---|---|
+| `address` | Written Location shown in the Plants Info table; required for new plant records |
 | `district`, `discom` | Location & grid card; the portfolio table's district filter |
-| `location` | Location card |
-| `latitude`, `longitude` | Coordinates, and an exact "Open map" link (otherwise the map falls back to a name search) |
+| `location` | Legacy location/city value; not used as a substitute for the written address or map coordinates |
+| `latitude`, `longitude` | Coordinates and the separate "Open map" link; without both coordinates no map link is shown |
 | `dc_capacity_kw`, `ac_capacity_kw` | Capacity tiles, DC/AC ratio, portfolio MW totals |
 | `commissioned_on` | COD and the derived plant age |
 | `status` | The status chip; a non-`active` plant with no records reads as "Not yet commissioned" |

@@ -19,7 +19,7 @@ def test_legacy_session_cookie_does_not_authenticate(client):
 
 def test_head_can_create_update_delete_plant(client, db):
     login_user(client, db)
-    plant = client.post('/api/plants', json={'site_code':'QA01','plant_name':'QA Plant','district':'Jaipur'})
+    plant = client.post('/api/plants', json={'site_code':'QA01','plant_name':'QA Plant','district':'Jaipur','address':'QA plant address'})
     assert plant.status_code == 201, plant.text
     plant_id = plant.json()['id']
     patched = client.patch(f'/api/plants/{plant_id}', json={'district':'Dausa'})
@@ -44,7 +44,7 @@ def test_validation_error_does_not_echo_submitted_values(client, db):
 
 def test_security_guard_mobile_must_be_ten_digits_and_is_persisted(client, db):
     login_user(client, db)
-    plant = client.post('/api/plants', json={'site_code': 'GUARD01', 'plant_name': 'Guard Plant'})
+    plant = client.post('/api/plants', json={'site_code': 'GUARD01', 'plant_name': 'Guard Plant', 'address': 'Guard plant address'})
     assert plant.status_code == 201, plant.text
     plant_id = plant.json()['id']
 
@@ -65,7 +65,7 @@ def test_security_guard_mobile_must_be_ten_digits_and_is_persisted(client, db):
 
 def test_security_contacts_support_multiple_people_and_day_night_shifts(client, db):
     login_user(client, db)
-    plant = client.post('/api/plants', json={'site_code': 'SECURITY01', 'plant_name': 'Security Plant'})
+    plant = client.post('/api/plants', json={'site_code': 'SECURITY01', 'plant_name': 'Security Plant', 'address': 'Security plant address'})
     assert plant.status_code == 201, plant.text
     plant_id = plant.json()['id']
 
@@ -118,7 +118,7 @@ def test_site_engineer_is_plant_scoped_and_cannot_manage_plants(client, db):
     db.add(UserPlantAssignment(user_id=user.id, plant_id=plant_a.id, assignment_role='Site Engineer')); db.commit()
     rows = client.get('/api/plants').json()
     assert [x['site_code'] for x in rows] == ['A01']
-    denied = client.post('/api/plants', json={'site_code':'X01','plant_name':'Nope'})
+    denied = client.post('/api/plants', json={'site_code':'X01','plant_name':'Nope','address':'Denied plant address'})
     assert denied.status_code == 403
 
 
@@ -262,7 +262,7 @@ def test_issue_create_assigns_assignee_and_returns_intake_fields(client, db):
     from uuid import uuid4
 
     login_user(client, db)
-    plant = client.post('/api/plants', json={'site_code':'INTAKE01','plant_name':'Intake Plant'}).json()
+    plant = client.post('/api/plants', json={'site_code':'INTAKE01','plant_name':'Intake Plant','address':'Intake plant address'}).json()
     assignee = User(
         auth_provider='test', external_subject='intake-assignee-'+str(uuid4()),
         email='intake-assignee@example.com', display_name='Inverter Assignee', role='Assignee',
@@ -292,7 +292,7 @@ def test_issue_create_rejects_non_assignee_target(client, db):
     from uuid import uuid4
 
     login_user(client, db)
-    plant = client.post('/api/plants', json={'site_code':'INTAKE02','plant_name':'Intake Plant 2'}).json()
+    plant = client.post('/api/plants', json={'site_code':'INTAKE02','plant_name':'Intake Plant 2','address':'Intake plant address'}).json()
     user = User(
         auth_provider='test', external_subject='not-assignee-'+str(uuid4()),
         email='not-assignee@example.com', display_name='Not an Assignee', role='Site Engineer',
@@ -307,7 +307,7 @@ def test_issue_create_rejects_non_assignee_target(client, db):
 
 def test_issue_evidence_enforces_ten_photo_limit(client, db):
     login_user(client, db)
-    plant = client.post('/api/plants', json={'site_code':'INTAKE03','plant_name':'Evidence Plant'}).json()
+    plant = client.post('/api/plants', json={'site_code':'INTAKE03','plant_name':'Evidence Plant','address':'Evidence plant address'}).json()
     created = client.post('/api/issues', json={
         'plant_id':plant['id'],'description':'Evidence limit','severity':'Low',
     })
@@ -330,7 +330,7 @@ def test_issue_evidence_enforces_ten_photo_limit(client, db):
 
 def test_issue_evidence_rejects_mismatched_image_content(client, db):
     login_user(client, db)
-    plant = client.post('/api/plants', json={'site_code':'MIME01','plant_name':'MIME Plant'}).json()
+    plant = client.post('/api/plants', json={'site_code':'MIME01','plant_name':'MIME Plant','address':'MIME plant address'}).json()
     created = client.post('/api/issues', json={
         'plant_id':plant['id'],'description':'Evidence MIME validation','severity':'Low',
     })
@@ -346,7 +346,7 @@ def test_issue_evidence_rejects_mismatched_image_content(client, db):
 
 def test_issue_filters_are_server_side(client, db):
     user = login_user(client, db)
-    plant = client.post('/api/plants', json={'site_code':'FLT01','plant_name':'Filter Plant'}).json()
+    plant = client.post('/api/plants', json={'site_code':'FLT01','plant_name':'Filter Plant','address':'Filter plant address'}).json()
     for no, sev in [('TKT-F-1','High'),('TKT-F-2','Low')]:
         response = client.post('/api/issues', json={'ticket_no':no,'plant_id':plant['id'],'description':no,'severity':sev})
         assert response.status_code == 201
@@ -360,14 +360,14 @@ def test_issue_filters_are_server_side(client, db):
 
 def test_validation_rejects_bad_latitude(client, db):
     login_user(client, db)
-    response = client.post('/api/plants', json={'site_code':'BAD','plant_name':'Bad','latitude':120})
+    response = client.post('/api/plants', json={'site_code':'BAD','plant_name':'Bad','address':'Bad plant address','latitude':120})
     assert response.status_code == 422
 
 
 def test_issue_assign_reassign_and_close_as_head(client, db):
     from app.core.models import User
     login_user(client, db)
-    plant = client.post('/api/plants', json={'site_code':'WF01','plant_name':'Workflow Plant'}).json()
+    plant = client.post('/api/plants', json={'site_code':'WF01','plant_name':'Workflow Plant','address':'Workflow plant address'}).json()
     target1 = User(auth_provider='test', external_subject='target-1', email='t1@example.com', display_name='Tech One', role='Assignee')
     target2 = User(auth_provider='test', external_subject='target-2', email='t2@example.com', display_name='Tech Two', role='Assignee')
     db.add_all([target1,target2]); db.commit(); db.refresh(target1); db.refresh(target2)
@@ -392,7 +392,7 @@ def test_issue_assign_reassign_and_close_as_head(client, db):
 
 def test_duplicate_plant_returns_conflict(client, db):
     login_user(client, db)
-    payload = {'site_code':'DUP01','plant_name':'Duplicate Plant'}
+    payload = {'site_code':'DUP01','plant_name':'Duplicate Plant','address':'Duplicate plant address'}
     assert client.post('/api/plants', json=payload).status_code == 201
     assert client.post('/api/plants', json=payload).status_code == 409
 

@@ -13,7 +13,7 @@ MIGRATIONS = Path(__file__).resolve().parents[1] / "database" / "migrations"
 
 def _plants(client, codes=("BM01", "BM02")):
     for code in codes:
-        created = client.post("/api/plants", json={"site_code": code, "plant_name": "Bom " + code})
+        created = client.post("/api/plants", json={"site_code": code, "plant_name": "Bom " + code, "address": "BOM test address"})
         assert created.status_code == 201, created.text
 
 

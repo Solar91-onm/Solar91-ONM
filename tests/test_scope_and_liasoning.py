@@ -94,8 +94,8 @@ def test_liasoning_record_is_redacted_for_roles_that_may_not_open_links():
 
 def test_plant_out_carries_pm_and_health_assignee_names():
     plant = SimpleNamespace(
-        id="p1", site_code="A1", plant_name="A", project_company=None, district=None, discom=None, location=None,
-        latitude=None, longitude=None, dc_capacity_kw=None, ac_capacity_kw=None, commissioned_on=None,
+        id="p1", site_code="A1", plant_name="A", project_company=None, district=None, discom=None, address=None,
+        location=None, latitude=None, longitude=None, dc_capacity_kw=None, ac_capacity_kw=None, commissioned_on=None,
         status="active", assigned_engineer=None, supervisor=None, custom_fields={})
     head = SimpleNamespace(role="O&M Head", is_active=True)
     out = plant_out(plant, [], "", head, {"pm": "Ravi", "health": "Mina"})

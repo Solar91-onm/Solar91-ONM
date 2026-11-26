@@ -138,7 +138,7 @@
         var hay = [
           p.siteCode, p.displayCode, p.plantName, p.displayName || "",
           p.projectCompany || "", p.district || "", p.discom || "",
-          engineerText, p.supervisor || "", p.location || ""
+          engineerText, p.supervisor || "", p.address || "", p.location || ""
         ].join(" ").toLowerCase();
         if (hay.indexOf(term) === -1) return false;
       }
@@ -183,7 +183,9 @@
     { key: "cod",       label: "COD",           align: "num",
       sort: function (r) { return r.plant.commissionedOn; } },
     { key: "location",  label: "Location",
-      sort: function (r) { return r.plant.location || r.plant.mapsUrl; } },
+      sort: function (r) { return r.plant.address; } },
+    { key: "map",       label: "Map",
+      sort: function (r) { return r.plant.mapsUrl; } },
     { key: "cctv",      label: "CCTV",
       sort: function (r) { return cctvUrl(r.plant); } },
     { key: "activity",  label: "Last Activity",
@@ -308,12 +310,14 @@
         ' in the Plants tab">' + codeInner + "</button></td>";
     var locationCell = '<td><div class="ep-pt__loccell ep-compact-cell" data-compact-cell>' +
       '<div class="ep-compact-cell__content is-collapsed" data-compact-content>' +
-        (p.location ? fmt.escape(p.location) : dash("No location recorded")) +
+        (p.address ? fmt.escape(p.address) : dash("No address recorded")) +
       '</div><button type="button" class="ep-compact-cell__toggle" data-compact-cell-toggle ' +
         'aria-expanded="false" hidden>More</button>' +
-      (p.mapsUrl
-        ? '<a class="ep-pt__loc" href="' + fmt.escape(p.mapsUrl) + '" target="_blank" rel="noopener" aria-label="View plant location" title="Open plant location in Maps">View map</a>'
-        : "") + "</div></td>";
+      "</div></td>";
+    var mapCell = "<td>" + (p.mapsUrl
+        ? '<a class="ep-pt__loc" href="' + fmt.escape(p.mapsUrl) + '" target="_blank" rel="noopener" aria-label="Open map for ' +
+            fmt.escape(p.displayName || p.plantName) + '" title="Open plant coordinates in Maps">Open map</a>'
+        : dash("Plant coordinates not provided")) + "</td>";
     var cameraUrl = cctvUrl(p);
     var cctvCell = "<td>" + (cameraUrl
         ? '<a class="ep-pt__loc" href="' + fmt.escape(cameraUrl) + '" target="_blank" rel="noopener" aria-label="Open CCTV feed for ' +
@@ -334,6 +338,7 @@
         "<td>" + (p.supervisor ? fmt.escape(p.supervisor) : dash("No supervisor assigned")) + "</td>" +
         '<td class="num mono">' + fmt.escape(formatCOD(p.commissionedOn)) + "</td>" +
         locationCell +
+        mapCell +
         cctvCell +
         '<td class="mono">' + fmt.escape(lastActivity(entry.profile)) + "</td>" +
         '<td class="num">' + editCell + "</td>" +
@@ -545,7 +550,8 @@
         engineerText,
         p.supervisor || "",
         formatCOD(p.commissionedOn),
-        p.location || p.mapsUrl || "",
+        p.address || "",
+        p.mapsUrl || "",
         cctvUrl(p),
         lastActivity(entry.profile)
       ];

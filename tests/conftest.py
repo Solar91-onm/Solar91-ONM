@@ -48,8 +48,14 @@ def clean_db():
     _CURRENT_USER = None
     Base.metadata.drop_all(engine)
     Base.metadata.create_all(engine)
+    # Each test has a fresh database, so every cross-request cache must be cleared too or a value
+    # computed from an earlier test's data leaks in and makes tests order-dependent.
     from app.issues.router import invalidate_pulse_cache
-    invalidate_pulse_cache()   # each test has a fresh database; a pulse cached by an earlier test must not leak in
+    from app.equipment.service import invalidate_responsibility_cache
+    from app.scheduled.washing_cycles import invalidate_overview_cache
+    invalidate_pulse_cache()
+    invalidate_responsibility_cache()
+    invalidate_overview_cache()
     yield
     _CURRENT_USER = None
 

@@ -20,7 +20,7 @@ def _setup(client, db, code="DL01"):
     assignee = User(auth_provider="test", external_subject=f"dl-a-{code}", email=f"dl-a-{code}@example.com",
                     display_name="Deadline Assignee", role="Assignee", is_active=True)
     db.add(assignee); db.commit(); db.refresh(assignee)
-    plant = client.post("/api/plants", json={"site_code": code, "plant_name": f"Deadline Plant {code}"}).json()
+    plant = client.post("/api/plants", json={"site_code": code, "plant_name": f"Deadline Plant {code}", "address": "Deadline test address"}).json()
     return head, assignee, plant
 
 

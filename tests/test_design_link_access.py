@@ -56,7 +56,7 @@ def test_redaction_never_mutates_the_stored_fields():
 def test_portal_plant_payload_is_redacted_per_role():
     plant = SimpleNamespace(
         id="p1", site_code="ABH01", plant_name="Abhaneri", project_company=None, district=None, discom=None,
-        location=None, latitude=None, longitude=None, dc_capacity_kw=None, ac_capacity_kw=None,
+        address=None, location=None, latitude=None, longitude=None, dc_capacity_kw=None, ac_capacity_kw=None,
         commissioned_on=None, status="active", assigned_engineer=None, supervisor=None,
         custom_fields=dict(FIELDS),
     )

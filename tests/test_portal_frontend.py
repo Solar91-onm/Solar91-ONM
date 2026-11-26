@@ -1011,6 +1011,7 @@ def test_module_cleaning_board_shows_every_plant_and_opens_one_plants_calendar()
     assert '<span class="ep-wb__tables">' not in board
     # The plant name drops its trailing site number; the code chip still separates ALN01 from ALN02.
     assert 'name.replace(/\\s+\\d{1,}$/, "")' in board
+    assert "rowsWithUnconfiguredPlants(body)" in board
     assert 'class="ep-wb__date">' in board
     assert "border-top: 3px solid var(--wb-tone);" in styles
     assert ".ep-wb__cycle-pip--done" in styles
@@ -1037,6 +1038,14 @@ def test_pm_summary_xlsx_export_uses_authenticated_download():
     tracking = (PORTAL_ASSETS / "js" / "pm-tracking.js").read_text(encoding="utf-8")
     assert "api().downloadFile('/api/pm-plan/tracking/summary/export?month='" in tracking
     assert "global.location.href='/api/pm-plan/tracking/summary/export" not in tracking
+
+
+def test_pm_portfolio_shows_unplanned_new_plants_by_default():
+    tracking = (PORTAL_ASSETS / "js" / "pm-tracking.js").read_text(encoding="utf-8")
+    show = tracking[tracking.index("function show("):tracking.index("function resume(")]
+    assert "plan:'all'" in show
+    assert 'option("all","All plants",s.plan)' in tracking
+    assert 'option("unplanned","Not planned",s.plan)' in tracking
     assert "summaryExport.disabled=true" in tracking
     assert "The PM summary could not be downloaded." in tracking
 
@@ -1108,6 +1117,33 @@ def test_module_cleaning_card_ring_uses_monthly_compliance_without_zero_fallback
       assert.strictEqual(box.value({table_count:10}),'Not available');
       assert.strictEqual(box.value({table_count:0}),'Not configured');
       assert(box.ring(null,'Compliance',{key:'unset'}).includes('<strong>—</strong>'));
+    """
+    run = subprocess.run(["node", "-e", script], cwd=ROOT, capture_output=True, text=True, timeout=20)
+    assert run.returncode == 0, run.stderr or run.stdout
+
+
+def test_module_cleaning_board_includes_unconfigured_plants_as_setup_tiles():
+    script = r"""
+      const fs=require('fs'),vm=require('vm'),assert=require('assert');
+      const source=fs.readFileSync('assets/js/washing-board.js','utf8');
+      const start=source.indexOf('function rowsWithUnconfiguredPlants(');
+      assert(start>=0,'unconfigured plant merger missing');
+      const open=source.indexOf('{',start);let depth=0,end=-1;
+      for(let i=open;i<source.length;i++){
+        if(source[i]==='{')depth++;
+        else if(source[i]==='}'&&--depth===0){end=i+1;break;}
+      }
+      const box={};vm.createContext(box);
+      vm.runInContext(source.slice(start,end)+';this.merge=rowsWithUnconfiguredPlants',box);
+      const rows=box.merge({
+        plants:[{site_code:'CFG01',table_count:12}],
+        unconfigured:[
+          {site_code:'NEW01',plant:'New Plant',district:'Dausa'},
+          {site_code:'CFG01',plant:'Duplicate'}
+        ]
+      });
+      assert.strictEqual(JSON.stringify(rows.map(r=>[r.site_code,r.table_count||0,r.district||''])),
+        JSON.stringify([['CFG01',12,''],['NEW01',0,'Dausa']]));
     """
     run = subprocess.run(["node", "-e", script], cwd=ROOT, capture_output=True, text=True, timeout=20)
     assert run.returncode == 0, run.stderr or run.stdout
@@ -1659,12 +1695,12 @@ def test_plant_table_uses_balanced_shared_columns_and_numeric_spv_label():
             styles,
         )
     ]
-    assert len(widths) == 13      # no obsolete Cleaning, PM, or Health Assignee columns
+    assert len(widths) == 14      # no obsolete assignee columns; separate Location and Map
     assert sum(widths) == 100
-    assert widths[9] >= 6, "the Location column should not wrap its heading"
-    assert widths[12] >= 6, "the Edit column should remain visible"
+    assert widths[9] >= 8, "the Location column should accommodate an address"
+    assert widths[13] >= 6, "the Edit column should remain visible"
     # Every column shares the frame on a desktop: no table minimum width, so nothing scrolls sideways.
-    # A phone is too narrow to fit 13 columns legibly, so the scroll fallback lives in that media query only.
+    # A phone is too narrow to fit 14 columns legibly, so the scroll fallback lives in that media query only.
     assert "width: 100%; min-width: 0; table-layout: fixed" in styles
     assert "min-width: 1200px" not in styles
     assert "@media (max-width: 700px) {\n  .ep-pt__table { min-width: 1080px; }" in styles
@@ -1676,14 +1712,16 @@ def test_plant_table_uses_balanced_shared_columns_and_numeric_spv_label():
     assert "p.washingAssignee" not in table
     assert "p.pmAssignee" not in table
     assert "p.healthAssignee" not in table
-    assert table.index('{ key: "location",  label: "Location",') < table.index('{ key: "cctv",      label: "CCTV",')
+    assert table.index('{ key: "location",  label: "Location",') < table.index('{ key: "map",       label: "Map",')
+    assert table.index('{ key: "map",       label: "Map",') < table.index('{ key: "cctv",      label: "CCTV",')
     assert table.index('{ key: "cctv",      label: "CCTV",') < table.index('{ key: "activity",  label: "Last Activity",')
     assert 'plant.customFields && plant.customFields.cctv_url' in table
     assert 'url.protocol === "http:" || url.protocol === "https:"' in table
     assert '<span class="ep-pt__cctv-placeholder">Add link</span>' in table
     assert 'class="ep-pt__loc" href="' in table
     assert 'class="ep-pt__loccell ep-compact-cell" data-compact-cell' in table
-    assert 'p.location ? fmt.escape(p.location)' in table
+    assert 'p.address ? fmt.escape(p.address)' in table
+    assert 'p.mapsUrl' in table
     assert 'data-compact-cell-toggle' in table
     assert 'aria-label="Open CCTV feed for ' in table
     assert "cctvUrl(p)" in table
@@ -1696,8 +1734,18 @@ def test_plant_table_uses_balanced_shared_columns_and_numeric_spv_label():
       const plant = Solar91PortalAPI.normalizePlant({
         id: 1, site_code: 'ABH01',
         project_company: 'Solar91 Project Thirty Five Private Limited',
+        address: 'Plot 14, Solar Park Road',
+        latitude: 26.2389, longitude: 73.0243,
         custom_fields: { cctv_url: 'https://cctv.example.invalid/feed' }
       });
+      if (plant.address !== 'Plot 14, Solar Park Road') throw new Error('address was not normalized');
+      if (!plant.mapsUrl.includes(encodeURIComponent('26.2389,73.0243'))) {
+        throw new Error('map must use latitude and longitude');
+      }
+      const noCoordinates = Solar91PortalAPI.normalizePlant({
+        site_code: 'NOCOORD', plant_name: 'No coordinates', location: 'Dausa'
+      });
+      if (noCoordinates.mapsUrl !== '') throw new Error('map link must not fall back to city text');
       if (plant.projectCompanyShort !== 'SPV 35') {
         throw new Error('Expected numeric project label, got ' + plant.projectCompanyShort);
       }

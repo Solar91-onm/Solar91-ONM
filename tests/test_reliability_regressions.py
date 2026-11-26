@@ -40,7 +40,7 @@ def test_issue_pagination_uses_newest_first_and_rejects_oversized_page(client, d
     login_user(client, db)
     plant = client.post(
         "/api/plants",
-        json={"site_code": "PAGE01", "plant_name": "Pagination Plant"},
+        json={"site_code": "PAGE01", "plant_name": "Pagination Plant", "address": "Pagination plant address"},
     ).json()
     issues = []
     for ticket_no in ("PAGE-1", "PAGE-2", "PAGE-3"):
@@ -89,7 +89,7 @@ def test_duplicate_issue_submission_returns_conflict_without_second_row(client, 
     login_user(client, db)
     plant = client.post(
         "/api/plants",
-        json={"site_code": "DUPISS", "plant_name": "Duplicate Issue Plant"},
+        json={"site_code": "DUPISS", "plant_name": "Duplicate Issue Plant", "address": "Duplicate issue plant address"},
     ).json()
     payload = {
         "ticket_no": "DUP-ISSUE-1",
@@ -142,7 +142,7 @@ def test_issue_evidence_upload_failure_rolls_back_metadata_and_cleans_uploaded_o
     login_user(client, db)
     plant = client.post(
         "/api/plants",
-        json={"site_code": "EVID01", "plant_name": "Evidence Plant"},
+        json={"site_code": "EVID01", "plant_name": "Evidence Plant", "address": "Evidence plant address"},
     ).json()
     created = client.post(
         "/api/issues",

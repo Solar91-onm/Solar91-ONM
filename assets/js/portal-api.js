@@ -67,6 +67,7 @@
       projectCompanyShort: shortenSPV(plant.project_company || ""),
       district: plant.district || "",
       discom: plant.discom || "",
+      address: plant.address || "",
       location: plant.location || "",
       latitude: numberOrNull(plant.latitude),
       longitude: numberOrNull(plant.longitude),
@@ -98,9 +99,7 @@
       return "https://www.google.com/maps/search/?api=1&query=" +
              encodeURIComponent(plant.latitude + "," + plant.longitude);
     }
-    var parts = [plant.plant_name, plant.location, plant.district].filter(Boolean);
-    if (!parts.length) return "";
-    return "https://www.google.com/maps/search/?api=1&query=" + encodeURIComponent(parts.join(", "));
+    return "";
   }
 
   // "Solar91 Project Thirty Five Private Limited" → "SPV 35".

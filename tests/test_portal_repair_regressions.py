@@ -177,6 +177,7 @@ def test_engineer_report_confirmed_by_reviewer_stays_frozen(client, db, monkeypa
 def test_plant_capacity_saved_through_api_and_rendered_with_units(client, db):
     login_user(client, db)
     created = client.post("/api/plants", json={"site_code": "CAP01", "plant_name": "Capacity Plant",
+                                               "address": "Capacity plant address",
                                                "dc_capacity_kw": 5000, "ac_capacity_kw": 4000})
     assert created.status_code == 201, created.text
     plant = client.get("/api/bootstrap").json()["state"]["plants"][0]

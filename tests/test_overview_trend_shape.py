@@ -18,7 +18,7 @@ from tests.conftest import login_user
 
 
 def _plant(client, code="TR01"):
-    created = client.post("/api/plants", json={"site_code": code, "plant_name": "Trend " + code})
+    created = client.post("/api/plants", json={"site_code": code, "plant_name": "Trend " + code, "address": "Trend test address"})
     assert created.status_code == 201, created.text
     return created.json()
 

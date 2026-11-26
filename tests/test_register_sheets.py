@@ -36,7 +36,7 @@ def _seed(client, db):
     login_user(client, db, role="O&M Head", name="Register Head", email="register-head@example.com")
     plants = []
     for code in ("RG01", "RG02"):
-        created = client.post("/api/plants", json={"site_code": code, "plant_name": "Register " + code})
+        created = client.post("/api/plants", json={"site_code": code, "plant_name": "Register " + code, "address": "Register test address"})
         assert created.status_code == 201, created.text
         plants.append(created.json())
     for index, plant in enumerate(plants):

@@ -26,6 +26,7 @@ FULL = {
     "dc_capacity_kw": 3158.82,
     "district": "Jodhpur",
     "discom": "JDVVNL",
+    "address": "Plot 14, Solar Park Road, Jodhpur, Rajasthan",
     "assigned_engineer": "Ratan Jani",
     "supervisor": "Site Supervisor",
     "commissioned_on": "2026-05-22",
@@ -46,6 +47,7 @@ def test_a_head_creates_a_plant_with_every_column_the_info_page_shows(client, db
     assert body["site_code"] == "NEW01"
     assert body["supervisor"] == "Site Supervisor", "the supervisor column must not be dropped"
     assert body["assigned_engineer"] == "Ratan Jani"
+    assert body["address"] == FULL["address"]
     assert body["custom_fields"]["cctv_url"] == "https://cctv.example.invalid/new01"
     assert float(body["dc_capacity_kw"]) == 3158.82
 
@@ -105,6 +107,10 @@ def test_an_invalid_plant_is_refused_by_the_api_not_only_by_the_form(client, db)
     assert client.post("/api/plants", json=dict(FULL, site_code="BAD01", latitude=120)).status_code == 422
     assert client.post("/api/plants", json=dict(FULL, site_code="BAD02", longitude=-200)).status_code == 422
     assert client.post("/api/plants", json={"plant_name": "No code"}).status_code == 422
+    assert client.post("/api/plants", json=dict(FULL, site_code="NOADDR", address="   ")).status_code == 422
+    missing_address = dict(FULL)
+    missing_address.pop("address")
+    assert client.post("/api/plants", json=missing_address).status_code == 422
     assert client.post("/api/plants", json=dict(FULL, site_code="BAD03", supervisor="x" * 161)).status_code == 422
 
 
@@ -133,18 +139,18 @@ def test_the_overlay_collects_every_plant_column_and_requires_all_of_them():
     fields = editor[editor.index("var CREATE_FIELDS = ["):editor.index("function createFieldHTML(")]
     for key in ("site_code", "plant_name", "project_company", "ac_capacity_kw", "dc_capacity_kw",
                 "district", "discom", "assigned_engineer", "supervisor", "commissioned_on",
-                "location", "latitude", "longitude", "cctv_url", "status"):
+                "address", "latitude", "longitude", "cctv_url", "status"):
         assert '"' + key + '"' in fields, "missing field: " + key
     # The CCTV link is a custom field, not a column.
     assert '{ key: "cctv_url",        label: "CCTV link",             type: "url",    custom: true, optional: true,' in fields
     assert '{ key: "supervisor",      label: "Supervisor",            type: "text", optional: true }' in fields
-    # Supervisor and CCTV link are optional in both markup and submission validation.
+    # The address is required; Supervisor and CCTV link remain optional.
     markup = editor[editor.index("function createFieldHTML("):editor.index("function openCreate(")]
     assert 'field.optional !== true' in markup
     assert 'required ? " required" : ""' in markup
-    assert 'required ? " *" : " (optional)"' in markup
+    assert '{ key: "address",         label: "Location",              type: "text", hint: "Full plant address" }' in fields
     create = editor[editor.index("function openCreate("):editor.index("var PlantEditor = {")]
-    assert "if (field.optional) return;" in create
+    assert 'if (field.optional) return;' in create
     assert 'problem = field.label + " is required."' in create
     # Role gate on the client too, and the overlay's own guards.
     assert '["O&M Head", "Assignee"].indexOf(user.role) === -1' in create
@@ -160,12 +166,14 @@ def test_the_plant_is_announced_only_after_the_server_confirms_it():
 
     send = create.index('global.Solar91PortalAPI.request("/api/plants", { method: "POST"')
     after = create[send:]
-    # Nothing is said or refreshed before the response: the success path is inside .then.
-    assert after.index(".then(function (plant) {") < after.index("data.invalidate();")
-    assert after.index("data.invalidate();") < after.index("Solar91PortalToast")
-    # The new plant reaches the rest of the portal: cached reads dropped, sidebar reloaded.
-    assert "global.Solar91PortalAPI.plants(true);" in after
-    assert "global.Solar91PortalNav.loadPlants();" in after
+    # Only a confirmed create invalidates the overview and plant-list caches.
+    assert after.index(".then(function (plant) {") < after.index("refreshPlantViews();")
+    refresh = editor[editor.index("function refreshPlantViews()"):editor.index("function openCreate(")]
+    assert "data.invalidate(true);" in refresh
+    assert "global.Solar91PortalAPI.plants(true)" in refresh
+    assert 'typeof nav.loadPlants === "function" ? nav.loadPlants() : undefined' in refresh
+    # A refresh error must not tell the user that the already-saved plant failed to create.
+    assert 'Plant added, but portal refresh failed' in after
     # A failure says so and leaves the form open with what was typed.
     assert 'errorEl.textContent = "Not added. "' in after
     assert 'Solar91PortalToast.error("Plant not added"' in after

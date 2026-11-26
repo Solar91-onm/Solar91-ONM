@@ -1291,7 +1291,7 @@
 
   // Called by app.js after catalog loads
   function loadPlants() {
-    data.listPlants().then(function (plants) {
+    return data.listPlants().then(function (plants) {
       populatePlantList(plants);
       plantsLoaded = true;
       if (navState.activeView === "plant-sub" &&

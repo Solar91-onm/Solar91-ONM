@@ -293,6 +293,20 @@
     st.dayActivityError = "";
   }
 
+  function rowsWithUnconfiguredPlants(body) {
+    var rows = (body.plants || []).slice();
+    var seen = Object.create(null);
+    rows.forEach(function (row) { seen["$" + row.site_code] = true; });
+    (body.unconfigured || []).forEach(function (plant) {
+      if (!plant || !plant.site_code || seen["$" + plant.site_code]) return;
+      seen["$" + plant.site_code] = true;
+      rows.push(Object.assign({ table_count: 0 }, plant));
+    });
+    return rows.sort(function (a, b) {
+      return String(a.site_code).localeCompare(String(b.site_code), undefined, { numeric: true });
+    });
+  }
+
   function gradeFor(row, selection) {
     var cycleNo = selection === "all" ? (Number(row.current_cycle) || 1) : Number(selection);
     return (row.cycle_grades || []).find(function (item) {
@@ -1129,9 +1143,7 @@
     return api().request("/api/scheduled/washing/overview?month=" + encodeURIComponent(month) +
       reports + "&summary=true").then(function (body) {
       if (mine !== token) return;                       // a newer page replaced this one
-      st.rows = (body.plants || []).slice().sort(function (a, b) {
-        return String(a.site_code).localeCompare(String(b.site_code), undefined, { numeric: true });
-      });
+      st.rows = rowsWithUnconfiguredPlants(body);
       st.summary = body.summary || {};
       st.month = body.month || month;
       st.today = body.today || "";

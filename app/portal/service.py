@@ -564,6 +564,7 @@ def plant_out(
         "project_company": plant.project_company,
         "district": plant.district,
         "discom": plant.discom,
+        "address": plant.address,
         "location": plant.location,
         "latitude": float(plant.latitude) if plant.latitude is not None else None,
         "longitude": float(plant.longitude) if plant.longitude is not None else None,

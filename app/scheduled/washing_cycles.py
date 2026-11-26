@@ -1361,7 +1361,7 @@ def _build_overview(db: Session, user: User, include_tables: bool = False, repor
         if row["active"]:
             matrix[row["overdue_bucket"]] += 1
     result["unconfigured"] = [
-        {"plant_id": str(p.id), "plant": p.plant_name, "site_code": p.site_code}
+        {"plant_id": str(p.id), "plant": p.plant_name, "site_code": p.site_code, "district": p.district}
         for p in pool if p.id not in configured_ids
     ]
     result["overdue_matrix"] = matrix

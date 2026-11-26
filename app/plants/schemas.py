@@ -77,6 +77,7 @@ class PlantBase(BaseModel):
     project_company: str | None = None
     district: str | None = None
     discom: str | None = None
+    address: str | None = Field(default=None, max_length=1000)
     location: str | None = None
     latitude: float | None = None
     longitude: float | None = None
@@ -116,7 +117,16 @@ class PlantBase(BaseModel):
 
 
 class PlantCreate(PlantBase):
-    pass
+    address: str = Field(min_length=1, max_length=1000)
+
+    @field_validator("address", mode="before")
+    @classmethod
+    def nonblank_address(cls, value):
+        if isinstance(value, str):
+            value = value.strip()
+        if not value:
+            raise ValueError("address is required")
+        return value
 
 
 class PlantUpdate(BaseModel):
@@ -124,6 +134,7 @@ class PlantUpdate(BaseModel):
     project_company: str | None = None
     district: str | None = None
     discom: str | None = None
+    address: str | None = Field(default=None, max_length=1000)
     location: str | None = None
     latitude: float | None = None
     longitude: float | None = None

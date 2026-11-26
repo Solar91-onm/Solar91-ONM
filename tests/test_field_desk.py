@@ -12,7 +12,7 @@ def fixture_data(client, db):
     head = login_user(client, db, role='O&M Head', name='Field Head', email='field-head@example.com')
     plants=[]
     for code in ('FE01', 'FE02'):
-        res=client.post('/api/plants',json={'site_code':code,'plant_name':'Field '+code})
+        res=client.post('/api/plants',json={'site_code':code,'plant_name':'Field '+code,'address':'Field test address'})
         assert res.status_code==201, res.text
         plants.append(res.json())
     for i,plant in enumerate(plants):

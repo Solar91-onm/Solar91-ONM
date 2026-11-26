@@ -22,7 +22,7 @@ def two_plants_one_engineer(client, db):
     login_user(client, db, role="O&M Head", name="Scope Head", email="scope-head@example.com")
     plants = []
     for code in ("SE01", "SE02"):
-        created = client.post("/api/plants", json={"site_code": code, "plant_name": "Scope " + code})
+        created = client.post("/api/plants", json={"site_code": code, "plant_name": "Scope " + code, "address": "Scope test address"})
         assert created.status_code == 201, created.text
         plants.append(created.json())
         raised = client.post("/api/issues", json={
@@ -82,7 +82,7 @@ def test_a_site_engineer_cannot_reach_another_plant_by_naming_it(two_plants_one_
 
 def test_a_site_engineer_with_no_assignment_sees_nothing_rather_than_everything(client, db):
     login_user(client, db, role="O&M Head", name="Scope Head 2", email="scope-head2@example.com")
-    created = client.post("/api/plants", json={"site_code": "SE09", "plant_name": "Scope SE09"})
+    created = client.post("/api/plants", json={"site_code": "SE09", "plant_name": "Scope SE09", "address": "Scope test address"})
     assert created.status_code == 201, created.text
 
     unassigned = User(auth_provider="test", external_subject="scope-none",

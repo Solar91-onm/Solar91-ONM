@@ -18,15 +18,15 @@
     { key: "supervisor",      from: "supervisor",     label: "Supervisor (optional)", type: "text" },
     { key: "district",        from: "district",       label: "District",              type: "text" },
     { key: "discom",          from: "discom",         label: "DISCOM",                type: "text" },
-    { key: "location",        from: "location",       label: "Location",              type: "text" },
+    { key: "address",         from: "address",        label: "Location",              type: "text" },
     { key: "latitude",        from: "latitude",       label: "Latitude",              type: "number", step: "any" },
     { key: "longitude",       from: "longitude",      label: "Longitude",             type: "number", step: "any" }
   ];
 
   // ─── Add a plant (POST /api/plants) ──────────────────────────────────
   //
-  // The same fields the Info table shows, in the same order. Only Supervisor and CCTV link are
-  // optional; Cleaning, PM and Health Assignees are configured on the Login Access page.
+  // The same fields the Info table shows, in the same order. Supervisor and CCTV link are optional;
+  // the written Location address is required. Other Assignees are configured on Login Access.
   var CREATE_FIELDS = [
     { key: "site_code",       label: "Plant code",            type: "text",   hint: "Unique, e.g. ABH01" },
     { key: "plant_name",      label: "Plant name",            type: "text" },
@@ -38,7 +38,7 @@
     { key: "assigned_engineer", label: "Site engineer",       type: "text" },
     { key: "supervisor",      label: "Supervisor",            type: "text", optional: true },
     { key: "commissioned_on", label: "COD",                   type: "date" },
-    { key: "location",        label: "Location",              type: "text" },
+    { key: "address",         label: "Location",              type: "text", hint: "Full plant address" },
     { key: "latitude",        label: "Latitude",              type: "number", step: "any" },
     { key: "longitude",       label: "Longitude",             type: "number", step: "any" },
     { key: "cctv_url",        label: "CCTV link",             type: "url",    custom: true, optional: true,
@@ -62,6 +62,14 @@
       (required ? " *" : " (optional)") + "</span>" + input + "</label>";
   }
 
+  function refreshPlantViews() {
+    data.invalidate(true);
+    return global.Solar91PortalAPI.plants(true).then(function () {
+      var nav = global.Solar91PortalNav;
+      return nav && typeof nav.loadPlants === "function" ? nav.loadPlants() : undefined;
+    });
+  }
+
   /**
    * Open the Add New Plant overlay. `onSaved` runs after the server has confirmed the plant,
    * never before: the table, the sidebar and every cached read are refreshed from that response.
@@ -82,7 +90,7 @@
         '<div class="ep-pd__modal-body ep-pd__modal-body--create">' +
           CREATE_FIELDS.map(createFieldHTML).join("") +
         "</div>" +
-        '<p class="ep-pd__create-note">Only Supervisor and CCTV link are optional. Cleaning, PM and Health Assignees ' +
+        '<p class="ep-pd__create-note">Enter the full plant address. Supervisor and CCTV link are optional. Cleaning, PM and Health Assignees ' +
           'are assigned afterwards from Login access; Preventive Maintenance and Module Cleaning ' +
           'schedules are set up separately and are not created here.</p>' +
         '<p class="ep-pd__form-error" role="alert"></p>' +
@@ -147,22 +155,24 @@
       submit.textContent = "Adding…";
       global.Solar91PortalAPI.request("/api/plants", { method: "POST", body: payload })
         .then(function (plant) {
-          // Confirmed by the server: only now is anything said or refreshed.
-          data.invalidate();
-          global.Solar91PortalAPI.plants(true);
-          if (global.Solar91PortalNav && global.Solar91PortalNav.loadPlants) {
-            global.Solar91PortalNav.loadPlants();
-          }
-          if (global.Solar91PortalToast) {
-            global.Solar91PortalToast.success(
-              (plant && plant.site_code ? plant.site_code : "Plant") + " added",
-              "It is now in the plant list across the portal.");
-          }
+          var refresh = refreshPlantViews();
           saving = false;
           close();
           if (typeof onSaved === "function") onSaved(plant);
-        })
-        .catch(function (error) {
+          refresh.then(function () {
+            if (global.Solar91PortalToast) {
+              global.Solar91PortalToast.success(
+                (plant && plant.site_code ? plant.site_code : "Plant") + " added",
+                "It is now available across the portal.");
+            }
+          }).catch(function (error) {
+            if (global.Solar91PortalToast) {
+              global.Solar91PortalToast.error(
+                "Plant added, but portal refresh failed",
+                (error && error.message ? error.message : "Reload the page to refresh the plant list."));
+            }
+          });
+        }, function (error) {
           saving = false;
           submit.disabled = false;
           submit.textContent = "Add plant";
@@ -272,11 +282,17 @@
           method: "PATCH",
           body: payload
         }).then(function () {
-          data.invalidate();
-          global.Solar91PortalAPI.plants(true);
+          var refresh = refreshPlantViews();
           saving = false;
           close();
           if (typeof onSaved === "function") onSaved();
+          refresh.catch(function (error) {
+            if (global.Solar91PortalToast) {
+              global.Solar91PortalToast.error(
+                "Plant saved, but portal refresh failed",
+                (error && error.message ? error.message : "Reload the page to refresh plant data."));
+            }
+          });
         }).catch(function (error) {
           saving = false;
           submit.disabled = false;

@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def _plants(client, codes=("MA01", "MA02")):
     for code in codes:
-        created = client.post("/api/plants", json={"site_code": code, "plant_name": "Movable " + code})
+        created = client.post("/api/plants", json={"site_code": code, "plant_name": "Movable " + code, "address": "Movable test address"})
         assert created.status_code == 201, created.text
 
 
