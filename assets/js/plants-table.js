@@ -14,7 +14,7 @@
   var detailSection = "details";
   var ui = { search: "", spv: "__all", district: "__all", sort: { key: "code", dir: "asc" }, columnFilters: {} };
   var DETAIL_SECTIONS = ["details", "design-mdl", "liasoning", "bom"];
-  var FILTERABLE_COLUMNS = ["code", "district", "discom", "engineer", "supervisor", "assignee", "pmAssignee", "healthAssignee", "location"];
+  var FILTERABLE_COLUMNS = ["code", "district", "discom", "engineer", "supervisor", "location"];
   var DETAIL_SECTION_LABELS = {
     details: "Details",
     "design-mdl": "Design/MDL",
@@ -138,7 +138,7 @@
         var hay = [
           p.siteCode, p.displayCode, p.plantName, p.displayName || "",
           p.projectCompany || "", p.district || "", p.discom || "",
-          engineerText, p.supervisor || "", p.washingAssignee || "", p.location || ""
+          engineerText, p.supervisor || "", p.location || ""
         ].join(" ").toLowerCase();
         if (hay.indexOf(term) === -1) return false;
       }
@@ -180,12 +180,6 @@
       } },
     { key: "supervisor", label: "Supervisor",
       sort: function (r) { return r.plant.supervisor; } },
-    { key: "assignee",  label: "Cleaning Assignee",
-      sort: function (r) { return r.plant.washingAssignee; } },
-    { key: "pmAssignee",     label: "PM Assignee",
-      sort: function (r) { return r.plant.pmAssignee; } },
-    { key: "healthAssignee", label: "Health Assignee",
-      sort: function (r) { return r.plant.healthAssignee; } },
     { key: "cod",       label: "COD",           align: "num",
       sort: function (r) { return r.plant.commissionedOn; } },
     { key: "location",  label: "Location",
@@ -335,9 +329,6 @@
         "<td>" + (p.discom ? fmt.escape(p.discom) : dash()) + "</td>" +
         "<td>" + engineerCell(p) + "</td>" +
         "<td>" + (p.supervisor ? fmt.escape(p.supervisor) : dash("No supervisor assigned")) + "</td>" +
-        "<td>" + (p.washingAssignee ? fmt.escape(p.washingAssignee) : dash("Module Cleaning not set up")) + "</td>" +
-        "<td>" + (p.pmAssignee ? fmt.escape(p.pmAssignee) : dash("No Preventive Maintenance Assignee")) + "</td>" +
-        "<td>" + (p.healthAssignee ? fmt.escape(p.healthAssignee) : dash("No Health Assignee")) + "</td>" +
         '<td class="num mono">' + fmt.escape(formatCOD(p.commissionedOn)) + "</td>" +
         locationCell +
         cctvCell +
@@ -550,9 +541,6 @@
         p.discom || "",
         engineerText,
         p.supervisor || "",
-        p.washingAssignee || "",
-        p.pmAssignee || "",
-        p.healthAssignee || "",
         formatCOD(p.commissionedOn),
         p.location || p.mapsUrl || "",
         cctvUrl(p),
