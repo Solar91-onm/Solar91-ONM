@@ -18,7 +18,7 @@ from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Annotated, Any, Literal
 
-from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile
 from openpyxl import load_workbook
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import func, select
@@ -1495,6 +1495,23 @@ def pm_plan_export(db: Annotated[Session, Depends(get_db)], user: Annotated[User
     return Response(content=pm_sheets.export_bytes(db, user, site_code=site_code), media_type=XLSX_MEDIA_TYPE,
                     headers={"Content-Disposition": 'attachment; filename="PM_Register.xlsx"',
                              "Cache-Control": "private, no-store"})
+
+
+@router.get("/tracking/summary/export")
+def pm_tracking_summary_export(
+    db: Annotated[Session, Depends(get_db)],
+    user: Annotated[User, Depends(get_current_user)],
+    month: str = Query(...),
+):
+    """Two-sheet XLSX: plant summary + equipment matrix for one PM month."""
+    return Response(
+        content=pm_sheets.export_tracking_summary_bytes(db, user, month),
+        media_type=XLSX_MEDIA_TYPE,
+        headers={
+            "Content-Disposition": f'attachment; filename="PM_Summary_{month}.xlsx"',
+            "Cache-Control": "private, no-store",
+        },
+    )
 
 
 @router.post("/import", dependencies=[Depends(require_csrf)])

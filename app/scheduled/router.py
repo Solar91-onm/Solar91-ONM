@@ -25,7 +25,7 @@ from app.pmplan.followups import FOLLOW_UP_OUTCOMES, follow_up_out, get_follow_u
 from app.pmplan.alerts import alert_log_out, task_alert_scope
 from app.core.fastjson import json_response
 from app.scheduled.history import history_since, recent_or_open
-from app.scheduled.washing_cycles import add_excused_reason, confirm_sheet_reports, create_daily_report, create_sheet_reports, day_activity, delete_daily_report, get_overview, list_assignees, list_excused_reasons, month_cycles, recount_month, remove_excused_reason, review_daily_report, save_cycle_schedule, save_excused_reasons, set_cycle_date, setup_plant, update_daily_report
+from app.scheduled.washing_cycles import add_excused_reason, confirm_sheet_reports, create_daily_report, create_sheet_reports, day_activity, delete_daily_report, export_summary_bytes, get_overview, list_assignees, list_excused_reasons, month_cycles, recount_month, remove_excused_reason, review_daily_report, save_cycle_schedule, save_excused_reasons, set_cycle_date, setup_plant, update_daily_report
 from app.scheduled.washing_import import MAX_IMPORT_BYTES, export_bytes, import_setup, template_bytes
 
 router = APIRouter(prefix="/api/scheduled", tags=["Preventive Maintenance"])
@@ -677,6 +677,22 @@ def export_washing_setup(
         content=export_bytes(db, user, selected),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": 'attachment; filename="Washing_Setup.xlsx"'},
+    )
+
+
+@router.get("/washing/summary/export")
+def export_washing_summary(
+    db: Annotated[Session, Depends(get_db)],
+    user: Annotated[User, Depends(get_current_user)],
+    month: str | None = None,
+):
+    return Response(
+        content=export_summary_bytes(db, user, month=month),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={
+            "Content-Disposition": 'attachment; filename="Module_Cleaning_Summary.xlsx"',
+            "Cache-Control": "private, no-store",
+        },
     )
 
 

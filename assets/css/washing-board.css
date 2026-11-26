@@ -163,6 +163,20 @@
 }
 .ep-wb__view-toggle:hover { border-color: var(--ep-accent); }
 .ep-wb__view-toggle:focus-visible { outline: 2px solid var(--ep-accent); outline-offset: 1px; }
+.ep-wb__export-btn {
+  min-height: 32px;
+  padding: 4px 11px;
+  border: 1px solid var(--ep-border);
+  border-radius: 8px;
+  background: var(--ep-bg);
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.ep-wb__export-btn:hover { border-color: var(--ep-accent); }
+.ep-wb__export-btn:focus-visible { outline: 2px solid var(--ep-accent); outline-offset: 1px; }
 .ep-wb__table-wrap { overflow-x: auto; }
 .ep-wb__table { min-width: 760px; }
 .ep-wb__table th,

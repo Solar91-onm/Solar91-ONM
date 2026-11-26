@@ -316,7 +316,11 @@ def _out(row, blocker, user, today, summary=False):
                         "date": _iso(blocker.scheduled_on)} if blocker else None}
     if summary:
         return base
-    return {**base, **_snapshot(row), "checks": _checks_for(row),
+    checks = _checks_for(row)
+    # Deterministic checklist item IDs: stable across template edits, same as the DB backfill.
+    # Derived here without a write so the GET endpoint stays read-only.
+    item_ids = [_checklist_item_id(row.id, task) for task in checks]
+    return {**base, **_snapshot(row), "checks": checks, "checklistItemIds": item_ids,
             "can_submit": user.role == "Site Engineer" and not blocker and status in {"Scheduled", "Returned"}
                           and row.scheduled_on <= today and row.equipment in CHECKLISTS,
             "can_request": user.role == "Site Engineer" and bool(blocker) and row.permission in {"None", "Denied"},

@@ -102,6 +102,11 @@
 .s91pm-detail :is(.s91pm-check-preview,.s91pm-results)::-webkit-scrollbar{width:9px}
 .s91pm-detail :is(.s91pm-check-preview,.s91pm-results)::-webkit-scrollbar-thumb{background:#d7ded9;border-radius:999px;border:2px solid #fbfcfb}
 .s91pm-detail :is(.s91pm-check-preview,.s91pm-results)::-webkit-scrollbar-track{background:transparent}
+.s91pm-check-photos{display:flex;gap:6px;margin-top:4px}
+.s91pm-photo-slot{padding:4px 10px;border:1px solid var(--ep-border,#dce4dd);border-radius:6px;background:#f5f7f5;font:inherit;font-size:11px;cursor:pointer;color:inherit}
+.s91pm-photo-slot:disabled{opacity:.5;cursor:default}
+.s91pm-photo-slot:not(:disabled):hover{border-color:var(--ep-accent,#168548);background:#eaf5ea}
+.s91pm-photo-done{background:#eaf5ea;border-color:#badbbe;color:#075c17}
 @media(min-width:951px){
   .s91pm-cal-layout>.s91pm-detail{position:sticky;top:12px;max-height:calc(100vh - 34px);overflow-y:auto;overscroll-behavior:contain}
 }

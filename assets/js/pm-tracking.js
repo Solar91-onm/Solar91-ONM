@@ -78,7 +78,8 @@
     const eyebrow=s.view==="calendar"?"PLANT CALENDAR":p?"PLANT PREVENTIVE MAINTENANCE":"PORTFOLIO VIEW";
     const sub=p?`${p.site_code}${p.district?' · '+p.district:''}${p.supervisor?' · Supervisor: '+p.supervisor:''} · ${mlabel(s.month)}`:"Monthly equipment-wise monitoring across all plants";
     const back=s.view==="calendar"?btn(s.calendarParent==="overview"?"← Back to all plants":"← Back to plant tracker","back-calendar"):p?btn(s.parent==="plants"?"← Plant details":"← All plants","back-plant"):"";
-    return `<header class="s91pm-head"><div><div class="s91pm-breadcrumb">${back}</div><small class="s91pm-eyebrow">${eyebrow}</small><h1>${e(title)}</h1><p>${e(sub)} · <span data-pmx-updated>${e(updatedLabel(s))}</span></p></div><div class="s91pm-head-actions"><label>Period<input type="month" data-pmx-filter="month" value="${e(s.month)}" aria-label="Month"></label>${p&&s.view!=="calendar"?btn("Open PM calendar →","calendar","",true):""}${btn("Export","export")}${btn("Refresh","reload")}</div></header>`;
+    const summaryExportBtn=!p?`<button type="button" class="s91pm-btn" data-pmx-export-summary title="Export plant summary as XLSX (two sheets: summary + equipment matrix)">Export Summary XLSX</button>`:"";
+    return `<header class="s91pm-head"><div><div class="s91pm-breadcrumb">${back}</div><small class="s91pm-eyebrow">${eyebrow}</small><h1>${e(title)}</h1><p>${e(sub)} · <span data-pmx-updated>${e(updatedLabel(s))}</span></p></div><div class="s91pm-head-actions"><label>Period<input type="month" data-pmx-filter="month" value="${e(s.month)}" aria-label="Month"></label>${p&&s.view!=="calendar"?btn("Open PM calendar →","calendar","",true):""}${summaryExportBtn}${btn("Export","export")}${btn("Refresh","reload")}</div></header>`;
   }
   function legend() {return `<div class="s91pm-legend">${["Approved","Pending approval","Overdue","Returned","Locked","Due today","Scheduled","Not assigned"].map(x=>pill(x)).join("")}${pill("Permission granted","blue")}${pill("Existing plan / work order","neutral")}</div>`;}
   function filters(s,portfolio) {
@@ -191,7 +192,7 @@
   function checkForm(s,a) {
     let section="";
     const preview=!a.can_submit;
-    const checks=a.checks.map((c,i)=>{const prev=a.checklist?.find(x=>x.task===c)||{};const parts=c.split(" — ");const group=parts.length>1?parts[0]:"";const label=group?parts.slice(1).join(" — "):c;const heading=group&&group!==section?`<h3 class="s91pm-check-group">${e(group)}</h3>`:"";section=group;return `${heading}<fieldset><legend>${i+1}. ${e(label)}</legend><select name="result${i}" required aria-label="Result ${i+1}">${option("","Select result",prev.result||"")}${['OK','Not OK','Abnormality','N/A'].map(x=>option(x,x,prev.result||"")).join('')}</select><textarea rows="2" maxlength="2000" name="note${i}" placeholder="Observation / N/A justification (required unless OK)" aria-label="Observation ${i+1}">${e(prev.note||'')}</textarea></fieldset>`;}).join('');
+    const checks=a.checks.map((c,i)=>{const prev=a.checklist?.find(x=>x.task===c)||{};const parts=c.split(" — ");const group=parts.length>1?parts[0]:"";const label=group?parts.slice(1).join(" — "):c;const heading=group&&group!==section?`<h3 class="s91pm-check-group">${e(group)}</h3>`:"";section=group;const itemId=a.checklistItemIds?.[i]||"";const photoAttrs=itemId&&!preview?` data-pmx-photo-btn data-item-id="${e(itemId)}" data-activity-id="${e(a.id)}"`:' disabled';return `${heading}<fieldset><legend>${i+1}. ${e(label)}</legend><select name="result${i}" required aria-label="Result ${i+1}">${option("","Select result",prev.result||"")}${['OK','Not OK','Abnormality','N/A'].map(x=>option(x,x,prev.result||"")).join('')}</select><textarea rows="2" maxlength="2000" name="note${i}" placeholder="Observation / N/A justification (required unless OK)" aria-label="Observation ${i+1}">${e(prev.note||'')}</textarea><div class="s91pm-check-photos"><button type="button" class="s91pm-photo-slot" data-slot="1"${photoAttrs} title="${preview?'Photo visible in preview':'Upload Before photo'}">📷 Before</button><button type="button" class="s91pm-photo-slot" data-slot="2"${photoAttrs} title="${preview?'Photo visible in preview':'Upload After photo'}">📷 After</button></div></fieldset>`;}).join('');
     return `<form class="s91pm-modal-form" data-pmx-submit-form${preview?' data-pmx-preview':''}><div class="s91pm-modal-body">${preview?`<div class="s91pm-callout"><b>Preview only — nothing is saved</b><p>This checklist is not open to you for recording${a.date>s.data.today?' until '+dlabel(a.date):''}. You can read and walk through it; no entry is created and no approval is requested.</p></div>`:''}<div class="s91pm-note"><b>Safety and applicability</b><p>Use approved OEM limits, authorised personnel and applicable isolation/permit-to-work procedures. Mark N/A only for genuinely absent or inapplicable components, with justification. Leave incomplete or deferred work unsubmitted.</p></div><label>Inspection date<input name="inspected_on" type="date" min="${e(a.date)}" max="${e(s.data.today)}" value="${e(a.inspected_on||s.data.today)}" required></label>${checks}<label>General remarks<textarea name="reason" maxlength="4000" rows="3">${e(a.remarks||'')}</textarea></label></div><footer class="s91pm-modal-foot"><div class="s91pm-wrap"><button class="s91pm-btn s91pm-primary" type="submit"${preview?' disabled title="Preview only: this activity is not open to you for recording"':''}>Submit for approval</button>${btn(preview?"Close preview":"Cancel","cancel-record")}</div><p class="s91pm-foot">${preview?'Preview only: the entry is not stored and no approval is requested.':'Engineer identity and submission time are captured automatically. No photo upload.'}</p></footer></form>`;
   }
   /**
@@ -239,7 +240,34 @@
   function exportRows(s){const rows=[...s.activities,...s.legacy];const plants=new Map(s.data.plants.map(p=>[p.id,p]));const safe=v=>{let x=String(v??'');if(/^[\s]*[=+@-]/.test(x))x="'"+x;return '"'+x.replaceAll('"','""')+'"';};const body=[['Plant','Code','Date','Equipment','Equipment ID','Source','Status','Overdue','Permission','Inspected on','Engineer','Reviewed by'],...rows.map(a=>[plants.get(a.plant_id)?.name,plants.get(a.plant_id)?.site_code,a.date,a.equipment,a.equipment_id,a.source,a.label,a.late?'Yes':'No',a.permission,a.inspected_on,a.submitted_name,a.reviewed_name])].map(r=>r.map(safe).join(',')).join('\r\n');const url=URL.createObjectURL(new Blob(['\ufeff'+body],{type:'text/csv;charset=utf-8'}));const link=document.createElement('a');link.href=url;link.download='Solar91-PM-'+s.month+'.csv';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
   const wired=new WeakSet();
   function wire(host){if(wired.has(host))return;wired.add(host);
-    host.addEventListener('click',ev=>{const s=active;if(!s||s.host!==host)return;const b=ev.target.closest('[data-pmx]');if(!b)return;const a=b.dataset.pmx;
+    host.addEventListener('click',ev=>{const s=active;if(!s||s.host!==host)return;if(ev.target.closest('[data-pmx-export-summary]')){global.location.href='/api/pm-plan/tracking/summary/export?month='+encodeURIComponent(s.month);return;}
+      const photoBtn=ev.target.closest('[data-pmx-photo-btn]');
+      if(photoBtn&&!photoBtn.disabled){
+        const activityId=photoBtn.dataset.activityId;
+        const itemId=photoBtn.dataset.itemId;
+        const slot=photoBtn.dataset.slot;
+        const inp=global.document.createElement('input');
+        inp.type='file';inp.accept='image/*';inp.capture='environment';
+        inp.addEventListener('change',async()=>{
+          const file=inp.files[0];if(!file)return;
+          const fd=new FormData();
+          fd.append('file',file);
+          fd.append('link_id',activityId);
+          fd.append('link_type','pm');
+          fd.append('checklist_item_id',itemId);
+          fd.append('slot',slot);
+          photoBtn.disabled=true;photoBtn.textContent=slot==='1'?'Uploading…':'Uploading…';
+          try{
+            const csrf=global.document.cookie.match(/csrf_token=([^;]+)/)?.[1]||'';
+            const resp=await fetch('/api/photos',{method:'POST',headers:{'X-CSRF-Token':csrf},body:fd});
+            if(resp.ok){photoBtn.textContent=slot==='1'?'✓ Before':'✓ After';photoBtn.classList.add('s91pm-photo-done');}
+            else{const err=await resp.json().catch(()=>({}));photoBtn.disabled=false;photoBtn.textContent=slot==='1'?'📷 Before':'📷 After';global.Solar91PortalToast?.error('Upload failed',err.detail||'Could not upload photo');}
+          }catch(err){photoBtn.disabled=false;photoBtn.textContent=slot==='1'?'📷 Before':'📷 After';global.Solar91PortalToast?.error('Upload failed','Network error');}
+        });
+        inp.click();
+        return;
+      }
+      const b=ev.target.closest('[data-pmx]');if(!b)return;const a=b.dataset.pmx;
       if(a==='plant'){const p=s.data.plants.find(x=>x.site_code===b.dataset.code);if(p){keepPortfolio(s);nav().selectPlantPage(p.site_code,'pm',null,{siteCode:p.site_code,displayName:p.name,plantName:p.name,displayCode:p.site_code},{pmParent:'overview',pmCalendar:true,pmCalendarMonth:s.month});toTop();}}
       else if(a==='calendar')nav().openPMCalendar(s.month,null);
       else if(a==='event'){nav().openPMCalendar(s.month,b.dataset.id);}

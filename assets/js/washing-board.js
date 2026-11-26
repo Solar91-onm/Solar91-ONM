@@ -848,6 +848,7 @@
           ? '<button type="button" class="ep-calendar__extra-open" data-wb-extra-action="open-extra">' +
             '+ Extra cleaning</button>'
           : "") +
+        '<button type="button" class="ep-wb__export-btn" data-wb-export-summary title="Export visible plants as XLSX">Export XLSX</button>' +
         '<button type="button" class="ep-wb__view-toggle" data-wb-view-toggle aria-pressed="' +
           (ui.view === "table" ? "true" : "false") + '" aria-label="Switch to ' +
           (ui.view === "table" ? "cards" : "table") + ' view" title="Switch to ' +
@@ -925,6 +926,15 @@
         render(container);
       });
     });
+
+    var exportBtn = container.querySelector("[data-wb-export-summary]");
+    if (exportBtn) {
+      exportBtn.addEventListener("click", function () {
+        var url = "/api/scheduled/washing/summary/export";
+        if (st.selectedMonth) url += "?month=" + encodeURIComponent(st.selectedMonth);
+        global.location.href = url;
+      });
+    }
 
     var month = container.querySelector("[data-wb-month]");
     if (month) {

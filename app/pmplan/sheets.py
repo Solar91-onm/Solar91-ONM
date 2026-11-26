@@ -155,3 +155,184 @@ def export_bytes(db: Session, user: User, *, site_code: str | None = None) -> by
     buffer = io.BytesIO()
     workbook.save(buffer)
     return buffer.getvalue()
+
+
+def export_tracking_summary_bytes(db, user, month: str) -> bytes:
+    """Two-sheet XLSX: plant-level PM summary + equipment matrix for one month.
+
+    Sheet 1 — Plant Summary: S.No | Site code | WOC Month | Scheduled | Completed | Overdue |
+              Completion% | Status  (paused plants show dashes, neutral fill, excluded from totals)
+    Sheet 2 — Equipment Matrix: plants as rows, each equipment category as a column, cell shows the
+              label for that equipment in the month (Scheduled / Locked / In Progress / Approved /
+              Overdue / Returned / Paused / dash).  Row header = Site code.
+
+    Calls neutralise_formulas() before saving.
+    """
+    import re as _re
+    from openpyxl import Workbook as _WB
+    from openpyxl.styles import PatternFill as _PF, Font as _Font, Alignment as _Align
+    from app.pmplan.tracking import CATEGORIES, _bounds, _rows, _blocker, _out
+    from app.core.models import PMCyclePlan
+    from app.core.timeutil import business_today
+    from sqlalchemy import select as _select, or_ as _or
+
+    # ----- scope + data -----------------------------------------------
+    allowed = None if has_portfolio_scope(user) else (user_scoped_plant_ids(db, user) or set())
+    q = _select(Plant).where(
+        _or(Plant.status.is_(None), ~Plant.status.ilike("inactive"))
+    ).order_by(Plant.plant_name, Plant.site_code)
+    if allowed is not None:
+        q = q.where(Plant.id.in_(allowed))
+    plants_list = list(db.scalars(q))
+    ids = [p.id for p in plants_list]
+
+    configured = {r.plant_id for r in db.scalars(
+        _select(PMCyclePlan).where(PMCyclePlan.plant_id.in_(ids))
+    )} if ids else set()
+
+    woc_months: dict = {}
+    for plan in db.scalars(_select(PMCyclePlan).where(PMCyclePlan.plant_id.in_(ids))):
+        marker = _re.search(r"\[PM_TRACKING_START=(\d{4}-\d{2})", plan.notes or "")
+        if marker:
+            woc_months[plan.plant_id] = marker.group(1)
+
+    first, last = _bounds(month)
+    rows = _rows(db, ids, first, last, summary=True)
+    today = business_today()
+
+    first_open: dict = {}
+    for row in rows:
+        if row.status != "Approved":
+            first_open.setdefault(row.plant_id, row)
+
+    act_by_plant: dict = {}
+    for row in rows:
+        blocker = _blocker(row, first_open.get(row.plant_id))
+        out = _out(row, blocker, user, today, summary=True)
+        act_by_plant.setdefault(row.plant_id, []).append(out)
+
+    # ----- fills -------------------------------------------------------
+    _FILL_GREEN = _PF(fill_type="solid", fgColor="C6EFCE")
+    _FILL_WHITE = _PF(fill_type="solid", fgColor="FFFFFF")
+    _FILL_GREY  = _PF(fill_type="solid", fgColor="E0E0E0")
+    _FILL_RED   = _PF(fill_type="solid", fgColor="FF9999")
+    _EQ_FILL = {
+        "Approved":         _PF(fill_type="solid", fgColor="C6EFCE"),
+        "Pending approval": _PF(fill_type="solid", fgColor="BDD7EE"),
+        "In Progress":      _PF(fill_type="solid", fgColor="FFEB9C"),
+        "Overdue":          _PF(fill_type="solid", fgColor="FF9999"),
+        "Returned":         _PF(fill_type="solid", fgColor="FFD966"),
+        "Locked":           _PF(fill_type="solid", fgColor="E0E0E0"),
+        "Scheduled":        _PF(fill_type="solid", fgColor="FFFFFF"),
+    }
+
+    def _plant_summary(plant_id):
+        acts = act_by_plant.get(plant_id, [])
+        if not acts:
+            return {"scheduled": 0, "completed": 0, "overdue": 0, "pct": 0, "status": "No activities"}
+        scheduled = len(acts)
+        completed = sum(1 for a in acts if a["status"] == "Approved")
+        overdue   = sum(1 for a in acts if a["label"] == "Overdue")
+        pct = round(100 * completed / scheduled) if scheduled else 0
+        if completed == scheduled:
+            status = "All done"
+        elif overdue:
+            status = "Overdue"
+        else:
+            status = "In progress"
+        return {"scheduled": scheduled, "completed": completed, "overdue": overdue, "pct": pct, "status": status}
+
+    def _row_fill_summary(sm):
+        if sm["status"] == "All done":
+            return _FILL_GREEN
+        if sm["overdue"]:
+            return _FILL_RED
+        return _FILL_WHITE
+
+    def _eq_label_for(plant_id, equipment):
+        acts = [a for a in act_by_plant.get(plant_id, []) if a["equipment"] == equipment]
+        if not acts:
+            return None
+        order = ["Overdue", "Returned", "Pending approval", "In Progress", "Locked", "Scheduled", "Approved"]
+        for target in order:
+            if any(a["label"] == target for a in acts):
+                return target
+        return acts[0]["status"]
+
+    # ----- workbook ---------------------------------------------------
+    workbook = _WB()
+
+    # Sheet 1: Plant Summary
+    s1 = workbook.active
+    s1.title = "Plant Summary"
+    hdrs1 = ("S.No", "Site code", "WOC Month", "Scheduled", "Completed", "Overdue", "Completion%", "Status")
+    s1.append(hdrs1)
+    for cell in s1[1]:
+        cell.font = _Font(bold=True)
+        cell.alignment = _Align(horizontal="center")
+    s1.freeze_panes = "A2"
+    s1.auto_filter.ref = f"A1:{s1.cell(1, len(hdrs1)).column_letter}1"
+
+    for sno, plant in enumerate(plants_list, start=1):
+        pid = plant.id
+        paused = pid not in configured
+        woc = woc_months.get(pid, month)
+        if paused:
+            row_data = [sno, plant.site_code, woc, "—", "—", "—", "—", "Paused"]
+            fill = _FILL_GREY
+        else:
+            sm = _plant_summary(pid)
+            row_data = [sno, plant.site_code, woc,
+                        sm["scheduled"], sm["completed"], sm["overdue"],
+                        sm["pct"], sm["status"]]
+            fill = _row_fill_summary(sm)
+        s1.append(row_data)
+        ri = s1.max_row
+        for ci in range(1, len(hdrs1) + 1):
+            cell = s1.cell(ri, ci)
+            cell.fill = fill
+            cell.alignment = _Align(horizontal="center")
+
+    for idx, width in enumerate((6, 14, 12, 12, 12, 10, 14, 16), start=1):
+        s1.column_dimensions[s1.cell(1, idx).column_letter].width = width
+
+    # Sheet 2: Equipment Matrix
+    s2 = workbook.create_sheet("Equipment Matrix")
+    eq_cols = CATEGORIES
+    hdrs2 = ["Site code"] + list(eq_cols)
+    s2.append(hdrs2)
+    for cell in s2[1]:
+        cell.font = _Font(bold=True)
+        cell.alignment = _Align(horizontal="center")
+    s2.freeze_panes = "B2"
+
+    for plant in plants_list:
+        pid = plant.id
+        paused = pid not in configured
+        row_data = [plant.site_code]
+        for eq in eq_cols:
+            if paused:
+                row_data.append("Paused")
+            else:
+                label = _eq_label_for(pid, eq)
+                row_data.append(label if label is not None else "—")
+        s2.append(row_data)
+        ri = s2.max_row
+        s2.cell(ri, 1).alignment = _Align(horizontal="left")
+        for ci, eq in enumerate(eq_cols, start=2):
+            cell = s2.cell(ri, ci)
+            label = cell.value
+            if paused or label == "Paused":
+                cell.fill = _FILL_GREY
+            else:
+                cell.fill = _EQ_FILL.get(label, _FILL_WHITE)
+            cell.alignment = _Align(horizontal="center")
+
+    s2.column_dimensions["A"].width = 14
+    for ci in range(2, len(eq_cols) + 2):
+        s2.column_dimensions[s2.cell(1, ci).column_letter].width = 16
+
+    neutralise_formulas(workbook)
+    buf = io.BytesIO()
+    workbook.save(buf)
+    return buf.getvalue()

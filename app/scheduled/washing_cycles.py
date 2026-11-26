@@ -3036,3 +3036,115 @@ def check_washing_overdue(db: Session, today: date | None = None) -> int:
     else:
         db.rollback()
     return notified
+
+# ── Module Cleaning Summary XLSX Export ──────────────────────────────────────
+
+def export_summary_bytes(db: Session, user: User, month: str | None = None) -> bytes:
+    """One row per plant XLSX for the Module Cleaning summary board.
+
+    Columns: S.No | Site code | Total Tables | C1% | C2% | C3% | Overall% | Cycles Complete |
+             Cycles Remaining | Dashboard Status
+
+    Row colours: green = all done, white = on track, light pink = behind (1d/3d), red-pink = late (7d).
+    Upcoming cycle cells get a grey fill instead of a percentage.
+    Calls neutralise_formulas() before saving.
+    """
+    import io as _io
+    from openpyxl import Workbook as _Workbook
+    from openpyxl.styles import Font as _Font, PatternFill as _PatternFill, Alignment as _Alignment
+    from app.core.spreadsheet import neutralise_formulas as _neutralise
+
+    overview = get_overview(db, user, month=month, include_reports=False, summary=True)
+    plants = overview.get("plants", [])
+
+    _FILL_GREEN = _PatternFill(fill_type="solid", fgColor="C6EFCE")
+    _FILL_WHITE = _PatternFill(fill_type="solid", fgColor="FFFFFF")
+    _FILL_PINK  = _PatternFill(fill_type="solid", fgColor="FFCCCC")
+    _FILL_RED   = _PatternFill(fill_type="solid", fgColor="FF9999")
+    _FILL_GREY  = _PatternFill(fill_type="solid", fgColor="E0E0E0")
+
+    def _status_label(row: dict) -> str:
+        ct = row.get("cycles_this_month", 0)
+        if ct >= MONTHLY_CYCLE_TARGET:
+            return "All cycles done"
+        bucket = row.get("overdue_bucket", "on_track")
+        days = row.get("overdue_days", 0)
+        if bucket == "on_track":
+            return "On track"
+        if bucket in ("1d", "3d"):
+            return f"Behind \u00b7 {days}d"
+        return f"Late \u00b7 {days}d"
+
+    def _row_fill(row: dict):
+        ct = row.get("cycles_this_month", 0)
+        if ct >= MONTHLY_CYCLE_TARGET:
+            return _FILL_GREEN
+        bucket = row.get("overdue_bucket", "on_track")
+        if bucket == "on_track":
+            return _FILL_WHITE
+        if bucket in ("1d", "3d"):
+            return _FILL_PINK
+        return _FILL_RED
+
+    headers = ("S.No", "Site code", "Total Tables", "C1%", "C2%", "C3%",
+               "Overall%", "Cycles Complete", "Cycles Remaining", "Dashboard Status")
+    col_widths = (6, 14, 14, 10, 10, 10, 10, 16, 18, 20)
+
+    workbook = _Workbook()
+    sheet = workbook.active
+    sheet.title = "Module Cleaning Summary"
+    sheet.append(headers)
+    for cell in sheet[1]:
+        cell.font = _Font(bold=True)
+        cell.alignment = _Alignment(horizontal="center")
+    sheet.freeze_panes = "A2"
+    sheet.auto_filter.ref = f"A1:{sheet.cell(1, len(headers)).column_letter}1"
+
+    for sno, row in enumerate(plants, start=1):
+        cycle_grades = row.get("cycle_grades", [])
+        grade_cells = []
+        for grade in cycle_grades[:3]:
+            if grade.get("grade") == "upcoming":
+                grade_cells.append(None)
+            else:
+                pct = grade.get("compliance_percent")
+                grade_cells.append(round(pct) if pct is not None else 0)
+        while len(grade_cells) < 3:
+            grade_cells.append(None)
+
+        overall_pct = row.get("monthly_compliance_percent")
+        overall_val = round(overall_pct) if overall_pct is not None else 0
+        cycles_complete = row.get("cycles_this_month", 0)
+        cycles_remaining = max(0, MONTHLY_CYCLE_TARGET - cycles_complete)
+        status = _status_label(row)
+        fill = _row_fill(row)
+
+        data = [
+            sno,
+            row.get("site_code", ""),
+            row.get("table_count", 0),
+            grade_cells[0] if grade_cells[0] is not None else "Upcoming",
+            grade_cells[1] if grade_cells[1] is not None else "Upcoming",
+            grade_cells[2] if grade_cells[2] is not None else "Upcoming",
+            overall_val,
+            cycles_complete,
+            cycles_remaining,
+            status,
+        ]
+        sheet.append(data)
+        row_idx = sheet.max_row
+        for col_idx, cell_val in enumerate(data, start=1):
+            cell = sheet.cell(row_idx, col_idx)
+            if col_idx in (4, 5, 6) and cell_val == "Upcoming":
+                cell.fill = _FILL_GREY
+            else:
+                cell.fill = fill
+            cell.alignment = _Alignment(horizontal="center")
+
+    for idx, width in enumerate(col_widths, start=1):
+        sheet.column_dimensions[sheet.cell(1, idx).column_letter].width = width
+
+    _neutralise(workbook)
+    buf = _io.BytesIO()
+    workbook.save(buf)
+    return buf.getvalue()
