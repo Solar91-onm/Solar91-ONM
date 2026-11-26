@@ -1003,6 +1003,24 @@ def test_module_cleaning_board_shows_every_plant_and_opens_one_plants_calendar()
     assert "Solar91PortalWashingBoard.show(document.querySelector(\"[data-washing-board-host]\"))" in nav
 
 
+def test_module_cleaning_xlsx_export_uses_authenticated_download():
+    board = (PORTAL_ASSETS / "js" / "washing-board.js").read_text(encoding="utf-8")
+    export_handler = board[board.index('var exportBtn = container.querySelector("[data-wb-export-summary]");'):
+                          board.index('var month = container.querySelector("[data-wb-month]");')]
+    assert 'api().downloadFile(url, "Module_Cleaning_Summary.xlsx")' in export_handler
+    assert 'global.location.href = url' not in export_handler
+    assert "exportBtn.disabled = true" in export_handler
+    assert "global.alert(error.message" in export_handler
+
+
+def test_pm_summary_xlsx_export_uses_authenticated_download():
+    tracking = (PORTAL_ASSETS / "js" / "pm-tracking.js").read_text(encoding="utf-8")
+    assert "api().downloadFile('/api/pm-plan/tracking/summary/export?month='" in tracking
+    assert "global.location.href='/api/pm-plan/tracking/summary/export" not in tracking
+    assert "summaryExport.disabled=true" in tracking
+    assert "The PM summary could not be downloaded." in tracking
+
+
 def test_module_cleaning_table_reuses_board_rows_and_compliance():
     board = (PORTAL_ASSETS / "js" / "washing-board.js").read_text(encoding="utf-8")
     helper = (PORTAL_ASSETS / "js" / "table-column-filter.js").read_text(encoding="utf-8")

@@ -932,7 +932,12 @@
       exportBtn.addEventListener("click", function () {
         var url = "/api/scheduled/washing/summary/export";
         if (st.selectedMonth) url += "?month=" + encodeURIComponent(st.selectedMonth);
-        global.location.href = url;
+        exportBtn.disabled = true;
+        api().downloadFile(url, "Module_Cleaning_Summary.xlsx").catch(function (error) {
+          global.alert(error.message || "The Module Cleaning export could not be downloaded.");
+        }).then(function () {
+          exportBtn.disabled = false;
+        });
       });
     }
 
