@@ -17,10 +17,47 @@ from sqlalchemy import Date, DateTime, ForeignKey, JSON, String, Text, UniqueCon
 from sqlalchemy.orm import Mapped, Session, mapped_column, load_only
 
 from app.core.database import Base, get_db
-from app.core.models import AuditLog, Plant, PMCyclePlan, User, TimestampMixin, uuid_pk
+from app.core.models import AuditLog, Plant, PMCyclePlan, SitePhoto, User, TimestampMixin, uuid_pk
 from app.core.security import get_current_user, require_csrf, user_scoped_plant_ids
 from app.core.timeutil import business_today
 from app.portal.service import calendar as legacy_calendar
+
+# Namespace for deterministic checklist-item UUIDs.
+# uuid5(ITEM_ID_NS, "{activity_id}:{task_text}") is stable across template changes:
+# the item keeps its id even if surrounding items are reordered or removed.
+_ITEM_ID_NS = uuid.UUID("d4a3c2b1-e5f6-7890-abcd-ef1234567890")
+
+
+def _checklist_item_id(activity_id: uuid.UUID, task: str) -> str:
+    """A deterministic, stable UUID for one checklist item on one activity."""
+    return str(uuid.uuid5(_ITEM_ID_NS, f"{activity_id}:{task}"))
+
+
+def _ensure_checklist_ids(db: Session, row: "PMTrackingActivity") -> None:
+    """Assign stable ids to every checklist item that lacks one, then persist.
+
+    Called once per activity detail request; a no-op if ids are already present.
+    For unsubmitted activities (checklist=[]) the template is locked in at this
+    point so photos taken now bind to the same ids even if the template later changes.
+    """
+    checklist = row.checklist or []
+    if checklist and all(isinstance(c, dict) and c.get("id") for c in checklist):
+        return  # all items already have ids
+
+    if checklist and all(isinstance(c, dict) and c.get("task") for c in checklist):
+        # Submitted row: add ids to existing items preserving result/note.
+        row.checklist = [
+            {**c, "id": c.get("id") or _checklist_item_id(row.id, c["task"])}
+            for c in checklist
+        ]
+    else:
+        # Unsubmitted row: pre-populate from the current template.
+        row.checklist = [
+            {"id": _checklist_item_id(row.id, task), "task": task}
+            for task in CHECKLISTS.get(row.equipment, [])
+        ]
+    db.add(row)
+    db.commit()
 
 router = APIRouter(prefix="/tracking", tags=["PM checklist tracking"])
 

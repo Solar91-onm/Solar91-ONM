@@ -1628,9 +1628,10 @@
 .ep-ih__tickets th:nth-child(2), .ep-ih__tickets td:nth-child(2) { width: 9%; }
 .ep-ih__tickets th:nth-child(3), .ep-ih__tickets td:nth-child(3) { width: 5%; }
 .ep-ih__tickets th:nth-child(4), .ep-ih__tickets td:nth-child(4) { width: 10%; }
-.ep-ih__tickets th:nth-child(5), .ep-ih__tickets td:nth-child(5) { width: 19%; }
+.ep-ih__tickets th:nth-child(5), .ep-ih__tickets td:nth-child(5) { width: 16%; }
 .ep-ih__tickets th:nth-child(6), .ep-ih__tickets td:nth-child(6) { width: 8%; }
-.ep-ih__tickets th:nth-child(7), .ep-ih__tickets td:nth-child(7) { width: 8%; }
+.ep-ih__tickets th:nth-child(7), .ep-ih__tickets td:nth-child(7) { width: 11%; overflow: hidden; }
+.ep-ih__tickets td:nth-child(7) .ep-chip { max-width: 100%; }
 .ep-ih__tickets th:nth-child(8), .ep-ih__tickets td:nth-child(8) { width: 7%; }
 .ep-ih__tickets th:nth-child(9), .ep-ih__tickets td:nth-child(9) { width: 7%; }
 .ep-ih__tickets th:nth-child(10), .ep-ih__tickets td:nth-child(10) { width: 8%; }

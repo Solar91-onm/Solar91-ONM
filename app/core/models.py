@@ -88,6 +88,9 @@ class SitePhoto(Base):
     height: Mapped[int | None] = mapped_column(Integer)
     phase: Mapped[str | None] = mapped_column(String(10))
     slot: Mapped[int | None] = mapped_column(SmallInteger)
+    # Keyed to a specific PM checklist item. Populated when link_type="pm" and the photo
+    # was taken from the per-checkpoint control rather than from Photo Intelligence directly.
+    checklist_item_id: Mapped[str | None] = mapped_column(String(80))
     original_purged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # Browser-generated id of one submission (and the photo's position in it): a retried or double-tapped
     # upload returns the photos already saved instead of storing them twice. Migration 031.

@@ -37,6 +37,7 @@ LINK_TYPES = {"issue", "pm", "washing", "inventory"}
 EXTENSIONS = {"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp"}
 MAX_FILES = 10
 MAX_ISSUE_PHOTOS = 4   # one ticket's evidence; the Raise issue form offers the same four
+MAX_CHECKPOINT_PHOTOS = 2   # per PM checklist checkpoint; storage arithmetic in AGENTS.md
 MAX_SIZE = 15 * 1024 * 1024
 MAX_WASHING_PDF_SIZE = 10 * 1024 * 1024
 PHOTO_STORAGE_FULL = "Photo storage is full — contact an administrator."
@@ -100,7 +101,8 @@ def _row(photo: SitePhoto, plant: Plant) -> dict:
             "thumbnailSizeBytes": photo.thumbnail_size_bytes,
             "width": photo.width, "height": photo.height,
             "originalPurgedAt": photo.original_purged_at.isoformat() if photo.original_purged_at else None,
-            "phase": photo.phase, "slot": photo.slot}
+            "phase": photo.phase, "slot": photo.slot,
+            "checklistItemId": photo.checklist_item_id}
 
 
 @router.get("/plants")
@@ -487,12 +489,16 @@ def create_photos(db: Annotated[Session, Depends(get_db)], user: Annotated[User,
                   tags: str = Form("[]"), link_type: str = Form(""), link_id: str = Form(""),
                   submission_id: uuid.UUID | None = Form(None), phase: str | None = Form(None),
                   slot: int | None = Form(None),
+                  checklist_item_id: str | None = Form(None),
                   files: list[UploadFile] = File(...)):
     _role(user, write=True)
     plant = _plant(db, user, plant_id)
     if category not in CATEGORIES: raise HTTPException(422, "Choose a valid photo category")
     if len(description) > 300: raise HTTPException(422, "Remark cannot exceed 300 characters")
     if not 1 <= len(files) <= MAX_FILES: raise HTTPException(422, "Choose between 1 and 10 photos")
+    checklist_item_id = (checklist_item_id or "").strip() or None
+    if checklist_item_id and len(checklist_item_id) > 80:
+        raise HTTPException(422, "Invalid checklist item id")
     try: parsed_tags = json.loads(tags)
     except (ValueError, TypeError): raise HTTPException(422, "Invalid tags") from None
     if not isinstance(parsed_tags, list) or len(parsed_tags) > 8 or any(not isinstance(t, str) or not re.fullmatch(r"[a-z0-9-]{1,24}", t) for t in parsed_tags):
@@ -535,6 +541,47 @@ def create_photos(db: Annotated[Session, Depends(get_db)], user: Annotated[User,
                 409,
                 f"A ticket can carry {MAX_ISSUE_PHOTOS} photos; {attached} are already attached",
             )
+    if kind == "pm" and checklist_item_id:
+        # Validate the item id exists in this activity's checklist and enforce the per-checkpoint cap.
+        from app.pmplan.tracking import PMTrackingActivity as _PMA
+        activity = db.scalar(select(_PMA).where(_PMA.work_order_no == ref)) if False else None
+        # Look up by work_order_no (the link_id stored on a photo) or by the activity id directly.
+        # Photos store the work_order_no string in link_id, matching OMTask.work_order_no convention.
+        # PM tracking activities are looked up by their own id as the link ref.
+        from app.pmplan.tracking import PMTrackingActivity as _PMActivity
+        import re as _re
+        if _re.fullmatch(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", ref or ""):
+            activity_row = db.get(_PMActivity, uuid.UUID(ref))
+        else:
+            activity_row = None
+        if activity_row is None:
+            raise HTTPException(404, "PM activity not found for this photo link")
+        if activity_row.plant_id != plant.id:
+            raise HTTPException(403, "That PM activity is not on this plant")
+        # Reject uploads while the activity cannot accept recording (future date or not in CHECKLISTS).
+        from app.pmplan.tracking import CHECKLISTS as _CHECKLISTS
+        from app.core.timeutil import business_today as _today
+        if activity_row.status not in {"Scheduled", "Returned"} or activity_row.scheduled_on > _today():
+            raise HTTPException(409, "Photos can only be added to an open activity that is due today or earlier")
+        if activity_row.equipment not in _CHECKLISTS:
+            raise HTTPException(409, "This equipment type does not use a PM checklist")
+        # Confirm the item id is known on this activity.
+        item_ids = {c.get("id") for c in (activity_row.checklist or []) if isinstance(c, dict)}
+        if checklist_item_id not in item_ids:
+            raise HTTPException(422, "Checklist item not found on this activity — refresh and try again")
+        # Hard cap: at most MAX_CHECKPOINT_PHOTOS per checkpoint.
+        attached_to_item = db.scalar(select(func.count(SitePhoto.id)).where(
+            SitePhoto.link_type == "pm", SitePhoto.link_id == ref,
+            SitePhoto.checklist_item_id == checklist_item_id
+        )) or 0
+        if attached_to_item + len(files) > MAX_CHECKPOINT_PHOTOS:
+            raise HTTPException(
+                409,
+                f"A checkpoint can carry {MAX_CHECKPOINT_PHOTOS} photos; "
+                f"{attached_to_item} {'is' if attached_to_item == 1 else 'are'} already attached",
+            )
+    elif checklist_item_id and kind != "pm":
+        raise HTTPException(422, "checklist_item_id is only valid for PM photos")
     if category == "washing" and kind != "washing":
         raise HTTPException(422, "Module cleaning photos must be linked to a daily report")
     # Cheap checks of every file (type, size, magic bytes) before anything is decoded or stored.
@@ -629,6 +676,7 @@ def create_photos(db: Annotated[Session, Depends(get_db)], user: Annotated[User,
                             content_type=stored_type, size_bytes=len(stored_data),
                             thumbnail_size_bytes=len(thumbnail), width=width, height=height,
                             phase=phase if kind == "washing" else None, slot=slot if kind == "washing" else None,
+                            checklist_item_id=checklist_item_id if kind == "pm" else None,
                             submission_id=submission_id, submission_index=index if submission_id else None))
             if mime != "application/pdf":
                 del photo
