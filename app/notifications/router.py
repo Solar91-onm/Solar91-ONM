@@ -2,8 +2,8 @@
 
 Three rules this file keeps:
 
-* **Recipients only.** Every query is restricted to the signed-in user's own rows plus the
-  broadcast rows (``user_id IS NULL``). Nothing is served because a client asked for it.
+* **Recipients only.** Assignees see their own rows only. Other roles retain
+  the existing portal-wide broadcast rows (``user_id IS NULL``). Nothing is served because a client asked for it.
 * **Action Required is read from the records, not from notifications.** Marking a notification
   read never resolves the underlying task, so the list is recomputed from the live PM activities
   and tickets the user is actually allowed to see, under the same plant scope their pages use.
@@ -17,11 +17,11 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import func, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.core.models import Issue, Notification, Plant, User
+from app.core.models import EquipmentResponsibility, Issue, Notification, Plant, PlantResponsibility, User
 from app.core.security import get_current_user, require_csrf, user_scoped_plant_ids
 from app.core.timeutil import business_today
 from app.notifications.service import notification_dto
@@ -37,7 +37,9 @@ SAME_SECOND_WINDOW = 60
 
 
 def _mine(user: User):
-    """Rows this user may read: their own, plus portal-wide broadcasts."""
+    """Personal inbox for Assignees; legacy broadcasts remain for other roles."""
+    if user.role == "Assignee":
+        return Notification.user_id == user.id
     return or_(Notification.user_id == user.id, Notification.user_id.is_(None))
 
 
@@ -108,19 +110,26 @@ def list_notifications(
 
 
 @router.get("/summary")
-def summary(db: DB, user: CurrentUser):
-    """The bell's badge and the Action Required list, in one cheap request."""
-    return {
-        "unread_count": _unread_count(db, user),
-        "actions": _actions_required(db, user),
-        "as_of": datetime.now(timezone.utc),
-    }
+def summary(db: DB, user: CurrentUser, preview: bool = False):
+    """One poll for the badge, scoped actions and an optional bounded alert preview.
+
+    Fetch the preview even if the unread count is unchanged (another device might
+    have read an older item). Never load the full history during polling.
+    """
+    count = _unread_count(db, user)
+    result = {"unread_count": count, "actions": _actions_required(db, user),
+              "as_of": datetime.now(timezone.utc), "personal_alerts": user.role == "Assignee"}
+    if preview:
+        rows = list(db.scalars(select(Notification).where(_mine(user), Notification.read_at.is_(None))
+                   .order_by(Notification.created_at.desc(), Notification.id.desc()).limit(5))) if count else []
+        result["recent_unread"] = [notification_dto(row) for row in rows]
+    return result
 
 
 @router.post("/{notification_id}/read", dependencies=[Depends(require_csrf)])
 def mark_read(notification_id: UUID, db: DB, user: CurrentUser):
     row = db.get(Notification, notification_id)
-    if not row or (row.user_id and row.user_id != user.id):
+    if not row or (row.user_id != user.id and (row.user_id is not None or user.role == "Assignee")):
         raise HTTPException(404, "Notification not found")
     if row.user_id is None:
         # A broadcast is shared: mark a per-user copy read rather than hiding it from everyone.
@@ -151,8 +160,9 @@ def mark_all(db: DB, user: CurrentUser):
             Notification.user_id == user.id, Notification.read_at.is_(None))):
         row.read_at = now
         changed += 1
-    for row in db.scalars(select(Notification).where(
-            Notification.user_id.is_(None), Notification.read_at.is_(None)).limit(200)):
+    broadcasts = [] if user.role == "Assignee" else db.scalars(select(Notification).where(
+            Notification.user_id.is_(None), Notification.read_at.is_(None)).limit(200))
+    for row in broadcasts:
         if not db.scalar(select(Notification.id).where(
                 Notification.user_id == user.id, Notification.dedupe_key == f"broadcast-read:{row.id}")):
             db.add(Notification(
@@ -189,58 +199,74 @@ def _actions_required(db: Session, user: User) -> list[dict]:
     today = business_today()
     out: list[dict] = []
 
-    def pm_count(*conditions) -> int:
-        stmt = select(func.count()).select_from(PMTrackingActivity).where(*conditions)
+    def scoped_pm(stmt):
+        # Every conditional count uses the same plant/ownership scope.
+        # Apply it once rather than re-evaluating it in separate queries.
         if scope is not None:
             stmt = stmt.where(PMTrackingActivity.plant_id.in_(scope))
-        return int(db.scalar(stmt) or 0)
+        if user.role == "Assignee":
+            # Match PM delivery: explicit plant PM ownership wins. Equipment
+            # responsibility is a fallback only when no active PM owner exists.
+            from app.equipment.service import PM_EQUIPMENT_KEYS
+            owned = select(PlantResponsibility.plant_id).where(
+                PlantResponsibility.area == "pm", PlantResponsibility.assigned_user_id == user.id)
+            configured = select(PlantResponsibility.plant_id).join(
+                User, User.id == PlantResponsibility.assigned_user_id).where(
+                PlantResponsibility.area == "pm", User.role == "Assignee", User.is_active.is_(True))
+            keys = select(EquipmentResponsibility.equipment_key).where(
+                EquipmentResponsibility.user_id == user.id, EquipmentResponsibility.active.is_(True))
+            equipment_match = or_(*(and_(PMTrackingActivity.equipment == equipment,
+                                       keys.where(EquipmentResponsibility.equipment_key.in_(names)).exists())
+                                     for equipment, names in PM_EQUIPMENT_KEYS.items()))
+            stmt = stmt.where(or_(PMTrackingActivity.plant_id.in_(owned), and_(
+                PMTrackingActivity.plant_id.not_in(configured), equipment_match)))
+        return stmt
 
+    pm_actions = []
     if user.role == "O&M Head":
-        pending = pm_count(PMTrackingActivity.status == "Pending approval")
-        if pending:
-            out.append(_action("pm_pending_approval", "PM checklists awaiting your approval",
-                               pending, "amber", "pm"))
+        pm_actions.append((PMTrackingActivity.status == "Pending approval",
+                           "pm_pending_approval", "PM checklists awaiting your approval", "amber"))
     if user.role in {"O&M Head", "Assignee"}:
-        requests = pm_count(PMTrackingActivity.permission == "Requested",
-                            PMTrackingActivity.status != "Approved")
-        if requests:
-            out.append(_action("pm_permission_requested", "PM sequence permission requests",
-                               requests, "purple", "pm"))
+        pm_actions.append((and_(PMTrackingActivity.permission == "Requested",
+                                PMTrackingActivity.status != "Approved"),
+                           "pm_permission_requested", "PM sequence permission requests", "purple"))
     if user.role == "Site Engineer":
-        returned = pm_count(PMTrackingActivity.status == "Returned")
-        if returned:
-            out.append(_action("pm_returned", "PM checklists returned for correction",
-                               returned, "red", "pm"))
-        submitted = pm_count(PMTrackingActivity.status == "Pending approval",
-                             PMTrackingActivity.submitted_by == user.id)
-        if submitted:
-            out.append(_action("pm_awaiting_review", "Your PM checklists awaiting approval",
-                               submitted, "blue", "pm"))
-    overdue = pm_count(PMTrackingActivity.scheduled_on < today,
-                       PMTrackingActivity.status.in_(("Scheduled", "Returned")))
-    if overdue:
-        out.append(_action("pm_overdue", "Overdue PM activities", overdue, "red", "pm"))
+        pm_actions.extend([
+            (PMTrackingActivity.status == "Returned", "pm_returned",
+             "PM checklists returned for correction", "red"),
+            (and_(PMTrackingActivity.status == "Pending approval",
+                  PMTrackingActivity.submitted_by == user.id), "pm_awaiting_review",
+             "Your PM checklists awaiting approval", "blue"),
+        ])
+    pm_actions.append((and_(PMTrackingActivity.scheduled_on < today,
+                            PMTrackingActivity.status.in_(("Scheduled", "Returned"))),
+                       "pm_overdue", "Overdue PM activities", "red"))
+    # Filter to the union of relevant conditions so old completed rows are not
+    # included in the aggregate; a row may legitimately match multiple actions.
+    conditions = [item[0] for item in pm_actions]
+    pm_stmt = select(*(func.count().filter(condition) for condition in conditions)).select_from(
+        PMTrackingActivity).where(or_(*conditions))
+    for count, (_, kind, label, tone) in zip(db.execute(scoped_pm(pm_stmt)).one(), pm_actions):
+        if count:
+            out.append(_action(kind, label, int(count), tone, "pm"))
 
-    issue_stmt = select(func.count()).select_from(Issue).where(
-        Issue.severity == "Critical",
+    issue_stmt = select(func.count(), func.count().filter(Issue.severity == "Critical"),
+                        func.count().filter(Issue.assigned_to.is_(None))).select_from(Issue).where(
+        Issue.deleted_at.is_(None),
         func.lower(Issue.status).notin_(("closed", "resolved", "cancelled")),
     )
     if scope is not None:
         issue_stmt = issue_stmt.where(Issue.plant_id.in_(scope))
     if user.role == "Assignee":
-        issue_stmt = issue_stmt.where(or_(Issue.assigned_to == user.id, Issue.assigned_to.is_(None)))
-    critical = int(db.scalar(issue_stmt) or 0)
+        issue_stmt = issue_stmt.where(Issue.assigned_to == user.id)
+    active_count, critical, unassigned = db.execute(issue_stmt).one()
+    if user.role == "Assignee" and active_count:
+        out.append(_action("issue_assigned", "Your open site issues", int(active_count), "blue", "health"))
+    critical = int(critical or 0)
     if critical:
         out.append(_action("issue_critical", "Open critical tickets", critical, "red", "health"))
 
     if user.role in {"O&M Head", "Administration"}:
-        unassigned_stmt = select(func.count()).select_from(Issue).where(
-            Issue.assigned_to.is_(None),
-            func.lower(Issue.status).notin_(("closed", "resolved", "cancelled")),
-        )
-        if scope is not None:
-            unassigned_stmt = unassigned_stmt.where(Issue.plant_id.in_(scope))
-        unassigned = int(db.scalar(unassigned_stmt) or 0)
         if unassigned:
             out.append(_action("issue_unassigned", "Tickets without a responsible person",
                                unassigned, "amber", "health"))

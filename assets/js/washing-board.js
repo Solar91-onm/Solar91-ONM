@@ -1140,8 +1140,14 @@
     render(container);
     // summary=true: the cards read scalars only, so the per-plant day, cycle and productivity
     // lists — about three quarters of the response — are not asked for.
-    return api().request("/api/scheduled/washing/overview?month=" + encodeURIComponent(month) +
-      reports + "&summary=true").then(function (body) {
+    var url = "/api/scheduled/washing/overview?month=" + encodeURIComponent(month) +
+      reports + "&summary=true";
+    var data = global.Solar91PortalData;
+    // Daily report details are read fresh, and explicit month/retry/save actions
+    // bypass the summary cache. Only quick navigation reuses ordinary summaries.
+    var request = !wantEntries && data && data.fetchWashingBoard
+      ? data.fetchWashingBoard(url, Boolean(selectedMonth)) : api().request(url);
+    return request.then(function (body) {
       if (mine !== token) return;                       // a newer page replaced this one
       st.rows = rowsWithUnconfiguredPlants(body);
       st.summary = body.summary || {};

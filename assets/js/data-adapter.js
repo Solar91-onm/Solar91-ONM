@@ -106,6 +106,15 @@
     return entry.promise;
   }
 
+  /** Reuse the ordinary cleaning-board summary on quick tab returns. Explicit
+   * reloads (month changes, retries and post-write refreshes) bypass the cache.
+   * The shared invalidate() clears this alongside all other portfolio reads. */
+  function fetchWashingBoard(url, force) {
+    const key = "washing-board:" + url;
+    if (force) rangeCache.delete(key);
+    return cached(key, function () { return api().request(url); });
+  }
+
   function normalizeRow(row) {
     const plant = api().normalizePlant(row.plant);
     const profile = Object.assign({}, row.profile);
@@ -461,6 +470,7 @@
     listPlants,
     getPlant,
     fetchPlantDetails,
+    fetchWashingBoard,
     fetchOperationalProfile,
     fetchActivity,
     fetchCalendarActivities,

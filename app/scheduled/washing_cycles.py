@@ -538,17 +538,17 @@ def _require_plant_access(db: Session, user: User, plant: Plant, config: Washing
 
 
 def _wash_recipients(db: Session, config: WashingConfig, extra_user_ids: list[UUID] | None = None, managers_only: bool = False) -> list[User]:
-    """Every O&M manager (O&M Head + all washing Assignees) is notified. With managers_only the submitter / extra users
-    are left out, which is used for performance alerts that Site Engineers must never receive."""
+    """Heads and this plant's configured washing owner; never all Assignees.
+    Explicit field participants still receive their own report updates."""
     users = users_with_role(db, {"O&M Head"})
-    for assignee in users_with_role(db, {"Assignee"}):
-        if assignee.is_active:
-            users.append(assignee)
+    owner = db.get(User, config.assigned_user_id) if config.assigned_user_id else None
+    if owner and owner.is_active and owner.role == "Assignee":
+        users.append(owner)
     if managers_only:
         return users
     for user_id in extra_user_ids or []:
         user = db.get(User, user_id)
-        if user and user.is_active:
+        if user and user.is_active and user.role != "Assignee":
             users.append(user)
     return users
 
@@ -574,6 +574,7 @@ def _notify_wash(
         target_type="washing",
         target_id=str(plant.id),
         dedupe_key=dedupe_key,
+        payload={"page": "washing", "site_code": plant.site_code, "plant_name": plant.plant_name},
     )
 
 

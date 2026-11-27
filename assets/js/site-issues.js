@@ -1607,7 +1607,9 @@
       state.plants = result.plants;
       var plantsById = {};
       state.plants.forEach(function (plant) { plantsById[plant.dbId] = plant; });
+      var linked = state.modalMode && state.rows.find(function (row) { return row.id === state.modalId; });
       state.rows = result.issues.map(function (issue) { return mapApiIssue(issue, plantsById); });
+      if (linked && !state.rows.some(function (row) { return row.dbId === linked.dbId; })) state.rows.unshift(linked);
       state.nextOffset = result.issues.length;
       state.hasMore = result.issues.length >= state.pageSize;
       state.canRaise = ["O&M Head", "Assignee", "Site Engineer"].indexOf(result.role) !== -1 &&
@@ -2791,21 +2793,20 @@
   function openTicket(ticketNo, siteCode, mode) {
     if (!active || !ticketNo) return;
     state.submitNotice = "";
-    var url = "/api/issues?vertical=Inverter&status=open&limit=200";
-    var scopedCode = siteCode || (active.context && active.context.plantCode) || "";
-    if (scopedCode) url += "&site_code=" + encodeURIComponent(scopedCode);
+    var opened = active;
+    var url = "/api/issues/by-ticket/" + encodeURIComponent(ticketNo);
     Promise.all([
       global.Solar91PortalAPI.request(url),
       global.Solar91PortalAPI.plants()
     ]).then(function (result) {
-      var issues = result[0];
+      if (active !== opened || !opened.host.isConnected) return;
+      var issue = result[0];
       state.plants = result[1];
-      var issue = issues.find(function (row) { return row.ticket_no === ticketNo; });
-      if (!issue) throw new Error("The ticket is not in the latest 200 open inverter issues for this plant.");
       var plantsById = {};
       state.plants.forEach(function (plant) { plantsById[plant.dbId] = plant; });
       var mapped = mapApiIssue(issue, plantsById);
-      if (!state.rows.some(function (row) { return row.dbId === mapped.dbId; })) state.rows.unshift(mapped);
+      state.rows = state.rows.filter(function (row) { return row.dbId !== mapped.dbId; });
+      state.rows.unshift(mapped);
       state.modalId = mapped.id;
       state.modalMode = mode === "edit" && canEditIssue(mapped) ? "edit" : "details";
       state.editDraft = null;
@@ -2818,6 +2819,7 @@
         loadAssigneesForDrawer(active.host);
       }
     }).catch(function (error) {
+      if (active !== opened) return;
       state.submitNotice = "Could not open ticket " + ticketNo + ": " + (error.message || "please retry.");
       renderView();
     });

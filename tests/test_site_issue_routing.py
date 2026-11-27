@@ -153,3 +153,43 @@ def test_write_validation_and_permission(client, db):
     assert set_rule(client, [plant], "inverter", a).status_code == 403
     assert client.get(BASE).status_code == 403
     assert db.get(AppSetting, SETTING_KEY) is None
+
+
+def test_other_is_independently_assignable_without_changing_miscellaneous_pm(client, db):
+    from app.equipment.service import pm_keys
+
+    north, south = _plants(db, "OTHER01", "OTHER02")
+    head = login_user(client, db, role="O&M Head")
+    seed_work_categories(db, "Other", "Miscellaneous", "Street Light")
+    global_owner = _assignee(db, "Other global", "other-global@test.example")
+    local_owner = _assignee(db, "Other local", "other-local@test.example")
+    backup = _assignee(db, "Other backup", "other-backup@test.example")
+    misc_owner = _assignee(db, "Misc owner", "misc-owner@test.example")
+    _act_as(db, head)
+
+    assert canonical_key("Other") == canonical_key("others") == "cat_other"
+    assert canonical_key("Miscellaneous") == "misc"
+    assert pm_keys("Miscellaneous") == ["misc", "weather", "communication", "water_system"]
+    categories = client.get(BASE + "?include_routing=false").json()["categories"]
+    labels = {row["key"]: row["label"] for row in categories}
+    assert labels["cat_other"] == "Other"
+    assert labels["misc"] == "Miscellaneous"
+    assert labels["cat_street_light"] == "Street Light"
+
+    for key, owner in [("cat_other", global_owner), ("misc", misc_owner)]:
+        result = client.put(BASE + "/category/" + key,
+                            json={"primary_user_id": str(owner.id)})
+        assert result.status_code == 200, result.text
+    assert set_rule(client, [north], "cat_other", local_owner, backup).status_code == 200
+
+    def check(plant, equipment, owner, description):
+        result = _raise_issue(client, plant, equipment, description)
+        assert result.status_code == 201, result.text
+        assert result.json()["assigned_to"] == str(owner.id)
+
+    check(north, "Other", local_owner, "Other plant override")
+    check(south, "Other", global_owner, "Other portfolio default")
+    check(north, "Miscellaneous", misc_owner, "Misc independent assignment")
+    local_owner.is_active = False
+    db.commit()
+    check(north, "Other", backup, "Other plant backup")

@@ -448,7 +448,7 @@ def _notify_upload(db: Session, user: User, issues: list[Issue], site_codes: dic
     """One summary per person instead of one alert per ticket; critical tickets still alert one by one.
     A failing notification never undoes the upload."""
     try:
-        from app.notifications.service import plant_responsible_users, notify_issue_assignee_and_heads, notify_users, users_with_role
+        from app.notifications.service import notify_issue_assignee_and_heads, notify_users, users_with_role
 
         batch = str(issues[0].id)
         span = issues[0].ticket_no if len(issues) == 1 else f"{issues[0].ticket_no} – {issues[-1].ticket_no}"
@@ -469,17 +469,13 @@ def _notify_upload(db: Session, user: User, issues: list[Issue], site_codes: dic
                 target_id=issue.ticket_no, include_heads=True, dedupe_key=f"issue-created:{issue.id}",
             )
         per_user: dict[Any, tuple[User, list[Issue]]] = {}
-        owners_cache: dict[tuple, list[User]] = {}
         for issue in issues:
             if issue.severity == "Critical":
                 continue
             if issue.assigned_to:
                 people = [db.get(User, issue.assigned_to)]
             else:
-                key = (issue.plant_id,)
-                if key not in owners_cache:
-                    owners_cache[key] = plant_responsible_users(db, plant_id=issue.plant_id)
-                people = owners_cache[key]
+                people = []  # unassigned tickets are escalated to the O&M Head, not random plant users
             for person in people:
                 if person is not None and person.is_active and person.id != user.id:
                     per_user.setdefault(person.id, (person, []))[1].append(issue)

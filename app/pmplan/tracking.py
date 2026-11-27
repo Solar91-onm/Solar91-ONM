@@ -385,6 +385,8 @@ def _notify_action(db: Session, row: PMTrackingActivity, plant: Plant, action: s
         elif action in {"approve", "return"}:
             engineer = db.get(User, row.submitted_by) if row.submitted_by else None
             users = [engineer] if engineer and engineer.id != actor.id else []
+            users.extend(u for u in pm_plant_recipients(db, plant_id=row.plant_id, equipment=row.equipment)
+                         if u.role == "Assignee" and u.id != actor.id)
             note = (row.review_note or "").strip()
             message = f"{where} — {'approved' if action == 'approve' else 'returned'} by {actor.display_name}."
             if action == "return" and note:
@@ -397,6 +399,8 @@ def _notify_action(db: Session, row: PMTrackingActivity, plant: Plant, action: s
         else:
             engineer = db.get(User, row.requested_by) if row.requested_by else None
             users = [engineer] if engineer and engineer.id != actor.id else []
+            users.extend(u for u in pm_plant_recipients(db, plant_id=row.plant_id, equipment=row.equipment)
+                         if u.role == "Assignee" and u.id != actor.id)
             message = (f"{where} — permission {'granted' if action == 'grant' else 'denied'} by "
                        f"{actor.display_name}. {(row.authorisation_note or '').strip()[:300]}")
         if not users:

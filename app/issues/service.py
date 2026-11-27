@@ -144,7 +144,8 @@ class IssueService:
         ticket_no = (payload.pop("ticket_no", None) or "").strip()
         auto_number = not ticket_no
         plant_id = payload.get("plant_id")
-        if plant_id and not self.db.get(Plant, plant_id):
+        plant = self.db.get(Plant, plant_id) if plant_id else None
+        if plant_id and not plant:
             raise HTTPException(404, "Plant not found")
         assignee = self._resolve_assignee(assigned_to, None) if assigned_to else None
         if assignee:
@@ -211,7 +212,7 @@ class IssueService:
             self._notify(
                 plant_id=row.plant_id, assigned_to=row.assigned_to, event_type="ticket_assigned",
                 title="Ticket assigned to you - " + row.ticket_no,
-                message=f"{auto_equipment} · {row.description[:180]}",
+                message=f"{plant.site_code if plant else ''} · {auto_equipment} · {row.description[:180]}",
                 target_id=row.ticket_no, dedupe_key=f"issue-auto-assign:{row.id}",
             )
         elif row.assigned_to is None and payload.get("vertical"):
@@ -231,21 +232,11 @@ class IssueService:
             except Exception:
                 self.db.rollback()
                 logger.exception("Unassigned-ticket notification failed; the ticket was created")
-        try:
-            from app.notifications.service import plant_responsible_users, notify_users
-            if row.assigned_to is None:
-                responsible = plant_responsible_users(self.db, plant_id=row.plant_id)
-                notify_users(self.db, responsible, event_type="issue_created", title=f"New issue — {row.ticket_no}",
-                             message=f"{row.plant_id or ''} · {row.description[:180]}", target_type="issue", target_id=row.ticket_no,
-                             dedupe_key=f"issue-owner:{row.id}")
-                self.db.commit()
-        except Exception:
-            self.db.rollback(); logger.exception("Issue owner notification failed; the ticket was created")
         self._notify(
-            plant_id=row.plant_id, assigned_to=row.assigned_to,
+            plant_id=row.plant_id, assigned_to=(None if auto_equipment and row.severity != "Critical" else row.assigned_to),
             event_type="critical_issue" if row.severity == "Critical" else "issue_created",
             title=("Critical issue raised — " if row.severity == "Critical" else "New issue raised — ")+row.ticket_no,
-            message=f"{row.plant_id or ''} · {row.description[:180]}",
+            message=f"{plant.site_code if plant else ''} · {row.vertical or 'Site issue'} · {row.description[:180]}",
             target_id=row.ticket_no,
             include_heads=True,
             dedupe_key=f"issue-created:{row.id}",

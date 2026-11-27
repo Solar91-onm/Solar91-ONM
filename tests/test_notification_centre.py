@@ -269,3 +269,92 @@ def test_a_future_locked_activity_raises_no_reminder_and_reminders_do_not_repeat
     assert len([n for n in rows if n.event_type == "pm_overdue"]) == 1, "one reminder per plant per day"
     assert len([n for n in rows if n.event_type == "pm_submitted"]) == 1
     assert all("INV-02" not in (n.message or "") for n in rows)
+
+
+def test_assignee_preview_only_returns_personal_unread_and_is_bounded(client, db):
+    a = login_user(client, db, role="Assignee", email="personal-a@example.com")
+    b = login_user(client, db, role="Assignee", email="personal-b@example.com")
+    unrelated = Notification(user_id=b.id, event_type="issue_created", title="Not yours")
+    broadcast = Notification(user_id=None, event_type="washing_overdue", title="Legacy broadcast")
+    db.add_all([unrelated, broadcast] + [Notification(user_id=a.id, event_type="issue_created", title=f"Own {i}") for i in range(8)])
+    db.commit()
+    _act_as(db, a)
+    response = client.get(BASE + "/summary?preview=true")
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["personal_alerts"] is True and body["unread_count"] == 8
+    assert len(body["recent_unread"]) == 5
+    assert all(n["title"].startswith("Own ") for n in body["recent_unread"])
+    assert len(client.get(BASE).json()["notifications"]) == 8
+    assert client.post(f"{BASE}/{unrelated.id}/read", json={}).status_code == 404
+    assert client.post(f"{BASE}/{broadcast.id}/read", json={}).status_code == 404
+    assert client.post(BASE + "/read-all", json={}).json()["unread_count"] == 0
+    db.refresh(unrelated); db.refresh(broadcast)
+    assert unrelated.read_at is None and broadcast.read_at is None
+
+
+def test_pm_events_and_action_counts_follow_designated_plant_owner(client, db, monkeypatch):
+    from app.core.models import PlantResponsibility, Issue
+    monkeypatch.setattr("app.pmplan.tracking.business_today", lambda: date(2026, 11, 25))
+    monkeypatch.setattr("app.notifications.router.business_today", lambda: date(2026, 11, 25))
+    p, q = _plant(db, "PER01"), _plant(db, "PER02")
+    head = login_user(client, db, role="O&M Head", email="personal-head@example.com")
+    a = login_user(client, db, role="Assignee", email="pm-owner-a@example.com")
+    b = login_user(client, db, role="Assignee", email="pm-owner-b@example.com")
+    db.add_all([PlantResponsibility(plant_id=p.id, area="pm", assigned_user_id=a.id),
+                PlantResponsibility(plant_id=q.id, area="pm", assigned_user_id=b.id),
+                Issue(ticket_no="NOT-A", plant_id=p.id, description="Own", severity="Critical", status="Assigned", assigned_to=a.id),
+                Issue(ticket_no="NOT-B", plant_id=q.id, description="Other", severity="Critical", status="Assigned", assigned_to=b.id),
+                Issue(ticket_no="NOT-NONE", plant_id=p.id, description="Unassigned", severity="Critical", status="Open")])
+    db.commit()
+    row = _activity(db, p, unit="INV-01", day=1)
+    _activity(db, q, unit="INV-02", day=1)
+    _act_as(db, a)
+    actions = {item['kind']: item['count'] for item in client.get(BASE + '/summary').json()['actions']}
+    assert actions['pm_overdue'] == actions['issue_assigned'] == actions['issue_critical'] == 1
+    _engineer(client, db, p, email="personal-field@example.com")
+    assert _submit(client, row).status_code == 200
+    _act_as(db, head)
+    assert client.post(f"{PM}/{row.id}/action", json={"action":"approve"}).status_code == 200
+    _act_as(db, a)
+    assert {n['event_type'] for n in client.get(BASE).json()['notifications']} == {'pm_submitted', 'pm_approved'}
+    _act_as(db, b)
+    assert client.get(BASE).json()['notifications'] == []
+
+
+def test_washing_notifications_only_go_to_configured_assignee(client, db):
+    from app.core.models import WashingConfig
+    from app.scheduled.washing_cycles import _notify_wash
+    plant = _plant(db, 'WAS01')
+    head = login_user(client, db, role='O&M Head', email='washing-notify-head@example.com')
+    owner = login_user(client, db, role='Assignee', email='washing-notify-owner@example.com')
+    other = login_user(client, db, role='Assignee', email='washing-notify-other@example.com')
+    field = _engineer(client, db, plant, email='washing-notify-field@example.com')
+    config = WashingConfig(plant_id=plant.id, assigned_user_id=owner.id)
+    db.add(config); db.commit()
+    for event, managers in [('washing_daily_report', False), ('washing_cycle_completed', True), ('washing_overdue', True)]:
+        _notify_wash(db, plant, config, event_type=event, title='Cleaning update', message='Report',
+                     dedupe_key=event, extra_user_ids=[other.id, field.id], managers_only=managers)
+    db.commit()
+    assert db.query(Notification).filter_by(user_id=other.id).count() == 0
+    assert db.query(Notification).filter_by(user_id=owner.id).count() == 3
+    assert db.query(Notification).filter_by(user_id=head.id).count() == 3
+    assert db.query(Notification).filter_by(user_id=field.id).count() == 1
+    config.assigned_user_id = other.id; db.commit()
+    _notify_wash(db, plant, config, event_type='washing_daily_report', title='New owner', message='Report', dedupe_key='after-transfer')
+    db.commit()
+    assert db.query(Notification).filter_by(user_id=owner.id).count() == 3
+    assert db.query(Notification).filter_by(user_id=other.id).count() == 1
+    assert db.query(Notification).filter_by(user_id=other.id).one().payload['site_code'] == 'WAS01'
+
+
+def test_notification_ticket_link_supports_non_inverter_and_plant_scope(client, db):
+    from app.core.models import Issue
+    p, q = _plant(db, 'TIC01'), _plant(db, 'TIC02')
+    db.add_all([Issue(ticket_no='CCTV-1', plant_id=p.id, description='Camera', vertical='CCTV', severity='Medium', status='Closed'),
+                Issue(ticket_no='CCTV-2', plant_id=q.id, description='Camera', vertical='CCTV', severity='Medium', status='Assigned')])
+    db.commit()
+    _engineer(client, db, p, email='ticket-link@example.com')
+    assert client.get('/api/issues/by-ticket/CCTV-1').json()['vertical'] == 'CCTV'
+    assert client.get('/api/issues/by-ticket/CCTV-2').status_code == 403
+    assert client.get('/api/issues/by-ticket/MISSING').status_code == 404

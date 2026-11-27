@@ -70,7 +70,10 @@ CATALOGUE: list[dict] = [
     {"key": "cat_mms_and_modules_tightness", "label": "MMS and Modules tightness", "area": "Plant side", "aliases": {"mms and modules tightness"}},
     {"key": "cat_grid_side_tripping_and_voltage_issue", "label": "Grid side tripping and voltage issue", "area": "GSS side", "aliases": {"grid side tripping and voltage issue"}},
     {"key": "misc", "label": "Miscellaneous", "area": "Plant side",
-     "aliases": {"miscellaneous", "misc", "other", "others"}},
+     "aliases": {"miscellaneous", "misc"}},
+    # Other is an independent site-issue reporting category, not a PM visit.
+    {"key": "cat_other", "label": "Other", "area": "Plant side",
+     "aliases": {"other", "others"}},
 ]
 
 _BY_KEY = {item["key"]: item for item in CATALOGUE}

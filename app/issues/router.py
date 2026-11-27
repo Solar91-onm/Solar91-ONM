@@ -180,6 +180,15 @@ def list_issues(db:Annotated[Session,Depends(get_db)],user:Annotated[User,Depend
     severity = normalize_issue_severity(severity)
     return IssueRepository(db).list(plant_id=plant_id,status=status,severity=severity,assignee=assignee,vertical=vertical,site_code=site_code,project_number=project_number,occurred_from=occurred_from,occurred_to=occurred_to,q=q,allowed_plant_ids=plant_scope,owner_id=user.id if mine else None,offset=offset,limit=limit)
 
+@router.get("/by-ticket/{ticket_no}", response_model=IssueOut)
+def issue_by_ticket(ticket_no: str, db: Annotated[Session, Depends(get_db)],
+                    user: Annotated[User, Depends(get_current_user)]):
+    row = IssueRepository(db).by_ticket(ticket_no)
+    if row is None:
+        raise HTTPException(404, "Issue not found")
+    ensure_plant_scope(db, user, row.plant_id)
+    return row
+
 @router.get("/deleted", response_model=list[IssueOut])
 def list_deleted_issues(db:Annotated[Session,Depends(get_db)],user:Annotated[User,Depends(require_permission("issues.manage"))],limit:int=Query(100,ge=1,le=200)):
     return IssueRepository(db).list(deleted_only=True,limit=limit)
