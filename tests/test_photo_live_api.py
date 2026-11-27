@@ -282,5 +282,10 @@ def test_recurring_pm_camera_rejects_locked_and_wrong_role(client, db):
                'checklist_item_id': _checklist_item_id(a.id, CHECKLISTS['Inverter'][0]), 'phase': 'before', 'slot': '1'}
     assert client.post('/api/photos', data=payload, files=[photo_file()]).status_code == 409
     login_user(client, db, role='Assignee', email='assignee-camera@example.com')
+    assert client.post('/api/photos', data=payload, files=[photo_file()]).status_code == 409
+    login_user(client, db, role='O&M Head', email='head-camera@example.com')
     assert client.post('/api/photos', data=payload, files=[photo_file()]).status_code == 403
     assert not StorageStub.objects
+    b.status = 'Approved'; db.commit()
+    login_user(client, db, role='Assignee', email='eligible-assignee-camera@example.com')
+    assert client.post('/api/photos', data=payload, files=[photo_file()]).status_code == 201

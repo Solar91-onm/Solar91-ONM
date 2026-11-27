@@ -31,8 +31,8 @@ class IssueRouting:
     """One fresh rule and eligible-owner snapshot, reusable during bulk routing."""
     def __init__(self, db: Session, equipment_keys: set[str] | None = None,
                  plant_ids: set[UUID] | None = None):
-        if plant_ids is not None and len(plant_ids) == 1 and equipment_keys is not None and len(equipment_keys) <= 1:
-            # Ticket creation reads only its relevant override/default JSON entries, not the
+        if plant_ids is not None and len(plant_ids) == 1 and equipment_keys is not None and len(equipment_keys) <= 64:
+            # Ticket creation (including a bounded PM batch) reads only its relevant override/default JSON entries, not the
             # entire portfolio rule document. Works with PostgreSQL JSONB and SQLite JSON.
             pid = next(iter(plant_ids))
             identities = list(dict.fromkeys([*(rule_key(pid, key) for key in equipment_keys),

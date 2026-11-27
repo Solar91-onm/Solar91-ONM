@@ -291,6 +291,7 @@
       occurredAt: String(issue.occurred_at || "").slice(0, 10),
       dueAt: issue.etc_at || "",
       problem: issue.description,
+      sourceTask: issue.source_task || "",
       status: issue.status,
       assignee: issue.assignee_text || "",
       reportedAt: String(issue.created_at || "").slice(0, 10),
@@ -647,6 +648,10 @@
       }).join("") + '</tbody></table></div>';
   }
 
+  function pmSourceBadge(issue) {
+    return issue.sourceTask ? '<span class="ep-issues__pm-source">From Preventive Maintenance</span>' : '';
+  }
+
   function renderIssueRow(issue, labels) {
     var selectedPlant = state.selectedIssuePlantCode === issue.plantCode;
     return '<tr class="ep-issues__row">' +
@@ -656,7 +661,7 @@
             (selectedPlant ? "Show issues for all plants" : "Show only issues for " + escape(issue.plantName)) +
             '"><strong>' + escape(issue.plantCode) + '</strong><small>' + escape(issue.plantName) +
             '</small></button></td>' +
-          '<td data-label="' + labels[1] + '"><strong>' + escape(issue.equipment) + '</strong></td>' +
+          '<td data-label="' + labels[1] + '"><strong>' + escape(issue.equipment) + '</strong>' + pmSourceBadge(issue) + '</td>' +
           '<td data-label="' + labels[2] + '">' + (issue.subpart
             ? escape(issue.subpart)
             : '<span class="ep-issues__unassigned">Not recorded</span>') + '</td>' +
@@ -933,7 +938,7 @@
     }
     return '<div class="ep-issues__drawer-content">' +
       '<div class="ep-issues__drawer-summary">' +
-        '<div class="ep-issues__drawer-equipment">' + escape(issue.equipment) + '</div>' +
+        '<div class="ep-issues__drawer-equipment">' + escape(issue.equipment) + '</div>' + pmSourceBadge(issue) +
         '<span class="ep-issues__status ep-issues__status--' + status + '">' +
           '<i></i>' + escape(issue.status) + '</span>' +
         '<p><strong>' + escape(issue.plantCode) + '</strong> · ' + escape(issue.plantName) + '</p>' +
@@ -2825,8 +2830,18 @@
     });
   }
 
+  // A PM submission can create Site Issues while this page is not mounted.
+  // Drop only this register's snapshot; the next navigation fetches it once.
+  function invalidate() {
+    state.loaded = false;
+    state.loading = false;
+    state.loadingMore = false;
+    state.requestId += 1;
+  }
+
   global.Solar91PortalIssues = {
     render: render,
+    invalidate: invalidate,
     presetEquipment: presetEquipment,
     openTicket: openTicket
   };

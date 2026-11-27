@@ -433,14 +433,11 @@ def test_string_breakdown_picker_saves_string_ids_and_count():
       const fs = require("fs");
       const vm = require("vm");
       const source = fs.readFileSync("assets/js/site-issues.js", "utf8").replace(/\\r\\n/g, "\\n");
-      const exported = [
-        "  global.Solar91PortalIssues = {{",
-        "    render: render,",
-        "    presetEquipment: presetEquipment,",
-        "    openTicket: openTicket",
-        "  }};"
-      ].join("\\n");
-      if (!source.includes(exported)) throw new Error("Issue module export changed.");
+      const exported = "  global.Solar91PortalIssues = {{";
+
+if (!source.includes(exported)) {{
+  throw new Error("Issue module export not found.");
+}}
       const testExport = [
         "  global.__issueTest = {{",
         "    loadUnitConfigFor: loadUnitConfigFor,",
@@ -451,7 +448,10 @@ def test_string_breakdown_picker_saves_string_ids_and_count():
         "    stringCache: stringUnitConfigCache",
         "  }};"
       ].join("\\n");
-      const testSource = source.replace(exported, testExport);
+      const testSource = source.replace(
+  exported,
+  testExport + "\\n" + exported
+);
       const calls = [];
       const context = {{
         Solar91PortalData: {{}},

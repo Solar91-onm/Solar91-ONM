@@ -1253,3 +1253,6 @@
 @media (max-width: 760px) {
   .ep-issues [data-issue-owner-view], .ep-pd__health-head [data-issue-owner-view] { min-height: 44px; }
 }
+
+/* Corrective issue provenance, visible in desktop and mobile registers. */
+.ep-issues__pm-source { display: block; width: fit-content; max-width: 100%; margin-top: 4px; padding: 2px 6px; border: 1px solid #9bb6d1; border-radius: 4px; background: #edf4fc; color: #214b80; font-size: 11px; font-weight: 600; white-space: normal; overflow-wrap: anywhere; }

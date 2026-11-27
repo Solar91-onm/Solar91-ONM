@@ -321,7 +321,7 @@ def _out(row, blocker, user, today, summary=False):
     # Derived here without a write so the GET endpoint stays read-only.
     item_ids = [_checklist_item_id(row.id, task) for task in checks]
     return {**base, **_snapshot(row), "checks": checks, "checklistItemIds": item_ids,
-            "can_submit": user.role == "Site Engineer" and not blocker and status in {"Scheduled", "Returned"}
+            "can_submit": user.role in {"Site Engineer", "Assignee"} and not blocker and status in {"Scheduled", "Returned"}
                           and row.scheduled_on <= today and row.equipment in CHECKLISTS,
             "can_request": user.role == "Site Engineer" and bool(blocker) and row.permission in {"None", "Denied"},
             "can_grant": user.role in {"O&M Head", "Assignee"} and bool(blocker) and row.permission == "Requested",
@@ -615,6 +615,12 @@ def tracking_action(activity_id: uuid.UUID, payload: TrackingAction,
     target_plant = db.scalar(select(PMTrackingActivity.plant_id).where(PMTrackingActivity.id == activity_id))
     if target_plant is None or (scope is not None and target_plant not in scope):
         raise HTTPException(404, "PM activity not available in your scope")
+    # Take the existing issue-routing lock BEFORE the plant lock to match
+    # normal issue creation (which can acquire a plant FK lock on insert).
+    if payload.action == "submit" and user.role in {"Site Engineer", "Assignee"} and any(
+            c.result in {"Not OK", "Abnormality"} for c in payload.checks):
+        from app.issues.service import _lock_issue_ticket_numbers
+        _lock_issue_ticket_numbers(db)
     plant = db.scalar(select(Plant).where(Plant.id == target_plant).with_for_update())
     if plant is None or (plant.status or "").casefold() == "inactive":
         raise HTTPException(404, "Plant not available")
@@ -635,6 +641,7 @@ def tracking_action(activity_id: uuid.UUID, payload: TrackingAction,
         raise HTTPException(409, "Action not permitted for your role or current activity state. Refresh the page.")
     if action in {"return", "request", "grant", "deny"} and not reason:
         raise HTTPException(422, "A reason is required")
+    corrective_issues = []
     if action == "submit":
         expected = _checks_for(row)
         if len(payload.checks) != len(expected):
@@ -645,11 +652,14 @@ def tracking_action(activity_id: uuid.UUID, payload: TrackingAction,
             raise HTTPException(422, "An observation or justification is required for every Not OK / Abnormality / N/A result")
         if all(c.result == "N/A" for c in payload.checks):
             raise HTTPException(422, "At least one applicable check is required; contact the O&M Head for an entirely inapplicable activity")
-        row.checklist = [{"task": task, "result": c.result, "note": c.note.strip()} for task, c in zip(expected, payload.checks)]
+        row.checklist = [{"id": _checklist_item_id(row.id, task), "task": task, "result": c.result, "note": c.note.strip()} for task, c in zip(expected, payload.checks)]
         row.inspected_on, row.remarks = payload.inspected_on, reason
         row.submitted_by, row.submitted_name, row.submitted_at = user.id, user.display_name, now
         row.status = "Pending approval"
         row.reviewed_by = row.reviewed_name = row.reviewed_at = row.review_note = None
+        if any(c.result in {"Not OK", "Abnormality"} for c in payload.checks):
+            from app.pmplan.issue_bridge import create_corrective_issues
+            corrective_issues = create_corrective_issues(db, row, plant, user, now)
     elif action in {"approve", "return"}:
         row.status = "Approved" if action == "approve" else "Returned"
         row.reviewed_by, row.reviewed_name, row.reviewed_at, row.review_note = user.id, user.display_name, now, reason
@@ -665,7 +675,8 @@ def tracking_action(activity_id: uuid.UUID, payload: TrackingAction,
     db.add(AuditLog(user_id=user.id, actor_name=user.display_name, action="PM tracking: " + action,
         module="Preventive Maintenance", entity_type="pm_tracking_activity", entity_id=str(row.id),
         before_state=before, after_state=_snapshot(row), metadata_json={"plant_id": str(row.plant_id),
-            "equipment_id": row.equipment_id, "scheduled_on": _iso(row.scheduled_on)}))
+            "equipment_id": row.equipment_id, "scheduled_on": _iso(row.scheduled_on),
+            "corrective_issues": corrective_issues}))
     db.commit()
     _notify_action(db, row, plant, action, user)
-    return {"id": str(row.id), "status": row.status, "permission": row.permission}
+    return {"id": str(row.id), "status": row.status, "permission": row.permission, "corrective_issues": corrective_issues}

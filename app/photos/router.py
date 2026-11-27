@@ -565,8 +565,8 @@ def create_photos(db: Annotated[Session, Depends(get_db)], user: Annotated[User,
         def validate_pm_checkpoint(activity_row):
             if activity_row is None or activity_row.plant_id != plant.id:
                 raise HTTPException(404, "PM activity not found at this plant")
-            if user.role != "Site Engineer" or (plant.status or "").casefold() == "inactive":
-                raise HTTPException(403, "Only the plant Site Engineer can record PM evidence")
+            if user.role not in {"Site Engineer", "Assignee"} or (plant.status or "").casefold() == "inactive":
+                raise HTTPException(403, "Only a scoped Site Engineer or Assignee can record PM evidence")
             first, last = _bounds(activity_row.scheduled_on.strftime("%Y-%m"))
             first_open = db.scalar(select(_PMActivity).where(_PMActivity.plant_id == plant.id,
                 _PMActivity.scheduled_on.between(first, last), _PMActivity.status != "Approved")
