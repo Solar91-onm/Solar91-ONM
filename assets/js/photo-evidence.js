@@ -10,6 +10,7 @@
   }
 
   function scaled(file) {
+    if (file.type === "application/pdf") return Promise.resolve({ blob: file, name: file.name });
     function encode(image, close) {
       var width = image.width || image.naturalWidth;
       var height = image.height || image.naturalHeight;
@@ -68,13 +69,14 @@
   }
 
   function upload(options) {
-    return Promise.all(options.files.map(scaled)).then(function (files) {
+    return prepare(options.files).then(function (files) {
       var body = new FormData();
       body.append("plant_id", options.plantId);
       body.append("category", options.category);
       body.append("link_type", options.linkType);
       body.append("link_id", options.linkId);
       body.append("submission_id", options.submissionId || submissionId());
+      if (options.checklistItemId) body.append("checklist_item_id", options.checklistItemId);
       if (options.phase) body.append("phase", options.phase);
       if (options.slot !== undefined && options.slot !== null) body.append("slot", String(options.slot));
       files.forEach(function (file) { body.append("files", file.blob, file.name); });
@@ -197,7 +199,9 @@
    * bytes that reach Storage are the prepared ones either way.
    */
   function prepare(files) {
-    return Promise.all(files.map(scaled));
+    return files.reduce(function (pending, file) {
+      return pending.then(function (prepared) { return scaled(file).then(function (item) { prepared.push(item); return prepared; }); });
+    }, Promise.resolve([]));
   }
 
   global.Solar91PhotoEvidence = {

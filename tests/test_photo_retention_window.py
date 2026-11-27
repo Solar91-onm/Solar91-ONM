@@ -184,3 +184,35 @@ def test_the_daily_job_follows_the_window_set_in_the_portal(client, db):
     result = purge_photo_originals(db, dry_run=True)
     assert result["retention_days"] == 90
     assert result["photos"] == 1, "only the 100-day-old original is past a 90-day window"
+
+
+def test_saved_scoped_policy_and_manual_override(client, db, _no_storage_calls):
+    login_user(client, db, role="O&M Head", email="scoped-retention@example.com")
+    plant = _plant(db)
+    other = Plant(site_code="PHO02", plant_name="Other Plant")
+    db.add(other)
+    db.commit()
+    match = _photo(db, plant, days_old=45, name="match")
+    pm = _photo(db, plant, days_old=45, name="pm")
+    pm.category = "pm"
+    pdf = _photo(db, plant, days_old=45, name="pdf")
+    pdf.content_type = "application/pdf"
+    outside = _photo(db, other, days_old=45, name="outside")
+    recent = _photo(db, plant, days_old=5, name="recent")
+    db.commit()
+    ids = [match.id, pm.id, pdf.id, outside.id, recent.id]
+    assert client.put(BASE, json={"days": 30, "category": "issue", "plant_id": str(plant.id), "automatic": True}).status_code == 200
+    assert client.get(BASE).json()["automatic"] is True
+    assert client.get(BASE).json()["plant_id"] == str(plant.id)
+    assert purge_photo_originals(db, dry_run=True)["photos"] == 1
+    assert not _no_storage_calls
+    assert purge_photo_originals(db)["photos"] == 1
+    db.expire_all()
+    assert [db.get(SitePhoto, i).original_purged_at is not None for i in ids] == [True, False, False, False, False]
+    preview = client.post(BASE + "/purge", json={"older_than_days": 30, "category": "pm", "plant_id": None, "dry_run": True})
+    assert preview.json()["photos"] == 1
+    assert client.post(BASE + "/purge", json={"older_than_days": 30, "category": "pm", "plant_id": None}).json()["photos"] == 1
+    assert client.get(BASE).json()["category"] == "issue"
+    assert client.put(BASE, json={"days": 30, "category": "invalid"}).status_code == 422
+    assert client.post(BASE + "/purge", json={"category": "invalid"}).status_code == 422
+    assert len(_no_storage_calls) == 2

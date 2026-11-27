@@ -236,3 +236,51 @@ def test_release_connection_never_commits_pending_writes(db):
     release_connection(db)
     db.rollback()
     assert db.query(Plant).filter_by(site_code='PENDING1').count()==0
+
+
+def test_recurring_pm_camera_evidence_slots_and_retry(client, db):
+    from app.pmplan.tracking import PMTrackingActivity, CHECKLISTS, _checklist_item_id
+    from app.core.timeutil import business_today
+    engineer = login_user(client, db, role='Site Engineer')
+    p = plant(db, 'PM Camera')
+    db.add(UserPlantAssignment(user_id=engineer.id, plant_id=p.id))
+    a = PMTrackingActivity(plant_id=p.id, equipment='Inverter', equipment_id='INV 1',
+                           scheduled_on=business_today(), checklist=[], status='Scheduled')
+    db.add(a); db.commit()
+    item = _checklist_item_id(a.id, CHECKLISTS['Inverter'][0])
+    payload = {'plant_id': str(p.id), 'category': 'pm', 'link_type': 'pm', 'link_id': str(a.id),
+               'checklist_item_id': item, 'phase': 'before', 'slot': '1', 'submission_id': str(uuid.uuid4())}
+    def post():
+        return client.post('/api/photos', data=payload, files=[photo_file()])
+    good = post()
+    assert good.status_code == 201, good.text
+    assert good.json()['records'][0]['phase'] == 'before'
+    assert post().status_code == 200
+    payload['submission_id'] = str(uuid.uuid4())
+    assert post().status_code == 409
+    payload.update(phase='after', slot='2')
+    assert post().status_code == 201
+    assert db.query(SitePhoto).count() == 2
+    assert len(StorageStub.objects) == 4
+    payload.update(submission_id=str(uuid.uuid4()), checklist_item_id='invalid')
+    assert post().status_code == 422
+
+
+def test_recurring_pm_camera_rejects_locked_and_wrong_role(client, db):
+    from app.pmplan.tracking import PMTrackingActivity, CHECKLISTS, _checklist_item_id
+    from app.core.timeutil import business_today
+    from datetime import timedelta
+    engineer = login_user(client, db, role='Site Engineer')
+    p = plant(db, 'PM Locked')
+    db.add(UserPlantAssignment(user_id=engineer.id, plant_id=p.id))
+    today = business_today()
+    due = today if today.day > 1 else today - timedelta(days=1)
+    a = PMTrackingActivity(plant_id=p.id, equipment='Inverter', equipment_id='INV 1', scheduled_on=due)
+    b = PMTrackingActivity(plant_id=p.id, equipment='Inverter', equipment_id='INV 2', scheduled_on=due-timedelta(days=1))
+    db.add_all([a,b]); db.commit()
+    payload = {'plant_id': str(p.id), 'category': 'pm', 'link_type': 'pm', 'link_id': str(a.id),
+               'checklist_item_id': _checklist_item_id(a.id, CHECKLISTS['Inverter'][0]), 'phase': 'before', 'slot': '1'}
+    assert client.post('/api/photos', data=payload, files=[photo_file()]).status_code == 409
+    login_user(client, db, role='Assignee', email='assignee-camera@example.com')
+    assert client.post('/api/photos', data=payload, files=[photo_file()]).status_code == 403
+    assert not StorageStub.objects

@@ -19,6 +19,7 @@
     // pm-cycle-plans as a component (mountTracker) rather than as a second panel on the page.
     // The portfolio's registers use the SHARED click-to-sort headings and searchable column
     // filters, not copies of them.
+    "pm-tracking": ["photo-evidence"],
     "pm-overview": ["pm-cycle-plans", "table-sort", "table-column-filter"],
     settings: ["categories"]
   };

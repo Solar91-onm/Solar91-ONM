@@ -1167,11 +1167,11 @@
         '<small class="ep-issues__inline-error" data-breakdown-remark-error role="alert" hidden></small>' +
       '</label>' +
       '<div class="ep-issues__wizard-fields ep-issues__wizard-fields--evidence">' +
-        '<label class="ep-issues__wizard-field">Evidence photos (up to ' + MAX_ISSUE_PHOTOS + ')' +
-          '<input name="evidence" type="file" accept="image/jpeg,image/png,image/webp" capture="environment" multiple />' +
+        '<div class="ep-issues__wizard-field">Evidence photos (up to ' + MAX_ISSUE_PHOTOS + ')' +
+          '<span class="ep-field-camera-actions"><label class="ep-field-camera">Take photo<input name="evidence" type="file" accept="image/jpeg,image/png,image/webp" capture="environment" aria-label="Take issue photo" /></label><label class="ep-field-camera">Choose photos<input name="evidence" type="file" accept="image/jpeg,image/png,image/webp" multiple aria-label="Choose issue photos" /></label></span>' +
           '<small>' + (draft.evidenceFiles.length
             ? draft.evidenceFiles.length + " photo" + (draft.evidenceFiles.length === 1 ? "" : "s") + " selected"
-            : "No photos selected") + '</small></label>' +
+            : "No photos selected") + '</small><button type="button" class="ep-issues__button" data-issue-clear-draft-photos>Clear selected photos</button></div>' +
         assignmentField +
       '</div>' +
       '<p class="ep-issues__wizard-error" data-wizard-error role="alert"' +
@@ -1780,7 +1780,9 @@
         return;
       }
       if (event.target.name === "evidence" && state.modalMode === "create" && state.draft) {
-        var files = Array.prototype.slice.call(event.target.files || []);
+        var picked = Array.prototype.slice.call(event.target.files || []);
+        if (!picked.length) return;
+        var files = state.draft.evidenceFiles.concat(picked);
         var error = host.querySelector("[data-wizard-error]");
         var supportedTypes = ["image/jpeg", "image/png", "image/webp"];
         if (files.length > MAX_ISSUE_PHOTOS || files.some(function (file) { return supportedTypes.indexOf(file.type) === -1; })) {
@@ -1805,6 +1807,7 @@
     });
     host.addEventListener("click", function (event) {
       if (!active || active.host !== host) return;
+      if (event.target.closest("[data-issue-clear-draft-photos]") && state.draft) { state.draft.evidenceFiles = []; renderWizardView(); return; }
       var compactToggle = event.target.closest("[data-compact-cell-toggle]");
       if (compactToggle) {
         var cell = compactToggle.closest("[data-compact-cell]");

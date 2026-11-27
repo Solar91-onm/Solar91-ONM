@@ -1261,6 +1261,31 @@
       });
     });
 
+    // Phone navigation uses its own state; never let desktop collapse hide phone links.
+    var mobileMenu = document.querySelector("[data-mobile-nav-toggle]");
+    var mobileShell = document.querySelector(".ep-shell");
+    var mobileSidebar = document.querySelector("#portal-primary-nav");
+    if (mobileMenu && mobileShell && mobileSidebar) {
+      function setMobileMenu(open) {
+        mobileShell.classList.toggle("is-mobile-nav-open", open);
+        mobileMenu.setAttribute("aria-expanded", String(open));
+        mobileMenu.setAttribute("aria-label", open ? "Close navigation" : "Open navigation");
+      }
+      mobileMenu.addEventListener("click", function () {
+        var open = mobileMenu.getAttribute("aria-expanded") !== "true";
+        if (open) mobileShell.classList.remove("is-sidebar-collapsed");
+        setMobileMenu(open);
+      });
+      mobileSidebar.addEventListener("click", function (ev) {
+        if (ev.target.closest("[data-nav], [data-navigation-history]")) setMobileMenu(false);
+      });
+      document.addEventListener("keydown", function (ev) {
+        if (ev.key === "Escape" && mobileMenu.getAttribute("aria-expanded") === "true") {
+          setMobileMenu(false); mobileMenu.focus();
+        }
+      });
+    }
+
     // Sidebar collapse toggle
     var collapseBtn = document.querySelector("[data-sidebar-toggle]");
     if (collapseBtn) {

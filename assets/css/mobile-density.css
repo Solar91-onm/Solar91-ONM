@@ -1,0 +1,88 @@
+/* Shared responsive density layer, loaded after page styles. No JS measurement or network work. */
+.ep-mobile-menu { display: none; }
+.ep-page__inner, .ep-tab-view.is-visible { min-width: 0; gap: 14px; }
+.ep-pt__toolbar, .ep-ih__toolbar { padding: 7px 10px; gap: 6px; }
+.ep-issues__metric { min-height: 66px; padding: 8px 12px; column-gap: 8px; }
+.ep-issues__metric strong { font-size: 24px; }
+.ep-issues__snapshot, .ep-issues__triage, .ep-issues__results { padding: 12px; }
+.ep-metric { min-height: 176px; padding: 14px 16px; gap: 9px; }
+.ep-metric__figure { min-height: 42px; }
+.ep-metric-wrap--washing .ep-metric { padding-top: 54px; }
+.ep-ih__plant-table th, .ep-ih__plant-table td { padding-top: 8px; padding-bottom: 8px; }
+.ep-pm__table th, .ep-pm__table td { padding: 7px 10px; }
+@media (max-width: 820px) {
+  .ep-shell, .ep-shell.is-sidebar-collapsed { grid-template-columns: minmax(0, 1fr); }
+  .ep-shell .ep-sidebar { display: none; }
+  .ep-shell.is-mobile-nav-open .ep-sidebar { display: flex; position: fixed; inset: 0 auto 0 0; width: min(320px, 86vw); height: 100vh; height: 100dvh; z-index: 35; box-shadow: 0 0 0 100vmax #10221966; padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom); }
+  /* The toggle must stay above the drawer and its backdrop. */
+  .ep-shell.is-mobile-nav-open .ep-topbar { z-index: 36; }
+  .ep-shell.is-mobile-nav-open .ep-sidebar { top: 0; padding-top: calc(60px + env(safe-area-inset-top)); }
+  .ep-shell [data-sidebar-toggle] { display: none !important; }
+  .ep-mobile-menu { display: inline-flex; width: auto; min-width: 56px; min-height: 44px; padding: 0 10px; font-weight: 650; }
+  .ep-topbar { padding-top: env(safe-area-inset-top); }
+  .ep-topbar__inner { padding: 5px 8px; gap: 6px; }
+  .ep-topbar__title { margin: 0; min-width: 0; font-size: 14px; overflow-wrap: anywhere; }
+  .ep-topbar__meta { min-width: 0; flex-wrap: wrap; gap: 5px; }
+  .ep-page { padding: 8px max(8px, env(safe-area-inset-right)) calc(12px + env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left)); }
+  .ep-page__inner, .ep-tab-view.is-visible { gap: 10px; }
+  .ep-sidebar__scroll { min-height: 0; overflow-y: auto; }
+  .ep-sidebar__history-button, .ep-nav-item, .ep-nav-group__toggle, .ep-nav-chevron { min-height: 44px; }
+  .ep-main :is(input:not([type=checkbox]):not([type=radio]):not([type=hidden]):not([type=file]), select, textarea), .ep-sidebar input:not([type=hidden]) { font-size: 16px; max-width: 100%; }
+  .ep-main :is(input:not([type=checkbox]):not([type=radio]):not([type=hidden]), select, textarea) { min-height: 44px; }
+  :is(.ep-icon-btn, .ep-issues__button, .ep-pt__add, .ep-pt__edit, .ep-settings__button, .ep-wb__button, .ep-pm__button) { min-height: 44px; }
+  .ep-main :is(.ep-pt__toolbar, .ep-ih__toolbar, .ep-issues__filter-row, .ep-issues__hero-actions) { flex-wrap: wrap; min-width: 0; }
+  /* Retain native table semantics and all columns. Existing card registers are excluded. */
+  :is(.ep-table-wrap, .ep-pt__table-wrap, .ep-pt__scroll, .ep-pm__table-wrap, .ep-cat__table-wrap, .ep-wb__table-wrap) { max-width: 100%; min-width: 0; }
+  .ep-table-wrap, .ep-table-wrap:has(> .ep-ih__plant-table), .ep-pt__scroll, .ep-pm__table-wrap, .ep-pm__board-content .ep-pm__table-wrap, .ep-cat__table-wrap { overflow-x: auto; }
+  .ep-table-wrap > .ep-table, .ep-pm__table-wrap > .ep-pm__table { min-width: 680px; }
+  .ep-pt__scroll > .ep-pt__table:not(.ep-security__table) { min-width: 900px; }
+  .ep-cat__table { min-width: 580px; }
+  .ep-ih__tickets { table-layout: auto; }
+  .ep-ih__tickets td, .ep-ih__tickets td > * { white-space: normal; overflow-wrap: anywhere; }
+  :is(.ep-table, .ep-pt__table, .ep-pm__table) td { overflow-wrap: anywhere; }
+  :is(.ep-pt__scroll, .ep-table-wrap, .ep-pm__table-wrap) button { min-height: 44px; }
+  .ep-main img { max-width: 100%; }
+  .ep-issues__table td, .ep-security__table td { font-size: 13px; overflow-wrap: anywhere; }
+  .ep-issues__table td strong, .ep-issues__table td small { font-size: 12px; }
+  .ep-issues__table td::before, .ep-security__table td::before { font-size: 11px; }
+  .ep-issues__table td > *, .ep-security__table td > * { min-width: 0; max-width: 100%; }
+  .ep-issues__table td:last-child .ep-issues__button { min-height: 44px; }
+  dialog { max-width: calc(100% - 12px); max-height: calc(100dvh - 12px); }
+  dialog :is(input:not([type=checkbox]):not([type=radio]), select, textarea) { font-size: 16px; min-height: 44px; max-width: 100%; }
+  dialog button { min-height: 44px; }
+}
+@media (max-width: 760px) {
+  .ep-issues__summary { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .ep-issues__metric { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto auto; min-height: 72px; padding: 7px; row-gap: 2px; border-right: 1px solid #e9eeeb; border-bottom: 0; }
+  .ep-issues__metric-icon { display: none; }
+  .ep-issues__metric strong { grid-column: 1; grid-row: 2; font-size: 22px; line-height: 1.1; }
+  .ep-issues__metric-label, .ep-issues__metric-note { overflow-wrap: anywhere; font-size: 10px; }
+  .ep-issues__hero { padding: 12px; gap: 8px; }
+  .ep-metric { min-height: 0; padding: 12px; gap: 7px; }
+  .ep-ih__kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .ep-ih__kpi { padding: 4px 6px; border-top: 0; border-left: 1px solid var(--ep-border-soft); }
+  .ep-ih__kpi:first-child { border-left: 0; }
+  .ep-ih__kpi strong { font-size: 19px; }
+  .ep-ih__kpi-label, .ep-ih__kpi small { overflow-wrap: anywhere; }
+  /* Card registers already expose data-labels. Do not replace them with wide tables. */
+  .ep-security__scroll, .ep-security__scroll > .ep-security__table { overflow: visible; min-width: 0; max-height: none; }
+}
+/* Field evidence: camera and gallery are separate native pickers. */
+.ep-field-camera-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.ep-field-camera { position: relative; display: inline-flex; align-items: center; justify-content: center; padding: 8px 12px; min-height: 44px; border: 1px solid #a9c9b0; border-radius: 6px; color: #145b30; background: #f3faf4; cursor: pointer; overflow: hidden; }
+.ep-field-camera input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
+.ep-field-camera:focus-within { outline: 2px solid #168548; outline-offset: 2px; }
+@media (max-width: 820px) {
+  .s91pm-modal-card { max-height: 100dvh; }
+  .s91pm-modal-foot { padding-bottom: calc(10px + env(safe-area-inset-bottom)); }
+  .s91pm-modal-head { padding-top: calc(10px + env(safe-area-inset-top)); }
+  .s91pm-modal-x, .s91pm-photo-slot, .s91pm-modal button, .ep-calendar__photo-add, .ep-calendar__photo-replace, .ep-calendar__photo-remove, .ep-issues__photo-add, .ep-issues__photo-remove { min-height: 44px; }
+  .s91pm-check-photos { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 6px; }
+  .ep-calendar__photo-slot, .ep-calendar__photo-row, .ep-issues__wizard-field { min-width: 0; overflow-wrap: anywhere; }
+  .ep-issues__wizard-field input[type=file] { max-width: 100%; }
+}
+
+.ep-settings__retention-scope { margin: 6px 0 10px; }
+.ep-settings__retention-scope label { display: grid; gap: 3px; flex: 1 1 160px; min-width: 0; }
+.ep-settings__retention-scope select { width: 100%; min-height: 38px; padding: 6px; border: 1px solid var(--ep-border-soft, #d3dad5); border-radius: 6px; background: white; }
+@media (max-width: 820px) { .ep-settings__retention-scope select { min-height: 44px; } }

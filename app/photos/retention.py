@@ -2,6 +2,9 @@
 from __future__ import annotations
 
 import logging
+import os
+import uuid
+from threading import Lock
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select, update
@@ -9,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.core.database import release_connection
-from app.core.models import AppSetting, AuditLog, SitePhoto, User
+from app.core.models import AppSetting, AuditLog, Plant, SitePhoto, User
 from app.storage.service import SupabaseStorage
 from app.storage.usage import adjust_bucket_usage
 
@@ -27,6 +30,21 @@ MAX_RETENTION_DAYS = 365
 # A manual sweep may reach further back than the standing window, but never to today's photos:
 # an original uploaded this morning must still be downloadable at full size.
 MIN_PURGE_DAYS = 1
+CATEGORIES = {"issue", "pm", "washing", "inventory", "safety", "other"}
+_SWEEP_LOCK = Lock()
+
+
+def _scope(category, plant_id):
+    if category is not None and category not in CATEGORIES:
+        raise ValueError("Choose a valid photo module")
+    return category, uuid.UUID(str(plant_id)) if plant_id is not None else None
+
+
+def stored_policy(db: Session) -> dict:
+    row = db.get(AppSetting, RETENTION_SETTING)
+    value = row.setting_value if row is not None else None
+    return value if isinstance(value, dict) else {}
+
 
 
 def retention_days(db: Session) -> int:
@@ -54,32 +72,48 @@ def retention_settings(db: Session) -> dict:
         "source": "portal" if row is not None else "deployment",
         "updated_by": author.display_name if author else None,
         "updated_at": row.updated_at.isoformat() if row is not None and row.updated_at else None,
+        "category": stored_policy(db).get("category"),
+        "plant_id": stored_policy(db).get("plant_id"),
+        "automatic": stored_policy(db).get("automatic", os.getenv("PHOTO_RETENTION_DAILY_JOB", "0") == "1"),
+        "plants": [{"id": str(p.id), "label": f"{p.site_code} — {p.plant_name}"}
+                   for p in db.execute(select(Plant.id, Plant.site_code, Plant.plant_name).order_by(Plant.site_code))],
     }
 
 
-def set_retention_days(db: Session, user: User, days: int) -> dict:
+def set_retention_days(db: Session, user: User, days: int, *, category=None, plant_id=None,
+                       automatic: bool | None = None, replace_scope: bool = False) -> dict:
     """Store the window and record who changed it. Nothing is deleted by this call."""
     if not MIN_RETENTION_DAYS <= int(days) <= MAX_RETENTION_DAYS:
         raise ValueError(f"Keep originals for {MIN_RETENTION_DAYS}-{MAX_RETENTION_DAYS} days")
-    before = retention_days(db)
+    previous = stored_policy(db).copy()
+    before = {"days": retention_days(db), **{k: v for k, v in previous.items() if k != "days"}}
+    value = {**previous, "days": int(days)}
+    if replace_scope:
+        category, plant_id = _scope(category, plant_id)
+        if plant_id is not None and db.get(Plant, plant_id) is None:
+            raise ValueError("Plant not found")
+        value.update(category=category, plant_id=str(plant_id) if plant_id else None)
+    if automatic is not None:
+        value["automatic"] = automatic
     row = db.get(AppSetting, RETENTION_SETTING)
     if row is None:
-        db.add(AppSetting(setting_key=RETENTION_SETTING, setting_value={"days": int(days)}, updated_by=user.id))
+        db.add(AppSetting(setting_key=RETENTION_SETTING, setting_value=value, updated_by=user.id))
     else:
-        row.setting_value = {"days": int(days)}
+        row.setting_value = value
         row.updated_by = user.id
     db.add(AuditLog(
         user_id=user.id, actor_name=user.display_name, action="Changed photo retention window",
         module="Photos", entity_type="app_setting", entity_id=RETENTION_SETTING,
-        before_state={"days": before}, after_state={"days": int(days)},
+        before_state=before, after_state=value,
     ))
     db.commit()
     return retention_settings(db)
 
 
-def purge_photo_originals(db: Session, *, dry_run: bool = False, batch_size: int = 100,
+def _purge_photo_originals(db: Session, *, dry_run: bool = False, batch_size: int = 100,
                           max_photos: int = MAX_PHOTOS_PER_RUN,
-                          older_than_days: int | None = None) -> dict:
+                          older_than_days: int | None = None, category=None, plant_id=None,
+                          override_scope: bool = False) -> dict:
     """Delete full-size originals older than the window; thumbnails and photo records stay.
 
     ``older_than_days`` runs this one sweep against a different age than the standing window —
@@ -92,6 +126,15 @@ def purge_photo_originals(db: Session, *, dry_run: bool = False, batch_size: int
         days = int(older_than_days)
         if not MIN_PURGE_DAYS <= days <= MAX_RETENTION_DAYS:
             raise ValueError(f"Purge originals older than {MIN_PURGE_DAYS}-{MAX_RETENTION_DAYS} days")
+    if not override_scope:
+        policy = stored_policy(db)
+        category, plant_id = policy.get("category"), policy.get("plant_id")
+    category, plant_id = _scope(category, plant_id)
+    conditions = []
+    if category is not None:
+        conditions.append(SitePhoto.category == category)
+    if plant_id is not None:
+        conditions.append(SitePhoto.plant_id == plant_id)
     now = datetime.now(timezone.utc)
     cutoff = now - timedelta(days=days)
     # Oldest first, and never the whole table at once: a long-neglected backlog must not be
@@ -103,6 +146,9 @@ def purge_photo_originals(db: Session, *, dry_run: bool = False, batch_size: int
             SitePhoto.created_at < cutoff,
             SitePhoto.original_purged_at.is_(None),
             SitePhoto.thumbnail_path.is_not(None),
+            SitePhoto.thumbnail_path != SitePhoto.storage_path,
+            SitePhoto.content_type.like("image/%"),
+            *conditions,
         )
         .order_by(SitePhoto.created_at, SitePhoto.id)
         .limit(limit)
@@ -146,3 +192,14 @@ def purge_photo_originals(db: Session, *, dry_run: bool = False, batch_size: int
     }
     logger.info("Photo retention sweep: photos=%s bytes_reclaimed=%s", purged, bytes_reclaimed)
     return result
+
+
+def purge_photo_originals(db: Session, **kwargs) -> dict:
+    if kwargs.get("dry_run"):
+        return _purge_photo_originals(db, **kwargs)
+    if not _SWEEP_LOCK.acquire(blocking=False):
+        raise ValueError("A photo cleanup is already running; try again later")
+    try:
+        return _purge_photo_originals(db, **kwargs)
+    finally:
+        _SWEEP_LOCK.release()

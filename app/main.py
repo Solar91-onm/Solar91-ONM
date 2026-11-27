@@ -4,7 +4,7 @@ import asyncio
 import logging
 import os
 from contextlib import asynccontextmanager
-from datetime import datetime, time as dt_time, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 import sys
 
@@ -84,7 +84,7 @@ async def lifespan(app: FastAPI):
         app.state.pm_job = asyncio.create_task(_start_pm_daily_job_loop())
     else:
         app.state.pm_job = None
-    if settings.app_env != "test" and os.getenv("PHOTO_RETENTION_DAILY_JOB", "0") == "1":
+    if settings.app_env != "test" and (settings.app_env == "production" or os.getenv("PHOTO_RETENTION_DAILY_JOB", "0") == "1"):
         app.state.photo_retention_job = asyncio.create_task(_start_photo_retention_daily_job())
     else:
         app.state.photo_retention_job = None
@@ -337,32 +337,38 @@ async def _start_pm_daily_job_loop():
 
 
 async def _start_photo_retention_daily_job():
-    """Run the Storage API retention sweep once daily on one configured worker."""
-    async def _once():
-        def _run():
-            from app.core.database import SessionLocal
-            from app.photos.retention import purge_photo_originals
-            with SessionLocal() as db:
-                return purge_photo_originals(db)
+    """Check hourly; a waking free-tier worker catches up on the next tick.
 
-        try:
-            result = await asyncio.to_thread(_run)
-            logger.info("Daily photo retention complete: %s", result)
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            logging.getLogger("solar91.photos").exception("Daily photo retention failed")
+    Only an explicitly enabled portal policy or the legacy deployment opt-in can delete.
+    Single-worker deployment; the retention service serializes sweeps within the process.
+    """
+    last_completed = None
+    def _run():
+        from app.core.database import SessionLocal
+        from app.photos.retention import purge_photo_originals, stored_policy
+        with SessionLocal() as db:
+            policy = stored_policy(db)
+            enabled = policy.get("automatic", os.getenv("PHOTO_RETENTION_DAILY_JOB", "0") == "1")
+            if enabled is not True or not settings.storage_configured:
+                return None
+            return purge_photo_originals(db)
 
     while True:
         if not app.state.bootstrap_ready:
             await asyncio.sleep(30)
             continue
-        now = datetime.now(timezone.utc)
-        next_run = datetime.combine(now.date(), dt_time(2, 15), tzinfo=timezone.utc)
-        if next_run <= now:
-            next_run += timedelta(days=1)
-        await asyncio.sleep((next_run - now).total_seconds())
-        await _once()
+        today = datetime.now(timezone.utc).date()
+        if last_completed != today:
+            try:
+                result = await asyncio.to_thread(_run)
+                if result is not None:
+                    last_completed = today
+                    logger.info("Daily photo retention complete: %s", result)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logging.getLogger("solar91.photos").exception("Daily photo retention failed")
+        await asyncio.sleep(3600)
 
 STATIC=BASE/"frontend"/"static"; TEMPLATES=BASE/"frontend"/"templates"
 if STATIC.is_dir():

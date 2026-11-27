@@ -273,12 +273,17 @@ def storage_usage(db: Annotated[Session, Depends(get_db)], user: Annotated[User,
 
 class RetentionWindow(BaseModel):
     days: int = Field(ge=7, le=365)
+    category: str | None = None
+    plant_id: uuid.UUID | None = None
+    automatic: bool | None = None
 
 
 class RetentionPurge(BaseModel):
     """An optional age for this one sweep, and a dry run to show what it would remove."""
     older_than_days: int | None = Field(default=None, ge=1, le=365)
     dry_run: bool = False
+    category: str | None = None
+    plant_id: uuid.UUID | None = None
 
 
 @router.get("/retention")
@@ -299,7 +304,8 @@ def set_photo_retention(payload: RetentionWindow, db: Annotated[Session, Depends
     from app.photos.retention import set_retention_days
 
     try:
-        return set_retention_days(db, user, payload.days)
+        return set_retention_days(db, user, payload.days, category=payload.category, plant_id=payload.plant_id,
+                                  automatic=payload.automatic, replace_scope=bool({"category", "plant_id"} & payload.model_fields_set))
     except ValueError as error:
         raise HTTPException(422, str(error)) from error
 
@@ -312,7 +318,9 @@ def manual_retention_purge(db: Annotated[Session, Depends(get_db)], user: Annota
 
     request = payload or RetentionPurge()
     try:
-        return purge_photo_originals(db, dry_run=request.dry_run, older_than_days=request.older_than_days)
+        return purge_photo_originals(db, dry_run=request.dry_run, older_than_days=request.older_than_days,
+                                     category=request.category, plant_id=request.plant_id,
+                                     override_scope=bool({"category", "plant_id"} & request.model_fields_set))
     except ValueError as error:
         raise HTTPException(422, str(error)) from error
 
@@ -505,7 +513,11 @@ def create_photos(db: Annotated[Session, Depends(get_db)], user: Annotated[User,
         raise HTTPException(422, "Use up to eight short tags")
     if submission_id and (saved := _existing_submission(db, user, submission_id, plant)) is not None:
         return JSONResponse({"records": saved, "persisted": True, "duplicate": True}, status_code=200)
-    kind, ref = _resolve_link(db, plant.id, link_type, link_id)
+    # Checklist evidence is linked to a recurring activity UUID, not a legacy OMTask.
+    if link_type == "pm" and checklist_item_id:
+        kind, ref = "pm", link_id.strip()
+    else:
+        kind, ref = _resolve_link(db, plant.id, link_type, link_id)
     phase = (phase or "").strip().lower() or None
     washing_report = None
     if kind == "washing":
@@ -528,8 +540,11 @@ def create_photos(db: Annotated[Session, Depends(get_db)], user: Annotated[User,
             washing_report = _check_washing_photo_write(db, user, ref)
         # category == "washing" with no phase/slot: a direct link from Photo Intelligence,
         # not a slotted evidence upload — the plant scope check above is enough.
+    elif kind == "pm" and checklist_item_id:
+        if category != "pm" or (phase, slot) not in {("before", 1), ("after", 2)} or len(files) != 1:
+            raise HTTPException(422, "Choose one Before or After PM checkpoint photo")
     elif phase is not None or slot is not None:
-        raise HTTPException(422, "Photo phase and slot are only valid for module cleaning")
+        raise HTTPException(422, "Photo phase and slot are only valid for module cleaning or PM checkpoints")
     if kind == "issue":
         # A ticket carries at most four photos. The form caps it too, but a cap only the
         # browser applies is not a cap: this is what keeps the bucket's per-ticket cost fixed.
@@ -543,34 +558,36 @@ def create_photos(db: Annotated[Session, Depends(get_db)], user: Annotated[User,
             )
     pm_activity_snapshot = None
     if kind == "pm" and checklist_item_id:
-        # Validate the item id exists in this activity's checklist and enforce the per-checkpoint cap.
-        from app.pmplan.tracking import PMTrackingActivity as _PMA
-        activity = db.scalar(select(_PMA).where(_PMA.work_order_no == ref)) if False else None
-        # Look up by work_order_no (the link_id stored on a photo) or by the activity id directly.
-        # Photos store the work_order_no string in link_id, matching OMTask.work_order_no convention.
-        # PM tracking activities are looked up by their own id as the link ref.
-        from app.pmplan.tracking import PMTrackingActivity as _PMActivity
-        import re as _re
-        if _re.fullmatch(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", ref or ""):
+        from app.pmplan.tracking import (PMTrackingActivity as _PMActivity, CHECKLISTS,
+            _checks_for, _checklist_item_id, _bounds, _blocker)
+        from app.core.timeutil import business_today
+
+        def validate_pm_checkpoint(activity_row):
+            if activity_row is None or activity_row.plant_id != plant.id:
+                raise HTTPException(404, "PM activity not found at this plant")
+            if user.role != "Site Engineer" or (plant.status or "").casefold() == "inactive":
+                raise HTTPException(403, "Only the plant Site Engineer can record PM evidence")
+            first, last = _bounds(activity_row.scheduled_on.strftime("%Y-%m"))
+            first_open = db.scalar(select(_PMActivity).where(_PMActivity.plant_id == plant.id,
+                _PMActivity.scheduled_on.between(first, last), _PMActivity.status != "Approved")
+                .order_by(_PMActivity.scheduled_on, _PMActivity.id).limit(1))
+            if (activity_row.status not in {"Scheduled", "Returned"} or activity_row.scheduled_on > business_today()
+                    or activity_row.equipment not in CHECKLISTS or _blocker(activity_row, first_open)):
+                raise HTTPException(409, "PM activity is not open for recording")
+            item_ids = {_checklist_item_id(activity_row.id, task) for task in _checks_for(activity_row)}
+            if checklist_item_id not in item_ids:
+                raise HTTPException(422, "Checklist item not found on this activity — refresh and try again")
+            if db.scalar(select(SitePhoto.id).where(SitePhoto.link_type == "pm", SitePhoto.link_id == ref,
+                    SitePhoto.checklist_item_id == checklist_item_id, SitePhoto.slot == slot).limit(1)):
+                raise HTTPException(409, "This PM checkpoint photo slot is already occupied")
+
+        try:
             activity_row = db.get(_PMActivity, uuid.UUID(ref))
-        else:
-            activity_row = None
-        if activity_row is None:
-            raise HTTPException(404, "PM activity not found for this photo link")
-        if activity_row.plant_id != plant.id:
-            raise HTTPException(403, "That PM activity is not on this plant")
-        # Reject uploads while the activity cannot accept recording (future date or not in CHECKLISTS).
-        from app.pmplan.tracking import CHECKLISTS as _CHECKLISTS
-        from app.core.timeutil import business_today as _today
-        if activity_row.status not in {"Scheduled", "Returned"} or activity_row.scheduled_on > _today():
-            raise HTTPException(409, "Photos can only be added to an open activity that is due today or earlier")
-        if activity_row.equipment not in _CHECKLISTS:
-            raise HTTPException(409, "This equipment type does not use a PM checklist")
+        except ValueError:
+            raise HTTPException(422, "Invalid PM activity ID") from None
+        validate_pm_checkpoint(activity_row)
+        ref = str(activity_row.id)
         pm_activity_snapshot = (activity_row.id, activity_row.scheduled_on)
-        # Confirm the item id is known on this activity.
-        item_ids = {c.get("id") for c in (activity_row.checklist or []) if isinstance(c, dict)}
-        if checklist_item_id not in item_ids:
-            raise HTTPException(422, "Checklist item not found on this activity — refresh and try again")
         # Hard cap: at most MAX_CHECKPOINT_PHOTOS per checkpoint.
         attached_to_item = db.scalar(select(func.count(SitePhoto.id)).where(
             SitePhoto.link_type == "pm", SitePhoto.link_id == ref,
@@ -677,7 +694,7 @@ def create_photos(db: Annotated[Session, Depends(get_db)], user: Annotated[User,
                             file_name=(file.filename or ("evidence.pdf" if mime == "application/pdf" else "photo"))[:255],
                             content_type=stored_type, size_bytes=len(stored_data),
                             thumbnail_size_bytes=len(thumbnail), width=width, height=height,
-                            phase=phase if kind == "washing" else None, slot=slot if kind == "washing" else None,
+                            phase=phase if kind in {"washing", "pm"} else None, slot=slot if kind in {"washing", "pm"} else None,
                             checklist_item_id=checklist_item_id if kind == "pm" else None,
                             submission_id=submission_id, submission_index=index if submission_id else None))
             if mime != "application/pdf":
@@ -691,6 +708,7 @@ def create_photos(db: Annotated[Session, Depends(get_db)], user: Annotated[User,
                 _PMActivity.plant_id == plant.id).with_for_update().execution_options(populate_existing=True))
             if current is None or current.scheduled_on != pm_activity_snapshot[1] or current.status not in {"Scheduled", "Returned"}:
                 raise HTTPException(409, "PM activity changed during upload; refresh and retry")
+            validate_pm_checkpoint(current)
             attached = db.scalar(select(func.count(SitePhoto.id)).where(SitePhoto.link_type == "pm",
                 SitePhoto.link_id == ref, SitePhoto.checklist_item_id == checklist_item_id)) or 0
             if attached + len(records) > MAX_CHECKPOINT_PHOTOS:

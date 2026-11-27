@@ -1828,7 +1828,7 @@
         (isPdf ? '<small class="ep-calendar__photo-file">PDF · ' + escape(photo.fileName || "evidence.pdf") + '</small>' : "") +
         (report.can_add_evidence
             ? '<div class="ep-calendar__photo-actions"><label class="ep-calendar__photo-replace">Replace<input type="file" accept="image/jpeg,image/png,image/webp,application/pdf,.pdf" data-washing-photo-file data-report-id="' +
-              escape(report.id) + '" data-phase="' + phase + '" data-slot="' + slot + '" /></label>' +
+              escape(report.id) + '" data-phase="' + phase + '" data-slot="' + slot + '" /></label>' + cameraInput(report.id, phase, slot) +
               '<button type="button" class="ep-calendar__photo-remove" data-washing-photo-remove="' +
             escape(photo.id) + '" data-washing-report="' + escape(report.id) + '" aria-label="Remove ' +
               escape(phase) + ' photo slot ' + slot + '">Remove</button>' + retryAction + '</div>'
@@ -1839,11 +1839,15 @@
     return '<div class="ep-calendar__photo-slot">' +
       (report.can_add_evidence
         ? '<label class="ep-calendar__photo-add">+ Add file<input type="file" accept="image/jpeg,image/png,image/webp,application/pdf,.pdf" data-washing-photo-file data-report-id="' +
-          escape(report.id) + '" data-phase="' + phase + '" data-slot="' + slot + '" /></label>'
+          escape(report.id) + '" data-phase="' + phase + '" data-slot="' + slot + '" /></label>' + cameraInput(report.id, phase, slot)
         : '<span class="ep-calendar__photo-empty">Not added</span>') +
       retryAction +
       (error ? '<small class="ep-calendar__photo-error" role="alert">' + escape(error) + '</small>' : "") +
     '</div>';
+  }
+
+  function cameraInput(reportId, phase, slot) {
+    return '<label class="ep-calendar__photo-add ep-field-camera">Take photo<input type="file" accept="image/jpeg,image/png,image/webp" capture="environment" aria-label="Take ' + phase + ' photo" data-washing-photo-file data-report-id="' + escape(reportId) + '" data-phase="' + phase + '" data-slot="' + slot + '" /></label>';
   }
 
   function renderDraftRecordPhotos(state, row) {
@@ -1866,7 +1870,8 @@
                   : '<label class="ep-calendar__photo-add">+ Add ' + (phase === "before" ? "before" : "after") +
                     ' file<input type="file" accept="image/jpeg,image/png,image/webp,application/pdf,.pdf" ' +
                     'data-record-draft-photo data-date="' + escape(row.date) + '" data-phase="' + phase +
-                    '" data-slot="' + slot + '" /></label>') +
+                     '" data-slot="' + slot + '" /></label>' +
+                    '<label class="ep-calendar__photo-add ep-field-camera">Take photo<input type="file" accept="image/jpeg,image/png,image/webp" capture="environment" aria-label="Take ' + phase + ' photo" data-record-draft-photo data-date="' + escape(row.date) + '" data-phase="' + phase + '" data-slot="' + slot + '" /></label>') +
               '</div>';
             }).join("") +
           '</div></div>';
@@ -1971,6 +1976,8 @@
     var key = recordPhotoKey(reportId, phase, slot);
     if (state.recordPhotoBusy[key]) return Promise.resolve(false);
     state.recordPhotoBusy[key] = true;
+    state.recordPhotoSubmissionIds = state.recordPhotoSubmissionIds || new WeakMap();
+    if (!state.recordPhotoSubmissionIds.has(file)) state.recordPhotoSubmissionIds.set(file, global.Solar91PhotoEvidence.submissionId());
     delete state.recordPhotoErrors[key];
     state.recordPhotoOpenId = reportId;
     updateRecordPhotoContent(host, state, reportId);
@@ -1982,7 +1989,7 @@
       phase: phase,
       slot: slot,
       files: [file],
-      submissionId: global.Solar91PhotoEvidence.submissionId()
+      submissionId: state.recordPhotoSubmissionIds.get(file)
     }).then(function (result) {
       if (!active || active.host !== host || active.state !== state) return false;
       var photo = result.records && result.records[0];
