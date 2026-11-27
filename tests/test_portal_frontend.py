@@ -158,8 +158,8 @@ def test_raise_issue_keeps_the_register_mounted_and_loads_assignees_on_demand():
     step_three = issues[issues.index("function renderWizardStepThree"):]
     step_three = step_three[:step_three.index("function ", len("function renderWizardStepThree"))]
     assert "var assignmentField = state.isAssignee" in step_three
-    assert "Equipment primary Assignee (you if none configured)" in step_three
-    assert '<option value="">Automatic by equipment</option>' in step_three
+    assert "Automatic by plant and equipment (you if no eligible owner)" in step_three
+    assert '<option value="">Automatic by plant and equipment</option>' in step_three
     submit = issues[issues.index("function submitLiveIssue"):]
     assert "assigned_to: draft.assignee || null" in submit
     assert "oldOverlay.outerHTML = markup;" in drawer

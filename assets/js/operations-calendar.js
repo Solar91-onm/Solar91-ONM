@@ -1210,7 +1210,12 @@
     var api = global.Solar91PortalAPI;
     if (!api) return;
     api.request("/api/categories").then(function (body) {
-      PM_CATEGORIES = (body && body.categories) || [];
+      PM_CATEGORIES = ((body && body.categories) || []).filter(function (category) {
+        // Newly added reporting-only categories do not imply an approved PM plan.
+        var issueOnlyCodes = ["PV-MODULE", "LA", "WATER-PIPE", "WATER-PUMP", "VEGETATION", "MODULE-CLEANING", "MMS", "MMS-TIGHTNESS", "GRID-TRIP-VOLTAGE"];
+        var issueOnly = String(category.notes || "").indexOf("[site-issue-only]") !== -1 || issueOnlyCodes.indexOf(String(category.code || "").toUpperCase()) !== -1;
+        return !issueOnly || (category.pm_parts || []).length > 0;
+      });
       if (onReady) onReady();
     }).catch(function () {
       PM_CATEGORIES = [];          // leave the fields as free text rather than blocking setup

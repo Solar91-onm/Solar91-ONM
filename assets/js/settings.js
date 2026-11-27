@@ -31,7 +31,8 @@
   var equipment = {
     loading: false, loaded: false, error: "", message: "",
     categories: [], holders: [], byUser: {}, search: "", saving: "",
-    history: [], historyOpen: false, historyLoading: false
+    history: [], historyOpen: false, historyLoading: false,
+    routing: {}, plants: [], routeOpen: false, routeLoading: false, routeLoaded: false, routeSaving: false, routeError: "", routeMessage: "", routeDraft: {plant: "", key: "*", primary: "", backup: "", extraPlants: [], applyExisting: false}
   };
 
   function escape(value) {
@@ -464,7 +465,7 @@
       .map(function (holder) {
         return '<option value="' + escape(holder.id) + '"' +
           (String(selected || "") === holder.id ? " selected" : "") + ">" +
-          escape(holder.name || "Unnamed") + " · " + escape(holder.role) + "</option>";
+          escape(holder.name || "Unnamed") + " · " + escape(holder.role === "O&M Head" ? "O&M Head (notifications only)" : holder.role) + "</option>";
       }).join("");
   }
 
@@ -502,6 +503,84 @@
     "</div>";
   }
 
+  function routingOwnerOptions(selected) {
+    return '<option value="">Not configured</option>' + equipment.holders.filter(function (h) { return h.role === "Assignee"; }).map(function (h) {
+      return '<option value="' + escape(h.id) + '"' + (h.id === selected ? ' selected' : '') + '>' + escape(h.name || "Unnamed") + '</option>';
+    }).join("") + (selected && !equipment.holders.some(function (h) { return h.id === selected && h.role === "Assignee"; }) ? '<option value="' + escape(selected) + '" selected>Inactive / ineligible owner</option>' : '');
+  }
+
+  function routeOption(value, label, selected) {
+    return '<option value="' + escape(value) + '"' + (value === selected ? ' selected' : '') + '>' + escape(label) + '</option>';
+  }
+
+  function renderIssueRouting() {
+    if (!equipment.loaded) return "";
+    var toggle = '<button type="button" class="ep-settings__button" data-settings-action="toggle-issue-routing" aria-expanded="' + equipment.routeOpen + '">' + (equipment.routeOpen ? 'Hide site issue plant exceptions and default' : 'Manage site issue plant exceptions and default') + '</button>';
+    if (!equipment.routeOpen) return '<div class="ep-issue-routing">' + toggle + '</div>';
+    if (equipment.routeLoading || !equipment.routeLoaded) return '<div class="ep-issue-routing">' + toggle + (equipment.routeLoading ? '<p role="status">Loading assignment rules…</p>' : '<p role="alert">' + escape(equipment.routeError || 'Assignment rules not loaded.') + '</p><button type="button" class="ep-settings__button" data-settings-action="reload-issue-routing">Retry</button>') + '</div>';
+    var d = equipment.routeDraft;
+    var plants = equipment.plants;
+    var allKeys = Object.keys(equipment.routing).sort();
+    var keys = d.plant ? allKeys.filter(function (identity) { return identity.split(":")[0] === d.plant; }) : allKeys.slice(0, 50);
+    var categoryLabel = function (key) {
+      var match = equipment.categories.find(function (c) { return c.key === key; });
+      return key === "*" ? "All equipment" : (match ? match.label : key);
+    };
+    var ownerLabel = function (id) {
+      var match = equipment.holders.find(function (h) { return h.id === id; });
+      return match ? match.name : (id ? "Inactive / ineligible" : "Not configured");
+    };
+    var morePlants = d.plant && d.plant !== "*" ? '<details class="ep-issue-routing__bulk"><summary>Apply same rule to additional plants (' + d.extraPlants.length + ' selected)</summary><div class="ep-issue-routing__plant-list">' + plants.filter(function (p) { return p.active && p.id !== d.plant; }).map(function (p) {
+      return '<label><input type="checkbox" data-routing-extra="' + escape(p.id) + '"' + (d.extraPlants.indexOf(p.id) !== -1 ? ' checked' : '') + '> ' + escape(p.site_code + " · " + p.plant_name) + '</label>';
+    }).join("") + '</div></details>' : '';
+    return '<div class="ep-issue-routing">' + toggle + '<h3>Site issue plant exceptions and default</h3>' +
+      '<p>Plant + equipment overrides take priority, then plant-wide rules, then portfolio equipment owners, then the default. Each rule tries its eligible primary before backup. PM responsibility is separate.</p>' +
+      '<div class="ep-issue-routing__fields">' +
+      '<label>Plant or default<select data-routing-field="plant">' + routeOption("", "Choose scope", d.plant) + routeOption("*", "Portfolio default (unmatched issues)", d.plant) + plants.filter(function (p) { return p.active || p.id === d.plant; }).map(function (p) { return routeOption(p.id, p.site_code + " · " + p.plant_name + (p.active ? "" : " (inactive)"), d.plant); }).join("") + (d.plant && d.plant !== "*" && !plants.some(function (p) { return p.id === d.plant; }) ? routeOption(d.plant, "Removed plant", d.plant) : "") + '</select></label>' +
+      '<label>Equipment<select data-routing-field="key"' + (d.plant === "*" ? ' disabled' : '') + '>' + routeOption("*", "All equipment", d.key) + equipment.categories.map(function (c) { return routeOption(c.key, c.label, d.key); }).join("") + (d.key !== "*" && !equipment.categories.some(function (c) { return c.key === d.key; }) ? routeOption(d.key, "Removed equipment: " + d.key, d.key) : "") + '</select></label>' +
+      '<label>Primary Assignee<select data-routing-field="primary">' + routingOwnerOptions(d.primary) + '</select></label>' +
+      '<label>Backup Assignee<select data-routing-field="backup">' + routingOwnerOptions(d.backup) + '</select></label></div>' + morePlants +
+      (equipment.routeError ? '<p class="ep-settings__form-error" role="alert">' + escape(equipment.routeError) + '</p>' : "") +
+      (equipment.routeMessage ? '<p class="ep-settings__message" role="status">' + escape(equipment.routeMessage) + '</p>' : "") +
+      '<div class="ep-issue-routing__actions"><label><input type="checkbox" data-routing-field="applyExisting"' + (d.applyExisting ? ' checked' : '') + '> Also assign matching open, unassigned issues</label>' +
+      '<button type="button" class="ep-settings__button ep-settings__button--primary" data-settings-action="save-issue-routing"' + (equipment.routeSaving || !d.plant ? ' disabled' : '') + '>' + (equipment.routeSaving ? 'Saving…' : 'Save rule') + '</button>' +
+      '<button type="button" class="ep-settings__button" data-settings-action="remove-issue-routing"' + (equipment.routeSaving || !equipment.routing[d.plant + ":" + d.key] ? ' disabled' : '') + '>Remove rule</button></div>' +
+      '<p class="ep-settings__footnote">Existing assigned issues are never transferred by these rules. If no eligible owner is configured, the existing unassigned escalation / Assignee self-assignment remains in place.</p>' +
+      '<p class="ep-settings__footnote">' + keys.length + ' rule(s) shown of ' + allKeys.length + ' saved. Choose a plant or default to see its rules.' + '</p>' +
+      (keys.length ? '<div class="ep-issue-routing__list">' + keys.map(function (identity) {
+        var parts = identity.split(":"), rule = equipment.routing[identity];
+        var plant = plants.find(function (p) { return p.id === parts[0]; });
+        return '<div class="ep-issue-routing__item"><div><strong>' + escape(plant ? plant.site_code : (parts[0] === "*" ? "Portfolio default" : "Removed plant")) + ' · ' + escape(categoryLabel(parts[1])) + '</strong><small>Primary: ' + escape(ownerLabel(rule.primary_user_id)) + ' · Backup: ' + escape(ownerLabel(rule.backup_user_id)) + '</small></div><button type="button" class="ep-settings__button" data-settings-action="edit-issue-routing" data-rule-key="' + escape(identity) + '">Edit</button></div>';
+      }).join("") + '</div>' : '<p class="ep-settings__empty">No plant exceptions or default configured.</p>') + '</div>';
+  }
+
+  function selectIssueRouting(plant, key) {
+    var rule = equipment.routing[plant + ":" + key] || {};
+    equipment.routeDraft = {plant: plant, key: key, primary: rule.primary_user_id || "", backup: rule.backup_user_id || "", extraPlants: [], applyExisting: false};
+    render();
+  }
+
+  function saveIssueRouting(remove) {
+    var d = equipment.routeDraft;
+    if (!d.plant || equipment.routeSaving) return;
+    if (!remove && !d.primary && !d.backup) { equipment.routeError = "Choose at least one Assignee, or remove the rule."; render(); return; }
+    if (!remove && d.primary && d.primary === d.backup) { equipment.routeError = "Primary and backup must be different people."; render(); return; }
+    if (remove && !global.confirm("Remove this responsibility rule? Existing assigned issues will not change.")) return;
+    var plantIds = d.plant === "*" ? [] : [d.plant].concat(remove ? [] : d.extraPlants);
+    if (plantIds.length > 1 && !global.confirm("Save this rule for " + plantIds.length + " plants? Existing rules for that plant/equipment combination will be replaced.")) return;
+    if (!remove && d.applyExisting && !global.confirm("Assign matching open issues that currently have no owner?")) return;
+    equipment.routeSaving = true; equipment.routeError = ""; equipment.routeMessage = ""; render();
+    api().request("/api/equipment-responsibilities/issue-routing", {method: "PUT", body: {
+      plant_ids: plantIds, equipment_key: d.key,
+      primary_user_id: remove ? null : d.primary || null, backup_user_id: remove ? null : d.backup || null,
+      apply_existing: !remove && d.applyExisting
+    }}).then(function (result) {
+      equipment.routeSaving = false; equipment.routing = result.rules || {};
+      equipment.routeMessage = (remove ? "Rule removed. " : "Rule saved. ") + (result.issues_auto_assigned || 0) + " existing issues assigned.";
+      selectIssueRouting(d.plant, d.key);
+    }).catch(function (error) { equipment.routeSaving = false; equipment.routeError = error.message || "Could not save the rule."; render(); });
+  }
+
   function renderEquipmentPanel(canManage) {
     if (!canManage) return "";
     var rows = equipment.categories.filter(matchesCategorySearch);
@@ -509,7 +588,7 @@
     return '<section class="ep-settings__panel ep-eqr" aria-labelledby="settings-equipment-title">' +
       '<div class="ep-settings__panel-intro"><h2 id="settings-equipment-title">Equipment responsibility</h2>' +
         '<p>Who answers for one equipment category across every plant. A new site issue for that ' +
-        'equipment is assigned to its primary Assignee automatically, wherever the plant is. Saving a primary also assigns matching open, unassigned issues; existing owners are preserved. The ' +
+        'equipment follows plant exceptions first, then the portfolio owner and backup. Saving an owner also assigns matching open, unassigned issues; existing owners are preserved. The ' +
         'same people are notified about its Preventive Maintenance. Every Assignee may edit schedules for all equipment and plants. Approval authority ' +
         'and sequence overrides are unchanged by this: they stay with the role and the plant ' +
         'assignments above. ' + configured + ' of ' + equipment.categories.length +
@@ -524,6 +603,7 @@
       "</div>" +
       (equipment.message ? '<p class="ep-settings__message" role="status">' + escape(equipment.message) + "</p>" : "") +
       (equipment.error ? '<p class="ep-settings__form-error" role="alert">' + escape(equipment.error) + "</p>" : "") +
+      renderIssueRouting() +
       (equipment.loading && !equipment.loaded
         ? '<p class="ep-settings__empty" role="status">Loading equipment responsibilities…</p>'
         : '<div class="ep-eqr__table" role="table" aria-label="Equipment responsibility matrix">' +
@@ -547,9 +627,6 @@
               }).join("") + "</ul>"
             : '<p class="ep-settings__empty">No responsibility change has been recorded yet.</p>') + "</div>"
         : "") +
-      '<p class="ep-settings__footnote">Responsibility is portfolio-wide: management does not assign plants ' +
-        'one by one for it. A category with nobody configured leaves new tickets unassigned and notifies the ' +
-        'O&amp;M Head — a ticket is never discarded.</p>' +
     "</section>";
   }
 
@@ -560,7 +637,7 @@
     equipment.loading = true;
     equipment.error = "";
     render();
-    return api().request("/api/equipment-responsibilities").then(function (body) {
+    return api().request("/api/equipment-responsibilities?include_routing=false").then(function (body) {
       equipment.categories = Array.isArray(body.categories) ? body.categories : [];
       equipment.holders = Array.isArray(body.holders) ? body.holders : [];
       equipment.byUser = body.by_user || {};
@@ -572,6 +649,25 @@
       equipment.error = error.message || "Equipment responsibilities could not be loaded.";
       render();
     });
+  }
+
+  function loadIssueRouting(force) {
+    if (!api().can("users.manage") || equipment.routeLoading || equipment.routeSaving) return Promise.resolve();
+    if (equipment.routeLoaded && !force) return Promise.resolve();
+    equipment.routeLoading = true; equipment.routeError = "";
+    render();
+    return api().request("/api/equipment-responsibilities/issue-routing").then(function (body) {
+      equipment.routing = body.issue_routing || {};
+      equipment.plants = Array.isArray(body.plants) ? body.plants : [];
+      equipment.routeLoaded = true;
+      // Refresh the selected rule as well, so reopening cannot resave an old owner.
+      var draft = equipment.routeDraft;
+      var rule = equipment.routing[draft.plant + ":" + draft.key] || {};
+      equipment.routeDraft = {plant: draft.plant, key: draft.key, primary: rule.primary_user_id || "", backup: rule.backup_user_id || "", extraPlants: [], applyExisting: false};
+    }).catch(function (error) {
+      equipment.routeLoaded = false;
+      equipment.routeError = error.message || "Assignment rules could not be loaded.";
+    }).finally(function () { equipment.routeLoading = false; render(); });
   }
 
   function loadEquipmentHistory() {
@@ -783,6 +879,23 @@
       }
     });
     host.addEventListener("change", function (event) {
+      var extraPlant = event.target.dataset.routingExtra;
+      if (extraPlant) {
+        var extra = equipment.routeDraft.extraPlants;
+        if (event.target.checked && extra.indexOf(extraPlant) === -1) extra.push(extraPlant);
+        else if (!event.target.checked) equipment.routeDraft.extraPlants = extra.filter(function (id) { return id !== extraPlant; });
+        var summary = host.querySelector('.ep-issue-routing__bulk summary');
+        if (summary) summary.textContent = "Apply same rule to additional plants (" + equipment.routeDraft.extraPlants.length + " selected)";
+        return;
+      }
+      var routingField = event.target.dataset.routingField;
+      if (routingField) {
+        var draft = equipment.routeDraft;
+        if (routingField === "plant") selectIssueRouting(event.target.value, event.target.value === "*" ? "*" : draft.key);
+        else if (routingField === "key") selectIssueRouting(draft.plant, event.target.value);
+        else draft[routingField] = routingField === "applyExisting" ? event.target.checked : event.target.value;
+        return;
+      }
       if (event.target.hasAttribute("data-settings-retention-days")) retention.days = event.target.value;
       if (event.target.hasAttribute("data-settings-purge-days")) {
         retention.purgeDays = event.target.value;
@@ -833,10 +946,26 @@
       } else if (action === "refresh-equipment") {
         equipment.message = "";
         loadEquipment(true);
+        if (equipment.routeOpen) loadIssueRouting(true);
+      } else if (action === "toggle-issue-routing") {
+        equipment.routeOpen = !equipment.routeOpen;
+        if (equipment.routeOpen) loadIssueRouting(true);
+        else render();
+      } else if (action === "reload-issue-routing") {
+        loadIssueRouting(true);
       } else if (action === "toggle-equipment-history") {
         equipment.historyOpen = !equipment.historyOpen;
         if (equipment.historyOpen) loadEquipmentHistory();
         else render();
+      } else if (action === "save-issue-routing") {
+        saveIssueRouting(false);
+      } else if (action === "remove-issue-routing") {
+        saveIssueRouting(true);
+      } else if (action === "edit-issue-routing") {
+        var identity = button.dataset.ruleKey.split(":");
+        selectIssueRouting(identity[0], identity[1]);
+        var field = host.querySelector('[data-routing-field="plant"]');
+        if (field) field.focus();
       } else if (action === "save-equipment") {
         saveCategory(button.dataset.equipmentKey, host);
       } else if (action === "edit-equipment" && person) {
@@ -1009,6 +1138,7 @@
     activeHost = host;
     wire(host);
     statusMessage = "";
+    equipment.routeOpen = false;
     loadUsers();
     loadStorageUsage(false);
     loadRetention();

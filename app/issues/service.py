@@ -96,12 +96,13 @@ class IssueService:
         if plant_id is None:
             raise HTTPException(422, "Choose the plant before assigning the ticket")
 
-    def _auto_assignee(self, equipment: str | None, plant_id) -> User | None:
-        """The active primary Assignee configured for this equipment category, if any."""
-        if plant_id is None or not equipment:
-            return None
-        from app.equipment.service import primary_assignee
-        return primary_assignee(self.db, equipment)
+    def _auto_assignee(self, equipment: str | None, plant_id):
+        """Resolve the site-specific rule, global owner, backup or default."""
+        if plant_id is None:
+            return None, None
+        from app.equipment.issue_routing import IssueRouting
+        from app.equipment.service import canonical_key
+        return IssueRouting(self.db, {key} if (key := canonical_key(equipment)) else set(), {plant_id}).resolve(plant_id, equipment)
 
     DUPLICATE_WINDOW_SECONDS = 120
 
@@ -148,15 +149,15 @@ class IssueService:
         assignee = self._resolve_assignee(assigned_to, None) if assigned_to else None
         if assignee:
             self._ensure_assignee_scope(assignee, user, plant_id)
-        # Nobody was chosen: the equipment's configured primary Assignee takes it, on any plant.
-        # Responsibility that is not configured leaves the ticket unassigned and tells the O&M
-        # Head - a ticket is never lost because the mapping is missing.
+        # Nobody was chosen: resolve plant overrides, equipment owners, backups and the default.
+        # Keep the existing escalation if no eligible owner is configured.
         auto_equipment = None
+        auto_rule = None
         if assignee is None:
-            candidate = self._auto_assignee(payload.get("vertical"), plant_id)
+            candidate, auto_rule = self._auto_assignee(payload.get("vertical"), plant_id)
             if candidate is not None:
                 assignee, assignee_id = candidate, candidate.id
-                auto_equipment = payload.get("vertical")
+                auto_equipment = payload.get("vertical") or "Site issue"
             elif user.role == "Assignee":
                 assignee, assignee_id = user, user.id
         if payload.get("etc_at") is None:
@@ -190,8 +191,8 @@ class IssueService:
                     self._history(
                         row, "issue.auto_assigned", user, status_to=row.status,
                         note=(f"Assigned automatically to {assignee.display_name}, the responsible "
-                              f"person for {auto_equipment} across all plants."),
-                        metadata={"rule": "equipment_responsibility", "equipment": auto_equipment,
+                              f"person for {auto_equipment} ({auto_rule})."),
+                        metadata={"rule": auto_rule, "equipment": auto_equipment,
                                   "assigned_to": str(assignee.id)})
                 elif row.assigned_to is None and payload.get("vertical"):
                     self._history(

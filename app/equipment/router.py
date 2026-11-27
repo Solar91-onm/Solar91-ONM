@@ -20,8 +20,9 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.core.models import AuditLog, EquipmentResponsibility, Issue, User
+from app.core.models import AppSetting, AuditLog, EquipmentResponsibility, Issue, Plant, User
 from app.core.security import get_current_user, require_csrf, require_permission
+from app.equipment.issue_routing import ALL, MAX_RULES, SETTING_KEY, IssueRouting, read_rules, rule_key
 from app.equipment.service import (
     POSITIONS,
     catalogue,
@@ -64,6 +65,65 @@ class CategoryResponsibility(BaseModel):
     backup_user_id: UUID | None = None
     active: bool = True
     note: str | None = Field(default=None, max_length=2000)
+
+
+class IssueRoutingChange(BaseModel):
+    plant_ids: list[UUID] = Field(default_factory=list, max_length=100)
+    equipment_key: str = Field(default=ALL, max_length=60)
+    primary_user_id: UUID | None = None
+    backup_user_id: UUID | None = None
+    apply_existing: bool = False
+
+
+@router.put("/issue-routing", dependencies=[Depends(require_csrf)])
+def set_issue_routing(payload: IssueRoutingChange, db: DB, user: Manager):
+    """Upsert/delete a batch of plant exceptions or the single portfolio default."""
+    from app.issues.service import _lock_issue_ticket_numbers
+    _lock_issue_ticket_numbers(db)
+    plants = set(payload.plant_ids)
+    key = payload.equipment_key
+    deleting = not (payload.primary_user_id or payload.backup_user_id)
+    if key != ALL and (not plants or (not deleting and key not in _known_keys(db))):
+        raise HTTPException(422, "Choose valid plants and an equipment category")
+    if plants and not deleting:
+        found = set(db.scalars(select(Plant.id).where(Plant.id.in_(plants), func.lower(Plant.status) == "active")))
+        if plants != found:
+            raise HTTPException(422, "One or more plants are inactive or do not exist")
+    if payload.primary_user_id and payload.primary_user_id == payload.backup_user_id:
+        raise HTTPException(422, "Primary and backup must be different people")
+    for uid in (payload.primary_user_id, payload.backup_user_id):
+        if uid and _holder(db, uid).role != "Assignee":
+            raise HTTPException(422, "Site issue owners must be active Assignees")
+    rules = read_rules(db)
+    value = {"primary_user_id": str(payload.primary_user_id) if payload.primary_user_id else None,
+             "backup_user_id": str(payload.backup_user_id) if payload.backup_user_id else None}
+    for plant_id in sorted(plants) if plants else [None]:
+        identity = rule_key(plant_id, key)
+        before = rules.get(identity)
+        after = value if any(value.values()) else None
+        if before == after:
+            continue
+        if after:
+            rules[identity] = after
+        else:
+            rules.pop(identity, None)
+        db.add(AuditLog(user_id=user.id, actor_name=user.display_name,
+            action="Site issue routing set" if after else "Site issue routing removed",
+            module="Login access", entity_type="site_issue_routing", entity_id=identity,
+            before_state=before, after_state=after,
+            metadata_json={"plant_id": str(plant_id) if plant_id else None, "equipment_key": key}))
+    if len(rules) > MAX_RULES:
+        raise HTTPException(422, "Site issue routing rule limit reached")
+    setting = db.get(AppSetting, SETTING_KEY)
+    if setting is None:
+        db.add(AppSetting(setting_key=SETTING_KEY, setting_value=rules, updated_by=user.id))
+    else:
+        setting.setting_value = rules
+        setting.updated_by = user.id
+    db.flush()
+    count = _route_open_issues(db, user, None if key == ALL else {key}, plants or None) if payload.apply_existing and not deleting else 0
+    _commit(db)
+    return {"issues_auto_assigned": count, "rules": rules}
 
 
 def _row_dto(row: EquipmentResponsibility, names: dict[UUID, User]) -> dict:
@@ -128,10 +188,10 @@ def _notify(db: Session, *, user_id: UUID, assigned: bool, label: str, position:
 
 
 @router.get("")
-def list_responsibilities(db: DB, user: Manager):
+def list_responsibilities(db: DB, user: Manager, include_routing: bool = True):
     """The whole matrix: every category, who holds it, and the people who can hold it."""
     people = _people(db)
-    rows = list(db.scalars(select(EquipmentResponsibility)))
+    rows = list(db.scalars(select(EquipmentResponsibility).order_by(EquipmentResponsibility.user_id)))
     by_key: dict[str, list[dict]] = {}
     for row in rows:
         by_key.setdefault(row.equipment_key, []).append(_row_dto(row, people))
@@ -139,15 +199,31 @@ def list_responsibilities(db: DB, user: Manager):
     for item in catalogue(db):
         entries = by_key.get(item["key"], [])
         primary = next((e for e in entries if e["position"] == "primary" and e["active"]), None)
-        backup = next((e for e in entries if e["position"] == "backup" and e["active"]), None)
-        items.append({**item, "primary": primary, "backup": backup, "entries": entries,
-                      "status": "Active" if primary else "Not configured"})
+        backups = [e for e in entries if e["position"] == "backup" and e["active"]]
+        eligible = lambda e: bool(e and e["user_active"] and e["user_role"] == "Assignee")
+        backup = next((e for e in backups if eligible(e)), backups[0] if backups else None)
+        status = "Active" if eligible(primary) else "Backup available" if eligible(backup) else "No eligible Assignee" if primary or backup else "Not configured"
+        items.append({**item, "primary": primary, "backup": backup, "entries": entries, "status": status})
     holders = [{"id": str(u.id), "name": u.display_name, "role": u.role}
                for u in people.values() if u.is_active and u.role in HOLDER_ROLES]
     holders.sort(key=lambda h: (h["role"] != "Assignee", (h["name"] or "").casefold()))
-    return {"categories": items, "holders": holders,
-            "by_user": {str(uid): sorted(user_responsibility_keys(db, uid))
-                        for uid in {r.user_id for r in rows}}}
+    by_user = {}
+    for row in rows:
+        if row.active:
+            by_user.setdefault(str(row.user_id), set()).add(row.equipment_key)
+    result = {"categories": items, "holders": holders,
+              "by_user": {uid: sorted(keys) for uid, keys in by_user.items()}}
+    if include_routing:
+        result.update(get_issue_routing(db, user))
+    return result
+
+
+@router.get("/issue-routing")
+def get_issue_routing(db: DB, user: Manager):
+    """Load the manager-only exceptions editor on demand, not on every settings visit."""
+    plants = [{"id": str(pid), "site_code": code, "plant_name": name, "active": (status or "").lower() == "active"}
+              for pid, code, name, status in db.execute(select(Plant.id, Plant.site_code, Plant.plant_name, Plant.status).order_by(Plant.site_code))]
+    return {"issue_routing": read_rules(db), "plants": plants}
 
 
 @router.get("/mine")
@@ -163,18 +239,27 @@ def history(db: DB, user: Manager, limit: int = 50):
     """Who changed equipment responsibility, and when."""
     limit = max(1, min(limit, 200))
     rows = db.scalars(
-        select(AuditLog).where(AuditLog.entity_type == AUDIT_ENTITY)
+        select(AuditLog).where(AuditLog.entity_type.in_((AUDIT_ENTITY, "site_issue_routing")))
         .order_by(AuditLog.created_at.desc()).limit(limit)
     )
     people = _people(db)
+    plants = {str(pid): code for pid, code in db.execute(select(Plant.id, Plant.site_code))}
     out = []
     for row in rows:
         target = (row.metadata_json or {}).get("user_id")
         person = people.get(UUID(target)) if target else None
+        if row.entity_type == "site_issue_routing":
+            meta = row.metadata_json or {}
+            key = meta.get("equipment_key", ALL)
+            scope = plants.get(meta.get("plant_id"), "Removed plant") if meta.get("plant_id") else "Portfolio default"
+            label = scope + " · " + ("All equipment" if key == ALL else label_for(key))
+        else:
+            key = row.entity_id
+            label = label_for(key or "", None)
         out.append({
             "id": str(row.id), "action": row.action, "actor": row.actor_name,
-            "equipment_key": row.entity_id,
-            "equipment_label": label_for(row.entity_id or "", None),
+            "equipment_key": key,
+            "equipment_label": label,
             "user_name": person.display_name if person else None,
             "before": row.before_state, "after": row.after_state,
             "created_at": row.created_at.isoformat() if row.created_at else None,
@@ -227,8 +312,7 @@ def replace_user_responsibilities(user_id: UUID, payload: UserResponsibilities, 
             _audit(db, user, "Equipment responsibility set", key, before, after, user_id)
             if item.active:
                 changed.append((user_id, True, label, item.position))
-    routed = _route_open_issues(db, user, {k: person for k, item in wanted.items()
-        if item.active and item.position == "primary" and person.role == "Assignee"})
+    routed = _route_open_issues(db, user, {k for k, item in wanted.items() if item.active})
     _commit(db)
     for target, assigned, label, position in changed:
         _notify(db, user_id=target, assigned=assigned, label=label, position=position)
@@ -285,9 +369,7 @@ def set_category_responsibility(equipment_key: str, payload: CategoryResponsibil
             _audit(db, user, "Equipment responsibility set", equipment_key, before, after, person.id)
             if payload.active:
                 changed.append((person.id, True, label, position))
-    primary = holders.get("primary")
-    routed = _route_open_issues(db, user, {equipment_key: primary}
-        if payload.active and primary and primary.role == "Assignee" else {})
+    routed = _route_open_issues(db, user, {equipment_key} if payload.active and holders else set())
     _commit(db)
     for target, assigned, changed_label, position in changed:
         _notify(db, user_id=target, assigned=assigned, label=changed_label, position=position)
@@ -295,21 +377,25 @@ def set_category_responsibility(equipment_key: str, payload: CategoryResponsibil
     return {"equipment_key": equipment_key, "active": payload.active, "issues_auto_assigned": routed}
 
 
-def _route_open_issues(db: Session, actor: User, owners: dict[str, User]) -> int:
+def _route_open_issues(db: Session, actor: User, keys: set[str] | None, plants: set[UUID] | None = None) -> int:
     """Route only previously unassigned open tickets; never overwrite an existing owner.
 
     Same transaction as responsibility configuration and audit. A bounded projection finds
     candidates by canonical alias; row locks then recheck eligibility before changing them.
     """
-    if not owners:
+    if keys is not None and not keys:
         return 0
+    db.flush()
+    routing = IssueRouting(db, keys, plants)
     from datetime import datetime, timezone
     from app.issues.service import IssueService
     from app.notifications.service import create_notification
     eligible = (Issue.status == "Open", Issue.deleted_at.is_(None), Issue.plant_id.is_not(None),
                 Issue.assigned_to.is_(None), func.trim(func.coalesce(Issue.assignee_text, "")) == "")
+    if plants:
+        eligible += (Issue.plant_id.in_(plants),)
     candidates = [i for i, vertical in db.execute(select(Issue.id, Issue.vertical).where(*eligible))
-                  if canonical_key(vertical) in owners]
+                  if keys is None or canonical_key(vertical) in keys]
     service = IssueService(db)
     counts: dict[UUID, int] = {}
     for offset in range(0, len(candidates), 250):
@@ -317,7 +403,7 @@ def _route_open_issues(db: Session, actor: User, owners: dict[str, User]) -> int
                           .order_by(Issue.id).with_for_update()).all()
         for row in rows:
             key = canonical_key(row.vertical)
-            target = owners.get(key)
+            target, source = routing.resolve(row.plant_id, row.vertical)
             if target is None:
                 continue
             row.assigned_to = target.id
@@ -325,8 +411,8 @@ def _route_open_issues(db: Session, actor: User, owners: dict[str, User]) -> int
             row.status = "Assigned"
             row.updated_at = datetime.now(timezone.utc)
             service._history(row, "issue.auto_assigned", actor, status_from="Open", status_to="Assigned",
-                note="Automatically assigned when equipment responsibility was configured.",
-                metadata={"rule": "equipment_responsibility", "equipment": key, "assigned_to": str(target.id)})
+                note=f"Automatically assigned when responsibility was configured ({source}).",
+                metadata={"rule": source, "equipment": key, "assigned_to": str(target.id)})
             counts[target.id] = counts.get(target.id, 0) + 1
     for uid, count in counts.items():
         create_notification(db, user_id=uid, event_type="ticket_assigned",

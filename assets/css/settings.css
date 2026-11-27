@@ -728,3 +728,25 @@
 /* Whole-plant PM responsibility: native touch-friendly checkboxes. */
 .ep-settings__dialog .ep-pm-plant-picks .ep-eqr__pick { flex-direction: row; min-height: 44px; cursor: pointer; }
 .ep-settings__dialog .ep-pm-plant-picks input[type="checkbox"] { width: 22px; min-height: 22px; height: 22px; flex: 0 0 22px; padding: 0; }
+
+/* Compact responsive plant exceptions; no separate mobile application. */
+.ep-issue-routing { margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--ep-border-strong, #d4d7d4); }
+.ep-issue-routing h3 { margin: 0 0 6px; font-size: 15px; }
+.ep-issue-routing p { margin: 6px 0 10px; }
+.ep-issue-routing__fields { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 8px; }
+.ep-issue-routing__fields label { display: grid; gap: 4px; min-width: 0; font-size: 12px; font-weight: 600; }
+.ep-issue-routing__fields select { width: 100%; min-width: 0; min-height: 36px; padding: 6px; border: 1px solid var(--ep-border-strong, #d4d7d4); border-radius: 7px; background: #fff; color: #17231b; }
+.ep-issue-routing__actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 10px 0; }
+.ep-issue-routing__actions label { flex: 1 1 240px; font-size: 12px; }
+.ep-issue-routing__list { display: grid; gap: 5px; }
+.ep-issue-routing__item { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 8px; border: 1px solid var(--ep-border-strong, #d4d7d4); border-radius: 7px; }
+.ep-issue-routing__item div { min-width: 0; overflow-wrap: anywhere; }
+.ep-issue-routing__item small { display: block; }
+@media (max-width: 720px) { .ep-issue-routing__fields { grid-template-columns: repeat(2,minmax(0,1fr)); } .ep-issue-routing__fields select, .ep-issue-routing__actions button, .ep-issue-routing__item button { min-height: 44px; } }
+@media (max-width: 420px) { .ep-issue-routing__fields { grid-template-columns: 1fr; } }
+.ep-issue-routing { margin-bottom: 12px; }
+.ep-issue-routing__bulk { margin: 8px 0; }
+.ep-issue-routing__bulk summary { cursor: pointer; padding: 6px 0; font-size: 12px; font-weight: 600; }
+.ep-issue-routing__plant-list { display: grid; grid-template-columns: repeat(auto-fit,minmax(200px,1fr)); gap: 4px 10px; max-height: 180px; overflow: auto; }
+.ep-issue-routing__plant-list label { display: flex; align-items: center; gap: 6px; min-height: 32px; font-size: 12px; }
+@media (max-width: 720px) { .ep-issue-routing__plant-list label { min-height: 44px; } }
