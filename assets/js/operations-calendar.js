@@ -3524,5 +3524,17 @@
     }
   }
 
+  // A new/edited plant can affect portfolio calendar selectors. Drop only
+  // loaded flags; do not fetch every calendar or discard recorded data.
+  if (global.document && typeof global.document.addEventListener === "function") {
+    global.document.addEventListener("portal:plants-changed", function () {
+      Object.keys(states).forEach(function (key) {
+        states[key].loaded = false;
+        states[key].loading = false;
+        states[key].requestId += 1;
+      });
+    });
+  }
+
   global.Solar91PortalCalendar = { render: render };
 }(window));

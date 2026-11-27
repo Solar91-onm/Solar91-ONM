@@ -14,6 +14,8 @@
 
   var sessionPromise = null;
   var plantsPromise = null;
+  var plantsLoadedAt = 0;
+  var PLANTS_TTL_MS = 60 * 1000;
 
   /** Authenticated JSON request. Throws an Error with .status on failure. */
   function request(url, options) {
@@ -35,8 +37,9 @@
 
   /** Every plant the signed-in user may see, with the full stored record. */
   function plants(force) {
-    if (force) plantsPromise = null;
+    if (force || Date.now() - plantsLoadedAt > PLANTS_TTL_MS) plantsPromise = null;
     if (!plantsPromise) {
+      plantsLoadedAt = Date.now();
       const pending = request("/api/portal/plants").then(function (body) {
         return (body.plants || []).map(normalizePlant);
       }).catch(function (error) {

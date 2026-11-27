@@ -64,7 +64,10 @@
 
   function refreshPlantViews() {
     data.invalidate(true);
-    return global.Solar91PortalAPI.plants(true).then(function () {
+    // Start the fresh shared catalogue request before notifying lazy modules.
+    var refresh = global.Solar91PortalAPI.plants(true);
+    document.dispatchEvent(new CustomEvent("portal:plants-changed"));
+    return refresh.then(function () {
       var nav = global.Solar91PortalNav;
       return nav && typeof nav.loadPlants === "function" ? nav.loadPlants() : undefined;
     });

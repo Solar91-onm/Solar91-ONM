@@ -8,6 +8,8 @@
   var allRows = [];            // [{ plant, profile }]
   var loadPromise = null;
   var loaded = false;
+  var portfolioRequest = null;
+  var showToken = 0;
   var searchTimer = null;
   var activeContainer = null;
   var mode = { kind: "all", siteCode: null, merged: false };
@@ -118,8 +120,13 @@
   }
 
   document.addEventListener("portal:info-health-panel-opened", function (event) {
-    if (event.detail && event.detail.section === "info" && activeContainer && activeContainer.isConnected) {
-      refreshCompactCells(activeContainer);
+    if (event.detail && event.detail.section === "info" && activeContainer && activeContainer.isConnected &&
+        mode.kind === "all" && detailSection === "details") {
+      // Info/Health switches keep the hosts mounted and do not call show().
+      // Recheck the shared cache here too, without repainting a warm table.
+      ensureLoaded();
+      if (!loaded) show(activeContainer, { section: "details" });
+      else refreshCompactCells(activeContainer);
     }
   });
 
@@ -704,18 +711,34 @@
 
   // ─── Public entry point ──────────────────────────────────────────────
   function ensureLoaded() {
-    if (!loadPromise) {
-      loadPromise = data.fetchPortfolio().then(function (portfolio) {
-        allRows = portfolio.rows;
-        loaded = true;
+    // The shared adapter owns freshness (TTL + write invalidation). A module-local
+    // resolved promise must never outlive it, or the Info table freezes at its first count.
+    var request = data.fetchPortfolio();
+    if (!loadPromise || portfolioRequest !== request) {
+      portfolioRequest = request;
+      loaded = false;
+      var pending = request.then(function (portfolio) {
+        if (loadPromise === pending) {
+          allRows = portfolio.rows || [];
+          loaded = true;
+        }
         return allRows;
+      }).catch(function (error) {
+        if (loadPromise === pending) {
+          loadPromise = null;
+          portfolioRequest = null;
+          loaded = false;
+        }
+        throw error;
       });
+      loadPromise = pending;
     }
     return loadPromise;
   }
 
   function show(container, opts) {
     if (!container) return;
+    var mine = ++showToken;
     activeContainer = container;
     detailSection = opts && DETAIL_SECTIONS.indexOf(opts.section) !== -1
       ? opts.section : "details";
@@ -739,14 +762,17 @@
       global.Solar91PortalLiasoning.show(container, { siteCode: mode.siteCode });
       return;
     }
+    var pending = ensureLoaded();
     if (loaded) {
       render(container);
-      return;
+      return pending;
     }
     container.innerHTML = '<div class="ep-pt__loading">Loading plants…</div>';
-    ensureLoaded().then(function () {
+    return pending.then(function () {
+      if (mine !== showToken || loadPromise !== pending) return;
       render(container);
     }).catch(function (err) {
+      if (mine !== showToken) return;
       container.innerHTML = '<div class="ep-pt__error">Could not load the plant catalogue. ' +
                             fmt.escape(err && err.message ? err.message : "") + "</div>";
     });

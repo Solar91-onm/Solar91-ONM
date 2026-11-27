@@ -599,7 +599,12 @@
   document.addEventListener("portal:info-health-panel-opened", function (event) {
     if (event.detail && event.detail.section === "health" && active &&
         !active.context.plantCode && active.host.isConnected) {
-      refreshCompactCells(active.host);
+      if (!state.loading && !state.submitting && !state.modalMode &&
+          (!state.loaded || Date.now() - state.loadedAt > 60000)) {
+        load();
+      } else {
+        refreshCompactCells(active.host);
+      }
     }
   });
 
@@ -1319,7 +1324,10 @@
     // rows; no polling and no extra request on the first visit.
     var refreshPersonal = context.resetOwnerView && state.isAssignee && state.loaded &&
       !state.loading && !state.submitting && !state.modalMode && Date.now() - state.loadedAt > 30000;
-    if (resetOwnerView || refreshPersonal || ((state.loaded || state.loading) && state.scope !== nextScope)) {
+    // Other portfolio roles also need to see newly added plants on later visits.
+    var refreshCatalogue = state.loaded && !state.loading && !state.submitting &&
+      !state.modalMode && Date.now() - state.loadedAt > 60000;
+    if (resetOwnerView || refreshPersonal || refreshCatalogue || ((state.loaded || state.loading) && state.scope !== nextScope)) {
       load();
     } else if (state.loaded) {
       renderView();
@@ -2838,6 +2846,9 @@
     state.loadingMore = false;
     state.requestId += 1;
   }
+
+  // A committed catalogue edit invalidates the register once, not on every navigation.
+  document.addEventListener("portal:plants-changed", invalidate);
 
   global.Solar91PortalIssues = {
     render: render,

@@ -323,6 +323,11 @@
     navState.expandedGroups[groupName] = !navState.expandedGroups[groupName];
     var groupEl = document.querySelector('[data-nav-group="' + groupName + '"]');
     if (groupEl) groupEl.classList.toggle("is-expanded", navState.expandedGroups[groupName]);
+    // Reopening the plant group consults the shared minute-long catalogue cache.
+    // Warm navigation still makes no request; another session's additions can appear.
+    if (groupName === "plants" && navState.expandedGroups[groupName]) {
+      loadPlants().catch(function () {});
+    }
   }
 
   function setGroupExpanded(groupName, expanded) {
@@ -333,8 +338,9 @@
 
   // ─── Plant list population ──────────────────────────────────────────
   function populatePlantList(plants) {
+    if (plantsLoaded && allPlants === plants) return;
     allPlants = plants;
-    renderPlantList("");
+    renderPlantList(document.querySelector("[data-plant-search]")?.value || "");
   }
 
   /**
