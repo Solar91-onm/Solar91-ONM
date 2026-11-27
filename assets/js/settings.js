@@ -255,13 +255,14 @@
     var canManage = api().can("users.manage");
     var existingModal = activeHost.querySelector("[data-settings-modal]");
     var list = filteredUsers();
-    activeHost.innerHTML = '<div class="ep-settings">' +
+    var pageHTML = '<div class="ep-settings">' +
       '<header class="ep-settings__page-head"><div><h1>Login access</h1>' +
         '<p>Manage Clerk sign-in invitations, account status, roles, and equipment responsibility.</p></div>' +
         '<span class="ep-settings__access-badge"><i></i>Clerk sign-in</span></header>' +
-      '<section class="ep-settings__panel" aria-labelledby="settings-team-title">' +
-        '<div class="ep-settings__panel-intro"><h2 id="settings-team-title">Team &amp; access</h2>' +
+      '<section class="ep-settings__panel ep-settings__team" aria-labelledby="settings-team-title">' +
+        '<div class="ep-settings__panel-intro ep-settings__team-intro"><div class="ep-settings__team-title"><div class="ep-settings__team-copy"><h2 id="settings-team-title">Team &amp; access</h2>' +
           '<p>Assignees and O&amp;M Heads can work across all plants and equipment. Equipment responsibility routes site issues; PM responsibility is assigned plant-wise. Site Engineers remain assigned to one plant.</p></div>' +
+          (canManage ? '<button type="button" class="ep-settings__button ep-settings__button--primary ep-settings__routing-launch" data-settings-action="open-issue-routing" aria-haspopup="dialog">Site Issue Responsibility</button>' : '') + '</div></div>' +
         (canManage ? renderRoleChips() :
           '<p class="ep-settings__message" role="status">Your account does not have permission to manage login access.</p>') +
         (canManage ? '<div class="ep-settings__toolbar">' +
@@ -290,7 +291,16 @@
       renderEquipmentPanel(canManage) +
       renderStorageCard(canManage) +
     "</div>";
-    if (existingModal) activeHost.appendChild(existingModal);
+    // Keep the native routing dialog mounted during async refreshes and form edits.
+    var routingDialog = activeHost.querySelector("[data-issue-routing-dialog]");
+    var page = activeHost.querySelector(".ep-settings");
+    if (routingDialog && page) page.outerHTML = pageHTML;
+    else {
+      activeHost.innerHTML = pageHTML;
+      if (existingModal) activeHost.appendChild(existingModal);
+    }
+    if (canManage && equipment.routeOpen) renderRoutingDialog();
+    else if (routingDialog) routingDialog.remove();
   }
 
   // Declared here, not inside loadUsers: renderPage and the toolbar's own buttons call it.
@@ -514,10 +524,8 @@
   }
 
   function renderIssueRouting() {
-    if (!equipment.loaded) return "";
-    var toggle = '<button type="button" class="ep-settings__button" data-settings-action="toggle-issue-routing" aria-expanded="' + equipment.routeOpen + '">' + (equipment.routeOpen ? 'Hide site issue plant exceptions and default' : 'Manage site issue plant exceptions and default') + '</button>';
-    if (!equipment.routeOpen) return '<div class="ep-issue-routing">' + toggle + '</div>';
-    if (equipment.routeLoading || !equipment.routeLoaded) return '<div class="ep-issue-routing">' + toggle + (equipment.routeLoading ? '<p role="status">Loading assignment rules…</p>' : '<p role="alert">' + escape(equipment.routeError || 'Assignment rules not loaded.') + '</p><button type="button" class="ep-settings__button" data-settings-action="reload-issue-routing">Retry</button>') + '</div>';
+    if (equipment.loading || equipment.routeLoading) return '<div class="ep-issue-routing"><p role="status">Loading assignment rules…</p></div>';
+    if (!equipment.loaded || !equipment.routeLoaded) return '<div class="ep-issue-routing"><p role="alert">' + escape(equipment.error || equipment.routeError || 'Assignment rules not loaded.') + '</p><button type="button" class="ep-settings__button" data-settings-action="reload-issue-routing">Retry</button></div>';
     var d = equipment.routeDraft;
     var plants = equipment.plants;
     var allKeys = Object.keys(equipment.routing).sort();
@@ -533,9 +541,9 @@
     var morePlants = d.plant && d.plant !== "*" ? '<details class="ep-issue-routing__bulk"><summary>Apply same rule to additional plants (' + d.extraPlants.length + ' selected)</summary><div class="ep-issue-routing__plant-list">' + plants.filter(function (p) { return p.active && p.id !== d.plant; }).map(function (p) {
       return '<label><input type="checkbox" data-routing-extra="' + escape(p.id) + '"' + (d.extraPlants.indexOf(p.id) !== -1 ? ' checked' : '') + '> ' + escape(p.site_code + " · " + p.plant_name) + '</label>';
     }).join("") + '</div></details>' : '';
-    return '<div class="ep-issue-routing">' + toggle + '<h3>Site issue plant exceptions and default</h3>' +
+    return '<div class="ep-issue-routing"><h3>Plant exceptions and portfolio default</h3>' +
       '<p>Plant + equipment overrides take priority, then plant-wide rules, then portfolio equipment owners, then the default. Each rule tries its eligible primary before backup. PM responsibility is separate.</p>' +
-      '<div class="ep-issue-routing__fields">' +
+      '<fieldset class="ep-issue-routing__editor"' + (equipment.routeSaving ? ' disabled' : '') + '><div class="ep-issue-routing__fields">' +
       '<label>Plant or default<select data-routing-field="plant">' + routeOption("", "Choose scope", d.plant) + routeOption("*", "Portfolio default (unmatched issues)", d.plant) + plants.filter(function (p) { return p.active || p.id === d.plant; }).map(function (p) { return routeOption(p.id, p.site_code + " · " + p.plant_name + (p.active ? "" : " (inactive)"), d.plant); }).join("") + (d.plant && d.plant !== "*" && !plants.some(function (p) { return p.id === d.plant; }) ? routeOption(d.plant, "Removed plant", d.plant) : "") + '</select></label>' +
       '<label>Equipment<select data-routing-field="key"' + (d.plant === "*" ? ' disabled' : '') + '>' + routeOption("*", "All equipment", d.key) + equipment.categories.map(function (c) { return routeOption(c.key, c.label, d.key); }).join("") + (d.key !== "*" && !equipment.categories.some(function (c) { return c.key === d.key; }) ? routeOption(d.key, "Removed equipment: " + d.key, d.key) : "") + '</select></label>' +
       '<label>Primary Assignee<select data-routing-field="primary">' + routingOwnerOptions(d.primary) + '</select></label>' +
@@ -544,7 +552,7 @@
       (equipment.routeMessage ? '<p class="ep-settings__message" role="status">' + escape(equipment.routeMessage) + '</p>' : "") +
       '<div class="ep-issue-routing__actions"><label><input type="checkbox" data-routing-field="applyExisting"' + (d.applyExisting ? ' checked' : '') + '> Also assign matching open, unassigned issues</label>' +
       '<button type="button" class="ep-settings__button ep-settings__button--primary" data-settings-action="save-issue-routing"' + (equipment.routeSaving || !d.plant ? ' disabled' : '') + '>' + (equipment.routeSaving ? 'Saving…' : 'Save rule') + '</button>' +
-      '<button type="button" class="ep-settings__button" data-settings-action="remove-issue-routing"' + (equipment.routeSaving || !equipment.routing[d.plant + ":" + d.key] ? ' disabled' : '') + '>Remove rule</button></div>' +
+      '<button type="button" class="ep-settings__button" data-settings-action="remove-issue-routing"' + (equipment.routeSaving || !equipment.routing[d.plant + ":" + d.key] ? ' disabled' : '') + '>Remove rule</button></div></fieldset>' +
       '<p class="ep-settings__footnote">Existing assigned issues are never transferred by these rules. If no eligible owner is configured, the existing unassigned escalation / Assignee self-assignment remains in place.</p>' +
       '<p class="ep-settings__footnote">' + keys.length + ' rule(s) shown of ' + allKeys.length + ' saved. Choose a plant or default to see its rules.' + '</p>' +
       (keys.length ? '<div class="ep-issue-routing__list">' + keys.map(function (identity) {
@@ -554,22 +562,77 @@
       }).join("") + '</div>' : '<p class="ep-settings__empty">No plant exceptions or default configured.</p>') + '</div>';
   }
 
+  function renderRoutingDialog() {
+    if (!activeHost || !equipment.routeOpen || !api().can("users.manage")) return;
+    var dialog = activeHost.querySelector("[data-issue-routing-dialog]");
+    if (!dialog) {
+      dialog = document.createElement("dialog");
+      dialog.className = "ep-settings__routing-dialog";
+      dialog.setAttribute("data-issue-routing-dialog", "");
+      dialog.setAttribute("aria-labelledby", "settings-routing-title");
+      dialog.innerHTML = '<header class="ep-settings__routing-head"><div><h2 id="settings-routing-title">Site Issue Responsibility</h2><p>Automatic assignment · Primary and backup owners</p></div><button type="button" class="ep-settings__icon-close" data-settings-action="close-issue-routing" aria-label="Close site issue responsibility">×</button></header>' +
+        '<div class="ep-settings__routing-body"><div class="ep-settings__routing-links"><button type="button" class="ep-settings__button" data-settings-action="view-portfolio-equipment">Portfolio equipment responsibility</button><span>Plant exceptions &amp; default</span></div><div data-routing-content></div></div>';
+      dialog.addEventListener("cancel", function (event) { event.preventDefault(); closeIssueRouting(); });
+      activeHost.appendChild(dialog);
+    }
+    var body = dialog.querySelector(".ep-settings__routing-body");
+    var content = dialog.querySelector("[data-routing-content]");
+    var html = renderIssueRouting();
+    if (content._routingHTML !== html) {
+      var scroll = body.scrollTop;
+      var focused = document.activeElement;
+      var field = content.contains(focused) && focused.getAttribute("data-routing-field");
+      var bulk = content.querySelector(".ep-issue-routing__bulk");
+      var bulkOpen = bulk && bulk.open;
+      content.innerHTML = html;
+      content._routingHTML = html;
+      bulk = content.querySelector(".ep-issue-routing__bulk");
+      if (bulk && bulkOpen) bulk.open = true;
+      if (field) {
+        var next = content.querySelector('[data-routing-field="' + field + '"]');
+        if (next && !next.disabled) next.focus({preventScroll: true});
+      }
+      body.scrollTop = scroll;
+    }
+    if (!dialog.open) dialog.showModal();
+  }
+
+  function openIssueRouting() {
+    if (!api().can("users.manage") || equipment.routeOpen) return;
+    equipment.routeOpen = true;
+    equipment.routeMessage = "";
+    // The header shortcut is usable even while the initial catalogue is loading.
+    if (!equipment.loaded && !equipment.loading) loadEquipment(false);
+    loadIssueRouting(true);
+    renderRoutingDialog();
+  }
+
+  function closeIssueRouting() {
+    equipment.routeOpen = false;
+    if (!activeHost) return;
+    var dialog = activeHost.querySelector("[data-issue-routing-dialog]");
+    if (dialog) { dialog.close(); dialog.remove(); }
+    var launch = activeHost.querySelector('[data-settings-action="open-issue-routing"]');
+    if (launch) launch.focus({preventScroll: true});
+  }
+
   function selectIssueRouting(plant, key) {
+    if (equipment.routeSaving) return;
     var rule = equipment.routing[plant + ":" + key] || {};
     equipment.routeDraft = {plant: plant, key: key, primary: rule.primary_user_id || "", backup: rule.backup_user_id || "", extraPlants: [], applyExisting: false};
-    render();
+    renderRoutingDialog();
   }
 
   function saveIssueRouting(remove) {
     var d = equipment.routeDraft;
     if (!d.plant || equipment.routeSaving) return;
-    if (!remove && !d.primary && !d.backup) { equipment.routeError = "Choose at least one Assignee, or remove the rule."; render(); return; }
-    if (!remove && d.primary && d.primary === d.backup) { equipment.routeError = "Primary and backup must be different people."; render(); return; }
+    if (!remove && !d.primary && !d.backup) { equipment.routeError = "Choose at least one Assignee, or remove the rule."; renderRoutingDialog(); return; }
+    if (!remove && d.primary && d.primary === d.backup) { equipment.routeError = "Primary and backup must be different people."; renderRoutingDialog(); return; }
     if (remove && !global.confirm("Remove this responsibility rule? Existing assigned issues will not change.")) return;
     var plantIds = d.plant === "*" ? [] : [d.plant].concat(remove ? [] : d.extraPlants);
     if (plantIds.length > 1 && !global.confirm("Save this rule for " + plantIds.length + " plants? Existing rules for that plant/equipment combination will be replaced.")) return;
     if (!remove && d.applyExisting && !global.confirm("Assign matching open issues that currently have no owner?")) return;
-    equipment.routeSaving = true; equipment.routeError = ""; equipment.routeMessage = ""; render();
+    equipment.routeSaving = true; equipment.routeError = ""; equipment.routeMessage = ""; renderRoutingDialog();
     api().request("/api/equipment-responsibilities/issue-routing", {method: "PUT", body: {
       plant_ids: plantIds, equipment_key: d.key,
       primary_user_id: remove ? null : d.primary || null, backup_user_id: remove ? null : d.backup || null,
@@ -578,7 +641,7 @@
       equipment.routeSaving = false; equipment.routing = result.rules || {};
       equipment.routeMessage = (remove ? "Rule removed. " : "Rule saved. ") + (result.issues_auto_assigned || 0) + " existing issues assigned.";
       selectIssueRouting(d.plant, d.key);
-    }).catch(function (error) { equipment.routeSaving = false; equipment.routeError = error.message || "Could not save the rule."; render(); });
+    }).catch(function (error) { equipment.routeSaving = false; equipment.routeError = error.message || "Could not save the rule."; renderRoutingDialog(); });
   }
 
   function renderEquipmentPanel(canManage) {
@@ -600,10 +663,10 @@
         '<button type="button" class="ep-settings__button" data-settings-action="refresh-equipment">Refresh</button>' +
         '<button type="button" class="ep-settings__button" data-settings-action="toggle-equipment-history">' +
           (equipment.historyOpen ? "Hide change history" : "Change history") + "</button>" +
+        '<button type="button" class="ep-settings__button" data-settings-action="toggle-issue-routing" aria-haspopup="dialog">Manage site issue plant exceptions and default</button>' +
       "</div>" +
       (equipment.message ? '<p class="ep-settings__message" role="status">' + escape(equipment.message) + "</p>" : "") +
       (equipment.error ? '<p class="ep-settings__form-error" role="alert">' + escape(equipment.error) + "</p>" : "") +
-      renderIssueRouting() +
       (equipment.loading && !equipment.loaded
         ? '<p class="ep-settings__empty" role="status">Loading equipment responsibilities…</p>'
         : '<div class="ep-eqr__table" role="table" aria-label="Equipment responsibility matrix">' +
@@ -655,7 +718,7 @@
     if (!api().can("users.manage") || equipment.routeLoading || equipment.routeSaving) return Promise.resolve();
     if (equipment.routeLoaded && !force) return Promise.resolve();
     equipment.routeLoading = true; equipment.routeError = "";
-    render();
+    renderRoutingDialog();
     return api().request("/api/equipment-responsibilities/issue-routing").then(function (body) {
       equipment.routing = body.issue_routing || {};
       equipment.plants = Array.isArray(body.plants) ? body.plants : [];
@@ -667,7 +730,7 @@
     }).catch(function (error) {
       equipment.routeLoaded = false;
       equipment.routeError = error.message || "Assignment rules could not be loaded.";
-    }).finally(function () { equipment.routeLoading = false; render(); });
+    }).finally(function () { equipment.routeLoading = false; renderRoutingDialog(); });
   }
 
   function loadEquipmentHistory() {
@@ -947,11 +1010,20 @@
         equipment.message = "";
         loadEquipment(true);
         if (equipment.routeOpen) loadIssueRouting(true);
-      } else if (action === "toggle-issue-routing") {
-        equipment.routeOpen = !equipment.routeOpen;
-        if (equipment.routeOpen) loadIssueRouting(true);
-        else render();
+      } else if (action === "toggle-issue-routing" || action === "open-issue-routing") {
+        openIssueRouting();
+      } else if (action === "close-issue-routing") {
+        closeIssueRouting();
+      } else if (action === "view-portfolio-equipment") {
+        closeIssueRouting();
+        var portfolio = host.querySelector("#settings-equipment-title");
+        if (portfolio) {
+          portfolio.setAttribute("tabindex", "-1");
+          portfolio.focus({preventScroll: true});
+          portfolio.scrollIntoView({block: "start"});
+        }
       } else if (action === "reload-issue-routing") {
+        if (!equipment.loaded) loadEquipment(false);
         loadIssueRouting(true);
       } else if (action === "toggle-equipment-history") {
         equipment.historyOpen = !equipment.historyOpen;
@@ -1135,6 +1207,7 @@
 
   function renderPage(host) {
     if (!host) throw new Error("Settings host element is missing.");
+    if (activeHost && equipment.routeOpen) closeIssueRouting();
     activeHost = host;
     wire(host);
     statusMessage = "";
