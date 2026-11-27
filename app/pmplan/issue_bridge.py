@@ -75,6 +75,10 @@ def create_corrective_issues(db: Session, row, plant: Plant, actor: User, now: d
         source = f"PM:{row.id}:{c['id']}"
         description = (f"Preventive Maintenance · {row.equipment_id} · {row.inspected_on.isoformat()}\n"
                        f"Checkpoint: {c['task']}\nResult: {c['result']}\nObservation: {c['note']}")
+        readings = c.get("measurements") or []
+        if readings:
+            description += "\nMeasurements: " + "; ".join(
+                f"{m['context'] + ': ' if m.get('context') else ''}{m['value']} {m['unit']}" for m in readings)
         occurred = min(now, datetime.combine(row.inspected_on, time(9),
                         tzinfo=timezone(timedelta(hours=5, minutes=30))).astimezone(timezone.utc))
         issue = Issue(id=issue_id, ticket_no=f'ISS-{next_no:04d}', plant_id=row.plant_id,
@@ -87,6 +91,7 @@ def create_corrective_issues(db: Session, row, plant: Plant, actor: User, now: d
                       legacy_payload={'evidence': [], 'pm_source': {'activity_id': str(row.id),
                           'checklist_item_id': c['id'], 'task': c['task'], 'result': c['result'],
                           'observation': c['note'], 'equipment_id': row.equipment_id,
+                          **({'measurements': readings} if readings else {}),
                           'scheduled_on': row.scheduled_on.isoformat(), 'inspected_on': row.inspected_on.isoformat()}})
         next_no += 1
         db.add(issue)

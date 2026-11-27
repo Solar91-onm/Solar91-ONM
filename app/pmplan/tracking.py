@@ -12,7 +12,7 @@ from calendar import monthrange
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, FiniteFloat
 from sqlalchemy import Date, DateTime, ForeignKey, JSON, String, Text, UniqueConstraint, select, func, or_, case
 from sqlalchemy.orm import Mapped, Session, mapped_column, load_only
 
@@ -65,144 +65,7 @@ router = APIRouter(prefix="/tracking", tags=["PM checklist tracking"])
 # unique Monthly-ticked items from Operation & Maintenance Schedule updated.xls.
 # Descriptions are inspection scope, not live electrical work instructions.
 # ACDB has no dedicated source sheet: two shared monthly panel checks are used.
-CHECKLISTS = {'Inverter': ['Check inverter cleanliness',
-              'Check tourqing of AC Termination',
-              'Check All cooling fans are working',
-              'String testig to be done - And Make String Report',
-              'Check any abnormilities (Cable puncher,crack in cable insulation)',
-              'Check Inverter Communication with RMS/COM100',
-              'ERT of All DC Earthing Pits',
-              'Check DC On/Off Switch',
-              'Check Cable entry hole seald by PV Foam',
-              'Module cleanning robot inspection',
-              'Modules physical inspection- For any Damage',
-              'Check/visually inspect the inverter-side MC4. Ensure all MC4 connectors are properly locked. '
-              'Perform a string check to identify any cuts in the DC cable.',
-              'MMS check ( rusting, wending nut bolts lossing)',
-              'Cleaning of fan filter units'],
- 'ACCB': ['Check ACCB fuse base',
-          'Check Bus Bar Sleeve',
-          'Check Bus Bar Bolt, Lug, Washer for Heat Up & Looseness',
-          'Check Fan is working',
-          'Check Power cable lug',
-          'Check Fuse base connection tightness',
-          'Check Temp. in ACCB',
-          'Check Fuse failure',
-          'Check ACCB cleanliness',
-          'Check Acrylic sheet mounting',
-          'Check Air filter & fan filter for cleanliness',
-          'Check Cable dressing',
-          'Check Door lock & Door working',
-          'Check LED Indication',
-          'Check for any unwanted opening or Hole',
-          'Check Enclosure Rusting',
-          'Check ACCB Rotary Switch is in ON condition',
-          'Inspect MCBs, DPs, fuses, relays, and timers for abnormalities, burns, or overheating'],
- 'IDT Transformer': ['Clean Complete Body of transformer',
-                     'Check Oil Leakage from Transformer ( Radiator,Conservator, Tank and Air Release & Oil '
-                     'Releive Valve)',
-                     'Check Torqing of LT and HT termmination',
-                     'Check Tightness of marshelling box connection',
-                     'Check IR Values of HT nad LT Winding',
-                     'Check tap changing take place both in Manual mode And Remote Mode',
-                     'Check all the cable termination',
-                     'Check OTI Alarm and Trip',
-                     'Check WTI Alarm and Trip',
-                     'Check Buchholz alarm and Trip',
-                     'Check MOG Alarm',
-                     'Check and release Air Vent in Buholz relay',
-                     'Check Earth resistanse of Transformer Earthing',
-                     'Visual check for any crack on Insulator',
-                     'Check and remove Vegetation in the yard',
-                     'Check Oil Level of transformer tank and OLTC',
-                     'Check the Breather Silicagel condition'],
- 'VCB': ['Check Breaker cleanliness',
-         'Check Torqing of AC termination',
-         'Check bolt, washer and lug for heatup',
-         'Check Breaker Jointing Kit (Any Crack in Jointing Kit)',
-         'Check manual Spring charge and On/Off',
-         'Check operation of Breaker',
-         'Check the Indication Lamp',
-         'Check the Annunciator function',
-         'Check the Hooter function',
-         'Check the Function of Selector switch and TNC Switch and Push Button',
-         'Check door lock and door working'],
- '4 Pole + ACDB + Aux. TX': ['Four Pole — Bush Should be Clear',
-                             'Four Pole — Oil Leakage Issue from CT & PT',
-                             'Four Pole — Yard Fencing Should be Proper',
-                             'Four Pole — Grease on Isolator Operating Part',
-                             'Four Pole — Equipment Bushing Proper',
-                             'Four Pole — Jointing Kits Proper',
-                             'Four Pole — Check ERT Value, if required fill water in pits',
-                             'Four Pole — No Chattering Sound Heard in Yard',
-                             'Four Pole — Yard Greet Should be Proper',
-                             'Four Pole — Fire Bucket Filled with Sand & Fire Extinguisher Filled',
-                             'Four Pole — Check horngap Rod and Fuse Condition',
-                             'Four Pole — Check the LA is Intact',
-                             'Four Pole — Visual inspection of the four-pole structure',
-                             'ACDB — HT & LT Pannels Cleaning Record',
-                             'ACDB — Inspect MCBs, DPs, fuses, relays, and timers for abnormalities, burns, or '
-                             'overheating',
-                             'Auxiliary Transformer — Clean Complete Body of transformer',
-                             'Auxiliary Transformer — Check Oil Leakage from Transformer ( Radiator,Conservator, '
-                             'Tank and Air Release & Oil Releive Valve)',
-                             'Auxiliary Transformer — Check Torqing of LT and HT termmination',
-                             'Auxiliary Transformer — Check Tightness of marshelling box connection',
-                             'Auxiliary Transformer — Check IR Values of HT nad LT Winding',
-                             'Auxiliary Transformer — Check tap changing take place both in Manual mode And '
-                             'Remote Mode',
-                             'Auxiliary Transformer — Check all the cable termination',
-                             'Auxiliary Transformer — Check OTI Alarm and Trip',
-                             'Auxiliary Transformer — Check WTI Alarm and Trip',
-                             'Auxiliary Transformer — Check Buchholz alarm and Trip',
-                             'Auxiliary Transformer — Check MOG Alarm',
-                             'Auxiliary Transformer — Check and release Air Vent in Buholz relay',
-                             'Auxiliary Transformer — Check Earth resistanse of Transformer Earthing',
-                             'Auxiliary Transformer — Visual check for any crack on Insulator',
-                             'Auxiliary Transformer — Check and remove Vegetation in the yard',
-                             'Auxiliary Transformer — Check Oil Level of transformer tank and OLTC',
-                             'Auxiliary Transformer — Check the Breather Silicagel condition'],
- 'Transmission line': ['Check the insulator crackness from Ground',
-                       'Check conductor Sag from Ground',
-                       'Check and ensure the pole & Pin insulators are upright and free from slantinng from '
-                       'Ground',
-                       'Check and ensure poles are with out any damage/observation from Ground',
-                       'Check and cut trees and shrubs during line clearance',
-                       'Check conductors are properly seated in its slot from Ground',
-                       'Check earth connection to the poles from Ground',
-                       'Check the guard wire for properness from Ground',
-                       'Check the stay insulator healthiness and stay wire properness',
-                       'Check all jointing kits visually',
-                       'Complete line patrolling from the plant to GSS',
-                       'Check arcing horn for any carbon deposits'],
- 'GSS visit': ['GSS-side VCB & Kiosk — Check Breaker cleanliness',
-               'GSS-side VCB & Kiosk — Check Torqing of AC termination',
-               'GSS-side VCB & Kiosk — Check bolt, washer and lug for heatup',
-               'GSS-side VCB & Kiosk — Check Breaker Jointing Kit (Any Crack in Jointing Kit)',
-               'GSS-side VCB & Kiosk — Check manual Spring charge and On/Off',
-               'GSS-side VCB & Kiosk — Check operation of Breaker',
-               'GSS-side VCB & Kiosk — Check the Indication Lamp',
-               'GSS-side VCB & Kiosk — Check the Annunciator function',
-               'GSS-side VCB & Kiosk — Check the Hooter function',
-               'GSS-side VCB & Kiosk — Check the Function of Selector switch and TNC Switch and Push Button',
-               'GSS-side VCB & Kiosk — Check door lock and door working',
-               'GSS-side Switchyard — Bush Should be Clear',
-               'GSS-side Switchyard — Oil Leakage Issue from CT & PT',
-               'GSS-side Switchyard — Yard Fencing Should be Proper',
-               'GSS-side Switchyard — Grease on Isolator Operating Part',
-               'GSS-side Switchyard — Equipment Bushing Proper',
-               'GSS-side Switchyard — Jointing Kits Proper',
-               'GSS-side Switchyard — Check ERT Value, if required fill water in pits',
-               'GSS-side Switchyard — No Chattering Sound Heard in Yard',
-               'GSS-side Switchyard — Yard Greet Should be Proper',
-               'GSS-side Switchyard — Fire Bucket Filled with Sand & Fire Extinguisher Filled',
-               'GSS-side Switchyard — Check horngap Rod and Fuse Condition',
-               'GSS-side Switchyard — Check the LA is Intact'],
- 'Earth pit': ['Earthing system check- ERT and Watering of all Pits'],
- 'Miscellaneous': ['Water pipe line and motor- Check for leakage and water preassure',
-                   'Comminication system check- System online monitoring',
-                   'WMS calibration checked- Check data as per Ambient Condition',
-                   'Water Drainage System Check- Check for leakage']}
+from app.pmplan.checklist_templates import CHECKLISTS, TEMPLATE_VERSION, guidance_for
 CATEGORIES = ["Inverter", "ACCB", "IDT Transformer", "VCB", "4 Pole + ACDB + Aux. TX",
               "Transmission line", "GSS visit", "Earth pit", "Miscellaneous"]
 ROLES = {"Site Engineer", "Assignee", "O&M Head"}
@@ -238,7 +101,16 @@ class PMTrackingActivity(Base, TimestampMixin):
     __table_args__ = (UniqueConstraint("plant_id", "equipment", "equipment_id", "scheduled_on"),)
 
 
+class Measurement(BaseModel):
+    # Unit encodes the physical quantity. A context can identify phase/string/pit.
+    unit: Literal["V", "kV", "A", "mA", "°C", "Ω", "mΩ", "MΩ", "s", "count"]
+    value: FiniteFloat
+    context: str = Field(default="", max_length=80)
+
+
 class CheckResult(BaseModel):
+    item_id: str | None = Field(default=None, max_length=80)
+    measurements: list[Measurement] = Field(default_factory=list, max_length=6)
     result: Literal["OK", "Not OK", "Abnormality", "N/A"]
     note: str = Field(default="", max_length=2000)
 
@@ -475,7 +347,8 @@ def check_pm_tracking_reminders(db: Session, today: date | None = None, *, max_p
 @router.get("")
 def tracking_month(db: Annotated[Session, Depends(get_db)], user: Annotated[User, Depends(get_current_user)],
                    month: str = Query(...), site_code: str | None = None, summary: bool = False,
-                   scheduled_date: date | None = Query(None, alias="date"), compliance: str | None = None):
+                   scheduled_date: date | None = Query(None, alias="date"), compliance: str | None = None,
+                   compact: bool = False):
     first, last = _bounds(month)
     if scheduled_date and not first <= scheduled_date <= last:
         raise HTTPException(422, "Date must be within the selected month")
@@ -598,12 +471,29 @@ def tracking_month(db: Annotated[Session, Depends(get_db)], user: Annotated[User
         daily_ids = {row.plant_id for row in rows}
         daily_codes = {entry.get("plantSiteCode") for entry in legacy}
         portfolio_plants = [plant for plant in portfolio_plants if plant.id in daily_ids or plant.site_code in daily_codes]
+    activities = [_out(r, _blocker(r, first_open.get(r.plant_id)), user, today, summary=summary) for r in rows]
+    templates = {}
+    # Opt-in only for a single plant. Older clients retain the full row format.
+    # Unstarted rows of the same equipment share one list of task descriptions.
+    if compact and site_code and not summary:
+        for activity, row in zip(activities, rows):
+            if not row.checklist:
+                templates.setdefault(row.equipment, activity.pop("checks"))
     return {"month": month, "as_of": datetime.now(timezone.utc).isoformat(), "today": _iso(today), "role": user.role, "categories": CATEGORIES,
             "covered": list(CHECKLISTS), "plants": [{"id": str(p.id), "site_code": p.site_code,
                 "name": p.plant_name, "district": p.district or "", "supervisor": p.supervisor or "",
                 "configured": p.id in configured, "compliance": compliance_by_plant[p.id], "pm_assignee": pm_owners[p.id]} for p in portfolio_plants],
-            "activities": [_out(r, _blocker(r, first_open.get(r.plant_id)), user, today, summary=summary) for r in rows],
+            "activities": activities, **({"templates": templates} if templates else {}),
             "legacy": legacy[:20000], "legacy_truncated": legacy_truncated}
+
+
+@router.get("/guidance/{equipment}")
+def checklist_guidance(equipment: str, user: Annotated[User, Depends(get_current_user)]):
+    if user.role not in ROLES:
+        raise HTTPException(403, "PM checklist guidance is not available to your role")
+    if equipment not in CHECKLISTS:
+        raise HTTPException(404, "Checklist equipment not found")
+    return {"version": TEMPLATE_VERSION, "equipment": equipment, "items": guidance_for(equipment)}
 
 
 @router.post("/{activity_id}/action", dependencies=[Depends(require_csrf)])
@@ -652,7 +542,20 @@ def tracking_action(activity_id: uuid.UUID, payload: TrackingAction,
             raise HTTPException(422, "An observation or justification is required for every Not OK / Abnormality / N/A result")
         if all(c.result == "N/A" for c in payload.checks):
             raise HTTPException(422, "At least one applicable check is required; contact the O&M Head for an entirely inapplicable activity")
-        row.checklist = [{"id": _checklist_item_id(row.id, task), "task": task, "result": c.result, "note": c.note.strip()} for task, c in zip(expected, payload.checks)]
+        # Optional item IDs protect new clients against reordered/stale templates.
+        # Older clients still receive the existing length validation above.
+        if any(c.item_id is not None for c in payload.checks):
+            if [c.item_id for c in payload.checks] != [_checklist_item_id(row.id, task) for task in expected]:
+                raise HTTPException(409, "Checklist changed; reopen the activity before submitting")
+        # Preserve the historical item identity and any stored metadata on return.
+        previous = {c["task"]: c for c in (row.checklist or []) if isinstance(c, dict) and c.get("task")}
+        row.checklist = [
+            {**previous.get(task, {}), "id": _checklist_item_id(row.id, task), "task": task,
+             "result": c.result, "note": c.note.strip(),
+             **({"measurements": [m.model_dump() for m in c.measurements]}
+                if "measurements" in c.model_fields_set else {})}
+            for task, c in zip(expected, payload.checks)
+        ]
         row.inspected_on, row.remarks = payload.inspected_on, reason
         row.submitted_by, row.submitted_name, row.submitted_at = user.id, user.display_name, now
         row.status = "Pending approval"

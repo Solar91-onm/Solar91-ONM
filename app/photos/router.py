@@ -713,6 +713,11 @@ def create_photos(db: Annotated[Session, Depends(get_db)], user: Annotated[User,
                 SitePhoto.link_id == ref, SitePhoto.checklist_item_id == checklist_item_id)) or 0
             if attached + len(records) > MAX_CHECKPOINT_PHOTOS:
                 raise HTTPException(409, "PM checkpoint photo limit reached; refresh and retry")
+            # Pin the exact task list on first evidence upload, inside the same
+            # transaction. Future template revisions must not detach these photos.
+            if not current.checklist:
+                current.checklist = [{"id": _checklist_item_id(current.id, task), "task": task}
+                                     for task in _checks_for(current)]
         db.add_all(records)
         db.flush()
         issue_photo_count = None

@@ -64,3 +64,7 @@ Enter one row for each physical inverter. The migration prohibits repeating the 
 ## Validation
 
 `pytest -q tests/test_pm_tracking.py` exercises cross-plant scope, incomplete/abnormal check validation, locked submission, independent inverter approval, permission override, return/resubmit, same-date unlock and legacy marker visibility. The new frontend was rendered using a browser with representative mock API data. The standalone design preview is illustrative and is not a live database or an authentication system. Run the complete project test suite and verify on a staging Supabase/PostgreSQL instance before production. No live Supabase credentials were provided and no migration has been executed against your database.
+
+## December 2026 checklist catalogue v2
+
+See `docs/PM_CHECKLIST_V2_RELEASE.md` for the current 235-check catalogue, preservation rules and deployment order. The legacy scheduling examples earlier in this document are historical context; do not rerun existing loaders or migrations for this content upgrade.

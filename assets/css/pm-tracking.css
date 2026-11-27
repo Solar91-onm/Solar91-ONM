@@ -135,3 +135,15 @@
   .s91pm-scroll,.s91pm-cards{max-height:none;min-height:0;overscroll-behavior:auto}.s91pm-matrix th:first-child{min-width:116px;width:116px;max-width:140px}.s91pm-matrix .s91pm-plant-link{overflow-wrap:anywhere}.s91pm-reg th:first-child{min-width:138px}.s91pm table{font-size:13px}.s91pm table thead th{font-size:11px}.s91pm-table{min-width:680px}.s91pm .s91pm-btn,.s91pm-plant-link,.s91pm-reg-toggle{min-height:44px}.s91pm input,.s91pm select,.s91pm textarea{font-size:16px;min-height:44px;min-width:0;max-width:100%}
   .s91pm-head-actions{gap:5px}.s91pm-head-actions .s91pm-btn{flex:1 1 auto;white-space:normal}.s91pm-cal-scroll{overflow-x:auto}.s91pm-cal-grid{min-width:560px}.s91pm-editor{max-width:calc(100% - 12px);max-height:calc(100dvh - 12px)}.s91pm-editor input,.s91pm-editor select{font-size:16px;min-height:44px}.s91pm-editor button{min-height:44px}
 }
+
+/* PM v2: guidance and measurements stay collapsed until needed. */
+.s91pm-guidance,.s91pm-measurements{margin:8px 0;border:1px solid #d7e4db;border-radius:8px;background:#f4f8f5;overflow-wrap:anywhere;min-width:0}
+.s91pm-guidance summary,.s91pm-measurements summary{cursor:pointer;padding:9px 11px;font-weight:600;color:#24563f;min-height:40px;box-sizing:border-box}
+.s91pm-guide-content,.s91pm-measure-fields{padding:0 11px 10px;min-width:0}
+.s91pm-guide-content p{margin:7px 0;line-height:1.45;font-size:13px}
+.s91pm-guide-source{color:#53695c;font-size:12px!important}
+.s91pm-measure-row{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,0.8fr) minmax(0,1.5fr);gap:8px;margin:8px 0;align-items:end}
+.s91pm-measure-row label{min-width:0;display:flex;flex-direction:column;gap:4px;font-size:12px}
+.s91pm-measure-row input,.s91pm-measure-row select{width:100%;min-width:0;box-sizing:border-box}
+.s91pm-reading-list{margin:4px 0;padding-left:20px;font-size:12px}
+@media(max-width:600px){.s91pm-measure-row{grid-template-columns:repeat(2,minmax(0,1fr))}.s91pm-measure-row label:last-child{grid-column:1/-1}.s91pm-measure-row input,.s91pm-measure-row select{min-height:44px;font-size:16px}.s91pm-guidance summary,.s91pm-measurements summary{min-height:44px}}

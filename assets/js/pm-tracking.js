@@ -41,6 +41,7 @@
     const byCode=new Map(s.data.plants.map(p=>[p.site_code,p]));
     const assigned=new Set(s.data.activities.map(a=>`${a.plant_id}|${a.equipment}|${a.date}`));
     s.activities=s.data.activities.map(a=>({...a,source:"tracking",
+      checks:a.checks||s.data.templates?.[a.equipment]||[],
       equipment_id:a.equipment==="4 Pole + ACDB + Aux. TX"&&a.equipment_id==="4 Pole — structure inspection"?"4 Pole + ACDB + Aux. TX — plant visit":a.equipment_id}));
     s.legacy=s.data.legacy.map(a=>{
       const p=byCode.get(a.plantSiteCode), equipment=category(a), marker=a.source==="cycle_plan";
@@ -185,7 +186,7 @@
     if(a.permission_reason)h+=`<div class="s91pm-note"><b>Permission ${e(a.permission.toLowerCase())}</b><p>${e(a.permission_reason)}</p><small>${e(a.requested_name||'')} · ${dlabel(a.requested_at)}</small>${a.authorisation_note?`<p>${e(a.authorisation_note)}</p><small>${e(a.authorised_name||'')} · ${dlabel(a.authorised_at)}</small>`:''}</div>`;
     if(a.review_note)h+=`<div class="s91pm-note"><b>Review note</b><p>${e(a.review_note)}</p><small>${e(a.reviewed_name||'')} · ${dlabel(a.reviewed_at)}</small></div>`;
     if(a.equipment==='GSS visit')h+='<div class="s91pm-note"><b>GSS side only</b><p>Record authorised inspections or verified utility-maintenance records. Do not operate utility-owned equipment without authorisation.</p></div>';
-    if(a.checklist?.length)h+=`<h3>Recorded checklist</h3><p>${e(a.submitted_name||'')} · ${dlabel(a.inspected_on)}</p><div class="s91pm-results">${a.checklist.map(c=>`<div><b>${e(c.task)}</b>${pill(c.result,c.result==='OK'?'green':c.result==='N/A'?'neutral':'red')}${c.note?`<p>${e(c.note)}</p>`:''}</div>`).join('')}</div>${a.remarks?`<p><b>Remarks:</b> ${e(a.remarks)}</p>`:''}`;
+    if(a.checklist?.some(c=>c.result))h+=`<h3>Recorded checklist</h3><p>${e(a.submitted_name||'')} · ${dlabel(a.inspected_on)}</p><div class="s91pm-results">${a.checklist.map(c=>`<div><b>${e(c.task)}</b>${pill(c.result,c.result==='OK'?'green':c.result==='N/A'?'neutral':'red')}${c.note?`<p>${e(c.note)}</p>`:''}${c.measurements?.length?`<ul class="s91pm-reading-list">${c.measurements.map(m=>`<li>${e(m.context?m.context+': ':'')}${e(m.value)} ${e(m.unit)}</li>`).join('')}</ul>`:''}</div>`).join('')}</div>${a.remarks?`<p><b>Remarks:</b> ${e(a.remarks)}</p>`:''}`;
     else h+=`<h3>Monthly checklist · ${a.checks.length} checks</h3><ol class="s91pm-check-preview">${a.checks.map(c=>`<li>${e(c)}</li>`).join('')}</ol>`;
     if(a.equipment.startsWith('4 Pole'))h+='<p class="s91pm-foot">Four Pole, shared ACDB panel checks and Auxiliary Transformer. Each section must be reviewed.</p>';
     if(a.can_submit)h+=btn("Record PM","record","",true);
@@ -196,10 +197,33 @@
     if(!a.can_submit&&!a.can_request&&!a.can_grant&&!a.can_review&&a.status==='Scheduled'&&a.date>s.data.today)h+='<p class="s91pm-foot">Recording opens on the scheduled date. The checklist can be opened and read before then; nothing is saved.</p>';
     return h;
   }
+  const pmGuidanceCache=new Map(), pmGuidancePending=new Map();
+  function pmGuidance(equipment){
+    if(pmGuidanceCache.has(equipment))return Promise.resolve(pmGuidanceCache.get(equipment));
+    if(pmGuidancePending.has(equipment))return pmGuidancePending.get(equipment);
+    const request=api().request('/api/pm-plan/tracking/guidance/'+encodeURIComponent(equipment)).then(data=>{
+      const items=data?.items||{};pmGuidanceCache.set(equipment,items);return items;
+    }).finally(()=>pmGuidancePending.delete(equipment));
+    pmGuidancePending.set(equipment,request);return request;
+  }
+  const measurementUnits=['V','kV','A','mA','°C','Ω','mΩ','MΩ','s','count'];
+  function measurementFields(i,measurements){
+    return Array.from({length:6},(_,j)=>{const m=measurements?.[j]||{};return `<div class="s91pm-measure-row"><label>Value ${j+1}<input type="number" step="any" inputmode="decimal" name="mv${i}_${j}" value="${e(m.value??'')}"></label><label>Unit<select name="mu${i}_${j}">${option('','Select unit',m.unit||'')}${measurementUnits.map(u=>option(u,u,m.unit||'')).join('')}</select></label><label>Context (optional)<input name="mc${i}_${j}" maxlength="80" value="${e(m.context||'')}" placeholder="e.g. L1 or string 2"></label></div>`;}).join('');
+  }
+  function inspectionExtras(a,task,i,prev){
+    const measurements=prev.measurements||[];
+    return `<details class="s91pm-guidance" data-pmx-guide="${i}"><summary>Inspection guidance</summary><div class="s91pm-guide-content" aria-live="polite">Expand to load guidance.</div></details><details class="s91pm-measurements" data-pmx-measure="${i}"><summary>Optional measured values${measurements.length?' · '+measurements.length+' recorded':''}</summary><div class="s91pm-measure-fields">${measurements.length?measurementFields(i,measurements):''}</div></details>`;
+  }
+  function showGuidance(details,items,task){
+    const box=details.querySelector('.s91pm-guide-content'),g=Object.prototype.hasOwnProperty.call(items,task)?items[task]:null;
+    if(!box)return;
+    if(!g){box.textContent='Retained existing check. Follow the approved site procedure and OEM limits; no additional workbook guidance was supplied.';return;}
+    box.innerHTML=`<p class="s91pm-guide-source">Workbook reference · ${e(g.source_sheet)} · item ${e(g.source_item)}. Not an approved work instruction. Verify OEM limits, site procedures and authorisation; never carry out intrusive work without isolation, PTW and LOTO.</p>${[['Workbook description',g.description],['Parameters to check',g.parameters],['Signs of abnormalities',g.abnormalities],['Corrective action guidance',g.corrective_actions]].map(([label,value])=>`<p><strong>${e(label)}</strong><br>${e(value||'Not specified')}</p>`).join('')}`;
+  }
   function checkForm(s,a) {
     let section="";
     const preview=!a.can_submit;
-    const checks=a.checks.map((c,i)=>{const prev=a.checklist?.find(x=>x.task===c)||{};const parts=c.split(" — ");const group=parts.length>1?parts[0]:"";const label=group?parts.slice(1).join(" — "):c;const heading=group&&group!==section?`<h3 class="s91pm-check-group">${e(group)}</h3>`:"";section=group;const itemId=a.checklistItemIds?.[i]||"";const photoAttrs=itemId&&!preview?` data-pmx-photo-btn data-item-id="${e(itemId)}" data-activity-id="${e(a.id)}" data-plant-id="${e(a.plant_id)}"`:' disabled';return `${heading}<fieldset><legend>${i+1}. ${e(label)}</legend><select name="result${i}" required aria-label="Result ${i+1}">${option("","Select result",prev.result||"")}${['OK','Not OK','Abnormality','N/A'].map(x=>option(x,x,prev.result||"")).join('')}</select><textarea rows="2" maxlength="2000" name="note${i}" placeholder="Observation / N/A justification (required unless OK)" aria-label="Observation ${i+1}">${e(prev.note||'')}</textarea><div class="s91pm-check-photos"><button type="button" class="s91pm-photo-slot" data-slot="1"${photoAttrs} title="${preview?'Photo visible in preview':'Upload Before photo'}">📷 Before</button><button type="button" class="s91pm-photo-slot" data-slot="1" data-gallery${photoAttrs}>Before file</button><button type="button" class="s91pm-photo-slot" data-slot="2"${photoAttrs} title="${preview?'Photo visible in preview':'Upload After photo'}">📷 After</button><button type="button" class="s91pm-photo-slot" data-slot="2" data-gallery${photoAttrs}>After file</button></div></fieldset>`;}).join('');
+    const checks=a.checks.map((c,i)=>{const prev=a.checklist?.find(x=>x.task===c)||{};const parts=c.split(" — ");const group=parts.length>1?parts[0]:"";const label=group?parts.slice(1).join(" — "):c;const heading=group&&group!==section?`<h3 class="s91pm-check-group">${e(group)}</h3>`:"";section=group;const itemId=a.checklistItemIds?.[i]||"";const photoAttrs=itemId&&!preview?` data-pmx-photo-btn data-item-id="${e(itemId)}" data-activity-id="${e(a.id)}" data-plant-id="${e(a.plant_id)}"`:' disabled';return `${heading}<fieldset><legend>${i+1}. ${e(label)}</legend><select name="result${i}" required aria-label="Result ${i+1}">${option("","Select result",prev.result||"")}${['OK','Not OK','Abnormality','N/A'].map(x=>option(x,x,prev.result||"")).join('')}</select><textarea rows="2" maxlength="2000" name="note${i}" placeholder="Observation / N/A justification (required unless OK)" aria-label="Observation ${i+1}">${e(prev.note||'')}</textarea>${inspectionExtras(a,c,i,prev)}<div class="s91pm-check-photos"><button type="button" class="s91pm-photo-slot" data-slot="1"${photoAttrs} title="${preview?'Photo visible in preview':'Upload Before photo'}">📷 Before</button><button type="button" class="s91pm-photo-slot" data-slot="1" data-gallery${photoAttrs}>Before file</button><button type="button" class="s91pm-photo-slot" data-slot="2"${photoAttrs} title="${preview?'Photo visible in preview':'Upload After photo'}">📷 After</button><button type="button" class="s91pm-photo-slot" data-slot="2" data-gallery${photoAttrs}>After file</button></div></fieldset>`;}).join('');
     return `<form class="s91pm-modal-form" data-pmx-submit-form${preview?' data-pmx-preview':''}><div class="s91pm-modal-body">${preview?`<div class="s91pm-callout"><b>Preview only — nothing is saved</b><p>This checklist is not open to you for recording${a.date>s.data.today?' until '+dlabel(a.date):''}. You can read and walk through it; no entry is created and no approval is requested.</p></div>`:''}<div class="s91pm-note"><b>Safety and applicability</b><p>Use approved OEM limits, authorised personnel and applicable isolation/permit-to-work procedures. Mark N/A only for genuinely absent or inapplicable components, with justification. Leave incomplete or deferred work unsubmitted. Not OK and Abnormality results create corrective Site Issues on submission; OK and N/A do not.</p></div><label>Inspection date<input name="inspected_on" type="date" min="${e(a.date)}" max="${e(s.data.today)}" value="${e(a.inspected_on||s.data.today)}" required></label>${checks}<label>General remarks<textarea name="reason" maxlength="4000" rows="3">${e(a.remarks||'')}</textarea></label></div><footer class="s91pm-modal-foot"><div class="s91pm-wrap"><button class="s91pm-btn s91pm-primary" type="submit"${preview?' disabled title="Preview only: this activity is not open to you for recording"':''}>Submit for approval</button>${btn(preview?"Close preview":"Cancel","cancel-record")}</div><p class="s91pm-foot">${preview?'Preview only: the entry is not stored and no approval is requested.':'Engineer identity and submission time are captured automatically. Photos upload separately; wait for confirmation before submitting.'}</p></footer></form>`;
   }
   /**
@@ -237,7 +261,7 @@
   function planPoll(s){clearTimeout(pollTimer);if(!visible(s))return;const slow=global.navigator?.connection?.saveData||/2g|3g/.test(global.navigator?.connection?.effectiveType||'');pollTimer=setTimeout(()=>{if(visible(s)&&!busy(s)&&global.navigator?.onLine!==false&&!s.loading)load(s,true);else if(visible(s))planPoll(s);},Math.max(s.backoff||60000,slow?120000:60000)+Math.random()*5000);}
   async function load(s,background=false) {
     const token=++s.token,hadError=!!s.error;s.loading=true;s.error="";if(!s.data)render(s);
-    try{let url='/api/pm-plan/tracking?month='+encodeURIComponent(s.month)+(s.siteCode?'&site_code='+encodeURIComponent(s.siteCode):'&summary=true');if(!s.siteCode&&s.view==="overview"){if(s.selectedDate)url+='&date='+encodeURIComponent(s.selectedDate);if(s.compliance)url+='&compliance='+encodeURIComponent(s.compliance);}const data=await api().request(url);if(active!==s||s.token!==token||!routeMatches(s))return;
+    try{let url='/api/pm-plan/tracking?month='+encodeURIComponent(s.month)+(s.siteCode?'&site_code='+encodeURIComponent(s.siteCode)+'&compact=true':'&summary=true');if(!s.siteCode&&s.view==="overview"){if(s.selectedDate)url+='&date='+encodeURIComponent(s.selectedDate);if(s.compliance)url+='&compliance='+encodeURIComponent(s.compliance);}const data=await api().request(url);if(active!==s||s.token!==token||!routeMatches(s))return;
       if(background&&(!visible(s)||busy(s))){s.loading=false;planPoll(s);return;}
       const same=background&&!hadError&&s.data&&JSON.stringify({...s.data,as_of:null})===JSON.stringify({...data,as_of:null});s.data=data;enrich(s);remember(s);s.loading=false;s.backoff=60000;if(!same)render(s);else {const stamp=s.host.querySelector("[data-pmx-updated]");if(stamp)stamp.textContent=updatedLabel(s); }
     }catch(err){if(active!==s||s.token!==token||!routeMatches(s))return;s.loading=false;s.error=err?.message||'Could not load PM tracking.';s.backoff=Math.min(300000,(s.backoff||60000)*2);if(!background||visible(s)&&!busy(s))render(s);}
@@ -272,6 +296,14 @@
   }
   const wired=new WeakSet();
   function wire(host){if(wired.has(host))return;wired.add(host);
+    // Native disclosure controls keep long combined visits compact and mobile friendly.
+    // Update only the expanded content, never re-render the form while recording.
+    host.addEventListener('toggle',ev=>{const d=ev.target,s=active;if(!s||s.host!==host||!d.open||!d.dataset)return;
+      const a=s.activities.find(x=>x.id===s.selected);if(!a||!s.form)return;
+      if(d.dataset.pmxMeasure!==undefined){const i=Number(d.dataset.pmxMeasure),box=d.querySelector('.s91pm-measure-fields');if(box&&!box.children.length){const prev=a.checklist?.find(x=>x.task===a.checks[i]);box.innerHTML=measurementFields(i,prev?.measurements||[]);}return;}
+      if(d.dataset.pmxGuide===undefined)return;const i=Number(d.dataset.pmxGuide),task=a.checks[i],box=d.querySelector('.s91pm-guide-content');if(!box)return;
+      box.textContent='Loading inspection guidance…';pmGuidance(a.equipment).then(items=>{if(d.isConnected)showGuidance(d,items,task);}).catch(()=>{if(d.isConnected)box.textContent='Guidance unavailable. Close and reopen to retry; follow the approved site procedure.';});
+    },true);
     host.addEventListener('click',ev=>{const s=active;if(!s||s.host!==host)return;const summaryExport=ev.target.closest('[data-pmx-export-summary]');if(summaryExport){summaryExport.disabled=true;api().downloadFile('/api/pm-plan/tracking/summary/export?month='+encodeURIComponent(s.month),'Solar91_PM_Summary.xlsx').catch(err=>global.alert(err?.message||'The PM summary could not be downloaded.')).then(()=>{summaryExport.disabled=false;});return;}
       const photoBtn=ev.target.closest('[data-pmx-photo-btn]');
       if(photoBtn&&!photoBtn.disabled){
@@ -336,7 +368,22 @@
       const fd=new FormData(form), action=submit?'submit':ev.submitter?.value;
       if(!action)return;
       const payload={action,reason:String(fd.get('reason')||'')};
-      if(submit){payload.inspected_on=fd.get('inspected_on');payload.checks=a.checks.map((_,i)=>({result:fd.get('result'+i),note:String(fd.get('note'+i)||'')}));}
+      if(submit){
+        payload.inspected_on=fd.get('inspected_on');
+        let invalidReading=false;
+        payload.checks=a.checks.map((task,i)=>{
+          const measurements=[];
+          for(let j=0;j<6;j++){
+            const value=String(fd.get(`mv${i}_${j}`)||'').trim(),unit=String(fd.get(`mu${i}_${j}`)||''),context=String(fd.get(`mc${i}_${j}`)||'').trim();
+            if(!value&&!unit&&!context)continue;
+            if(!value||!unit||!Number.isFinite(Number(value))){invalidReading=true;form.querySelector(`[data-pmx-measure="${i}"]`).open=true;continue;}
+            measurements.push({value:Number(value),unit,context});
+          }
+          const item_id=a.checklistItemIds?.[i];
+          return {result:fd.get('result'+i),note:String(fd.get('note'+i)||''),...(item_id?{item_id}:{}),measurements};
+        });
+        if(invalidReading){global.Solar91PortalToast?.error('Incomplete measurement','Enter both a numeric value and unit, or clear the optional reading.');return;}
+      }
       const errNode=document.createElement('p');errNode.className='s91pm-form-error';errNode.setAttribute('role','alert');form.querySelector('.s91pm-form-error')?.remove();
       s.saving=true;Array.from(form.querySelectorAll('button')).forEach(b=>b.disabled=true);
       try{const saved=await api().request('/api/pm-plan/tracking/'+encodeURIComponent(a.id)+'/action',{method:'POST',body:payload});recent.clear();if(saved?.corrective_issues?.some(x=>x.created)){global.Solar91PortalIssues?.invalidate?.();global.Solar91PortalData?.invalidate(true);}if(active!==s||!routeMatches(s))return;s.form='';s.notice={submit:'Checklist submitted for O&M Head approval.',approve:'PM approved. Sequence recalculated.',return:'PM returned for correction.',request:'Permission requested.',grant:'Permission granted for this activity only.',deny:'Permission denied.'}[action];

@@ -255,6 +255,9 @@ def test_recurring_pm_camera_evidence_slots_and_retry(client, db):
     good = post()
     assert good.status_code == 201, good.text
     assert good.json()['records'][0]['phase'] == 'before'
+    db.refresh(a)
+    assert [c['task'] for c in a.checklist] == CHECKLISTS['Inverter']
+    assert a.checklist[0]['id'] == item
     assert post().status_code == 200
     payload['submission_id'] = str(uuid.uuid4())
     assert post().status_code == 409
