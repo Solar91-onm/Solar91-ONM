@@ -154,7 +154,14 @@ def test_raise_issue_keeps_the_register_mounted_and_loads_assignees_on_demand():
 
     assert '"/api/issues/assignees"' not in load_live
     assert 'if (state.wizardStep === 3 && direction === "next" && !state.isAssignee)' in issues
-    assert "You — assigned automatically" in issues
+    # Equipment responsibility takes priority over the reporting Assignee.
+    step_three = issues[issues.index("function renderWizardStepThree"):]
+    step_three = step_three[:step_three.index("function ", len("function renderWizardStepThree"))]
+    assert "var assignmentField = state.isAssignee" in step_three
+    assert "Equipment primary Assignee (you if none configured)" in step_three
+    assert '<option value="">Automatic by equipment</option>' in step_three
+    submit = issues[issues.index("function submitLiveIssue"):]
+    assert "assigned_to: draft.assignee || null" in submit
     assert "oldOverlay.outerHTML = markup;" in drawer
     assert 'root.insertAdjacentHTML("beforeend", markup);' in drawer
     assert "host.innerHTML" not in drawer

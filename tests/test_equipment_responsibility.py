@@ -294,7 +294,7 @@ def test_configuring_responsibility_later_does_not_touch_existing_tickets(client
     assert later["assigned_to"] == str(new_owner.id), "only new tickets follow the new configuration"
 
 
-def test_an_assignee_raising_their_own_ticket_still_keeps_it(client, db):
+def test_an_assignee_raising_a_ticket_defaults_to_equipment_owner(client, db):
     plant, = _plants(db, "EQR14")
     head = login_user(client, db, role="O&M Head", email="self-head@example.com")
     seed_work_categories(db, "Inverter")
@@ -306,8 +306,19 @@ def test_an_assignee_raising_their_own_ticket_still_keeps_it(client, db):
     _act_as(db, reporter)
     created = _raise_issue(client, plant, "Inverter", "Found while on site")
     assert created.status_code == 201, created.text
-    assert created.json()["assigned_to"] == str(reporter.id), \
-        "an Assignee's own ticket stays with them, as before"
+    assert created.json()["assigned_to"] == str(owner.id)
+
+
+def test_an_assignee_raising_a_ticket_defaults_to_self_without_equipment_owner(client, db):
+    plant, = _plants(db, "EQR15")
+    seed_work_categories(db, "Inverter")
+    reporter = _assignee(db, "Reporter", "fallback-reporter@example.com", plant.id)
+
+    _act_as(db, reporter)
+    created = _raise_issue(client, plant, "Inverter", "Found without configured owner")
+    assert created.status_code == 201, created.text
+    assert created.json()["assigned_to"] == str(reporter.id)
+    assert created.json()["status"] == "Assigned"
 
 
 # ── Preventive Maintenance routing, without changing authority ─────────────
@@ -349,3 +360,38 @@ def test_pm_notifications_reach_the_equipment_owner_across_plants(client, db, mo
     assert refused.status_code in (403, 404, 409), refused.text
     db.refresh(row)
     assert row.status == "Pending approval"
+
+
+def test_new_responsibility_routes_existing_open_tickets_from_both_access_editors(client, db):
+    north, south = _plants(db, "EQR30", "EQR31")
+    head = login_user(client, db, role="O&M Head", email="backfill-head@example.com")
+    owner = _assignee(db, "Owner", "backfill-owner@example.com", north.id)
+    other = _assignee(db, "Other", "backfill-other@example.com", north.id)
+    rows = [Issue(ticket_no=f"ISS-{100+i}", plant_id=plant.id, vertical=vertical,
+                  description="Test fault", severity="Medium", status=status,
+                  assigned_to=assigned, assignee_text=text)
+            for i, (plant, vertical, status, assigned, text) in enumerate([
+                (north, "VCB Panel", "Open", None, None),
+                (south, "VCB", "Open", None, None),
+                (south, "Inverter", "Open", None, None),
+                (north, "VCB", "Assigned", other.id, other.display_name),
+                (south, "VCB", "Closed", None, None),
+                (south, "VCB", "Open", None, "Legacy owner")])]
+    db.add_all(rows); db.commit()
+    ids = [r.id for r in rows]
+    _act_as(db, head)
+    response = client.put(f"{BASE}/category/vcb", json={"primary_user_id": str(owner.id)})
+    assert response.status_code == 200, response.text
+    assert response.json()["issues_auto_assigned"] == 2
+    response = client.put(f"{BASE}/user/{owner.id}", json={"items": [
+        {"equipment_key": "vcb", "position": "primary"}, {"equipment_key": "inverter", "position": "primary"}]})
+    assert response.status_code == 200, response.text
+    assert response.json()["issues_auto_assigned"] == 1
+    db.expire_all()
+    routed = [db.get(Issue, i) for i in ids]
+    assert all(r.assigned_to == owner.id and r.status == "Assigned" for r in routed[:3])
+    assert routed[3].assigned_to == other.id
+    assert routed[4].status == "Closed" and routed[4].assigned_to is None
+    assert routed[5].assignee_text == "Legacy owner"
+    assert any(e["action"] == "issue.auto_assigned" for e in _history(client, str(ids[0])))
+    assert client.put(f"{BASE}/category/vcb", json={"primary_user_id": str(owner.id)}).json()["issues_auto_assigned"] == 0
