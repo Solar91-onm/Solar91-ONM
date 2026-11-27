@@ -484,3 +484,44 @@ def test_portfolio_date_and_compliance_controls_request_filtered_data_and_clear(
         assert(host.html.indexOf('<option value="behind" selected>') === -1, 'the compliance control was not cleared');
       })().then(() => process.exit(0)).catch(e => { console.error(e.message); process.exit(1); });
     """)
+
+
+def test_manage_schedule_is_portfolio_only_and_restricted_to_schedule_managers():
+    _run(r"""
+      (async () => {
+        let dialogs = 0;
+        const createElement = document.createElement;
+        document.createElement = tag => {
+          if (tag === 'dialog') dialogs++;
+          return createElement(tag);
+        };
+        for (const role of ['O&M Head', 'Assignee', 'Site Engineer', 'Technician']) {
+          BODY.role = role;
+          docHandlers['portal:data-invalidated']();
+          const allowed = ['O&M Head', 'Assignee'].includes(role);
+          for (const page of ['portfolio', 'plant', 'calendar']) {
+            const portfolio = page === 'portfolio';
+            routeState = portfolio
+              ? {activeView: 'view-sub', selectedViewPage: 'pm', pmCalendarOpen: false}
+              : {activeView: 'plant-sub', selectedPlant: 'ABH01', selectedSubPage: 'pm',
+                 pmCalendarOpen: page === 'calendar'};
+            const host = makeHost();
+            Solar91PMTracking.show(host, portfolio ? {} : {siteCode: 'ABH01', calendar: page === 'calendar'});
+            await settle();
+            const show = portfolio && allowed;
+            const count = (host.html.match(/data-pmx="schedule-editor"/g) || []).length;
+            assert(count === Number(show), role + ' / ' + page + ': incorrect schedule action visibility');
+            if (!show) {
+              const requests = urls.length;
+              const previousDialogs = dialogs;
+              fire(host, 'click', {pmx: 'schedule-editor'});
+              await settle();
+              assert(dialogs === previousDialogs && urls.length === requests,
+                role + ' / ' + page + ': hidden action opened the editor');
+            }
+            if (page === 'plant') assert(host.html.includes('Open PM calendar'), 'calendar navigation removed');
+            if (page === 'calendar') assert(host.html.includes('s91pm-cal-grid'), 'calendar removed');
+          }
+        }
+      })().then(() => process.exit(0)).catch(e => { console.error(e.message); process.exit(1); });
+    """)

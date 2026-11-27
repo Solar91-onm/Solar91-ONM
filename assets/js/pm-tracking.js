@@ -76,13 +76,14 @@
     return `<div class="s91pm-kpis">${arr.map(([t,v,sub,c])=>`<div class="s91pm-kpi s91pm-accent-${c}"><span>${t}</span><strong>${v}</strong><small>${sub}</small></div>`).join("")}</div>`;
   }
   function updatedLabel(s){return s.data?.as_of?"Data checked "+new Intl.DateTimeFormat("en-IN",{timeZone:"Asia/Kolkata",day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"}).format(new Date(s.data.as_of)):"Data time unavailable";}
+  const canManageSchedule = s => !s.siteCode && s.view === "overview" && ["O&M Head","Assignee"].includes(s.data?.role);
   function header(s,p) {
     const title=s.view==="calendar"?(p?p.name+" · PM calendar":"PM calendar"):p?p.name:"Preventive Maintenance";
     const eyebrow=s.view==="calendar"?"PLANT CALENDAR":p?"PLANT PREVENTIVE MAINTENANCE":"PORTFOLIO VIEW";
     const sub=p?p.site_code:"Monthly equipment-wise monitoring across all plants";
     const back=s.view==="calendar"?btn(s.calendarParent==="overview"?"← Back to all plants":"← Back to plant tracker","back-calendar"):p?btn(s.parent==="plants"?"← Plant details":"← All plants","back-plant"):"";
     const summaryExportBtn=!p?`<button type="button" class="s91pm-btn" data-pmx-export-summary title="Export plant summary as XLSX (two sheets: summary + equipment matrix)">Export Summary XLSX</button>`:"";
-    return `<header class="s91pm-head"><div><div class="s91pm-breadcrumb">${back}</div><small class="s91pm-eyebrow">${eyebrow}</small><h1>${e(title)}</h1><p>${e(sub)}${!p?` · <span data-pmx-updated>${e(updatedLabel(s))}</span>`:''}</p></div><div class="s91pm-head-actions">${!p&&s.view!=="calendar"?"":`<label>Period<input type="month" data-pmx-filter="month" value="${e(s.month)}" aria-label="Month"></label>`}${p&&s.view!=="calendar"?btn("Open PM calendar →","calendar","",true):""}${["O&M Head","Assignee"].includes(s.data.role)?btn("Manage PM schedule","schedule-editor","",true):""}${summaryExportBtn}${btn("Export","export")}${btn("Refresh","reload")}</div></header>`;
+    return `<header class="s91pm-head"><div><div class="s91pm-breadcrumb">${back}</div><small class="s91pm-eyebrow">${eyebrow}</small><h1>${e(title)}</h1><p>${e(sub)}${!p?` · <span data-pmx-updated>${e(updatedLabel(s))}</span>`:''}</p></div><div class="s91pm-head-actions">${!p&&s.view!=="calendar"?"":`<label>Period<input type="month" data-pmx-filter="month" value="${e(s.month)}" aria-label="Month"></label>`}${p&&s.view!=="calendar"?btn("Open PM calendar →","calendar","",true):""}${canManageSchedule(s)?btn("Manage PM schedule","schedule-editor","",true):""}${summaryExportBtn}${btn("Export","export")}${btn("Refresh","reload")}</div></header>`;
   }
   function legend() {return `<div class="s91pm-legend">${["Approved","Pending approval","Overdue","Returned","Locked","Due today","Scheduled","Not assigned"].map(x=>pill(x)).join("")}${pill("Permission granted","blue")}${pill("Existing plan / work order","neutral")}</div>`;}
   function filters(s,portfolio) {
@@ -246,9 +247,9 @@
   function changeCompliance(s,value){s.compliance=value;s.data=null;load(s);}
   function exportRows(s){const rows=[...s.activities,...s.legacy];const plants=new Map(s.data.plants.map(p=>[p.id,p]));const safe=v=>{let x=String(v??'');if(/^[\s]*[=+@-]/.test(x))x="'"+x;return '"'+x.replaceAll('"','""')+'"';};const body=[['Plant','Code','Date','Equipment','Equipment ID','Source','Status','Overdue','Permission','Inspected on','Engineer','Reviewed by'],...rows.map(a=>[plants.get(a.plant_id)?.name,plants.get(a.plant_id)?.site_code,a.date,a.equipment,a.equipment_id,a.source,a.label,a.late?'Yes':'No',a.permission,a.inspected_on,a.submitted_name,a.reviewed_name])].map(r=>r.map(safe).join(',')).join('\r\n');const url=URL.createObjectURL(new Blob(['\ufeff'+body],{type:'text/csv;charset=utf-8'}));const link=document.createElement('a');link.href=url;link.download='Solar91-PM-'+s.month+'.csv';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
   async function openSchedule(s){
-    if(s.editorOpen)return;s.editorOpen=true;
+    if(active!==s||!routeMatches(s)||!canManageSchedule(s)||s.editorOpen)return;s.editorOpen=true;
     const d=document.createElement('dialog');d.className='s91pm-editor';d.setAttribute('aria-labelledby','pm-editor-title');
-    document.body.append(d);const base='/api/pm-plan/schedules';let model=null,scope='future',draft={},preview=null,working=false,code=s.siteCode||'',period=s.month,seq=0,plantOptions=[];
+    document.body.append(d);const base='/api/pm-plan/schedules';let model=null,scope='future',draft={},preview=null,working=false,code='',period=s.month,seq=0,plantOptions=[];
     const key=x=>x.equipment+'|'+(x.inverter_no||'');const label=x=>x.inverter_no?'Inverter '+x.inverter_no:x.equipment;
     const dirty=()=>Object.keys(draft).length>0;
     function close(){if(working)return;if(dirty()&&!global.confirm('Discard unsaved schedule changes?'))return;d.close();}
