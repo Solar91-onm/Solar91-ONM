@@ -26,12 +26,22 @@
   // ── Toasts ────────────────────────────────────────────────────────────────
 
   const TOAST_MAX = 3;
-  const TOAST_MS = { success: 4500, info: 5000, alert: 10000, error: 0, critical: 0 };
+  const TOAST_MS = { notification: 18000, success: 4500, info: 5000, alert: 10000, error: 0, critical: 0 };
   let toastHost = null;
+  let alertHost = null;
   const live = new Map();          // key -> { node, timer }
   const waiting = [];              // queued while three are already on screen
 
-  function host() {
+  function host(notification) {
+    if (notification) {
+      if (alertHost && alertHost.isConnected) return alertHost;
+      alertHost = document.createElement("div");
+      alertHost.className = "ep-notification-alerts";
+      alertHost.setAttribute("role", "region");
+      alertHost.setAttribute("aria-label", "New task notifications");
+      document.body.appendChild(alertHost);
+      return alertHost;
+    }
     if (toastHost && toastHost.isConnected) return toastHost;
     toastHost = document.createElement("div");
     toastHost.className = "ep-toasts";
@@ -54,12 +64,26 @@
     while (live.size < TOAST_MAX && waiting.length) paint(waiting.shift());
   }
 
+  // Small, local vector illustrations: no image requests or icon library required.
+  function taskIllustration(category, critical) {
+    const common = '<svg viewBox="0 0 48 48" width="48" height="48" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">';
+    if (critical) return { kind: "critical", svg: common + '<path d="M21 8a3.5 3.5 0 0 1 6 0l15 26a3.5 3.5 0 0 1-3 5H9a3.5 3.5 0 0 1-3-5Z" fill="#fff"/><path d="M24 17v10m0 6h.01" stroke-width="3.5"/></svg>' };
+    const art = {
+      issue: '<path d="M30 9a11 11 0 0 0-12 15L8 34a4 4 0 0 0 6 6l10-10A11 11 0 0 0 39 18l-7 6-6-6 6-7Z" fill="#fff"/><path d="M11 12v6m-3-3h6m23 18v6m-3-3h6" stroke-width="1.7"/>',
+      pm: '<rect x="11" y="10" width="26" height="32" rx="5" fill="#fff"/><rect x="18" y="6" width="12" height="8" rx="3" fill="#dbeafe"/><path d="m17 23 4 4 9-9m-13 15h14" stroke-width="2.5"/><path d="M40 6v7m-3.5-3.5h7" stroke-width="1.5"/>',
+      washing: '<circle cx="30" cy="16" r="7" fill="#fff2a5"/><path d="M30 3v4m0 18v4M17 16h4m18 0h4M21 7l3 3m12 12 3 3m0-18-3 3" stroke-width="1.6"/><path d="M8 18C8 18 1 27 1 32a8 8 0 0 0 16 0c0-5-9-14-9-14Z" transform="translate(5 -1)" fill="#fff"/><path d="M11 32a3 3 0 0 0 3 3" stroke="#0284c7"/><path d="M25 32h15l-3 8H22Z" fill="#fff"/><path d="M29 32l-3 8m8-8-3 8" stroke-width="1.5"/>',
+      general: '<path d="M35 20a11 11 0 0 0-22 0c0 9-5 12-5 12h32s-5-3-5-12Z" fill="#fff"/><path d="M20 37q4 5 8 0M8 10l-3 5m35-5 3 5"/><circle cx="20" cy="23" r="1.5" fill="currentColor" stroke="none"/><circle cx="28" cy="23" r="1.5" fill="currentColor" stroke="none"/><path d="M21 27q3 3 6 0"/>'
+    };
+    const kind = Object.prototype.hasOwnProperty.call(art, category) ? category : "general";
+    return { kind: kind, svg: common + art[kind] + "</svg>" };
+  }
+
   function paint(toast) {
     const key = toast.key;
     const existing = live.get(key);
     if (existing) {                                   // same message again: don't stack it
       if (existing.timer) clearTimeout(existing.timer);
-      const ms = TOAST_MS[toast.tone] != null ? TOAST_MS[toast.tone] : TOAST_MS.info;
+      const ms = toast.notification ? (toast.tone === "critical" ? 25000 : 18000) : (TOAST_MS[toast.tone] != null ? TOAST_MS[toast.tone] : TOAST_MS.info);
       existing.timer = ms ? setTimeout(() => dismissToast(key), ms) : null;
       existing.node.classList.remove("is-repeat");
       void existing.node.offsetWidth;
@@ -67,10 +91,14 @@
       return;
     }
     const node = document.createElement("div");
-    node.className = "ep-toast ep-toast--" + (toast.tone || "info");
+    node.className = "ep-toast ep-toast--" + (toast.tone || "info") + (toast.notification ? " ep-notification-alert" : "");
     node.setAttribute("role", toast.tone === "error" || toast.tone === "critical" ? "alert" : "status");
+    const art = toast.notification ? taskIllustration(toast.category, toast.tone === "critical") : null;
+    if (art) node.dataset.alertKind = art.kind;
     node.innerHTML =
+      (art ? '<div class="ep-alert-bell" aria-hidden="true">' + art.svg + '</div>' : "") +
       '<div class="ep-toast__body">' +
+        (toast.notification ? '<span class="ep-alert-label">' + esc(toast.label || "New notification") + '</span>' : "") +
         '<strong class="ep-toast__title">' + esc(toast.title) + "</strong>" +
         (toast.message ? '<span class="ep-toast__text">' + esc(toast.message) + "</span>" : "") +
       "</div>" +
@@ -79,8 +107,8 @@
           esc(toast.action.label || "View") + "</button>" : "") +
         '<button type="button" class="ep-toast__close" data-toast-close aria-label="Dismiss">&times;</button>' +
       "</div>";
-    host().appendChild(node);
-    const ms = TOAST_MS[toast.tone] != null ? TOAST_MS[toast.tone] : TOAST_MS.info;
+    host(toast.notification).appendChild(node);
+    const ms = toast.notification ? (toast.tone === "critical" ? 25000 : 18000) : (TOAST_MS[toast.tone] != null ? TOAST_MS[toast.tone] : TOAST_MS.info);
     const entry = { node: node, timer: ms ? setTimeout(() => dismissToast(key), ms) : null };
     live.set(key, entry);
     node.addEventListener("click", ev => {
@@ -101,7 +129,7 @@
       title: opts.title,
       message: opts.message || "",
       tone: opts.tone || "info",
-      action: opts.action || null
+      action: opts.action || null, notification: !!opts.notification, label: opts.label || "", category: opts.category || "general"
     };
     if (live.has(item.key) || live.size < TOAST_MAX) paint(item);
     else {
@@ -143,6 +171,40 @@
     announced: new Set(),     // notification ids already toasted in this tab
     timer: null
   };
+
+  let audio = null;
+  let soundEnabled = false;
+  let ringTimer = null;
+  function toggleSound() {
+    if (soundEnabled) { soundEnabled = false; render(); return; }
+    try {
+      const Audio = global.AudioContext || global.webkitAudioContext;
+      if (!Audio) throw new Error("Sound unavailable");
+      audio = audio || new Audio();
+      audio.resume().then(() => { soundEnabled = true; render(); chime(); }).catch(() => {});
+    } catch (_) { global.Solar91PortalToast.info("Sound unavailable", "Visual alerts will still appear."); }
+  }
+  function chime() {
+    if (!soundEnabled || !audio || audio.state !== "running" || document.visibilityState !== "visible") return;
+    try {
+      [660, 880].forEach((freq, i) => {
+        const t = audio.currentTime + i * 0.13;
+        const osc = audio.createOscillator(), gain = audio.createGain();
+        osc.type = "sine"; osc.frequency.value = freq;
+        gain.gain.setValueAtTime(0.001, t); gain.gain.exponentialRampToValueAtTime(0.09, t + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.001, t + 0.19);
+        osc.connect(gain); gain.connect(audio.destination); osc.start(t); osc.stop(t + 0.2);
+      });
+    } catch (_) { /* visual alerts are independent of audio */ }
+  }
+  function ringBell() {
+    const bell = el("[data-notification-toggle]");
+    if (!bell) return;
+    bell.classList.remove("is-ringing"); void bell.offsetWidth; bell.classList.add("is-ringing");
+    if (ringTimer) clearTimeout(ringTimer);
+    ringTimer = setTimeout(() => bell.classList.remove("is-ringing"), 2200);
+    chime();
+  }
 
   const BASE_INTERVAL = 60000;
   const MAX_INTERVAL = 600000;
@@ -265,6 +327,7 @@
     panel.innerHTML =
       '<div class="ep-note-head">' +
         "<strong>Notifications</strong>" +
+        '<button type="button" class="ep-note-allread ep-note-sound" data-note-sound aria-pressed="' + String(soundEnabled) + '">' + (soundEnabled ? "Sound on" : "Enable sound") + "</button>" +
         '<button type="button" class="ep-note-allread" data-note-read-all' +
           (state.unread ? "" : " disabled") + ">Mark all as read</button>" +
       "</div>" +
@@ -285,16 +348,16 @@
 
   function summary() {
     if (state.inflight) return state.inflight;                 // one request at a time
-    state.inflight = api().request("/api/notifications/summary").then(body => {
+    if (document.visibilityState !== "visible" || global.navigator.onLine === false) return Promise.resolve(null);
+    state.inflight = api().request("/api/notifications/summary?preview=true").then(body => {
       state.inflight = null;
       state.error = "";
       state.backoff = BASE_INTERVAL;
-      const before = state.unread;
       state.unread = Number(body.unread_count) || 0;
       state.actions = Array.isArray(body.actions) ? body.actions : [];
       badge();
       if (state.open) render();
-      if (state.unread > before) announce();
+      if (document.visibilityState === "visible") announce(body.recent_unread || [], !!body.personal_alerts);
       return body;
     }).catch(error => {
       state.inflight = null;
@@ -306,25 +369,29 @@
     return state.inflight;
   }
 
-  /** Something new arrived: toast the important ones, once each. */
-  function announce() {
-    api().request("/api/notifications?unread=true&limit=5").then(body => {
-      const fresh = (body.notifications || []).filter(item =>
-        !state.announced.has(item.id) && (item.priority === "high" || item.priority === "critical"));
-      fresh.reverse().forEach(item => {
-        state.announced.add(item.id);
-        toast({
-          key: "note:" + item.id,
-          title: item.title,
-          message: item.message || "",
-          tone: item.priority === "critical" ? "critical" : "alert",
-          action: { label: "View", run: () => openItem(item, true) }
-        });
+  /** Bounded preview in the existing summary, even if the unread count is unchanged. */
+  function announce(items, personal) {
+    const fresh = items.filter(item => !state.announced.has(item.id));
+    const eligible = fresh.filter(item => personal || item.priority === "high" || item.priority === "critical");
+    const actionable = new Set(["issue_created", "ticket_assigned", "ticket_reassigned", "issue_message", "issue_reopened", "pm_permission_requested", "pm_returned", "pm_overdue", "washing_daily_report", "washing_overdue", "task_assigned", "task_reassigned"]);
+    // An automatically assigned critical ticket has both creation and assignment history.
+    // Show one critical popup instead of ringing twice for the same ticket in a batch.
+    const criticalTickets = new Set(eligible.filter(item => item.event_type === "critical_issue").map(item => item.target_id));
+    const alerts = eligible.filter(item => !(item.event_type === "ticket_assigned" && criticalTickets.has(item.target_id)));
+    if (alerts.length) ringBell();
+    alerts.reverse().forEach(item => {
+      toast({ key: "note:" + item.id, notification: true, category: item.category,
+        label: (CATEGORY_LABEL[item.category] || "Portal") + " · " +
+          (item.priority === "critical" ? "Critical" : item.priority === "high" || actionable.has(item.event_type) ? "Action required" : "New update"),
+        title: item.title, message: item.message || "",
+        tone: item.priority === "critical" ? "critical" : item.priority === "high" ? "alert" : "notification",
+        action: { label: "View details", run: () => openItem(item, true) }
       });
-      (body.notifications || []).forEach(item => state.announced.add(item.id));
-      rememberAnnounced();
-      if (state.open && state.filter !== "actions") loadList(true);
-    }).catch(() => { /* the badge is already right; a missed toast is not an error */ });
+    });
+    fresh.forEach(item => state.announced.add(item.id));
+    if (state.announced.size > 200) state.announced = new Set(Array.from(state.announced).slice(-200));
+    if (fresh.length) rememberAnnounced();
+    if (fresh.length && state.open && state.filter !== "actions") loadList(true);
   }
 
   function loadList(reset) {
@@ -347,8 +414,7 @@
       state.hasMore = !!body.has_more;
       state.nextBefore = body.next_before || null;
       state.nextBeforeId = body.next_before_id || null;
-      state.items.forEach(item => state.announced.add(item.id));
-      rememberAnnounced();
+
       render();
     }).catch(error => {
       if (token !== state.listToken) return;
@@ -358,8 +424,8 @@
     });
   }
 
-  function markRead(id) {
-    const item = state.items.find(row => row.id === id);
+  function markRead(id, previewItem) {
+    const item = state.items.find(row => row.id === id) || previewItem;
     if (!item || item.read) return;
     item.read = true;                                   // optimistic; rolled back on failure
     state.unread = Math.max(0, state.unread - 1);
@@ -408,8 +474,19 @@
   function openItem(item, fromToast) {
     const link = item.link || {};
     const close = () => { if (!fromToast) setOpen(false); };
-    if (!item.read && !fromToast) markRead(item.id);
-    const page = link.page || (item.target_type === "issue" ? "health" : null);
+    if (!item.read) markRead(item.id, item);
+    const page = item.target_type === "issue" ? "health" : (link.page ||
+      (item.category === "pm" || item.category === "task" ? "pm" : item.category === "washing" ? "washing" : null));
+    if (item.target_type === "issue" && item.target_id && nav()) {
+      close();
+      const ready = global.Solar91Modules ? global.Solar91Modules.load(["plants-table", "site-issues"]) : Promise.resolve();
+      ready.then(() => {
+        if (!global.Solar91PortalIssues) throw new Error("Issue register unavailable");
+        nav().selectView("health");
+        global.Solar91PortalIssues.openTicket(item.target_id, link.site_code || "", "details");
+      }).catch(error => global.Solar91PortalToast.error("Could not open issue", error.message || "Try again from Health."));
+      return;
+    }
     if (!page || page === "settings") { close(); return; }
     if (!link.site_code) {
       close();
@@ -485,6 +562,7 @@
         else loadList(true);
         return;
       }
+      if (ev.target.closest("[data-note-sound]")) { toggleSound(); return; }
       if (ev.target.closest("[data-note-read-all]")) { markAllRead(); return; }
       if (ev.target.closest("[data-note-retry]")) { loadList(true); summary().catch(() => {}); return; }
       if (ev.target.closest("[data-note-more]")) { loadList(false); return; }

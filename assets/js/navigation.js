@@ -770,8 +770,13 @@
     }
   }
 
+  var lastIssueRoute = null;
   function renderContentArea() {
     enforceRolePages();
+    var issueRoute = [navState.activeView, navState.selectedPlant || "", navState.selectedSubPage || "",
+      navState.selectedViewPage || "", navState.selectedDetailSection || ""].join("|");
+    var resetIssueOwnerView = lastIssueRoute !== issueRoute;
+    lastIssueRoute = issueRoute;
     var shell = document.querySelector(".ep-shell");
     if (shell) shell.classList.toggle("is-login-access", navState.activeView === "settings");
     var overviewEl = document.querySelector('[data-tab-view="overview"]');
@@ -963,6 +968,7 @@
             document.querySelector("[data-issues-host]"),
             {
               plantCode: null,
+              resetOwnerView: resetIssueOwnerView,
               startDate: navState.selectedRange && navState.selectedRange.startDate,
               endDate: navState.selectedRange && navState.selectedRange.endDate
             }
@@ -985,7 +991,8 @@
             plantCode: plantCode,
             startDate: navState.selectedRange && navState.selectedRange.startDate,
             endDate: navState.selectedRange && navState.selectedRange.endDate,
-            plantDetailsMerged: true
+            plantDetailsMerged: true,
+            resetOwnerView: resetIssueOwnerView
           }
         );
       } else if (plantCode) {
@@ -1000,6 +1007,7 @@
         document.querySelector("[data-issues-host]"),
         {
           plantCode: plantCode,
+          resetOwnerView: resetIssueOwnerView,
           startDate: navState.selectedRange && navState.selectedRange.startDate,
           endDate: navState.selectedRange && navState.selectedRange.endDate
         }

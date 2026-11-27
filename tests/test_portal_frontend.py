@@ -1280,7 +1280,7 @@ def test_overview_inverter_tile_counts_units_and_opens_standalone_health():
     assert 'data-ih-edit="${fmt.escape(ticket.ticket_no || "")}"' in inverter_health
     assert 'global.Solar91PortalIssues.openTicket(ticket.dataset.ihTicket || ticket.dataset.ihEdit, code, mode)' in inverter_health
     assert "function openTicket(ticketNo, siteCode, mode)" in issues
-    assert 'state.modalMode = mode === "edit" ? "edit" : "details";' in issues
+    assert 'state.modalMode = mode === "edit" && canEditIssue(mapped) ? "edit" : "details";' in issues
     styles = (PORTAL_ASSETS / "css" / "components.css").read_text(encoding="utf-8")
     assert "left: var(--ep-sidebar-w);" in styles
     # Shared with the String Health panel, which collapses its position the same way.

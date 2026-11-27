@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -63,13 +63,15 @@ class IssueCreate(BaseModel):
 
 
 class IssueUpdate(BaseModel):
-    vertical: str | None = None
-    subcategory: str | None = None
+    assignment_mode: Literal["auto", "retain", "manual"] | None = None
+    assigned_to: UUID | None = None
+    vertical: str | None = Field(default=None, max_length=120)
+    subcategory: str | None = Field(default=None, max_length=160)
     serial_no: str | None = Field(default=None, max_length=120)
     supplier_maker: str | None = Field(default=None, max_length=160)
     unit_count: int | None = Field(default=None, ge=1, le=100000)
     equipment_running: bool | None = None
-    description: str | None = None
+    description: str | None = Field(default=None, max_length=4000)
     severity: str | None = None
     occurred_at: datetime | None = None
     etc_at: datetime | None = None

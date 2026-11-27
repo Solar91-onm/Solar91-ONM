@@ -10,8 +10,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy import select, text, update
 from sqlalchemy.orm import Session
 
-from app.core.models import AuditLog, InventoryItem, InventoryMovement, Issue, IssueETCChange, IssueHistory, IssueStep, Plant, User
-from app.core.security import plant_scope_matches
+from app.core.models import AuditLog, InventoryItem, InventoryMovement, Issue, IssueETCChange, IssueHistory, IssueStep, Plant, User, WorkCategory
+from app.core.security import plant_scope_matches, text_is_current_user
 from app.issues.deadlines import default_deadline
 from app.issues.repository import IssueRepository
 from app.issues.schemas import AssignmentRequest, BulkAssignRequest, CloseRequest, StepBackRequest, IssueCreate, IssueUpdate, ProgressRequest, ResolveRequest
@@ -254,13 +254,61 @@ class IssueService:
         return row
 
     def update(self,issue_id,data:IssueUpdate,user:User):
+        # Keep the same lock order as responsibility updates/backfill (routing lock, then ticket).
+        if user.role == "O&M Head" and (data.assignment_mode in {"auto", "manual"} or "vertical" in data.model_fields_set):
+            _lock_issue_ticket_numbers(self.db)
         row=self.repo.by_id(issue_id,for_update=True)
         if not row: raise HTTPException(404,"Issue not found")
+        if user.role != "O&M Head":
+            if user.role != "Assignee" or not (row.assigned_to == user.id or (row.assigned_to is None and text_is_current_user(row.assignee_text,user))):
+                raise HTTPException(403,"Only the assigned Assignee can edit this ticket")
+            if row.status == "Closed":
+                raise HTTPException(409,"A closed ticket can only be edited by the O&M Head")
         changes=data.model_dump(exclude_unset=True)
         reason=(changes.pop("change_reason", None) or "").strip()
-        if "description" in changes and (changes["description"] is None or not changes["description"].strip()):
-            raise HTTPException(422,"Issue description cannot be blank")
-        if "description" in changes: changes["description"]=changes["description"].strip()
+        mode=changes.pop("assignment_mode", None)
+        requested_owner=changes.pop("assigned_to", None)
+        if user.role != "O&M Head" and ({"vertical", "subcategory", "description", "assignment_mode", "assigned_to"} & data.model_fields_set):
+            raise HTTPException(403,"Only the O&M Head can correct equipment, original remarks or assignment")
+        if requested_owner is not None and mode != "manual":
+            raise HTTPException(422,"Choose manual assignment to select an Assignee")
+        if "description" in changes:
+            # An explicit empty string clears a remark; null and accidental whitespace are invalid.
+            if changes["description"] is None or (changes["description"] and not changes["description"].strip()):
+                raise HTTPException(422,"Use an empty string to clear the remark")
+            changes["description"]=changes["description"].strip()
+        category_changed="vertical" in changes and changes["vertical"] != row.vertical
+        if category_changed or ("subcategory" in changes and changes["subcategory"] != row.subcategory):
+            category=self.db.scalar(select(WorkCategory).where(WorkCategory.name==changes.get("vertical",row.vertical),WorkCategory.active.is_(True)))
+            if not category:
+                raise HTTPException(422,"Choose an active configured equipment category")
+            if category_changed:
+                changes.setdefault("subcategory",None)
+                # Breakdown flags describe the previous equipment, not its replacement.
+                changes.setdefault("equipment_running",None)
+            if changes.get("subcategory") and changes["subcategory"] not in (category.sub_problems or []):
+                raise HTTPException(422,"Choose a problem configured for the selected equipment")
+        if (changes.get("vertical",row.vertical) or "").strip().casefold() in {"inverter","string"} and changes.get("equipment_running",row.equipment_running) is False:
+            if not (changes.get("serial_no",row.serial_no) or "").strip() or not (changes.get("description",row.description) or "").strip():
+                raise HTTPException(422,"A breakdown requires selected units and a remark")
+        # Closed/resolved/closure-pending history can be corrected, but its owner is protected.
+        protected=row.status in {"Closed","Resolved","Pending Closure"}
+        if mode is None:
+            mode="auto" if category_changed and not protected else "retain"
+        route_source=None
+        if mode != "retain":
+            if protected:
+                raise HTTPException(409,"Retain the owner of a resolved, closed or closure-pending ticket")
+            if mode == "auto":
+                target,route_source=self._auto_assignee(changes.get("vertical",row.vertical),row.plant_id)
+                if target is None:
+                    raise HTTPException(422,"No eligible automatic Assignee. Configure responsibility or choose retain/manual assignment")
+            else:
+                target=self._resolve_assignee(requested_owner,None)
+                route_source="manual"
+            self._ensure_assignee_scope(target,user,row.plant_id)
+            changes.update(assigned_to=target.id,assignee_text=target.display_name)
+            if row.status == "Open": changes["status"]="Assigned"
         def utc(v):
             if v is None: return None
             return v.replace(tzinfo=timezone.utc) if v.tzinfo is None else v.astimezone(timezone.utc)
@@ -278,11 +326,19 @@ class IssueService:
             self.db.add(IssueETCChange(issue_id=row.id,old_etc=row.etc_at,new_etc=changes["etc_at"],reason=reason or "Ticket details corrected",changed_by=user.id,changed_by_name=user.display_name))
         for key in before: setattr(row,key,changes[key])
         row.updated_at=datetime.now(timezone.utc)
-        def stamp(v): return v.isoformat() if isinstance(v,(date,datetime,uuid.UUID)) else v
-        self._history(row,"issue.edited",user,note=reason or "Ticket details corrected",metadata={
-            "changes":{key:{"before":stamp(old),"after":stamp(changes[key])} for key,old in before.items()}
+        def stamp(v): return str(v) if isinstance(v,uuid.UUID) else (v.isoformat() if isinstance(v,(date,datetime)) else v)
+        self._history(row,"issue.edited",user,note=reason or "Ticket details corrected",
+                      status_from=before.get("status"),status_to=row.status if "status" in before else None,metadata={
+            "changes":{key:{"before":stamp(old),"after":stamp(changes[key])} for key,old in before.items()},
+            "assignment_rule":route_source,
         })
-        self.db.commit(); self.db.refresh(row); return row
+        self.db.commit()
+        if "assigned_to" in before:
+            self._notify(plant_id=row.plant_id,assigned_to=row.assigned_to,event_type="ticket_reassigned",
+                         title="Ticket reassigned — "+row.ticket_no,message="Issue responsibility updated",
+                         target_id=row.ticket_no,include_heads=False,
+                         dedupe_key=f"issue-edit-assign:{row.id}:{row.updated_at.isoformat()}")
+        self.db.refresh(row); return row
 
     def change_dates(self,issue_id:uuid.UUID,data,user:User):
         """Edit the start date (occurred_at) and/or deadline (etc_at) of an open issue, with a mandatory reason."""

@@ -149,3 +149,103 @@
     max-height: calc(100vh - 76px);
   }
 }
+
+/* Incoming task speech bubbles. Right-facing tail mirrors the reference shape.
+   All illustrations are local inline SVG; ordinary bottom-right toasts are unchanged. */
+.ep-notification-alerts {
+  position: fixed; top: calc(64px + env(safe-area-inset-top, 0px));
+  right: max(16px, env(safe-area-inset-right, 0px));
+  z-index: 110; width: min(420px, calc(100vw - 32px));
+  box-sizing: border-box; padding: 3px 13px 8px 2px;
+  display: flex; flex-direction: column; gap: 17px; pointer-events: none;
+}
+.ep-notification-alert {
+  --bubble-ink: #185b41; --bubble-shadow: #9dbca9;
+  --bubble-icon: #d5e7d9; --bubble-paper: #dcece1;
+  --bubble-start: rgba(250, 253, 249, .97);
+  --bubble-end: rgba(220, 236, 225, .90);
+  --bubble-text: #19382b; --bubble-accent: #245c43;
+  position: relative; isolation: isolate; box-sizing: border-box; min-width: 0;
+  display: grid; grid-template-columns: 52px minmax(0, 1fr) 32px;
+  grid-template-rows: auto auto; align-items: start;
+  padding: 14px 12px 12px 13px; gap: 8px 10px;
+  border: 2px solid var(--bubble-ink); border-radius: 17px 17px 5px 17px;
+  background: linear-gradient(135deg, var(--bubble-start), var(--bubble-end)); color: var(--bubble-text);
+  box-shadow: 4px 5px 0 var(--bubble-shadow), 0 9px 24px #10181424;
+  animation: ep-alert-arrive 240ms cubic-bezier(.2,.75,.35,1);
+}
+/* Two layered polygons create an outlined, filled, right-facing speech tail.
+   The tail overlaps the border so it looks like one continuous shape. */
+.ep-notification-alert::before, .ep-notification-alert::after {
+  content: ""; position: absolute; pointer-events: none;
+  right: -13px; bottom: -2px; width: 23px; height: 18px;
+  clip-path: polygon(0 0, 100% 100%, 0 100%);
+}
+.ep-notification-alert::before { background: var(--bubble-ink); }
+.ep-notification-alert::after {
+  right: -8px; bottom: 0; width: 19px; height: 15px;
+  background: var(--bubble-paper);
+}
+.ep-toast--notification { --toast-edge: #168548; --toast-light: #f0faf4; }
+/* English-inspired pastels with a lightly translucent gradient. No backdrop
+   filter: the lightweight paint remains suitable for low-power mobile devices. */
+.ep-notification-alert[data-alert-kind="pm"] {
+  --bubble-ink: #214b80; --bubble-shadow: #a1b8d2; --bubble-icon: #dbe7f4;
+  --bubble-paper: #dce8f5; --bubble-start: rgba(250, 252, 255, .97);
+  --bubble-end: rgba(220, 232, 245, .90); --bubble-text: #1e3554; --bubble-accent: #294e7b;
+}
+.ep-notification-alert[data-alert-kind="washing"] {
+  --bubble-ink: #87530c; --bubble-shadow: #cdb88c; --bubble-icon: #f4e7c8;
+  --bubble-paper: #f4e8ce; --bubble-start: rgba(255, 253, 246, .97);
+  --bubble-end: rgba(244, 232, 206, .90); --bubble-text: #4b3519; --bubble-accent: #704812;
+}
+.ep-notification-alert[data-alert-kind="general"] {
+  --bubble-ink: #65427f; --bubble-shadow: #bba9cc; --bubble-icon: #e9dff1;
+  --bubble-paper: #e9dff2; --bubble-start: rgba(253, 250, 255, .97);
+  --bubble-end: rgba(233, 223, 242, .90); --bubble-text: #3e2b50; --bubble-accent: #65427f;
+}
+.ep-notification-alert.ep-toast--alert .ep-alert-label { color: var(--bubble-accent); }
+.ep-notification-alert.ep-toast--critical {
+  --bubble-ink: #a32724; --bubble-shadow: #d6a5a1; --bubble-icon: #f7dbd6;
+  --bubble-paper: #f8dfda; --bubble-start: rgba(255, 250, 249, .97);
+  --bubble-end: rgba(248, 223, 218, .90); --bubble-text: #572421; --bubble-accent: #8b2926;
+}
+.ep-alert-bell {
+  grid-column: 1; grid-row: 1 / span 2;
+  display: grid; place-items: center; width: 52px; height: 52px;
+  border-radius: 16px; color: var(--bubble-ink); background: var(--bubble-icon);
+  border: 1px solid var(--bubble-ink); box-sizing: border-box;
+}
+.ep-alert-bell svg { width: 42px; height: 42px; }
+.ep-alert-label { color: var(--bubble-accent); font-size: 10px; text-transform: uppercase; letter-spacing: .045em; font-weight: 750; overflow-wrap: anywhere; }
+.ep-notification-alert .ep-toast__body { grid-column: 2; grid-row: 1; gap: 4px; }
+.ep-notification-alert .ep-toast__title { font-size: 14px; font-weight: 750; }
+.ep-notification-alert .ep-toast__text { font-size: 12px; max-height: 6em; overflow: auto; color: var(--bubble-text); }
+.ep-notification-alert .ep-toast__actions { display: contents; }
+.ep-notification-alert .ep-toast__view {
+  grid-column: 2; grid-row: 2; justify-self: start; min-height: 34px;
+  border: 1px solid var(--bubble-ink); border-radius: 9px;
+  color: #fff; background: var(--bubble-ink); padding: 6px 12px;
+  font-weight: 700; font-size: 12px;
+}
+.ep-notification-alert .ep-toast__close { grid-column: 3; grid-row: 1; justify-self: end; min-width: 32px; min-height: 32px; border-radius: 8px; color: var(--bubble-text); }
+.ep-notification-alert .ep-toast__close:hover { background: var(--bubble-icon); color: var(--bubble-ink); }
+.ep-notification-alert .ep-toast__view:hover { background: var(--bubble-icon); color: var(--bubble-ink); }
+.ep-notification-alert button:focus-visible { outline: 2px solid var(--bubble-ink); outline-offset: 3px; }
+.ep-note-sound { margin-left: auto; }
+.ep-notify__button.is-ringing svg, .ep-notification-alert[data-alert-kind="general"] .ep-alert-bell svg { animation: ep-ring .55s ease-in-out 3; transform-origin: 50% 15%; }
+.ep-notification-alert:not([data-alert-kind="critical"]):not([data-alert-kind="general"]) .ep-alert-bell svg { animation: ep-task-pop 420ms ease-out; }
+@keyframes ep-ring { 0%,100% { transform: rotate(0); } 25% { transform: rotate(16deg); } 75% { transform: rotate(-16deg); } }
+@keyframes ep-task-pop { 0% { transform: scale(.85); } 60% { transform: scale(1.09); } 100% { transform: none; } }
+@keyframes ep-alert-arrive { from { opacity: 0; transform: translateY(-10px) scale(.97); } to { opacity: 1; transform: none; } }
+@media (max-width: 600px) {
+  .ep-notification-alerts { right: max(10px, env(safe-area-inset-right, 0px)); left: max(10px, env(safe-area-inset-left, 0px)); width: auto; top: calc(58px + env(safe-area-inset-top, 0px)); }
+  .ep-notification-alert { grid-template-columns: 42px minmax(0, 1fr) 44px; padding: 10px 8px 10px 10px; gap: 6px 8px; }
+  .ep-alert-bell { width: 42px; height: 42px; border-radius: 12px; }
+  .ep-alert-bell svg { width: 34px; height: 34px; }
+  .ep-notification-alert .ep-toast__view, .ep-notification-alert .ep-toast__close { min-height: 44px; min-width: 44px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ep-notification-alert, .ep-notification-alert.is-leaving, .ep-notification-alert.is-repeat,
+  .ep-notify__button.is-ringing svg, .ep-notification-alert .ep-alert-bell svg { animation: none !important; }
+}

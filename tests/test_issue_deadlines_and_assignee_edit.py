@@ -74,21 +74,21 @@ def test_assigned_assignee_can_edit_details_and_deadline_with_a_logged_change(cl
     conftest._CURRENT_USER = db.get(User, assignee.id)
     new_etc = (datetime.now(timezone.utc) + timedelta(days=10)).replace(microsecond=0)
     resp = client.patch(f"/api/issues/{issue['id']}", json={
-        "description": "Inverter tripping on IGBT fault", "severity": "Critical",
+        "severity": "Critical",
         "etc_at": new_etc.isoformat(), "change_reason": "Vendor visit confirmed"})
     assert resp.status_code == 200, resp.text
     body = resp.json()
-    assert body["description"] == "Inverter tripping on IGBT fault" and body["severity"] == "Critical"
+    assert body["description"] == "Inverter tripping" and body["severity"] == "Critical"
     assert abs(_utc(body["etc_at"]) - new_etc) < timedelta(seconds=1)
     change = db.query(IssueETCChange).filter_by(issue_id=UUID(issue["id"])).one()
     assert change.reason == "Vendor visit confirmed" and change.changed_by == assignee.id
     edited = db.query(IssueHistory).filter_by(issue_id=UUID(issue["id"]), action="issue.edited").one()
-    assert set(edited.metadata_json["changes"]) == {"description", "severity", "etc_at"}
+    assert set(edited.metadata_json["changes"]) == {"severity", "etc_at"}
 
     # a deadline before the start date is refused
     assert client.patch(f"/api/issues/{issue['id']}", json={"etc_at": "2000-01-01T00:00:00Z"}).status_code == 422
-    # the category is not a scope boundary any more: the ticket's Assignee may correct it
-    assert client.patch(f"/api/issues/{issue['id']}", json={"vertical": "Transformer"}).status_code == 200
+    # Category corrections and original remarks are now Head-only.
+    assert client.patch(f"/api/issues/{issue['id']}", json={"vertical": "Transformer"}).status_code == 403
     # the dates endpoint stays open to them as well
     dates = client.patch(f"/api/issues/{issue['id']}/dates", json={"etc_at": (new_etc + timedelta(days=1)).isoformat(), "reason": "Parts late"})
     assert dates.status_code == 200, dates.text

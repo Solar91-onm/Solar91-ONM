@@ -20,7 +20,7 @@ class IssueRepository:
     def list(
         self, *, plant_id=None, status=None, severity=None, assignee=None, vertical=None,
         site_code=None, project_number=None, occurred_from=None, occurred_to=None,
-        q=None, allowed_plant_ids=None, assigned_user: User | None = None, offset=0, limit=50, include_deleted=False, deleted_only=False,
+        q=None, allowed_plant_ids=None, assigned_user: User | None = None, owner_id=None, offset=0, limit=50, include_deleted=False, deleted_only=False,
     ):
         stmt = select(Issue)
         if deleted_only:
@@ -39,6 +39,7 @@ class IssueRepository:
                 identities.append(assigned_user.email)
             text_conditions = [func.lower(func.coalesce(Issue.assignee_text, "")).like(f"%{x.lower()}%") for x in identities if x]
             stmt = stmt.where(or_(Issue.assigned_to == assigned_user.id, *text_conditions))
+        if owner_id is not None: stmt = stmt.where(Issue.assigned_to == owner_id)
         if plant_id: stmt = stmt.where(Issue.plant_id == plant_id)
         if status == "open":
             stmt = stmt.where(Issue.status.in_(OPEN_ISSUE_STATUSES))

@@ -1246,3 +1246,10 @@
   cursor: pointer;
 }
 .ep-issues__equip-chip:hover { background: #dcecE2; }
+
+/* Only show the manual owner picker when manual routing is selected. */
+.ep-issues__edit [data-edit-manual-owner][hidden] { display: none; }
+.ep-issues [data-issue-owner-view], .ep-pd__health-head [data-issue-owner-view] { min-height: 40px; width: auto; min-width: 108px; padding-left: 8px; border: 1px solid var(--ep-border); border-radius: var(--ep-radius-sm); background-color: #fff; }
+@media (max-width: 760px) {
+  .ep-issues [data-issue-owner-view], .ep-pd__health-head [data-issue-owner-view] { min-height: 44px; }
+}

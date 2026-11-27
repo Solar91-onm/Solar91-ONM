@@ -175,10 +175,10 @@ def issue_equipment_units(
     }
 
 @router.get("",response_model=list[IssueOut])
-def list_issues(db:Annotated[Session,Depends(get_db)],user:Annotated[User,Depends(get_current_user)],plant_id:UUID|None=None,status:str|None=None,severity:str|None=None,assignee:str|None=None,vertical:str|None=None,site_code:str|None=None,project_number:str|None=None,occurred_from:datetime|None=None,occurred_to:datetime|None=None,q:str|None=None,offset:int=0,limit:int=Query(50,le=200)):
+def list_issues(db:Annotated[Session,Depends(get_db)],user:Annotated[User,Depends(get_current_user)],plant_id:UUID|None=None,status:str|None=None,severity:str|None=None,assignee:str|None=None,vertical:str|None=None,site_code:str|None=None,project_number:str|None=None,occurred_from:datetime|None=None,occurred_to:datetime|None=None,q:str|None=None, mine:bool=False,offset:int=0,limit:int=Query(50,le=200)):
     plant_scope=user_scoped_plant_ids(db,user)
     severity = normalize_issue_severity(severity)
-    return IssueRepository(db).list(plant_id=plant_id,status=status,severity=severity,assignee=assignee,vertical=vertical,site_code=site_code,project_number=project_number,occurred_from=occurred_from,occurred_to=occurred_to,q=q,allowed_plant_ids=plant_scope,offset=offset,limit=limit)
+    return IssueRepository(db).list(plant_id=plant_id,status=status,severity=severity,assignee=assignee,vertical=vertical,site_code=site_code,project_number=project_number,occurred_from=occurred_from,occurred_to=occurred_to,q=q,allowed_plant_ids=plant_scope,owner_id=user.id if mine else None,offset=offset,limit=limit)
 
 @router.get("/deleted", response_model=list[IssueOut])
 def list_deleted_issues(db:Annotated[Session,Depends(get_db)],user:Annotated[User,Depends(require_permission("issues.manage"))],limit:int=Query(100,ge=1,le=200)):
@@ -380,9 +380,7 @@ def update_issue(issue_id:UUID,data:IssueUpdate,db:Annotated[Session,Depends(get
     if user.role!="O&M Head":
         if user.role!="Assignee":
             raise HTTPException(403,"Only the O&M Head or the ticket's Assignee can edit a ticket")
-        row=_require_issue_workflow_scope(db,user,issue_id)
-        if row.status=="Closed":
-            raise HTTPException(409,"A closed ticket can only be edited by the O&M Head")
+        # The service authorizes against the locked row, avoiding a stale ownership check.
     return IssueService(db).update(issue_id,data,user)
 
 @router.patch("/{issue_id}/dates",response_model=IssueOut,dependencies=[Depends(require_csrf)])

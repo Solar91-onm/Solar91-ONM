@@ -134,6 +134,7 @@
     rows: [],
     plants: [],
     loaded: false,
+    loadedAt: 0,
     loading: false,
     error: "",
     search: "",
@@ -159,6 +160,8 @@
     assigneesLoading: false,
     assigneesError: "",
     isAssignee: false,
+    issueOwnerView: "mine",
+    currentUserId: "",
     unitConfigError: "",
     modalId: "",
     modalMode: "",
@@ -170,13 +173,14 @@
     // first. `scope` is the plant code the rows were loaded for ("" = all plants); `hasMore` = the last page was full.
     scope: null,
     pageSize: 200,
+    nextOffset: 0,
     hasMore: false,
     loadingMore: false,
     moreError: "",
     liveMode: false,
     canRaise: false,
-    // Correcting a stored ticket: the O&M Head on any ticket, an Assignee on an
-    // open ticket of theirs — the same pair PATCH /api/issues/{id} allows.
+    // The Head can correct original classification/remarks; Assignees can use
+    // permitted operational edits on their own open tickets.
     canEdit: false,
     // Assigning and resetting to Open need issues.manage, so they are the Head's alone.
     isHead: false,
@@ -301,8 +305,19 @@
     };
   }
 
+  function matchesOwnerView(issue) {
+    return !state.isAssignee || state.issueOwnerView === "all" ||
+      (issue.assignedTo && issue.assignedTo === state.currentUserId);
+  }
+
+  function canEditIssue(issue) {
+    return !state.liveMode || state.isHead || (state.isAssignee && issue.status !== "Closed" &&
+      (issue.assignedTo ? issue.assignedTo === state.currentUserId : canCloseIssue(issue)));
+  }
+
   function rowsFor(context, ignoreStatus) {
     var rows = state.rows.filter(function (issue) {
+      if (!matchesOwnerView(issue)) return false;
       if (context.plantCode && issue.plantCode !== context.plantCode) return false;
       if ((state.issueDateStart || state.issueDateEnd) &&
           (!issue.occurredAt ||
@@ -391,7 +406,12 @@
         'title="Show every equipment category again">' + escape(state.equipmentFilter) +
         ' only <span aria-hidden="true">x</span></button>'
       : "";
-    return '<div class="ep-issues__portfolio-actions">' + equipmentChip +
+    var ownerView = state.isAssignee
+      ? '<label class="ep-issues__date-month"><span>Responsibility</span><select class="ep-issues__date-period" data-issue-owner-view aria-label="Issue responsibility">' +
+        '<option value="mine"' + (state.issueOwnerView === "mine" ? " selected" : "") + '>My Issues</option>' +
+        '<option value="all"' + (state.issueOwnerView === "all" ? " selected" : "") + '>All Issues</option></select></label>'
+      : "";
+    return '<div class="ep-issues__portfolio-actions">' + ownerView + equipmentChip +
       '<div class="ep-issues__date-filter" role="group" aria-label="Filter issues by occurrence date">' +
         '<span class="ep-issues__date-label">Range</span>' +
         '<label class="ep-toggle" title="Toggle custom date range">' +
@@ -659,7 +679,7 @@
             statusTone(issue.status) + '"><i></i>' + escape(issue.status) + '</span></td>' +
           '<td data-label="' + labels[9] + '"><button type="button" class="ep-issues__ticket-link" data-issue-open="' +
             escape(issue.id) + '">' + escape(issue.id) + '</button></td>' +
-          '<td data-label="' + labels[10] + '">' + (state.liveMode && !state.canEdit
+          '<td data-label="' + labels[10] + '">' + (!canEditIssue(issue)
             ? '<span aria-label="Manage this saved ticket in Solar91 O&M">Saved</span>'
             // A tick icon rather than an "Edit" button: the column shrinks to the icon's width
             // and gives its space back to the description. The label stays for screen readers.
@@ -751,7 +771,7 @@
 
   /** The edit form: the stored details of one ticket, corrected in place. */
   function renderEditForm(issue) {
-    if (!issue) return '<p class="ep-issues__empty">This ticket is no longer in the list.</p>';
+    if (!issue || !canEditIssue(issue)) return '<p class="ep-issues__empty">This ticket is not editable by you.</p>';
     var draft = state.editDraft && state.editDraft.id === issue.dbId ? state.editDraft : {};
     var value = function (name, fallback) {
       return draft[name] === undefined ? (fallback || "") : draft[name];
@@ -763,23 +783,25 @@
     var equipment = value("equipment", issue.equipment);
     var subpart = value("subpart", issue.subpart);
     var status = value("status", issue.status);
+    var protectedOwner = ["Closed", "Resolved", "Pending Closure"].indexOf(issue.status) !== -1;
+    var routing = value("assignmentMode", protectedOwner ? "retain" : "on_change");
     // Compact layout: short fields share rows, help text only where it changes what the user
     // does, and Save / Cancel stay pinned at the bottom so the form is never scrolled to save.
     // The ticket ID is in the drawer title and the plant in its subtitle, so no info box repeats them.
     return '<form class="ep-issues__wizard ep-issues__edit" data-issue-form data-issue-edit-form="' + escape(issue.dbId) + '">' +
       '<div class="ep-issues__wizard-fields ep-issues__wizard-fields--two">' +
         '<label class="ep-issues__wizard-field">Equipment / category' +
-          '<select name="equipment">' + renderEquipmentOptions(equipment) + '</select></label>' +
+          (state.isHead ? '<select name="equipment">' + renderEquipmentOptions(equipment) + '</select>' : '<span class="ep-issues__readonly">' + escape(equipment) + '</span>') + '</label>' +
         '<label class="ep-issues__wizard-field">Sub-problem' +
-          '<select name="subpart" title="The fault for this category, the same list the Raise issue form offers">' +
-          renderSubpartOptions(subpart, equipment) + '</select></label>' +
+          (state.isHead ? '<select name="subpart" title="The fault for this category, the same list the Raise issue form offers">' +
+          renderSubpartOptions(subpart, equipment) + '</select>' : '<span class="ep-issues__readonly">' + escape(subpart || 'Not recorded') + '</span>') + '</label>' +
       '</div>' +
-      (state.categoryLoading
+      (state.isHead && state.categoryLoading
         ? '<p class="ep-issues__category-note" role="status">Loading configured categories…</p>'
-        : state.categoryError
+        : state.isHead && state.categoryError
           ? '<p class="ep-issues__category-note ep-issues__category-error" role="alert">Could not load configured categories. The ticket’s existing category is preserved. ' +
             '<button type="button" class="ep-issues__button ep-issues__button--small" data-issue-action="retry-edit-categories">Retry</button></p>'
-          : !CATEGORIES.length
+          : state.isHead && !CATEGORIES.length
             ? '<p class="ep-issues__category-note">No categories were returned by Settings → Categories. The ticket’s existing category is preserved.</p>'
             : "") +
       '<div class="ep-issues__wizard-fields ep-issues__wizard-fields--three">' +
@@ -793,21 +815,19 @@
       // Assigning is the O&M Head's call: /assign and /reassign both require
       // issues.manage, so an Assignee sees who holds the ticket but cannot move it.
       '<div class="ep-issues__wizard-fields ep-issues__wizard-fields--two">' +
-      (state.isHead
-        ? '<label class="ep-issues__wizard-field">Assigned to' +
-            '<select name="assignedTo">' +
-              '<option value="">Unassigned</option>' +
-              (state.assigneesLoading ? '<option value="" disabled>Loading assignees…</option>' : "") +
-              assigneeOptions(issue.plantCode, value("assignedTo", issue.assignedTo)) +
-            '</select>' +
-            (state.assigneesError
-              ? '<small class="ep-issues__inline-error" role="alert">Could not load assignees: ' +
-                escape(state.assigneesError) +
-                ' <button type="button" class="ep-issues__button ep-issues__button--small" data-issue-action="retry-assignees">Retry</button></small>'
-              : "") + '</label>'
+      (state.isHead && !protectedOwner
+        ? '<div class="ep-issues__wizard-field"><label class="ep-issues__wizard-field">Assignment (current: ' + escape(issue.assignee || "Unassigned") + ')' +
+            '<select name="assignmentMode">' +
+              [["on_change", "Automatic when equipment changes"], ["auto", "Reapply automatic routing"], ["retain", "Retain current Assignee"], ["manual", "Choose Assignee manually"]].map(function (choice) {
+                return '<option value="' + choice[0] + '"' + (routing === choice[0] ? ' selected' : '') + '>' + choice[1] + '</option>';
+              }).join("") + '</select></label>' +
+            '<label class="ep-issues__wizard-field" data-edit-manual-owner' + (routing === "manual" ? "" : " hidden") + '>New Assignee' +
+              '<select name="assignedTo"><option value="">Select active Assignee</option>' +
+              assigneeOptions(issue.plantCode, value("assignedTo", issue.assignedTo)) + '</select>' +
+              (state.assigneesLoading ? '<small>Loading assignees…</small>' : '') +
+              (state.assigneesError ? '<small role="alert">' + escape(state.assigneesError) + ' <button type="button" data-issue-action="retry-assignees">Retry</button></small>' : '') + '</label></div>'
         : '<div class="ep-issues__wizard-field">Assigned to' +
-            '<span class="ep-issues__readonly" title="Only the O&amp;M Head can change this">' +
-            escape(issue.assignee || "Unassigned") + '</span></div>') +
+            '<span class="ep-issues__readonly">' + escape(issue.assignee || "Unassigned") + '</span></div>') +
       '<label class="ep-issues__wizard-field">Status' +
         '<select name="status">' +
           statusChoicesFor(issue.status).map(function (choice) {
@@ -818,7 +838,7 @@
         '</select></label>' +
       '</div>' +
       '<label class="ep-issues__wizard-field">Issue details' +
-        '<textarea name="problem" required rows="3" maxlength="4000">' + escape(value("problem", issue.problem)) + '</textarea></label>' +
+        (state.isHead ? '<textarea name="problem" rows="3" maxlength="4000">' + escape(value("problem", issue.problem)) + '</textarea><small>Clear the text to remove the remark. Original text is retained in history.</small>' : '<span class="ep-issues__readonly">' + escape(issue.problem || 'No remark recorded.') + '</span>') + '</label>' +
       // Shown only when Resolved is chosen; date and closing remark are optional.
       '<fieldset class="ep-issues__wizard-field ep-issues__edit-resolution" data-issue-resolution' +
         (status === "Resolved" ? "" : " hidden") + '>' +
@@ -943,7 +963,7 @@
             field("Issue details", issue.problem) +
             field("Notes", issue.notes) +
           '</dl>' + renderIssuePhotos(issue) +
-          (state.canEdit ? '<button type="button" class="ep-issues__button" data-issue-action="edit-current">Edit full details</button>' : "") +
+          (canEditIssue(issue) ? '<button type="button" class="ep-issues__button" data-issue-action="edit-current">Edit full details</button>' : "") +
         '</details>' : "") +
       (state.submitNotice ? '<p class="ep-issues__demo-note" role="status">' + escape(state.submitNotice) + '</p>' : "") +
       '</div>';
@@ -1233,6 +1253,15 @@
   function render(host, context) {
     if (!host) throw new Error("Site issues host element is missing.");
     context = context || {};
+    var resetOwnerView = context.resetOwnerView && state.isAssignee && state.issueOwnerView !== "mine";
+    if (resetOwnerView) {
+      state.issueOwnerView = "mine";
+      state.rows = [];
+      state.modalId = "";
+      state.modalMode = "";
+      state.editDraft = null;
+      state.columnFilters = {};
+    }
     var previousScope = active ? active.context.plantCode || "" : null;
     var nextScope = context.plantCode || "";
     var previousRange = active
@@ -1280,7 +1309,12 @@
     }
     active = { host: host, context: context };
     wire(host);
-    if ((state.loaded || state.loading) && state.scope !== nextScope) {
+    // Re-entering Health after more than 30 seconds refreshes a personal register,
+    // so ownership transfers are not hidden indefinitely. Quick returns use the cached
+    // rows; no polling and no extra request on the first visit.
+    var refreshPersonal = context.resetOwnerView && state.isAssignee && state.loaded &&
+      !state.loading && !state.submitting && !state.modalMode && Date.now() - state.loadedAt > 30000;
+    if (resetOwnerView || refreshPersonal || ((state.loaded || state.loading) && state.scope !== nextScope)) {
       load();
     } else if (state.loaded) {
       renderView();
@@ -1371,7 +1405,7 @@
     var host = active.host;
     var context = active.context;
     var openCount = state.rows.filter(function (issue) {
-      return (!context.plantCode || issue.plantCode === context.plantCode) &&
+      return matchesOwnerView(issue) && (!context.plantCode || issue.plantCode === context.plantCode) &&
         statusGroup(issue.status) !== "Solved";
     }).length;
     var rows = rowsFor(context);
@@ -1450,6 +1484,7 @@
     state.error = "";
     state.scope = active ? (active.context.plantCode || "") : "";
     state.hasMore = false;
+    state.nextOffset = 0;
     state.loadingMore = false;
     var requestId = ++state.requestId;
     state.liveMode = true;
@@ -1511,6 +1546,7 @@
   function issuesUrl(offset) {
     var url = "/api/issues?limit=" + state.pageSize + "&offset=" + offset +
       (state.scope ? "&site_code=" + encodeURIComponent(state.scope) : "");
+    if (state.isAssignee && state.issueOwnerView === "mine") url += "&mine=true";
     if (state.issueDateStart) {
       url += "&occurred_from=" + encodeURIComponent(state.issueDateStart + "T00:00:00Z");
     }
@@ -1528,7 +1564,7 @@
     state.loadingMore = true;
     state.moreError = "";
     renderView();
-    global.Solar91PortalAPI.request(issuesUrl(state.rows.length)).then(function (issues) {
+    global.Solar91PortalAPI.request(issuesUrl(state.nextOffset)).then(function (issues) {
       if (requestId !== state.requestId) return;
       var plantsById = {};
       state.plants.forEach(function (plant) { plantsById[plant.dbId] = plant; });
@@ -1538,6 +1574,7 @@
         var row = mapApiIssue(issue, plantsById);
         if (!seen[row.id]) state.rows.push(row);
       });
+      state.nextOffset += issues.length;
       state.hasMore = issues.length >= state.pageSize;
       state.loadingMore = false;
       renderView();
@@ -1553,6 +1590,11 @@
     var api = global.Solar91PortalAPI;
     api.session().then(function (session) {
       var role = session.user && session.user.role;
+      if (requestId !== state.requestId) return null;
+      var userId = String(session.user && session.user.id || "");
+      if (state.currentUserId !== userId) state.issueOwnerView = "mine";
+      state.currentUserId = userId;
+      state.isAssignee = role === "Assignee";
       var requests = [
         api.plants(),
         api.request(issuesUrl(0))
@@ -1561,11 +1603,12 @@
         return { role: role, plants: result[0], issues: result[1] };
       });
     }).then(function (result) {
-      if (requestId !== state.requestId) return;
+      if (!result || requestId !== state.requestId) return;
       state.plants = result.plants;
       var plantsById = {};
       state.plants.forEach(function (plant) { plantsById[plant.dbId] = plant; });
       state.rows = result.issues.map(function (issue) { return mapApiIssue(issue, plantsById); });
+      state.nextOffset = result.issues.length;
       state.hasMore = result.issues.length >= state.pageSize;
       state.canRaise = ["O&M Head", "Assignee", "Site Engineer"].indexOf(result.role) !== -1 &&
         state.plants.length > 0;
@@ -1574,6 +1617,7 @@
       state.isAssignee = result.role === "Assignee";
       state.liveMode = true;
       state.loaded = true;
+      state.loadedAt = Date.now();
       state.loading = false;
       renderView();
     }).catch(function (error) {
@@ -1650,6 +1694,22 @@
       }
       var issueEditForm = event.target.closest("[data-issue-edit-form]");
       if (issueEditForm) syncIssueEditDraft(issueEditForm);
+      if (event.target.matches("[data-issue-owner-view]")) {
+        if (!state.isAssignee || state.submitting) return;
+        state.issueOwnerView = event.target.value === "all" ? "all" : "mine";
+        state.rows = [];
+        state.modalId = "";
+        state.modalMode = "";
+        state.editDraft = null;
+        state.columnFilters = {};
+        load();
+        return;
+      }
+      if (event.target.name === "assignmentMode" && state.modalMode === "edit") {
+        var ownerField = issueEditForm && issueEditForm.querySelector("[data-edit-manual-owner]");
+        if (ownerField) ownerField.hidden = event.target.value !== "manual";
+        return;
+      }
       if (event.target.matches("[data-issue-date-mode]")) {
         state.issueDateRangeMode = event.target.checked;
         state.issueDateError = "";
@@ -1925,6 +1985,8 @@
       }
       var edit = event.target.closest("[data-issue-edit]");
       if (edit) {
+        var selectedIssue = state.rows.find(function (row) { return row.id === edit.dataset.issueEdit; });
+        if (!selectedIssue || !canEditIssue(selectedIssue)) return;
         state.modalId = edit.dataset.issueEdit;
         state.modalMode = "edit";
         state.editDraft = null;
@@ -1932,8 +1994,10 @@
         state.categoryError = "";
         state.categoryLoading = false;
         renderDrawerOnly();
-        loadCategoriesForEdit(host, state.modalId);
-        if (state.isHead) loadAssigneesForDrawer(host);
+        if (state.isHead) {
+          loadCategoriesForEdit(host, state.modalId);
+          loadAssigneesForDrawer(host);
+        }
         return;
       }
       var open = event.target.closest("[data-issue-open]");
@@ -2078,11 +2142,15 @@
         load();
         return;
       } else if (action === "edit-current") {
+        var currentIssue = state.rows.find(function (row) { return row.id === state.modalId; });
+        if (!currentIssue || !canEditIssue(currentIssue)) return;
         state.modalMode = "edit";
         state.editDraft = null;
         renderDrawerOnly();
-        loadCategoriesForEdit(host, state.modalId);
-        if (state.isHead) loadAssigneesForDrawer(host);
+        if (state.isHead) {
+          loadCategoriesForEdit(host, state.modalId);
+          loadAssigneesForDrawer(host);
+        }
         return;
       } else if (action === "progress" || action === "solve") {
         var current = state.rows.find(function (row) { return row.id === state.modalId; });
@@ -2278,7 +2346,7 @@
   function syncIssueEditDraft(form) {
     if (!form) return;
     var draft = { id: form.dataset.issueEditForm };
-    ["equipment", "subpart", "supplierMaker", "serialNo", "unitCount", "assignedTo", "status",
+    ["equipment", "subpart", "supplierMaker", "serialNo", "unitCount", "assignedTo", "assignmentMode", "status",
       "fixedOn", "resolutionRemark", "problem", "closeNote"]
       .forEach(function (name) {
         var control = form.elements[name];
@@ -2435,7 +2503,7 @@
   function renderIssuePhotos(issue) {
     var photos = state.issuePhotos[issue.id];
     var busy = state.photoBusy[issue.id];
-    var canChange = state.canEdit && state.liveMode;
+    var canChange = canEditIssue(issue) && state.liveMode;
     var body;
     if (busy && !photos) {
       body = '<p class="ep-issues__photo-status" role="status">Loading photos…</p>';
@@ -2495,7 +2563,9 @@
       state.submitError = message;
       renderView();
     }
+    if (state.submitting) return;
     if (!issue) return fail("This ticket is no longer in the list. Close and reopen the register.");
+    if (!canEditIssue(issue)) return fail("You cannot edit this ticket.");
     if (!state.liveMode) return fail("This preview cannot save changes. Open the signed-in Solar91 O&M app.");
 
     syncIssueEditDraft(form);
@@ -2503,12 +2573,12 @@
     var read = function (name) { return (form.elements[name] && form.elements[name].value || "").trim(); };
     var units = parseInt(read("unitCount"), 10);
     var next = {
-      vertical: read("equipment"),
-      subcategory: read("subpart") || null,
+      vertical: state.isHead ? read("equipment") : issue.equipment,
+      subcategory: state.isHead ? (read("subpart") || null) : (issue.subpart || null),
       supplier_maker: read("supplierMaker") || null,
       serial_no: read("serialNo") || null,
       unit_count: isNaN(units) ? null : units,
-      description: read("problem")
+      description: state.isHead ? read("problem") : issue.problem
     };
     var before = {
       vertical: issue.equipment,
@@ -2525,31 +2595,26 @@
     Object.keys(next).forEach(function (key) {
       if (next[key] !== before[key]) payload[key] = next[key];
     });
-    // No early return on an empty payload: status and assignee are saved through
-    // their own endpoints below, so changing only one of those is still a change.
-    // The "nothing to do" check is the steps list further down.
-    // Assignment and status are not part of PATCH; each has its own endpoint,
-    // so they are applied in turn after the details and only when they changed.
     var base = "/api/issues/" + encodeURIComponent(issue.dbId);
-    var nextAssignee = state.isHead ? read("assignedTo") : (issue.assignedTo || "");
     var nextStatus = read("status");
+    var mode = read("assignmentMode");
+    var ownerProtected = ["Closed", "Resolved", "Pending Closure"].indexOf(issue.status) !== -1;
+    if (state.isHead) {
+      if (ownerProtected && payload.vertical !== undefined) payload.assignment_mode = "retain";
+      else if (mode === "manual") {
+        if (!state.assigneesLoaded || !read("assignedTo")) return fail("Choose an active Assignee after the list loads.");
+        payload.assignment_mode = "manual";
+        payload.assigned_to = read("assignedTo");
+      } else if (mode === "auto" || (mode === "on_change" && payload.vertical !== undefined)) {
+        payload.assignment_mode = "auto";
+      } else if (mode === "retain" && payload.vertical !== undefined) payload.assignment_mode = "retain";
+    }
+    if (Object.keys(payload).length && nextStatus && nextStatus !== issue.status) {
+      return fail("Save the detail corrections first, then change the workflow status separately.");
+    }
     var steps = [];
     if (Object.keys(payload).length) {
       steps.push(function () { return api.request(base, { method: "PATCH", body: payload }); });
-    }
-    if (nextAssignee !== (issue.assignedTo || "")) {
-      steps.push(function () {
-        // The edit drawer collects no note, and `note` is optional on both endpoints. This used
-        // to read a `reason` variable that was never declared, so under "use strict" every save
-        // that changed the assignee threw a ReferenceError before any request was sent — which
-        // took the whole save chain (status included) down with it.
-        if (!nextAssignee) {
-          // Clearing an assignment is a reassignment to nobody.
-          return api.request(base + "/reassign", { method: "POST", body: { assigned_to: null, note: null } });
-        }
-        return api.request(base + (issue.assignedTo ? "/reassign" : "/assign"),
-          { method: "POST", body: { assigned_to: nextAssignee, note: null } });
-      });
     }
     if (nextStatus === "Resolved" && issue.status !== "Resolved") {
       var photoInput = form.elements.resolutionEvidence;
@@ -2742,13 +2807,16 @@
       var mapped = mapApiIssue(issue, plantsById);
       if (!state.rows.some(function (row) { return row.dbId === mapped.dbId; })) state.rows.unshift(mapped);
       state.modalId = mapped.id;
-      state.modalMode = mode === "edit" ? "edit" : "details";
+      state.modalMode = mode === "edit" && canEditIssue(mapped) ? "edit" : "details";
       state.editDraft = null;
       state.submitError = "";
       state.categoryError = "";
       state.categoryLoading = false;
       renderView();
-      if (state.modalMode === "edit") loadCategoriesForEdit(active.host, state.modalId);
+      if (state.modalMode === "edit" && state.isHead) {
+        loadCategoriesForEdit(active.host, state.modalId);
+        loadAssigneesForDrawer(active.host);
+      }
     }).catch(function (error) {
       state.submitNotice = "Could not open ticket " + ticketNo + ": " + (error.message || "please retry.");
       renderView();
