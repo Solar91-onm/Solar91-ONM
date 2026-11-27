@@ -244,7 +244,7 @@ def notification_dto(row: Notification) -> dict:
 
 def pm_plant_recipients(db: Session, *, plant_id: UUID | None, equipment: str | None = None) -> list[User]:
     """Who is answerable for a plant's PM: every O&M Head, the plant's PM Assignee, and the
-    Assignee responsible for this equipment across the portfolio (equipment responsibility).
+    equipment Assignee only as a fallback if there is no active plant PM owner.
 
     Approval authority is unchanged — this decides who is told, not who may act.
     """
@@ -259,8 +259,9 @@ def pm_plant_recipients(db: Session, *, plant_id: UUID | None, equipment: str | 
         )
         if responsible_id:
             person = db.get(User, responsible_id)
-            if person and person.is_active:
+            if person and person.is_active and person.role == "Assignee":
                 users.append(person)
+                return users
     if equipment:
         from app.equipment.service import equipment_responsible_users
         users.extend(equipment_responsible_users(db, equipment))

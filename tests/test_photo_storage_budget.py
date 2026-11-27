@@ -4,7 +4,8 @@ replacement, retention and the issue photo count.
 The bucket is 1 GB. Three things keep it inside that: every photo is stored as a WebP
 display copy rather than a camera original, field evidence carries a 480px/q65 thumbnail
 (the shared gallery keeps its 640px/q70 default), and full-resolution originals are purged
-after the retention window while the thumbnail and the record remain. Above the block
+after the retention window while the thumbnail and the record remain; PDF evidence
+is excluded because its placeholder thumbnail cannot replace the report. Above the block
 threshold a photo upload is refused — but never at the cost of the cleaning record or the
 ticket it belonged to, which are saved first and stay saved.
 """
@@ -151,15 +152,26 @@ def test_module_cleaning_pdf_is_saved_unmodified_and_replaces_the_slot(client, d
     assert original.headers["content-disposition"].startswith("attachment;")
     assert original.headers["x-content-type-options"] == "nosniff"
 
+    # Retention applies only to image originals. A PDF thumbnail is a generic
+    # placeholder, not a usable copy of the report, so retain the entire PDF.
     from app.photos.retention import purge_photo_originals
     _age(db, saved.id, 40)
-    retention = purge_photo_originals(db, dry_run=False)
-    assert retention["photos"] == 1
-    assert saved.storage_path not in StorageStub.objects
+    for scope in ({}, {"older_than_days": 30, "category": "washing",
+                       "plant_id": str(plant.id), "override_scope": True}):
+        for dry_run in (True, False):
+            retention = purge_photo_originals(db, dry_run=dry_run, **scope)
+            assert retention["photos"] == 0
+            assert retention["bytes_reclaimed"] == 0
+    db.refresh(saved)
+    assert saved.original_purged_at is None
+    assert db.query(SitePhoto).count() == 1
+    assert StorageStub.objects[saved.storage_path] == (pdf, "application/pdf")
     assert saved.thumbnail_path in StorageStub.objects
-    expired = client.get(f"/api/photos/{saved.id}/image?size=original")
-    assert expired.headers["x-photo-original-purged"] == "true"
-    assert expired.headers["content-type"] == "image/webp"
+    retained = client.get(f"/api/photos/{saved.id}/image?size=original")
+    assert retained.status_code == 200 and retained.content == pdf
+    assert retained.headers.get("x-photo-original-purged") != "true"
+    assert retained.headers["content-type"] == "application/pdf"
+    assert retained.headers["content-disposition"].startswith("attachment;")
 
 
 def test_module_cleaning_pdf_rejects_oversize_bad_signature_and_non_slot_uploads(client, db):

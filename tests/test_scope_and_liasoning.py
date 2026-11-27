@@ -122,3 +122,37 @@ def test_data_tables_fit_the_frame_without_a_desktop_minimum_width():
     assert ".is-portfolio { table-layout: fixed; min-width: 0; width: 100%; }" in design
     settings = (ROOT / "assets" / "css" / "settings.css").read_text(encoding="utf-8")
     assert ".ep-settings__table {\n  min-width: 0;" in settings
+
+
+def test_dedicated_pm_assignment(client, db):
+    alpha, bravo = _plant(db, "PM-A"), _plant(db, "PM-B")
+    ravi, mina = _person(db, "Ravi", "pm-ravi@example.com"), _person(db, "Mina", "pm-mina@example.com")
+    login_user(client, db, role="O&M Head")
+    assert _put_access(client, ravi, health_plant_ids=[str(alpha.id)]).status_code == 200
+    def assign(person, ids):
+        return client.put(f"/api/users/{person.id}/pm-responsibility", json={"plant_ids": ids})
+    assert assign(ravi, [str(alpha.id), str(bravo.id)]).status_code == 200
+    assert assign(mina, [str(bravo.id)]).status_code == 200
+    db.expire_all()
+    assert db.get(PlantResponsibility, (alpha.id, "pm")).assigned_user_id == ravi.id
+    assert db.get(PlantResponsibility, (bravo.id, "pm")).assigned_user_id == mina.id
+    assert db.get(PlantResponsibility, (alpha.id, "health")).assigned_user_id == ravi.id
+    portfolio = client.get("/api/pm-plan/tracking?month=2026-12").json()
+    assert {p["site_code"]: p["pm_assignee"] for p in portfolio["plants"]} == {"PMA": "Ravi", "PMB": "Mina"}
+    assert assign(ravi, []).status_code == 200
+    db.expire_all()
+    assert db.get(PlantResponsibility, (alpha.id, "pm")) is None
+    login_user(client, db, role="Assignee", email="pm-other@example.com")
+    assert assign(mina, []).status_code == 403
+
+
+def test_pm_assignment_rejects_inactive_plant_and_non_assignee(client, db):
+    alpha = _plant(db, "PM-INACTIVE")
+    alpha.status = "inactive"
+    db.commit()
+    ravi = _person(db, "Ravi", "inactive-pm@example.com")
+    engineer = _person(db, "Engineer", "pm-eng@example.com", role="Site Engineer")
+    login_user(client, db, role="O&M Head")
+    assert client.put(f"/api/users/{ravi.id}/pm-responsibility", json={"plant_ids": [str(alpha.id)]}).status_code == 422
+    assert client.put(f"/api/users/{engineer.id}/pm-responsibility", json={"plant_ids": []}).status_code == 422
+    assert db.scalar(select(PlantResponsibility)) is None

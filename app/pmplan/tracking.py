@@ -17,7 +17,7 @@ from sqlalchemy import Date, DateTime, ForeignKey, JSON, String, Text, UniqueCon
 from sqlalchemy.orm import Mapped, Session, mapped_column, load_only
 
 from app.core.database import Base, get_db
-from app.core.models import AuditLog, Plant, PMCyclePlan, SitePhoto, User, TimestampMixin, uuid_pk
+from app.core.models import AuditLog, Plant, PlantResponsibility, PMCyclePlan, SitePhoto, User, TimestampMixin, uuid_pk
 from app.core.security import get_current_user, require_csrf, user_scoped_plant_ids
 from app.core.timeutil import business_today
 from app.portal.service import calendar as legacy_calendar
@@ -378,7 +378,7 @@ def _notify_action(db: Session, row: PMTrackingActivity, plant: Plant, action: s
                   "request": row.requested_at, "grant": row.authorised_at, "deny": row.authorised_at}
         stamp = (stamps.get(action) or datetime.now(timezone.utc)).isoformat()
         if action == "submit":
-            # The approver and the people answerable for this equipment, portfolio-wide.
+            # The approver and the plant PM owner (equipment fallback if no owner).
             users = pm_plant_recipients(db, plant_id=row.plant_id, equipment=row.equipment)
             users = [u for u in users if u.id != actor.id]
             message = f"{where} — submitted by {actor.display_name} for approval."
@@ -484,7 +484,13 @@ def tracking_month(db: Annotated[Session, Depends(get_db)], user: Annotated[User
         q = q.where(Plant.id.in_(scope))
     if site_code:
         q = q.where(Plant.site_code == site_code)
-    plants = list(db.scalars(q))
+    plant_rows = db.execute(q.outerjoin(PlantResponsibility,
+        (PlantResponsibility.plant_id == Plant.id) & (PlantResponsibility.area == "pm"))
+        .outerjoin(User, (User.id == PlantResponsibility.assigned_user_id) & User.is_active.is_(True)
+                   & (User.role == "Assignee"))
+        .add_columns(User.display_name)).all()
+    plants = [plant for plant, _ in plant_rows]
+    pm_owners = {plant.id: owner or "" for plant, owner in plant_rows}
     if site_code and not plants:
         raise HTTPException(404, "Plant not available in your scope")
     ids = [p.id for p in plants]
@@ -591,7 +597,7 @@ def tracking_month(db: Annotated[Session, Depends(get_db)], user: Annotated[User
     return {"month": month, "as_of": datetime.now(timezone.utc).isoformat(), "today": _iso(today), "role": user.role, "categories": CATEGORIES,
             "covered": list(CHECKLISTS), "plants": [{"id": str(p.id), "site_code": p.site_code,
                 "name": p.plant_name, "district": p.district or "", "supervisor": p.supervisor or "",
-                "configured": p.id in configured, "compliance": compliance_by_plant[p.id]} for p in portfolio_plants],
+                "configured": p.id in configured, "compliance": compliance_by_plant[p.id], "pm_assignee": pm_owners[p.id]} for p in portfolio_plants],
             "activities": [_out(r, _blocker(r, first_open.get(r.plant_id)), user, today, summary=summary) for r in rows],
             "legacy": legacy[:20000], "legacy_truncated": legacy_truncated}
 

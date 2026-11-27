@@ -395,3 +395,19 @@ def test_new_responsibility_routes_existing_open_tickets_from_both_access_editor
     assert routed[5].assignee_text == "Legacy owner"
     assert any(e["action"] == "issue.auto_assigned" for e in _history(client, str(ids[0])))
     assert client.put(f"{BASE}/category/vcb", json={"primary_user_id": str(owner.id)}).json()["issues_auto_assigned"] == 0
+
+
+def test_pm_plant_owner_takes_priority_over_equipment_owner(client, db):
+    from app.notifications.service import pm_plant_recipients
+    plant, = _plants(db, "PM-OWNER")
+    head = login_user(client, db, role="O&M Head", email="pm-plant-head@example.com")
+    equipment_owner = _assignee(db, "Equipment owner", "pm-equip-owner@example.com")
+    plant_owner = _assignee(db, "Plant owner", "pm-plant-owner@example.com")
+    _act_as(db, head)
+    assert client.put(f"{BASE}/category/idt_transformer", json={"primary_user_id": str(equipment_owner.id), "active": True}).status_code == 200
+    assert client.put(f"/api/users/{plant_owner.id}/pm-responsibility", json={"plant_ids": [str(plant.id)]}).status_code == 200
+    ids = {u.id for u in pm_plant_recipients(db, plant_id=plant.id, equipment="IDT Transformer")}
+    assert ids == {head.id, plant_owner.id}
+    assert {u.id for u in pm_plant_recipients(db, plant_id=plant.id, equipment="Inverter")} == ids
+    assert client.put(f"/api/users/{plant_owner.id}/pm-responsibility", json={"plant_ids": []}).status_code == 200
+    assert {u.id for u in pm_plant_recipients(db, plant_id=plant.id, equipment="IDT Transformer")} == {head.id, equipment_owner.id}

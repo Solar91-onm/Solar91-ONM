@@ -315,14 +315,16 @@ def test_login_access_uses_real_users_and_hides_categories_from_settings(client)
     assert "Arun Demo" not in settings and "Demo invite" not in settings
     assert "Solar91PortalCategories" not in settings
     assert "data-categories-host" not in settings
-    # Plant-based scope is no longer configured here: Assignees work portfolio-wide and
-    # equipment responsibility routes the work, so the per-plant scope pickers are gone.
+    # Portfolio access is independent of the dedicated plant PM responsibility editor.
     assert "Scope · Module Cleaning" not in settings
     assert "Scope · Preventive Maintenance" not in settings and "Scope · Health" not in settings
     assert "data-settings-washing-plants" not in settings
     assert "Equipment responsibility" in settings
     assert 'data-settings-action="edit-equipment"' in settings
     assert "/api/equipment-responsibilities" in settings
+    assert 'data-settings-action="edit-pm-responsibility"' in settings
+    assert '"/pm-responsibility"' in settings
+    assert 'values.getAll("pm_plants")' in settings
     # A Site Engineer's single plant is still assigned here.
     assert 'var plantsRequired = role === "Site Engineer";' in settings
     assert "Role &amp; plant assignments" not in settings

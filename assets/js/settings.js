@@ -25,7 +25,7 @@
   // How long full-size originals are kept, and what a one-off sweep would remove. Only the
   // originals are ever deleted: thumbnails and the photo records stay, so every gallery keeps
   // its evidence.
-  var retention = { loaded: false, saving: false, days: null, settings: null, purgeDays: null, preview: null };
+  var retention = { loaded: false, saving: false, days: null, settings: null, purgeDays: null, preview: null, category: "", plantId: "", automatic: false, purgeCategory: "", purgePlantId: "" };
   // Equipment responsibility: who answers for one equipment category on every plant.
   // The matrix below and a person's own dialog write the same rows through the same API.
   var equipment = {
@@ -105,6 +105,10 @@
       actions += '<button type="button" class="ep-settings__button ep-settings__button--small" ' +
         'data-settings-action="edit-equipment" data-user-id="' + escape(person.id) + '">Equipment</button>';
     }
+    if (person.active && person.role === "Assignee") {
+      actions += '<button type="button" class="ep-settings__button ep-settings__button--small" ' +
+        'data-settings-action="edit-pm-responsibility" data-user-id="' + escape(person.id) + '">PM plants (' + (person.pm_plant_ids || []).length + ')</button>';
+    }
     if (person.invited && person.active) {
       actions += '<button type="button" class="ep-settings__button ep-settings__button--small" ' +
         'data-settings-action="resend" data-user-id="' + escape(person.id) + '">Resend invite</button>';
@@ -152,7 +156,7 @@
         '<div><button type="button" class="ep-settings__button" data-settings-action="refresh-storage"' +
           (storageLoading ? " disabled" : "") + '>Refresh</button>' +
           '<button type="button" class="ep-settings__button" data-settings-action="purge-originals"' +
-          (storageLoading ? " disabled" : "") + '>Run retention sweep</button></div></header>' +
+          (storageLoading ? " disabled" : "") + '>Preview saved policy</button></div></header>' +
       (storageLoading && !usage
         ? '<p class="ep-settings__storage-status" role="status">Reading bucket usage…</p>'
         : storageError
@@ -174,6 +178,19 @@
       '</section>';
   }
 
+  function retentionScope(prefix, category, plantId, info) {
+    var modules = [["", "All modules"], ["pm", "Preventive maintenance"], ["washing", "Module cleaning"],
+      ["issue", "Site issues"], ["inventory", "Inventory"], ["safety", "Safety"], ["other", "Other"]];
+    var plants = [["", "All plants"]].concat((info.plants || []).map(function (p) { return [p.id, p.label]; }));
+    function options(items, selected) {
+      return items.map(function (item) { return '<option value="' + escape(item[0]) + '"' +
+        (item[0] === selected ? ' selected' : '') + '>' + escape(item[1]) + '</option>'; }).join("");
+    }
+    return '<div class="ep-settings__retention-controls ep-settings__retention-scope">' +
+      '<label>Module<select data-retention-field="' + (prefix ? "purgeCategory" : "category") + '">' + options(modules, category) + '</select></label>' +
+      '<label>Plant<select data-retention-field="' + (prefix ? "purgePlantId" : "plantId") + '">' + options(plants, plantId) + '</select></label></div>';
+  }
+
   /** The retention window and the on-demand sweep, inside the Photo storage card. */
   function renderRetention() {
     var info = retention.settings;
@@ -187,7 +204,7 @@
     return '<div class="ep-settings__retention">' +
       '<div class="ep-settings__retention-row">' +
         '<label for="settings-retention-days">Keep full-size originals for' +
-          '<span>Older originals are deleted automatically each day. Thumbnails and photo records stay.</span></label>' +
+          '<span>Applies only to the selected module and plant. Thumbnails, PDF reports and photo records stay.</span></label>' +
         '<div class="ep-settings__retention-controls">' +
           '<input id="settings-retention-days" type="number" inputmode="numeric" min="' + info.min_days +
             '" max="' + info.max_days + '" step="1" value="' + escape(days) + '" data-settings-retention-days />' +
@@ -197,7 +214,10 @@
             (retention.saving ? "Saving…" : "Save window") + "</button>" +
         "</div>" +
       "</div>" +
-      '<p class="ep-settings__retention-note">In force: <strong>' + escape(info.days) + ' days</strong> · ' +
+      retentionScope("", retention.category, retention.plantId, info) +
+      '<label class="ep-settings__retention-note"><input type="checkbox" data-retention-field="automatic"' +
+        (retention.automatic ? ' checked' : '') + '> Enable automatic cleanup (daily while server is running)</label>' +
+      '<p class="ep-settings__retention-note">In force: <strong>' + escape(info.days) + ' days</strong> · ' + (info.automatic ? "Automatic enabled" : "Automatic disabled") + " · " + escape(info.category || "All modules") + " · " + escape(((info.plants || []).find(function (p) { return p.id === info.plant_id; }) || {}).label || (info.plant_id ? "Selected plant (unavailable)" : "All plants")) + " · " +
         (info.source === "portal"
           ? "set in the portal" + (info.updated_by ? " by " + escape(info.updated_by) : "") +
             (info.updated_at ? " on " + escape(new Date(info.updated_at).toLocaleDateString("en-IN")) : "")
@@ -217,6 +237,7 @@
             : "") +
         "</div>" +
       "</div>" +
+      retentionScope("purge", retention.purgeCategory, retention.purgePlantId, info) +
       (preview
         ? '<p class="ep-settings__retention-note" role="status">' + (preview.photos
           ? escape(preview.photos) + " original" + (preview.photos === 1 ? "" : "s") + " older than " +
@@ -231,6 +252,7 @@
   function render() {
     if (!activeHost) return;
     var canManage = api().can("users.manage");
+    var existingModal = activeHost.querySelector("[data-settings-modal]");
     var list = filteredUsers();
     activeHost.innerHTML = '<div class="ep-settings">' +
       '<header class="ep-settings__page-head"><div><h1>Login access</h1>' +
@@ -238,7 +260,7 @@
         '<span class="ep-settings__access-badge"><i></i>Clerk sign-in</span></header>' +
       '<section class="ep-settings__panel" aria-labelledby="settings-team-title">' +
         '<div class="ep-settings__panel-intro"><h2 id="settings-team-title">Team &amp; access</h2>' +
-          '<p>Assignees and O&amp;M Heads can work across all plants and equipment. Equipment responsibility routes work automatically; Site Engineers remain assigned to one plant.</p></div>' +
+          '<p>Assignees and O&amp;M Heads can work across all plants and equipment. Equipment responsibility routes site issues; PM responsibility is assigned plant-wise. Site Engineers remain assigned to one plant.</p></div>' +
         (canManage ? renderRoleChips() :
           '<p class="ep-settings__message" role="status">Your account does not have permission to manage login access.</p>') +
         (canManage ? '<div class="ep-settings__toolbar">' +
@@ -266,8 +288,8 @@
       '</section>' +
       renderEquipmentPanel(canManage) +
       renderStorageCard(canManage) +
-      (activeHost.querySelector("[data-settings-modal]") ? activeHost.querySelector("[data-settings-modal]").outerHTML : "") +
     "</div>";
+    if (existingModal) activeHost.appendChild(existingModal);
   }
 
   // Declared here, not inside loadUsers: renderPage and the toolbar's own buttons call it.
@@ -293,7 +315,14 @@
     return api().request("/api/photos/retention").then(function (info) {
       retention.settings = info;
       retention.loaded = true;
-      if (retention.days == null) retention.days = info.days;
+      if (retention.days == null) {
+        retention.days = info.days;
+        retention.category = info.category || "";
+        retention.plantId = info.plant_id || "";
+        retention.automatic = !!info.automatic;
+        retention.purgeCategory = retention.category;
+        retention.purgePlantId = retention.plantId;
+      }
       if (retention.purgeDays == null) retention.purgeDays = info.days;
       render();
     }).catch(function (error) {
@@ -308,22 +337,24 @@
     if (!input || !retention.settings) return;
     var days = Number(input.value);
     var info = retention.settings;
-    if (!Number.isFinite(days) || days < info.min_days || days > info.max_days) {
+    if (!Number.isInteger(days) || days < info.min_days || days > info.max_days) {
       storageError = "Keep originals for " + info.min_days + "-" + info.max_days + " days.";
       render();
       return;
     }
+    if (retention.automatic && !global.confirm("Enable automatic deletion of full-size originals older than " + days + " days for the selected module and plant? Thumbnails and records stay. Originals cannot be recovered.")) return;
+    retention.days = days;
     retention.saving = true;
     storageError = "";
     storageMessage = "";
     render();
-    api().request("/api/photos/retention", { method: "PUT", body: { days: days } })
+    api().request("/api/photos/retention", { method: "PUT", body: { days: days, category: retention.category || null, plant_id: retention.plantId || null, automatic: retention.automatic } })
       .then(function (saved) {
         retention.saving = false;
         retention.settings = saved;
         retention.days = saved.days;
         retention.preview = null;
-        storageMessage = "Originals are now kept for " + saved.days + " days. Nothing was deleted by this change.";
+        storageMessage = "Originals are now kept for " + saved.days + " days for the selected scope. The policy was saved; no originals were deleted by this request.";
         if (global.Solar91PortalToast) {
           global.Solar91PortalToast.success("Retention window saved", saved.days + " days");
         }
@@ -342,21 +373,23 @@
     if (!input || !retention.settings) return;
     var days = Number(input.value);
     var info = retention.settings;
-    if (!Number.isFinite(days) || days < info.min_purge_days || days > info.max_days) {
+    if (!Number.isInteger(days) || days < info.min_purge_days || days > info.max_days) {
       storageError = "Choose between " + info.min_purge_days + " and " + info.max_days + " days.";
       render();
       return;
     }
     retention.purgeDays = days;
+    var scope = [retention.purgeCategory, retention.purgePlantId, days].join("|");
+    retention.preview = null;
     storageLoading = true;
     storageError = "";
     storageMessage = "";
     render();
     api().request("/api/photos/retention/purge", {
-      method: "POST", body: { older_than_days: days, dry_run: true }
+      method: "POST", body: { older_than_days: days, category: retention.purgeCategory || null, plant_id: retention.purgePlantId || null, dry_run: true }
     }).then(function (result) {
       storageLoading = false;
-      retention.preview = result;
+      if (scope === [retention.purgeCategory, retention.purgePlantId, Number(retention.purgeDays)].join("|")) retention.preview = result;
       render();
     }).catch(function (error) {
       storageLoading = false;
@@ -368,15 +401,15 @@
   function purgeOlderThan() {
     var preview = retention.preview;
     var days = retention.purgeDays;
-    if (!preview || !preview.photos || days == null) return;
+    if (storageLoading || !preview || !preview.photos || days == null) return;
     if (!global.confirm("Delete " + preview.photos + " full-size original(s) older than " + days +
-        " days? Thumbnails and photo records are kept, and this cannot be undone.")) return;
+        " days for the selected module and plant? Thumbnails, PDF reports and photo records are kept, and this cannot be undone.")) return;
     storageLoading = true;
     storageError = "";
     storageMessage = "";
     retention.preview = null;
     render();
-    api().request("/api/photos/retention/purge", { method: "POST", body: { older_than_days: days } })
+    api().request("/api/photos/retention/purge", { method: "POST", body: { older_than_days: days, category: retention.purgeCategory || null, plant_id: retention.purgePlantId || null } })
       .then(function (result) {
         storageMessage = "Deleted " + Number(result.photos || 0) + " original(s); " +
           formatBytes(result.bytes_reclaimed) + " reclaimed." +
@@ -622,11 +655,26 @@
     var selectedCodes = person ? (person.plants || []).map(function (plant) { return String(plant.site_code); }) : [];
     var title = mode === "invite" ? "Invite a person"
       : mode === "equipment" ? "Equipment responsibility"
+      : mode === "pm-responsibility" ? "PM plant responsibility"
       : (isProfile ? "Edit person details" : "Change role");
     var plantsRequired = role === "Site Engineer";
     var fields;
     if (mode === "equipment") {
       fields = equipmentModalHTML(person);
+    } else if (mode === "pm-responsibility") {
+      var owned = person.pm_plant_ids || [];
+      var owners = {};
+      users.forEach(function (u) { (u.pm_plant_ids || []).forEach(function (id) { owners[id] = u; }); });
+      fields = '<p>Choose the plants for which ' + escape(person.name) + ' owns all PM equipment. Selecting a plant transfers responsibility from its current owner; clearing it releases responsibility. Portfolio editing access is unchanged.</p>' +
+        '<div class="ep-eqr__picks ep-pm-plant-picks">' + plantList.filter(function (p) {
+          return String(p.status || "active").toLowerCase() !== "inactive";
+        }).map(function (p) {
+          var owner = owners[p.id];
+          return '<label class="ep-eqr__pick"><span><strong>' + escape(p.siteCode + " · " + p.plantName) + '</strong><small>' +
+            escape(owner ? owner.name + (owner.active ? "" : " (disabled)") : "Unassigned") + '</small></span>' +
+            '<input type="checkbox" name="pm_plants" value="' + escape(p.id) + '"' +
+            (owned.indexOf(p.id) >= 0 ? ' checked' : '') + ' /></label>';
+        }).join("") + '</div>';
     } else if (isProfile) {
       var isInvited = person.invited;
       fields = '<label>Name<input name="name" required maxlength="255" value="' + escape(person.name || "") + '" /></label>' +
@@ -673,7 +721,7 @@
 
   function openModal(mode, person) {
     statusMessage = "";
-    var plantsPromise = mode === "profile" ? Promise.resolve([]) : api().plants();
+    var plantsPromise = mode === "profile" ? Promise.resolve([]) : api().plants(mode === "pm-responsibility");
     plantsPromise.then(function (plantList) {
       if (!activeHost) return;
       var wrapper = document.createElement("div");
@@ -735,6 +783,21 @@
       }
     });
     host.addEventListener("change", function (event) {
+      if (event.target.hasAttribute("data-settings-retention-days")) retention.days = event.target.value;
+      if (event.target.hasAttribute("data-settings-purge-days")) {
+        retention.purgeDays = event.target.value;
+        retention.preview = null;
+        var stale = host.querySelector('[data-settings-action="purge-older"]');
+        if (stale) stale.disabled = true;
+        return;
+      }
+      var field = event.target.dataset.retentionField;
+      if (field) {
+        retention[field] = field === "automatic" ? event.target.checked : event.target.value;
+        retention.preview = null;
+        render();
+        return;
+      }
       if (event.target.dataset.settingsFilter === "role") {
         filters.role = event.target.value;
         render();
@@ -760,23 +823,13 @@
       } else if (action === "purge-older") {
         purgeOlderThan();
       } else if (action === "purge-originals") {
-        var window_days = retention.settings ? retention.settings.days : null;
-        if (!global.confirm("Delete full-size originals older than " +
-            (window_days ? window_days + " days" : "the retention window") +
-            "? Thumbnails and photo records are kept, and this cannot be undone.")) return;
-        storageLoading = true;
-        storageError = "";
-        storageMessage = "";
+        if (!retention.settings || storageLoading) return;
+        retention.purgeDays = retention.settings.days;
+        retention.purgeCategory = retention.settings.category || "";
+        retention.purgePlantId = retention.settings.plant_id || "";
+        retention.preview = null;
         render();
-        api().request("/api/photos/retention/purge", { method: "POST" }).then(function (result) {
-          storageMessage = "Purged " + Number(result.photos || 0) + " original(s); " +
-            formatBytes(result.bytes_reclaimed) + " reclaimed.";
-          return loadStorageUsage(true);
-        }).catch(function (error) {
-          storageLoading = false;
-          storageError = error.message || "The retention sweep failed.";
-          render();
-        });
+        previewPurge(host);
       } else if (action === "refresh-equipment") {
         equipment.message = "";
         loadEquipment(true);
@@ -788,6 +841,8 @@
         saveCategory(button.dataset.equipmentKey, host);
       } else if (action === "edit-equipment" && person) {
         loadEquipment(false).then(function () { openModal("equipment", person); });
+      } else if (action === "edit-pm-responsibility" && person && person.active && person.role === "Assignee") {
+        openModal("pm-responsibility", person);
       } else if (action === "invite") {
         openModal("invite");
       } else if (action === "edit-access" && person) {
@@ -880,6 +935,22 @@
             equipment.message = "";
             return loadEquipment(true);
           });
+      } else if (mode === "pm-responsibility") {
+        var pmIds = values.getAll("pm_plants");
+        var transfers = users.filter(function (u) { return u.id !== form.dataset.userId; }).reduce(function (n, u) {
+          return n + (u.pm_plant_ids || []).filter(function (id) { return pmIds.indexOf(id) >= 0; }).length;
+        }, 0);
+        if (transfers && !global.confirm("Transfer PM responsibility for " + transfers + " plant(s) from their current Assignee(s)?")) {
+          submit.disabled = false; return;
+        }
+        request = api().request("/api/users/" + encodeURIComponent(form.dataset.userId) + "/pm-responsibility", {
+          method: "PUT", body: { plant_ids: pmIds }
+        }).then(function () {
+          statusMessage = "PM responsibility saved for " + pmIds.length + " plants.";
+          if (global.Solar91PortalData && global.Solar91PortalData.invalidate) global.Solar91PortalData.invalidate(true);
+          else document.dispatchEvent(new CustomEvent("portal:data-invalidated"));
+          return api().plants(true).catch(function () {});
+        });
       } else if (mode === "access") {
         var role = String(values.get("role") || "");
         var plantSelect = form.querySelector("[data-settings-plants]");

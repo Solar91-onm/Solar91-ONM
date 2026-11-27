@@ -272,6 +272,46 @@ def update_access(
     return item
 
 
+class PMResponsibilityUpdate(BaseModel):
+    plant_ids: list[UUID] = Field(max_length=500)
+
+
+@router.put("/{user_id}/pm-responsibility", dependencies=[Depends(require_csrf)])
+def update_pm_responsibility(
+    user_id: UUID,
+    data: PMResponsibilityUpdate,
+    db: Annotated[Session, Depends(get_db)],
+    user: Annotated[User, Depends(require_permission("users.manage"))],
+):
+    """Assign whole-plant PM responsibility without changing login role or other scopes."""
+    target = db.scalar(select(User).where(User.id == user_id).with_for_update())
+    if target is None:
+        raise HTTPException(404, "User not found")
+    if target.role != "Assignee" or not target.is_active:
+        raise HTTPException(422, "PM responsibility requires an active Assignee")
+    wanted = list(dict.fromkeys(data.plant_ids))
+    before_ids = list(db.scalars(select(PlantResponsibility.plant_id).where(
+        PlantResponsibility.area == "pm", PlantResponsibility.assigned_user_id == user_id)))
+    # Lock actual plant rows, including plants with no responsibility row yet.
+    # This serializes competing first assignments without relying on a unique-key error.
+    locked = list(db.scalars(select(Plant).where(Plant.id.in_(set(wanted) | set(before_ids)))
+        .order_by(Plant.id).with_for_update()))
+    valid = {p.id for p in locked if (p.status or "").casefold() != "inactive"}
+    if set(wanted) - valid:
+        raise HTTPException(422, "PM responsibility includes an unknown or inactive plant")
+    previous = {str(r.plant_id): str(r.assigned_user_id) if r.assigned_user_id else None
+        for r in db.scalars(select(PlantResponsibility).where(PlantResponsibility.area == "pm",
+            PlantResponsibility.plant_id.in_(set(wanted) | set(before_ids))))}
+    _set_responsibility(db, "pm", user_id, wanted)
+    after = {str(pid): str(user_id) if pid in wanted else (None if previous.get(str(pid)) == str(user_id) else previous.get(str(pid)))
+             for pid in set(wanted) | set(before_ids)}
+    db.add(AuditLog(user_id=user.id, actor_name=user.display_name,
+        action="Changed plant PM responsibility", module="Users", entity_type="user", entity_id=str(user_id),
+        before_state={"owners": previous}, after_state={"owners": after}))
+    db.commit()
+    return {"pm_plant_ids": [str(pid) for pid in wanted]}
+
+
 @router.patch("/{user_id}/active", dependencies=[Depends(require_csrf)])
 def set_active(
     user_id: UUID,
