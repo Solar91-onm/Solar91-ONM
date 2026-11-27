@@ -13,7 +13,7 @@ from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import Date, DateTime, ForeignKey, JSON, String, Text, UniqueConstraint, select, func, or_
+from sqlalchemy import Date, DateTime, ForeignKey, JSON, String, Text, UniqueConstraint, select, func, or_, case
 from sqlalchemy.orm import Mapped, Session, mapped_column, load_only
 
 from app.core.database import Base, get_db
@@ -470,10 +470,16 @@ def check_pm_tracking_reminders(db: Session, today: date | None = None, *, max_p
 
 @router.get("")
 def tracking_month(db: Annotated[Session, Depends(get_db)], user: Annotated[User, Depends(get_current_user)],
-                   month: str = Query(...), site_code: str | None = None, summary: bool = False):
+                   month: str = Query(...), site_code: str | None = None, summary: bool = False,
+                   scheduled_date: date | None = Query(None, alias="date"), compliance: str | None = None):
     first, last = _bounds(month)
+    if scheduled_date and not first <= scheduled_date <= last:
+        raise HTTPException(422, "Date must be within the selected month")
+    compliance_options = {"on_schedule", "behind", "not_started", "not_planned"}
+    if compliance and compliance not in compliance_options:
+        raise HTTPException(422, "Invalid compliance filter")
     scope = _role_scope(db, user)
-    q = select(Plant).where(or_(Plant.status.is_(None), func.lower(Plant.status) != "inactive")).order_by(Plant.plant_name, Plant.site_code)
+    q = select(Plant).options(load_only(Plant.id, Plant.site_code, Plant.plant_name, Plant.district, Plant.supervisor)).where(or_(Plant.status.is_(None), func.lower(Plant.status) != "inactive")).order_by(Plant.plant_name, Plant.site_code)
     if scope is not None:
         q = q.where(Plant.id.in_(scope))
     if site_code:
@@ -495,23 +501,69 @@ def tracking_month(db: Annotated[Session, Depends(get_db)], user: Annotated[User
                 pass
     configured = {p.plant_id for p in plans if p.phases and
                   (p.plant_id not in managed or first >= managed[p.plant_id])}
-    rows = _rows(db, ids, first, last, summary=summary)
+    today = business_today()
+    first_open = {}
+    metrics = {}
+    assigned_categories = set()
+    if scheduled_date and ids:
+        # Month-level compliance stays independent of the date filter. Return grouped
+        # counts instead of hydrating every month's activity over the database link.
+        a = PMTrackingActivity
+        month_filter = (a.plant_id.in_(ids), a.scheduled_on.between(first, last))
+        for pid, equipment, total, late, started in db.execute(select(
+                a.plant_id, a.equipment, func.count(),
+                func.sum(case(( (a.scheduled_on < today) & (a.status != "Approved"), 1), else_=0)),
+                func.sum(case((a.status.in_(("Approved", "Pending approval", "Returned")), 1), else_=0))
+            ).where(*month_filter).group_by(a.plant_id, a.equipment)):
+            assigned_categories.add((pid, equipment))
+            old = metrics.get(pid, (0, 0, 0))
+            metrics[pid] = (old[0]+total, old[1]+late, old[2]+started)
+        ranked = select(a.id, func.row_number().over(partition_by=a.plant_id,
+            order_by=(a.scheduled_on, a.equipment, a.equipment_id, a.id)).label("rn")
+            ).where(*month_filter, a.status != "Approved", a.scheduled_on < scheduled_date).subquery()
+        for row in db.scalars(select(a).join(ranked, ranked.c.id == a.id).where(ranked.c.rn == 1)
+                .options(load_only(a.id, a.plant_id, a.scheduled_on, a.equipment_id))):
+            first_open[row.plant_id] = row
+        rows = _rows(db, ids, scheduled_date, scheduled_date, summary=summary)
+    else:
+        rows = _rows(db, ids, first, last, summary=summary)
+        for row in rows:
+            assigned_categories.add((row.plant_id, row.equipment))
+            total, late, started = metrics.get(row.plant_id, (0, 0, 0))
+            metrics[row.plant_id] = (total + 1, late + int(row.scheduled_on < today and row.status != "Approved"),
+                started + int(row.status in {"Approved", "Pending approval", "Returned"}))
+            if row.status != "Approved":
+                first_open.setdefault(row.plant_id, row)
+    configured.update(metrics)
     # An authorized page can nudge the background scheduler, never block on it.
     # Only managed plants with no assignments in this month need the hint.
-    assigned_plants = {row.plant_id for row in rows}
+    assigned_plants = set(metrics)
     if any(first >= starts and plant_id not in assigned_plants
            for plant_id, starts in managed.items()):
         from app.pmplan.recurrence import request_schedule_check
         request_schedule_check(first)
-    first_open = {}
-    for row in rows:
-        if row.status != "Approved":
-            first_open.setdefault(row.plant_id, row)
-    today = business_today()
-    legacy = legacy_calendar(db, user, "pm", month, ids, limit=20001)
+    compliance_by_plant = {}
+    for plant in plants:
+        total, late, started = metrics.get(plant.id, (0, 0, 0))
+        if not total:
+            compliance_by_plant[plant.id] = "not_started" if plant.id in configured else "not_planned"
+        elif late:
+            compliance_by_plant[plant.id] = "behind"
+        elif not started:
+            compliance_by_plant[plant.id] = "not_started"
+        else:
+            compliance_by_plant[plant.id] = "on_schedule"
+    selected_plant_ids = {plant.id for plant in plants}
+    if compliance:
+        selected_plant_ids.intersection_update(
+            plant_id for plant_id, value in compliance_by_plant.items() if value == compliance
+        )
+    portfolio_plants = [plant for plant in plants if plant.id in selected_plant_ids]
+    rows = [row for row in rows if row.plant_id in selected_plant_ids]
+    legacy = legacy_calendar(db, user, "pm", month, [p.id for p in portfolio_plants], limit=20001, scheduled_date=scheduled_date)
     legacy_truncated = len(legacy) > 20000
     managed_codes = {p.site_code: (p.id, managed[p.id]) for p in plants if p.id in managed}
-    assigned_categories = {(r.plant_id, r.equipment) for r in rows}
+    portal_managed = {p.plant_id for p in plans if "[PM_PORTAL_EDITOR]" in (p.notes or "")}
     def visible_marker(entry):
         # Keep actual work orders and all untagged cycle plans.
         scoped = managed_codes.get(entry.get("plantSiteCode"))
@@ -521,15 +573,25 @@ def tracking_month(db: Annotated[Session, Depends(get_db)], user: Annotated[User
         if first < starts:
             return False
         # Explicit SQL assignments replace the old calculated phase markers.
-        if (plant_id, entry.get("planPhase")) in assigned_categories:
+        if plant_id in portal_managed or (plant_id, entry.get("planPhase")) in assigned_categories:
             return False
         # Retain the nominal dates for remaining plan-only categories, not
         # artificial chained dates generated from the old uniform intervals.
         return entry.get("cyclePlanState") != "chained"
     legacy = [entry for entry in legacy if visible_marker(entry)]
+    if scheduled_date:
+        # Select plants only after both SQL-filtered work orders and visible plan markers
+        # are available; legacy-only work must not vanish from the daily portfolio.
+        selected_codes = {plant.site_code for plant in portfolio_plants}
+        legacy = [entry for entry in legacy
+                  if entry.get("date") == scheduled_date.isoformat() and entry.get("plantSiteCode") in selected_codes]
+        daily_ids = {row.plant_id for row in rows}
+        daily_codes = {entry.get("plantSiteCode") for entry in legacy}
+        portfolio_plants = [plant for plant in portfolio_plants if plant.id in daily_ids or plant.site_code in daily_codes]
     return {"month": month, "as_of": datetime.now(timezone.utc).isoformat(), "today": _iso(today), "role": user.role, "categories": CATEGORIES,
             "covered": list(CHECKLISTS), "plants": [{"id": str(p.id), "site_code": p.site_code,
-                "name": p.plant_name, "district": p.district or "", "supervisor": p.supervisor or "", "configured": p.id in configured} for p in plants],
+                "name": p.plant_name, "district": p.district or "", "supervisor": p.supervisor or "",
+                "configured": p.id in configured, "compliance": compliance_by_plant[p.id]} for p in portfolio_plants],
             "activities": [_out(r, _blocker(r, first_open.get(r.plant_id)), user, today, summary=summary) for r in rows],
             "legacy": legacy[:20000], "legacy_truncated": legacy_truncated}
 

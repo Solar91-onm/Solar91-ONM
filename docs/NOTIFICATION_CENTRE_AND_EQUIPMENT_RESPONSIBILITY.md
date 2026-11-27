@@ -206,3 +206,10 @@ Not verified here, and worth doing before production: a browser pass on the live
 bell, the toasts and the register on desktop, tablet and phone; the two migrations against a
 staging Supabase instance; and behaviour under a real slow connection. No migration has been run
 against any database from this change, and no live-service or concurrency testing was performed.
+
+
+## Login Access and recurring PM editor update (27 November 2026)
+
+Saving an active primary Assignee in either Login Access configuration view automatically routes matching open, unassigned site issues across all plants in the same transaction. Existing assigned tickets (including legacy free-text owners), closed/deleted tickets, and other categories are preserved. The response shows the number routed; ticket history and a summary notification are written. New issues default to the equipment primary, including those reported by Assignees. An explicit authorized assignee remains an override; an Assignee who reports an issue with no configured owner remains its owner. Only a primary active Assignee, not a backup or a Head, automatically holds tickets.
+
+All Assignees and O&M Heads may manage recurring schedules for every plant/equipment, independently of their equipment routing responsibilities. Site Engineers retain single-plant access and checklist recording; only O&M Heads approve/return checklists. See the release notes for deployment verification.

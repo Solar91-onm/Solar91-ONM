@@ -1527,7 +1527,7 @@ def _cycle_plan_calendar(
 
 
 def calendar(db: Session, user: User, kind: str, month: str, plant_ids: list[UUID],
-             limit: int = CALENDAR_LIMIT) -> list[dict[str, Any]]:
+             limit: int = CALENDAR_LIMIT, *, scheduled_date: date | None = None) -> list[dict[str, Any]]:
     """Dated PM/Washing records and authorized PM cycle-plan days for one month."""
     if kind not in {"pm", "washing"}:
         raise ValueError("Calendar activity requires kind=pm or kind=washing")
@@ -1555,7 +1555,7 @@ def calendar(db: Session, user: User, kind: str, month: str, plant_ids: list[UUI
                    OMTask.assignee_text, OMTask.unit_no, OMTask.total_units,
                    assignee.display_name.label("assignee_name"))
             .outerjoin(assignee, assignee.id == OMTask.assignee_user_id)
-            .where(OMTask.plant_id.in_(plant_ids), due >= first, due <= last)
+            .where(OMTask.plant_id.in_(plant_ids), due >= (scheduled_date or first), due <= (scheduled_date or last))
             .order_by(due, OMTask.id)
             .limit(limit)
         ).all()
@@ -1583,7 +1583,8 @@ def calendar(db: Session, user: User, kind: str, month: str, plant_ids: list[UUI
                 "plantName": names.get(row.plant_id),
                 "source": "database",
             })
-        out.extend(_cycle_plan_calendar(db, user, plant_ids, first, last, codes, names, limit))
+        out.extend(entry for entry in _cycle_plan_calendar(db, user, plant_ids, first, last, codes, names, limit)
+                   if scheduled_date is None or entry["date"] == scheduled_date.isoformat())
         return sorted(
             out,
             key=lambda event: (

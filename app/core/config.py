@@ -88,7 +88,7 @@ class Settings(BaseSettings):
 
     # Persistent hosted service: keep the application-side DB pool deliberately small.
     db_pool_size: int = 5
-    db_max_overflow: int = 2
+    db_max_overflow: int = 0  # keep one process within the five-connection budget
     # Replace pooled connections after 30 minutes. Each new connection costs several network round trips (TCP, TLS,
     # login), so recycling every few minutes made page loads pay for reconnects. Dead connections are still caught by
     # the health check below, whatever this value is.

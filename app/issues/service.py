@@ -137,7 +137,8 @@ class IssueService:
         if user.role == "Assignee":
             if assigned_to is not None and assigned_to != user.id:
                 raise HTTPException(403, "Assignees can only assign new issues to themselves")
-            assigned_to = user.id
+        # Serialize routing with ownership changes, including manually numbered tickets.
+        _lock_issue_ticket_numbers(self.db)
         assignee_id = assigned_to
         ticket_no = (payload.pop("ticket_no", None) or "").strip()
         auto_number = not ticket_no
@@ -156,6 +157,8 @@ class IssueService:
             if candidate is not None:
                 assignee, assignee_id = candidate, candidate.id
                 auto_equipment = payload.get("vertical")
+            elif user.role == "Assignee":
+                assignee, assignee_id = user, user.id
         if payload.get("etc_at") is None:
             # No deadline sent: the priority's default duration, which the O&M Head sets (app/issues/deadlines.py).
             payload["etc_at"] = default_deadline(self.db, payload["severity"])

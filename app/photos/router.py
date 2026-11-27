@@ -541,6 +541,7 @@ def create_photos(db: Annotated[Session, Depends(get_db)], user: Annotated[User,
                 409,
                 f"A ticket can carry {MAX_ISSUE_PHOTOS} photos; {attached} are already attached",
             )
+    pm_activity_snapshot = None
     if kind == "pm" and checklist_item_id:
         # Validate the item id exists in this activity's checklist and enforce the per-checkpoint cap.
         from app.pmplan.tracking import PMTrackingActivity as _PMA
@@ -565,6 +566,7 @@ def create_photos(db: Annotated[Session, Depends(get_db)], user: Annotated[User,
             raise HTTPException(409, "Photos can only be added to an open activity that is due today or earlier")
         if activity_row.equipment not in _CHECKLISTS:
             raise HTTPException(409, "This equipment type does not use a PM checklist")
+        pm_activity_snapshot = (activity_row.id, activity_row.scheduled_on)
         # Confirm the item id is known on this activity.
         item_ids = {c.get("id") for c in (activity_row.checklist or []) if isinstance(c, dict)}
         if checklist_item_id not in item_ids:
@@ -681,6 +683,18 @@ def create_photos(db: Annotated[Session, Depends(get_db)], user: Annotated[User,
             if mime != "application/pdf":
                 del photo
             del stored_data, thumbnail
+        if pm_activity_snapshot is not None:
+            # Do not hold a connection during image/Storage I/O. Serialize the final evidence
+            # write with PM schedule edits and workflow actions, then revalidate the snapshot.
+            db.scalar(select(Plant.id).where(Plant.id == plant.id).with_for_update())
+            current = db.scalar(select(_PMActivity).where(_PMActivity.id == pm_activity_snapshot[0],
+                _PMActivity.plant_id == plant.id).with_for_update().execution_options(populate_existing=True))
+            if current is None or current.scheduled_on != pm_activity_snapshot[1] or current.status not in {"Scheduled", "Returned"}:
+                raise HTTPException(409, "PM activity changed during upload; refresh and retry")
+            attached = db.scalar(select(func.count(SitePhoto.id)).where(SitePhoto.link_type == "pm",
+                SitePhoto.link_id == ref, SitePhoto.checklist_item_id == checklist_item_id)) or 0
+            if attached + len(records) > MAX_CHECKPOINT_PHOTOS:
+                raise HTTPException(409, "PM checkpoint photo limit reached; refresh and retry")
         db.add_all(records)
         db.flush()
         issue_photo_count = None

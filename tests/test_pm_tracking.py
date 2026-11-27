@@ -107,6 +107,64 @@ def test_portfolio_summary_omits_details_without_changing_status(client,db,monke
     assert any(a['label']=='Locked' for a in lite['activities'])
 
 
+def test_portfolio_date_and_compliance_filters(client, db, monkeypatch):
+    monkeypatch.setattr("app.pmplan.tracking.business_today", lambda: date(2026, 12, 7))
+    lkt = Plant(site_code="LKT01", plant_name="LKT Plant", status="active")
+    behind = Plant(site_code="BHD01", plant_name="Behind Plant", status="active")
+    not_started = Plant(site_code="NST01", plant_name="Not Started Plant", status="active")
+    not_planned = Plant(site_code="NPL01", plant_name="Not Planned Plant", status="active")
+    no_activity_plants = [
+        Plant(site_code=f"NPL{i:02d}", plant_name=f"Not Planned {i:02d}", status="active")
+        for i in range(2, 10)
+    ]
+    db.add_all([lkt, behind, not_started, not_planned, *no_activity_plants]); db.flush()
+    rows = [
+        PMTrackingActivity(plant_id=lkt.id, equipment="Inverter", equipment_id="INV 1",
+                           scheduled_on=date(2026, 12, 1), status="Approved"),
+        PMTrackingActivity(plant_id=lkt.id, equipment="Inverter", equipment_id="INV 2",
+                           scheduled_on=date(2026, 12, 1), status="Approved"),
+        *[PMTrackingActivity(plant_id=lkt.id, equipment="Inverter", equipment_id=f"INV {i}",
+                            scheduled_on=date(2026, 12, 8)) for i in (7, 8, 9)],
+        PMTrackingActivity(plant_id=behind.id, equipment="ACCB", equipment_id="ACCB 1",
+                           scheduled_on=date(2026, 12, 5), status="Scheduled"),
+        PMTrackingActivity(plant_id=not_started.id, equipment="VCB", equipment_id="VCB 1",
+                           scheduled_on=date(2026, 12, 15), status="Scheduled"),
+    ]
+    db.add_all(rows); db.commit()
+    login_user(client, db, role="O&M Head", email="pm-filter-head@example.com")
+
+    response_sizes = {}
+
+    def get(**params):
+        response = client.get(BASE, params={"month": "2026-12", "summary": True, **params})
+        assert response.status_code == 200, response.text
+        response_sizes[params.get("date", params.get("compliance", "month"))] = len(response.content)
+        return response.json()
+
+    month = get()
+    first = get(date="2026-12-01")
+    assert [plant["site_code"] for plant in first["plants"]] == ["LKT01"]
+    assert [activity["equipment_id"] for activity in first["activities"]] == ["INV 1", "INV 2"]
+    assert len(first["activities"]) < len(month["activities"])
+    assert response_sizes["2026-12-01"] < response_sizes["month"]
+    eighth = get(date="2026-12-08")
+    assert [activity["equipment_id"] for activity in eighth["activities"]] == ["INV 7", "INV 8", "INV 9"]
+    empty = get(date="2026-12-06")
+    assert empty["plants"] == [] and empty["activities"] == []
+
+    assert [plant["site_code"] for plant in get(compliance="on_schedule")["plants"]] == ["LKT01"]
+    assert [plant["site_code"] for plant in get(compliance="behind")["plants"]] == ["BHD01"]
+    assert [plant["site_code"] for plant in get(compliance="not_started")["plants"]] == ["NST01"]
+    unplanned = get(compliance="not_planned")["plants"]
+    assert len(unplanned) == 9
+    assert all(plant["site_code"].startswith("NPL") for plant in unplanned)
+    combined = get(date="2026-12-08", compliance="on_schedule")
+    assert [plant["site_code"] for plant in combined["plants"]] == ["LKT01"]
+    assert len(combined["activities"]) == 3
+    assert get(date="2026-12-01", compliance="behind")["plants"] == []
+    assert client.get(BASE, params={"month": "2026-12", "date": "2026-11-30"}).status_code == 422
+
+
 def test_recurring_plan_start_and_explicit_dates(client, db, monkeypatch):
     plant=Plant(site_code="ABH01",plant_name="ABHANERI",status="active")
     db.add(plant); db.flush()
@@ -155,3 +213,27 @@ def test_returned_legacy_checklist_keeps_original_task_version(client,db,monkeyp
     assert state(client)[row.equipment_id]['checks']==['Original monthly task']
     assert submit(client,row,[{'result':'OK'}]).status_code==200
     assert state(client)[row.equipment_id]['checklist'][0]['task']=='Original monthly task'
+
+
+def test_daily_filter_keeps_legacy_only_work_and_cycle_markers(client, db, monkeypatch):
+    from app.core.models import OMTask
+    monkeypatch.setattr("app.pmplan.tracking.business_today", lambda: date(2026, 12, 5))
+    login_user(client, db, role="O&M Head", email="legacy-daily@example.com")
+    legacy = Plant(site_code="LEG01", plant_name="Legacy only", status="active")
+    marker = Plant(site_code="PLN01", plant_name="Plan only", status="active")
+    empty = Plant(site_code="EMP01", plant_name="No work", status="active")
+    db.add_all([legacy, marker, empty]); db.flush()
+    db.add(OMTask(plant_id=legacy.id, work_order_no="LEG-DAY-01", task_name="Inverter PM", task_type="Inverter", due_on=date(2026,12,5), status="Scheduled"))
+    db.add(PMCyclePlan(plant_id=marker.id, phases=[{"phase":"ACCB","area":"Plant side","categories":["ACCB Panel"],"start_day":5,"days":1,"step_days":1}]))
+    db.commit()
+    r = client.get(BASE, params={"month":"2026-12","date":"2026-12-05"})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert {p["site_code"] for p in body["plants"]} == {"LEG01", "PLN01"}
+    assert {x["source"] for x in body["legacy"]} == {"database", "cycle_plan"}
+    assert not body["activities"]
+    assert all(x["date"] == "2026-12-05" for x in body["legacy"])
+    assert client.get(BASE, params={"month":"2026-12","date":"2026-12-06"}).json()["plants"] == []
+    engineer(client, db, legacy, "legacy-daily-se@example.com")
+    scoped = client.get(BASE, params={"month":"2026-12","date":"2026-12-05"}).json()
+    assert {p["site_code"] for p in scoped["plants"]} == {"LEG01"}

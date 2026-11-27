@@ -200,7 +200,7 @@ def test_the_calendar_offers_back_to_all_plants_and_restores_the_dashboard_as_it
         await settle();
         assert(again.html.indexOf('value="Alan"') !== -1, 'the search was not restored');
         assert(again.html.indexOf('<option value="Overdue" selected>') !== -1, 'the status filter was not restored');
-        assert(again.html.indexOf('s91pm-cards') !== -1, 'the cards layout was not restored');
+        assert(again.html.indexOf('data-layout="cards" aria-pressed="true"') !== -1, 'the cards layout was not restored');
         assert(scrolls.some(s => s[1] === 640), 'the scroll position was not restored: ' + JSON.stringify(scrolls));
 
         // A later, unrelated visit opens clean rather than re-applying old filters.
@@ -426,5 +426,61 @@ def test_the_checklist_can_be_opened_for_a_walkthrough_but_never_records_an_entr
         // The one the user may record still offers the real button.
         fire(host, 'click', { pmx: 'select', id: 'inv3' });
         assert(host.html.indexOf('s91pm-primary" data-pmx="record"') !== -1, 'the real Record PM button is gone');
+      })().then(() => process.exit(0)).catch(e => { console.error(e.message); process.exit(1); });
+    """)
+
+
+def test_portfolio_date_and_compliance_controls_request_filtered_data_and_clear():
+    _run(r"""
+      (async () => {
+        const daily = ['INV 1', 'INV 2'].map((id, i) => ({
+          id: 'dec' + i, plant_id: 'p1', equipment: 'Inverter', equipment_id: id,
+          date: '2026-12-01', status: 'Scheduled', permission: 'None',
+          label: 'Scheduled', late: false, blocker: null
+        }));
+        Solar91PortalAPI.request = url => {
+          urls.push(url);
+          const base = Object.assign({}, BODY, { month: '2026-12', legacy: [], legacy_truncated: false });
+          if (url.indexOf('date=2026-12-01') !== -1 && url.indexOf('compliance=behind') === -1) {
+            return Promise.resolve(Object.assign(base, { plants: [PLANTS[0]], activities: daily }));
+          }
+          if (url.indexOf('date=') !== -1 || url.indexOf('compliance=behind') !== -1) {
+            return Promise.resolve(Object.assign(base, { plants: [], activities: [] }));
+          }
+          return Promise.resolve(Object.assign(base, { plants: PLANTS, activities: [] }));
+        };
+        const host = makeHost();
+        Solar91PMTracking.show(host, {});
+        await settle();
+
+        host.handlers.change({ target: { dataset: { pmxFilter: 'month' }, value: '2026-12' } });
+        await settle();
+        const beforeInvalid = urls.length;
+        host.handlers.change({ target: { dataset: { pmxFilter: 'selectedDate' }, value: '2026-11-30' } });
+        await settle();
+        assert(urls.length === beforeInvalid, 'out-of-period date triggered a request');
+        host.handlers.change({ target: { dataset: { pmxFilter: 'selectedDate' }, value: '2026-12-01' } });
+        await settle();
+        assert(urls[urls.length - 1].indexOf('month=2026-12') !== -1, 'selected period not retained');
+        assert(urls[urls.length - 1].indexOf('date=2026-12-01') !== -1, 'the selected date was not sent to the API');
+        assert(host.html.indexOf('value="2026-12"') !== -1, 'the selected period was not retained');
+        assert(host.html.indexOf('INV 1, INV 2') !== -1, 'the daily equipment IDs are not shown');
+        assert(host.html.indexOf('Clear date') !== -1, 'there is no one-click way back to the full month');
+
+        host.handlers.change({ target: { dataset: { pmxFilter: 'compliance' }, value: 'behind' } });
+        await settle();
+        const combinedUrl = urls[urls.length - 1];
+        assert(combinedUrl.indexOf('date=2026-12-01') !== -1 && combinedUrl.indexOf('compliance=behind') !== -1,
+               'date and compliance were not sent together');
+        assert(host.html.indexOf('No plants have work scheduled') !== -1, 'the combined empty state is unclear');
+        assert(host.html.indexOf('s91pm-matrix') === -1, 'an empty grid is rendered when no plants match');
+
+        fire(host, 'click', { pmx: 'clear' });
+        await settle();
+        const clearedUrl = urls[urls.length - 1];
+        assert(clearedUrl.indexOf('date=') === -1 && clearedUrl.indexOf('compliance=') === -1,
+               'Clear filters did not remove the date and compliance parameters');
+        assert(host.html.indexOf('data-pmx-filter="selectedDate" value=""') !== -1, 'the date control was not cleared');
+        assert(host.html.indexOf('<option value="behind" selected>') === -1, 'the compliance control was not cleared');
       })().then(() => process.exit(0)).catch(e => { console.error(e.message); process.exit(1); });
     """)

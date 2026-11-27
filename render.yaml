@@ -44,7 +44,7 @@ services:
       - key: DB_POOL_SIZE
         value: "5"
       - key: DB_MAX_OVERFLOW
-        value: "2"
+        value: "0"
       - key: DB_POOL_RECYCLE_SECONDS
         value: "1800"
       - key: BOOTSTRAP_CLOSED_ISSUE_DAYS

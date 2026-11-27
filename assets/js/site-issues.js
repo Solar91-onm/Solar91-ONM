@@ -1140,9 +1140,9 @@
     var assignees = assigneeOptions(draft.plantCode, draft.assignee);
     var assignmentField = state.isAssignee
       ? '<div class="ep-issues__wizard-field">Assigned to' +
-          '<span class="ep-issues__readonly">You — assigned automatically</span></div>'
+          '<span class="ep-issues__readonly">Equipment primary Assignee (you if none configured)</span></div>'
       : '<label class="ep-issues__wizard-field">Assign to assignee (optional)' +
-          '<select name="assignee"><option value="">Leave unassigned</option>' +
+          '<select name="assignee"><option value="">Automatic by equipment</option>' +
             (state.assigneesLoading ? '<option value="" disabled>Loading assignees…</option>' : "") +
             (state.liveMode ? assignees : ASSIGNEES.map(function (person) {
               return '<option value="' + escape(person) + '"' +

@@ -224,10 +224,16 @@ def primary_assignee(db: Session, name: str | None) -> User | None:
     module requires of any assignee; an O&M Head configured as primary routes notifications
     but does not become the ticket's assignee.
     """
-    for user in equipment_responsible_users(db, name, include_backup=False):
-        if user.role == "Assignee":
-            return user
-    return None
+    # Assignment is a write decision, not a notification hint: read committed ownership
+    # directly instead of using a per-worker cache that can be stale after a transfer.
+    key = canonical_key(name)
+    if not key:
+        return None
+    return db.scalar(select(User).join(EquipmentResponsibility, EquipmentResponsibility.user_id == User.id)
+        .where(EquipmentResponsibility.equipment_key == key,
+               EquipmentResponsibility.position == "primary", EquipmentResponsibility.active.is_(True),
+               User.is_active.is_(True), User.role == "Assignee").limit(1))
+
 
 
 def user_responsibility_keys(db: Session, user_id: UUID) -> set[str]:

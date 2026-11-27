@@ -476,8 +476,8 @@
     return '<section class="ep-settings__panel ep-eqr" aria-labelledby="settings-equipment-title">' +
       '<div class="ep-settings__panel-intro"><h2 id="settings-equipment-title">Equipment responsibility</h2>' +
         '<p>Who answers for one equipment category across every plant. A new site issue for that ' +
-        'equipment is assigned to its primary Assignee automatically, wherever the plant is, and the ' +
-        'same people are notified about its Preventive Maintenance. Plant access, approval authority ' +
+        'equipment is assigned to its primary Assignee automatically, wherever the plant is. Saving a primary also assigns matching open, unassigned issues; existing owners are preserved. The ' +
+        'same people are notified about its Preventive Maintenance. Every Assignee may edit schedules for all equipment and plants. Approval authority ' +
         'and sequence overrides are unchanged by this: they stay with the role and the plant ' +
         'assignments above. ' + configured + ' of ' + equipment.categories.length +
         ' categories configured.</p></div>' +
@@ -573,9 +573,9 @@
     api().request("/api/equipment-responsibilities/category/" + encodeURIComponent(key), {
       method: "PUT",
       body: { primary_user_id: primary, backup_user_id: backup, active: active }
-    }).then(function () {
+    }).then(function (result) {
       equipment.saving = "";
-      equipment.message = "Equipment responsibility saved. It applies to every plant from now on.";
+      equipment.message = "Equipment responsibility saved across all plants. " + (result.issues_auto_assigned || 0) + " existing open issues assigned.";
       if (global.Solar91PortalToast) {
         global.Solar91PortalToast.success("Equipment responsibility saved");
       }
@@ -875,8 +875,8 @@
         });
         request = api().request("/api/equipment-responsibilities/user/" +
           encodeURIComponent(form.dataset.userId), { method: "PUT", body: { items: items } })
-          .then(function () {
-            statusMessage = "Equipment responsibility saved for every plant.";
+          .then(function (result) {
+            statusMessage = "Equipment responsibility saved for every plant. " + (result.issues_auto_assigned || 0) + " existing open issues assigned.";
             equipment.message = "";
             return loadEquipment(true);
           });

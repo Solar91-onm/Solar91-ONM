@@ -15,16 +15,17 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, field_validator
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.core.models import AuditLog, EquipmentResponsibility, User
+from app.core.models import AuditLog, EquipmentResponsibility, Issue, User
 from app.core.security import get_current_user, require_csrf, require_permission
 from app.equipment.service import (
     POSITIONS,
     catalogue,
+    canonical_key,
     invalidate_responsibility_cache,
     label_for,
     user_responsibility_keys,
@@ -188,6 +189,8 @@ def replace_user_responsibilities(user_id: UUID, payload: UserResponsibilities, 
     Categories the person no longer holds are removed; a category they take over as primary is
     released by whoever held it, so there is never a second active primary.
     """
+    from app.issues.service import _lock_issue_ticket_numbers
+    _lock_issue_ticket_numbers(db)
     person = _holder(db, user_id)
     known = _known_keys(db)
     wanted: dict[str, Item] = {}
@@ -224,16 +227,20 @@ def replace_user_responsibilities(user_id: UUID, payload: UserResponsibilities, 
             _audit(db, user, "Equipment responsibility set", key, before, after, user_id)
             if item.active:
                 changed.append((user_id, True, label, item.position))
+    routed = _route_open_issues(db, user, {k: person for k, item in wanted.items()
+        if item.active and item.position == "primary" and person.role == "Assignee"})
     _commit(db)
     for target, assigned, label, position in changed:
         _notify(db, user_id=target, assigned=assigned, label=label, position=position)
     db.commit()
-    return {"user_id": str(person.id), "keys": sorted(user_responsibility_keys(db, user_id))}
+    return {"user_id": str(person.id), "keys": sorted(user_responsibility_keys(db, user_id)), "issues_auto_assigned": routed}
 
 
 @router.put("/category/{equipment_key}", dependencies=[Depends(require_csrf)])
 def set_category_responsibility(equipment_key: str, payload: CategoryResponsibility, db: DB, user: Manager):
     """Set one category's primary and optional backup from the responsibility matrix."""
+    from app.issues.service import _lock_issue_ticket_numbers
+    _lock_issue_ticket_numbers(db)
     known = _known_keys(db)
     if equipment_key not in known:
         raise HTTPException(422, f"Unknown equipment category: {equipment_key}")
@@ -278,11 +285,55 @@ def set_category_responsibility(equipment_key: str, payload: CategoryResponsibil
             _audit(db, user, "Equipment responsibility set", equipment_key, before, after, person.id)
             if payload.active:
                 changed.append((person.id, True, label, position))
+    primary = holders.get("primary")
+    routed = _route_open_issues(db, user, {equipment_key: primary}
+        if payload.active and primary and primary.role == "Assignee" else {})
     _commit(db)
     for target, assigned, changed_label, position in changed:
         _notify(db, user_id=target, assigned=assigned, label=changed_label, position=position)
     db.commit()
-    return {"equipment_key": equipment_key, "active": payload.active}
+    return {"equipment_key": equipment_key, "active": payload.active, "issues_auto_assigned": routed}
+
+
+def _route_open_issues(db: Session, actor: User, owners: dict[str, User]) -> int:
+    """Route only previously unassigned open tickets; never overwrite an existing owner.
+
+    Same transaction as responsibility configuration and audit. A bounded projection finds
+    candidates by canonical alias; row locks then recheck eligibility before changing them.
+    """
+    if not owners:
+        return 0
+    from datetime import datetime, timezone
+    from app.issues.service import IssueService
+    from app.notifications.service import create_notification
+    eligible = (Issue.status == "Open", Issue.deleted_at.is_(None), Issue.plant_id.is_not(None),
+                Issue.assigned_to.is_(None), func.trim(func.coalesce(Issue.assignee_text, "")) == "")
+    candidates = [i for i, vertical in db.execute(select(Issue.id, Issue.vertical).where(*eligible))
+                  if canonical_key(vertical) in owners]
+    service = IssueService(db)
+    counts: dict[UUID, int] = {}
+    for offset in range(0, len(candidates), 250):
+        rows = db.scalars(select(Issue).where(*eligible, Issue.id.in_(candidates[offset:offset+250]))
+                          .order_by(Issue.id).with_for_update()).all()
+        for row in rows:
+            key = canonical_key(row.vertical)
+            target = owners.get(key)
+            if target is None:
+                continue
+            row.assigned_to = target.id
+            row.assignee_text = target.display_name
+            row.status = "Assigned"
+            row.updated_at = datetime.now(timezone.utc)
+            service._history(row, "issue.auto_assigned", actor, status_from="Open", status_to="Assigned",
+                note="Automatically assigned when equipment responsibility was configured.",
+                metadata={"rule": "equipment_responsibility", "equipment": key, "assigned_to": str(target.id)})
+            counts[target.id] = counts.get(target.id, 0) + 1
+    for uid, count in counts.items():
+        create_notification(db, user_id=uid, event_type="ticket_assigned",
+            title=f"{count} open site issue(s) assigned to you",
+            message="Existing unassigned issues matching your equipment responsibility.",
+            target_type="issue", payload={"page": "site-issues"})
+    return sum(counts.values())
 
 
 def _release_primary(db: Session, equipment_key: str, *, keep_user_id: UUID, actor: User) -> None:

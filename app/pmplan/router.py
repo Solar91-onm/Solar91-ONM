@@ -1042,6 +1042,8 @@ def get_cycle_plan(plant_key: str, db: Annotated[Session, Depends(get_db)],
     _cycle_plan_scope(db, user, plant)
     editable = _can_edit_cycle_plan(db, user, plant)
     row = db.scalar(select(PMCyclePlan).where(PMCyclePlan.plant_id == plant.id))
+    if row and "[PM_TRACKING_START=" in (row.notes or ""):
+        editable = False
     if not (row and row.phases):
         return _cycle_plan_out(plant, None, row.notes if row else None, None, updated_at=_version(row),
                                updated_by=_updated_by_name(db, row), can_edit=editable)
@@ -1066,7 +1068,10 @@ def save_cycle_plan(plant_key: str, payload: CyclePlanIn, db: Annotated[Session,
     problem = plan_problem(phases)
     if problem:
         raise HTTPException(422, problem)
-    row = db.scalar(select(PMCyclePlan).where(PMCyclePlan.plant_id == plant.id))
+    db.scalar(select(Plant.id).where(Plant.id == plant.id).with_for_update())
+    row = db.scalar(select(PMCyclePlan).where(PMCyclePlan.plant_id == plant.id).with_for_update())
+    if row and "[PM_TRACKING_START=" in (row.notes or ""):
+        raise HTTPException(409, "Use Manage PM schedule for this recurring plant")
     if "expected_updated_at" in payload.model_fields_set and _version(row) != payload.expected_updated_at:
         raise HTTPException(409, f"{plant.plant_name}'s cycle plan was changed by someone else after you opened "
                                  "it. Reload it to see the latest version, then make your change again.")
@@ -1123,7 +1128,10 @@ def delete_cycle_plan(plant_key: str, db: Annotated[Session, Depends(get_db)],
     _require(user, CREATOR_ROLES, "Only the O&M Head or the plant's Assignee can edit a cycle plan")
     plant = _resolve_plants(db, [plant_key])[0]
     _cycle_plan_scope(db, user, plant)
-    row = db.scalar(select(PMCyclePlan).where(PMCyclePlan.plant_id == plant.id))
+    db.scalar(select(Plant.id).where(Plant.id == plant.id).with_for_update())
+    row = db.scalar(select(PMCyclePlan).where(PMCyclePlan.plant_id == plant.id).with_for_update())
+    if row and "[PM_TRACKING_START=" in (row.notes or ""):
+        raise HTTPException(409, "Use Manage PM schedule for this recurring plant")
     if not row:
         raise HTTPException(404, "This plant has no cycle plan")
     db.delete(row)
@@ -1627,3 +1635,6 @@ async def import_plan(db: Annotated[Session, Depends(get_db)], user: Annotated[U
 # Monthly checklist execution; separate from planning/import and existing work orders.
 from app.pmplan.tracking import router as tracking_router
 router.include_router(tracking_router)
+
+from app.pmplan.schedule_editor import router as schedule_editor_router
+router.include_router(schedule_editor_router)
