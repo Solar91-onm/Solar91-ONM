@@ -300,7 +300,9 @@
     (body.unconfigured || []).forEach(function (plant) {
       if (!plant || !plant.site_code || seen["$" + plant.site_code]) return;
       seen["$" + plant.site_code] = true;
-      rows.push(Object.assign({ table_count: 0 }, plant));
+      // Flagged, because washing has no configuration for them: they carry no cycles, no
+      // tables and no daily activity, and the day-activity response never lists them.
+      rows.push(Object.assign({ table_count: 0 }, plant, { washing_unconfigured: true }));
     });
     return rows.sort(function (a, b) {
       return String(a.site_code).localeCompare(String(b.site_code), undefined, { numeric: true });
@@ -1095,8 +1097,12 @@
             table_data_by_cycle: plant.table_data_by_cycle || []
           };
         });
+        // Only plants washing is configured for are expected back; a plant still awaiting
+        // setup is listed on the board but has no daily entry to report, so its absence
+        // here is normal and must not read as a truncated response.
         var missing = st.rows.some(function (row) {
-          return !Object.prototype.hasOwnProperty.call(byCode, "$" + row.site_code);
+          return !row.washing_unconfigured &&
+            !Object.prototype.hasOwnProperty.call(byCode, "$" + row.site_code);
         });
         if (missing) throw new Error("The daily entry status did not include every visible plant.");
         st.dayActivity = { date: date, byCode: byCode };

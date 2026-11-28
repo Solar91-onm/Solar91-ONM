@@ -133,3 +133,63 @@ def test_every_day_status_the_server_returns_has_a_label():
                 / "assets" / "js" / "operations-calendar.js").read_text(encoding="utf-8")
     for status in washing_cycles.DAY_STATUS_ORDER:
         assert status in calendar, status
+
+
+def test_a_plant_without_washing_setup_is_not_expected_in_the_day_response():
+    """The board lists plants washing has no configuration for, so people can set them up.
+
+    ``day_activity`` joins WashingConfig and therefore never returns them. The board's
+    completeness guard - which exists to catch a truncated response - must not read that
+    as one, or picking any date blanks the board with "did not include every visible plant".
+    """
+    script = r"""
+      const fs=require('fs'),vm=require('vm'),assert=require('assert');
+      const source=fs.readFileSync('assets/js/washing-board.js','utf8');
+      function extract(name){
+        const start=source.indexOf('function '+name+'(');
+        assert(start>=0,name+' missing');
+        const open=source.indexOf('{',start);let depth=0;
+        for(let i=open;i<source.length;i++){
+          if(source[i]==='{')depth++;
+          else if(source[i]==='}'&&--depth===0)return source.slice(start,i+1);
+        }
+        throw new Error(name+' is incomplete');
+      }
+      const box={setTimeout:setTimeout,Promise:Promise,Object:Object,Array:Array,Number:Number,String:String};
+      box.ui={date:'2026-10-12'};
+      box.dayActivityToken=0;
+      box.render=function(){};
+      box.response={plants:[{site_code:'DA01',status:'confirmed',table_data_by_cycle:[]}]};
+      box.api=function(){return {request:function(){return Promise.resolve(box.response);}};};
+      vm.createContext(box);
+      vm.runInContext(extract('loadDayActivity')+extract('rowsWithUnconfiguredPlants')+
+        ';this.load=loadDayActivity;this.merge=rowsWithUnconfiguredPlants',box);
+
+      const merged=box.merge({plants:[{site_code:'DA01',table_count:10}],
+                              unconfigured:[{site_code:'NEW01',plant:'New Plant'}]});
+      assert.strictEqual(merged.find(r=>r.site_code==='NEW01').washing_unconfigured,true,
+        'a plant awaiting setup must be flagged');
+      assert.ok(!merged.find(r=>r.site_code==='DA01').washing_unconfigured,
+        'a configured plant must not be flagged');
+
+      function run(rows){
+        box.st={rows:rows,dayActivity:null,dayActivityDate:'',dayActivityLoading:false,dayActivityError:''};
+        box.load({isConnected:true});
+        return new Promise(resolve=>setTimeout(resolve,0)).then(()=>box.st);
+      }
+      run(merged).then(st=>{
+        assert.strictEqual(st.dayActivityError,'',
+          'the plant awaiting setup must not look like a truncated response');
+        assert.ok(st.dayActivity&&st.dayActivity.byCode['$DA01'],'the configured plant is kept');
+        assert.ok(!st.dayActivity.byCode['$NEW01'],'the unset plant simply has no activity');
+        // The guard still fires when a plant washing IS configured for goes missing.
+        return run([{site_code:'DA01'},{site_code:'DA02'}]);
+      }).then(st=>{
+        assert.ok(/did not include every visible plant/.test(st.dayActivityError),
+          'a genuinely incomplete response must still be reported: '+st.dayActivityError);
+      }).catch(error=>{console.error(error.message);process.exit(1);});
+    """
+    import subprocess
+    root = __import__("pathlib").Path(__file__).resolve().parents[1]
+    run = subprocess.run(["node", "-e", script], cwd=root, capture_output=True, text=True, timeout=20)
+    assert run.returncode == 0, run.stderr or run.stdout

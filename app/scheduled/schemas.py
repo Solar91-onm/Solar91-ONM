@@ -14,7 +14,7 @@ ALLOWED_ASSETS = {
     "RMS", "WMS", "CCTV", "Boundary wall", "String", "Earthing", "LA", "Water pipe line",
     "Vegetation", "Modules cleaning", "ABT meters", "Street Light", "MMS", "BIKE", "Piling and Foundation", "Other",
     "MCCB", "OLTC(RTCC)", "4 Pole", "VCB - GSS side", "4 Pole - GSS side",
-    "Miscellaneous", "ACDB",
+    "Miscellaneous", "ACDB","UPS", "Robot", "PV Area", 
 }
 ALLOWED_FREQUENCIES = {"Daily", "Weekly", "Monthly", "Quarterly", "Half-yearly", "Annual"}
 
