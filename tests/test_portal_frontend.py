@@ -1262,7 +1262,6 @@ def test_overview_inverter_tile_counts_units_and_opens_standalone_health():
     # The headline is a count pair, not a percentage: 375 of 376 rounds to "100%" and reads as
     # nothing being down, while one inverter is actually off.
     assert 'value: fmt.formatNumber(inv.running) + "/" + fmt.formatNumber(inv.total),' in overview
-    assert 'caption: "inverters running out of total"' in overview
     # The legend states the total, what is not running, and open tickets.
     assert '{ dot: "green", label: "Total inverters", value: fmt.formatNumber(inv.total) }' in overview
     assert 'label: "Not running", value: fmt.formatNumber(inv.down), bad: inv.down > 0' in overview

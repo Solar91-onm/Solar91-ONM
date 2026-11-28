@@ -25,7 +25,7 @@
     s.query=m.query;s.status=m.status;s.equipment=m.equipment;s.day=m.day;s.selectedDate=m.selectedDate?.slice(0,7)===s.month?m.selectedDate:"";s.compliance=m.compliance;s.plan=m.plan;s.layout=m.layout;s.filtersOpen=m.filtersOpen;s.restoreScroll=m.scroll;
   }
   const toTop = () => {if(typeof global.scrollTo==="function")global.scrollTo(0,0);};
-  const btn = (label,action,extra="",primary=false) => `<button type="button" class="s91pm-btn${primary?" s91pm-primary":""}" data-pmx="${e(action)}" ${extra}>${e(label)}</button>`;
+  const btn = (label,action,extra="",primary=false,cls="") => `<button type="button" class="s91pm-btn${primary?" s91pm-primary":""}${cls?" "+cls:""}" data-pmx="${e(action)}" ${extra}>${e(label)}</button>`;
   const pill = (label,tone) => `<span class="s91pm-pill s91pm-${tone||tones[label]||"neutral"}">${e(label)}</span>`;
   const option = (value,label,current) => `<option value="${e(value)}"${value===current?" selected":""}>${e(label)}</option>`;
   const count = (r, predicate) => r.filter(predicate).length;
@@ -83,7 +83,7 @@
     const eyebrow=s.view==="calendar"?"PLANT CALENDAR":p?"PLANT PREVENTIVE MAINTENANCE":"PORTFOLIO VIEW";
     const sub=p?p.site_code+" · PM Assignee: "+(p.pm_assignee||"Unassigned"):"Monthly equipment-wise monitoring across all plants";
     const back=s.view==="calendar"?btn(s.calendarParent==="overview"?"← Back to all plants":"← Back to plant tracker","back-calendar"):p?btn(s.parent==="plants"?"← Plant details":"← All plants","back-plant"):"";
-    const summaryExportBtn=!p?`<button type="button" class="s91pm-btn" data-pmx-export-summary title="Export plant summary as XLSX (two sheets: summary + equipment matrix)">Export Summary XLSX</button>`:"";
+    const summaryExportBtn=!p?`<button type="button" class="s91pm-btn s91pm-outline" data-pmx-export-summary title="Export plant summary as XLSX (two sheets: summary + equipment matrix)">Export Summary XLSX</button>`:"";
     return `<header class="s91pm-head"><div><div class="s91pm-breadcrumb">${back}</div><small class="s91pm-eyebrow">${eyebrow}</small><h1>${e(title)}</h1><p>${e(sub)}${!p?` · <span data-pmx-updated>${e(updatedLabel(s))}</span>`:''}</p></div><div class="s91pm-head-actions">${!p&&s.view!=="calendar"?"":`<label>Period<input type="month" data-pmx-filter="month" value="${e(s.month)}" aria-label="Month"></label>`}${p&&s.view!=="calendar"?btn("Open PM calendar →","calendar","",true):""}${canManageSchedule(s)?btn("Manage PM schedule","schedule-editor","",true):""}${summaryExportBtn}${btn("Export","export")}${btn("Refresh","reload")}</div></header>`;
   }
   function legend() {return `<div class="s91pm-legend">${["Approved","Pending approval","Overdue","Returned","Locked","Due today","Scheduled","Not assigned"].map(x=>pill(x)).join("")}${pill("Permission granted","blue")}${pill("Existing plan / work order","neutral")}</div>`;}
@@ -190,7 +190,7 @@
     else h+=`<h3>Monthly checklist · ${a.checks.length} checks</h3><ol class="s91pm-check-preview">${a.checks.map(c=>`<li>${e(c)}</li>`).join('')}</ol>`;
     if(a.equipment.startsWith('4 Pole'))h+='<p class="s91pm-foot">Four Pole, shared ACDB panel checks and Auxiliary Transformer. Each section must be reviewed.</p>';
     if(a.can_submit)h+=btn("Record PM","record","",true);
-    else if(a.source==='tracking'&&a.checks?.length)h+=btn("Open checklist (preview)","record");
+    else if(a.source==='tracking'&&a.checks?.length)h+=btn("Open checklist (preview)","record","",false,"s91pm-outline");
     if(a.can_request||a.can_grant||a.can_review){h+=`<form data-pmx-action-form><label>${a.can_request?'Reason for permission':a.can_grant?'Authorisation / denial reason':'Review note (required if returning)'}<textarea name="reason" rows="3" maxlength="4000" ${a.can_review?'':'required'} placeholder="Enter reason"></textarea></label><div class="s91pm-wrap">${a.can_request?`<button class="s91pm-btn s91pm-primary" name="action" value="request">Request permission</button>`:a.can_grant?`<button class="s91pm-btn s91pm-primary" name="action" value="grant">Grant permission</button><button class="s91pm-btn" name="action" value="deny">Deny</button>`:`<button class="s91pm-btn s91pm-primary" name="action" value="approve">Approve PM</button><button class="s91pm-btn s91pm-danger" name="action" value="return">Return for correction</button>`}</div></form>`;}
     if(a.status==='Approved')h+=`<div class="s91pm-note"><b>Approved by ${e(a.reviewed_name||'O&M Head')}</b><p>${dlabel(a.reviewed_at)}</p></div>`;
     if(a.status==='Pending approval'&&!a.can_review)h+='<p class="s91pm-foot">Awaiting O&M Head approval. This activity has not yet been counted as completed.</p>';

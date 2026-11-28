@@ -164,20 +164,20 @@
 .ep-wb__view-toggle:hover { border-color: var(--ep-accent); }
 .ep-wb__view-toggle:focus-visible { outline: 2px solid var(--ep-accent); outline-offset: 1px; }
 .ep-wb__export-btn {
-  min-height: 36px;
-  padding: 6px 15px;
-  border: 1px solid var(--ep-border-strong);
-  border-radius: 8px;
-  background: var(--ep-bg-elev);
-  color: var(--ep-text-strong);
+  min-height: 38px;
+  padding: 8px 14px;
+  border: 1px solid var(--ep-accent-strong);
+  border-radius: var(--ep-radius-md);
+  background: var(--ep-bg);
+  color: var(--ep-accent-strong);
   font: inherit;
-  font-size: 13px;
+  font-size: var(--ep-fs-md);
   font-weight: 650;
+  white-space: nowrap;
   cursor: pointer;
-  box-shadow: 0 1px 2px rgba(14,24,20,.06);
-  transition: background .15s ease, border-color .15s ease, box-shadow .15s ease;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
 }
-.ep-wb__export-btn:hover { border-color: var(--ep-accent); background: var(--ep-accent-soft); color: var(--ep-accent-strong); box-shadow: 0 1px 4px rgba(0,120,20,.1); }
+.ep-wb__export-btn:hover { border-color: #00610b; background: var(--ep-accent-soft); color: #00610b; }
 .ep-wb__export-btn:focus-visible { outline: 2px solid var(--ep-accent); outline-offset: 1px; }
 .ep-wb__table-wrap { overflow-x: auto; }
 .ep-wb__table { min-width: 760px; }

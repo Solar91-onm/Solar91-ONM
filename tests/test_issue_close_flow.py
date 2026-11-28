@@ -8,7 +8,7 @@ from app.core.models import Issue, IssueHistory, Notification, Plant, User, User
 from tests.conftest import login_user
 
 
-def _issue_in_progress(client, db, code="CLOSE01"):
+def _issue_in_progress(client, db, code="CLOSE01", started=True):
     head = login_user(client, db, role="O&M Head", email=f"{code.lower()}-head@example.com")
     plant = Plant(site_code=code, plant_name="Close flow plant")
     db.add(plant)
@@ -38,6 +38,8 @@ def _issue_in_progress(client, db, code="CLOSE01"):
     issue = issue_response.json()
     assigned = client.post(f"/api/issues/{issue['id']}/assign", json={"assigned_to": str(assignee.id)})
     assert assigned.status_code == 200, assigned.text
+    if not started:
+        return head, assignee, plant, issue
     from tests import conftest
     conftest._CURRENT_USER = db.get(User, assignee.id)
     assert client.post(f"/api/issues/{issue['id']}/acknowledge").status_code == 200
@@ -128,6 +130,47 @@ def test_yes_resolves_and_no_by_head_closes_immediately(client, db):
     })
     assert closed.status_code == 200, closed.text
     assert closed.json()["status"] == "Closed"
+
+
+def test_head_force_closes_an_assigned_issue_marked_resolved(client, db):
+    head, assignee, _, issue = _issue_in_progress(client, db, "CLOSE10", started=False)
+    _set_user(db, assignee.id)
+    refused = client.post(f"/api/issues/{issue['id']}/close", json={
+        "resolved": True, "remark": "Trying to skip the workflow.",
+    })
+    assert refused.status_code == 409
+
+    _set_user(db, head.id)
+    closed = client.post(f"/api/issues/{issue['id']}/close", json={
+        "resolved": True, "remark": "Fixed on site during the audit visit.",
+    })
+    assert closed.status_code == 200, closed.text
+    assert closed.json()["status"] == "Closed"
+    db.expire_all()
+    row = db.get(Issue, UUID(issue["id"]))
+    assert row.closure["closed_directly"] is True
+    assert row.closure["direct_reason"] == "Fixed on site during the audit visit."
+    assert db.query(IssueHistory).filter_by(
+        issue_id=row.id, action="issue.closed_directly",
+    ).one().status_from == "Assigned"
+
+
+def test_head_marking_resolved_confirms_a_pending_closure(client, db):
+    head, assignee, _, issue = _issue_in_progress(client, db, "CLOSE11")
+    _set_user(db, assignee.id)
+    assert client.post(f"/api/issues/{issue['id']}/close", json={
+        "resolved": False, "remark": "Requesting review.",
+    }).json()["status"] == "Pending Closure"
+
+    _set_user(db, head.id)
+    closed = client.post(f"/api/issues/{issue['id']}/close", json={
+        "resolved": True, "remark": "Reviewed and accepted.",
+    })
+    assert closed.status_code == 200, closed.text
+    assert closed.json()["status"] == "Closed"
+    assert db.query(IssueHistory).filter_by(
+        issue_id=UUID(issue["id"]), action="issue.closure_confirmed",
+    ).count() == 1
 
 
 @pytest.mark.parametrize("resolved", [True, False])

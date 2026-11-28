@@ -394,7 +394,7 @@ def test_string_tile_reads_counts_in_overview_js():
     assert "/api/issues?vertical=String&limit=200" not in overview
     assert "strings.issues = (body && body.plants) || [];" in overview
     assert "down += Number(row.units) || 0;" in overview
-    assert '"strings working out of total"' in overview
+    assert 'value: fmt.formatNumber(str.running) + "/" + fmt.formatNumber(str.total)' in overview
     assert '"strings not working"' in overview
     assert 'label: "Not working"' in overview
 

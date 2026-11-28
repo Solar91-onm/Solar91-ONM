@@ -1880,18 +1880,43 @@
       else return;
       renderView();
     });
+    function setCompactCell(cell, expanded) {
+      var content = cell.querySelector("[data-compact-content]");
+      var toggle = cell.querySelector("[data-compact-cell-toggle]");
+      if (!content || !toggle) return;
+      content.classList.toggle("is-collapsed", !expanded);
+      toggle.setAttribute("aria-expanded", String(expanded));
+      toggle.textContent = expanded ? "Less" : "More";
+    }
+    // Hovering "More" opens the text; it stays open while the pointer is anywhere in the cell,
+    // because the growing text pushes the button out from under the pointer. Mouse only: a tap
+    // fires a synthetic hover before its click, which would open and then shut the cell.
+    host.addEventListener("pointerover", function (event) {
+      if (event.pointerType !== "mouse" || !active || active.host !== host) return;
+      var toggle = event.target.closest("[data-compact-cell-toggle]");
+      if (!toggle || toggle.hidden || toggle.getAttribute("aria-expanded") === "true") return;
+      var cell = toggle.closest("[data-compact-cell]");
+      if (!cell) return;
+      cell.setAttribute("data-compact-hover-open", "");
+      setCompactCell(cell, true);
+    });
+    host.addEventListener("pointerout", function (event) {
+      if (event.pointerType !== "mouse") return;
+      var cell = event.target.closest("[data-compact-cell][data-compact-hover-open]");
+      if (!cell || (event.relatedTarget && cell.contains(event.relatedTarget))) return;
+      cell.removeAttribute("data-compact-hover-open");
+      setCompactCell(cell, false);
+    });
     host.addEventListener("click", function (event) {
       if (!active || active.host !== host) return;
       if (event.target.closest("[data-issue-clear-draft-photos]") && state.draft) { state.draft.evidenceFiles = []; renderWizardView(); return; }
       var compactToggle = event.target.closest("[data-compact-cell-toggle]");
       if (compactToggle) {
         var cell = compactToggle.closest("[data-compact-cell]");
-        var content = cell && cell.querySelector("[data-compact-content]");
-        if (!content) return;
-        var expanded = compactToggle.getAttribute("aria-expanded") !== "true";
-        content.classList.toggle("is-collapsed", !expanded);
-        compactToggle.setAttribute("aria-expanded", String(expanded));
-        compactToggle.textContent = expanded ? "Less" : "More";
+        if (!cell) return;
+        // A click is a deliberate choice, so it no longer collapses when the pointer leaves.
+        cell.removeAttribute("data-compact-hover-open");
+        setCompactCell(cell, compactToggle.getAttribute("aria-expanded") !== "true");
         return;
       }
       var plantToggle = event.target.closest("[data-issue-plant-toggle]");

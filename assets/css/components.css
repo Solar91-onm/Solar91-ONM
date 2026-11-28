@@ -1245,15 +1245,18 @@
 /* ─── Plants table: edit button and edit modal ─────────────────────── */
 .ep-pt__table thead { position: relative; z-index: 2; }
 
+/* Acts on existing data, so it is the green-outline tier: same green family as
+   .ep-pt__add, but it never competes with the page's one create action. */
 .ep-pt__edit {
-  display: inline-flex; align-items: center; justify-content: center; gap: 5px;
-  max-width: 100%; padding: 7px 14px; border: 1px solid var(--ep-border-strong); border-radius: var(--ep-radius-sm);
-  background: var(--ep-bg-elev); cursor: pointer;
-  font-family: inherit; font-size: 13px; font-weight: 650; color: var(--ep-text-strong);
-  transition: background .15s ease, border-color .15s ease, box-shadow .15s ease;
-  box-shadow: 0 1px 2px rgba(14,24,20,.06);
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  max-width: 100%; padding: 8px 14px; border: 1px solid var(--ep-accent-strong); border-radius: var(--ep-radius-md);
+  background: var(--ep-bg); cursor: pointer;
+  font-family: inherit; font-size: var(--ep-fs-md); font-weight: 650; color: var(--ep-accent-strong);
+  white-space: nowrap;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
 }
-.ep-pt__edit:hover { border-color: var(--ep-accent); color: var(--ep-accent-strong); background: var(--ep-accent-soft); box-shadow: 0 1px 4px rgba(0,120,20,.1); }
+.ep-pt__edit:hover { background: var(--ep-accent-soft); border-color: #00610b; color: #00610b; }
+.ep-pt__edit:focus-visible { outline: 2px solid var(--ep-accent-ring); outline-offset: 2px; }
 
 .ep-pt__modal-overlay {
   position: fixed; inset: 0; z-index: 100;
@@ -1310,20 +1313,19 @@
 .ep-sheet-io { display: inline-flex; align-items: center; gap: 6px; }
 .ep-sheet-io__button {
   min-height: 38px;
-  padding: 0 15px;
-  border: 1px solid var(--ep-border-strong);
-  border-radius: var(--ep-radius-sm);
-  background: var(--ep-bg-elev);
-  color: var(--ep-text-strong);
+  padding: 0 14px;
+  border: 1px solid var(--ep-accent-strong);
+  border-radius: var(--ep-radius-md);
+  background: var(--ep-bg);
+  color: var(--ep-accent-strong);
   font: inherit;
-  font-size: 13px;
+  font-size: var(--ep-fs-md);
   font-weight: 650;
+  white-space: nowrap;
   cursor: pointer;
-  letter-spacing: .01em;
-  box-shadow: 0 1px 2px rgba(14,24,20,.06);
-  transition: background .15s ease, border-color .15s ease, box-shadow .15s ease;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
 }
-.ep-sheet-io__button:not(:disabled):hover { border-color: var(--ep-accent); background: var(--ep-accent-soft); color: var(--ep-accent-strong); box-shadow: 0 1px 4px rgba(0,120,20,.1); }
+.ep-sheet-io__button:not(:disabled):hover { border-color: #00610b; background: var(--ep-accent-soft); color: #00610b; }
 .ep-sheet-io__button:focus-visible { outline: 2px solid var(--ep-accent-ring); outline-offset: 2px; }
 .ep-sheet-io__button:disabled { opacity: .55; cursor: not-allowed; }
 .ep-sheet-io__button--primary {

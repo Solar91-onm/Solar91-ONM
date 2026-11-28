@@ -769,7 +769,8 @@ const make = (code, name, over) => Object.assign({
 const entries = [
   make('AA-01', 'Alpha', { status: 'Completed', date: day(2), completedOn: day(2) }),
   make('AA-01', 'Alpha', { status: 'Completed', date: day(5), completedOn: day(5) }),
-  make('AA-01', 'Alpha', { status: 'Scheduled', date: day(27), assignee: '' }),
+  // Due today, not a fixed day: a fixed day(27) turned overdue on the 28th-31st of each month.
+  make('AA-01', 'Alpha', { status: 'Scheduled', date: today, assignee: '' }),
   make('BB-02', 'Bravo', { status: 'Overdue', date: day(1) }),
   make('BB-02', 'Bravo', { status: 'Overdue', date: day(3) }),
   make('BB-02', 'Bravo', { status: 'Overdue', date: day(4) }),

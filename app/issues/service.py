@@ -951,6 +951,13 @@ class IssueService:
             if data.resolved:
                 if row.status == "Resolved":
                     return self.close(issue_id, CloseRequest(note=remark), user)
+                # The O&M Head is the closure authority, so a ticket that has not reached the
+                # Assignee's resolution stage is closed outright rather than refused.
+                if user.role == "O&M Head":
+                    if row.status == "Pending Closure":
+                        return self.transition(issue_id, "Closed", user, note=remark)
+                    if row.status not in {"In Progress", "Pending Vendor", "Pending Parts/Vendor"}:
+                        return self.close(issue_id, CloseRequest(note=remark, direct=True), user)
                 return self.transition(
                     issue_id, "Resolved", user,
                     resolve=ResolveRequest(note=remark, remark=remark),
