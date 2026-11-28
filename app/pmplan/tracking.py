@@ -66,7 +66,8 @@ router = APIRouter(prefix="/tracking", tags=["PM checklist tracking"])
 # Descriptions are inspection scope, not live electrical work instructions.
 # ACDB has no dedicated source sheet: two shared monthly panel checks are used.
 from app.pmplan.checklist_templates import CHECKLISTS, TEMPLATE_VERSION, guidance_for
-CATEGORIES = ["Inverter", "ACCB", "IDT Transformer", "VCB", "4 Pole + ACDB + Aux. TX",
+from app.pmplan.issue_bridge import create_corrective_issues, findings, raised_tickets
+CATEGORIES =["Inverter", "ACCB", "IDT Transformer", "VCB", "4 Pole + ACDB + Aux. TX",
               "Transmission line", "GSS visit", "Earth pit", "Miscellaneous"]
 ROLES = {"Site Engineer", "Assignee", "O&M Head"}
 
@@ -111,7 +112,8 @@ class Measurement(BaseModel):
 class CheckResult(BaseModel):
     item_id: str | None = Field(default=None, max_length=80)
     measurements: list[Measurement] = Field(default_factory=list, max_length=6)
-    result: Literal["OK", "Not OK", "Abnormality", "N/A"]
+    # "Abnormality" was retired: a fault is "Not OK". Older stored results are left as recorded.
+    result: Literal["OK", "Not OK", "N/A"]
     note: str = Field(default="", max_length=2000)
 
 
@@ -173,7 +175,15 @@ def _checks_for(row):
     return CHECKLISTS.get(row.equipment, [])
 
 
-def _out(row, blocker, user, today, summary=False):
+RAISABLE_STATUSES = {"Pending approval", "Approved"}
+
+
+def _may_raise_issues(user, pm_owner_id) -> bool:
+    """The plant's PM Assignee, or any O&M Head, decides which PM findings become site issues."""
+    return user.role == "O&M Head" or (user.role == "Assignee" and pm_owner_id is not None and pm_owner_id == user.id)
+
+
+def _out(row, blocker, user, today, summary=False, raised=None, pm_owner_id=None):
     status = row.status
     if blocker:
         label = "Locked"
@@ -192,7 +202,12 @@ def _out(row, blocker, user, today, summary=False):
     # Deterministic checklist item IDs: stable across template edits, same as the DB backfill.
     # Derived here without a write so the GET endpoint stays read-only.
     item_ids = [_checklist_item_id(row.id, task) for task in checks]
+    open_findings = findings(row)
+    raised = raised or {}
     return {**base, **_snapshot(row), "checks": checks, "checklistItemIds": item_ids,
+            "raised_issues": {c["id"]: raised[c["id"]] for c in open_findings if c["id"] in raised},
+            "can_raise_issues": status in RAISABLE_STATUSES and _may_raise_issues(user, pm_owner_id)
+                                and any(c["id"] not in raised for c in open_findings),
             "can_submit": user.role in {"Site Engineer", "Assignee"} and not blocker and status in {"Scheduled", "Returned"}
                           and row.scheduled_on <= today and row.equipment in CHECKLISTS,
             "can_request": user.role == "Site Engineer" and bool(blocker) and row.permission in {"None", "Denied"},
@@ -249,11 +264,18 @@ def _notify_action(db: Session, row: PMTrackingActivity, plant: Plant, action: s
         stamps = {"submit": row.submitted_at, "approve": row.reviewed_at, "return": row.reviewed_at,
                   "request": row.requested_at, "grant": row.authorised_at, "deny": row.authorised_at}
         stamp = (stamps.get(action) or datetime.now(timezone.utc)).isoformat()
+        title = _ACTION_TITLE[action]
         if action == "submit":
             # The approver and the plant PM owner (equipment fallback if no owner).
             users = pm_plant_recipients(db, plant_id=row.plant_id, equipment=row.equipment)
             users = [u for u in users if u.id != actor.id]
             message = f"{where} — submitted by {actor.display_name} for approval."
+            faults = len(findings(row))
+            if faults:
+                # The plant's PM Assignee decides which findings become site issues.
+                title = f"PM checklist submitted · {faults} Not OK to review"
+                message += (f" {faults} Not OK finding{'' if faults == 1 else 's'} to review: open the record "
+                            "to raise site issues.")
         elif action in {"approve", "return"}:
             engineer = db.get(User, row.submitted_by) if row.submitted_by else None
             users = [engineer] if engineer and engineer.id != actor.id else []
@@ -279,7 +301,7 @@ def _notify_action(db: Session, row: PMTrackingActivity, plant: Plant, action: s
             return
         notify_pm_event(
             db, users=[u for u in users if u is not None], event_type=_ACTION_EVENT[action],
-            title=_ACTION_TITLE[action], message=message, activity_id=str(row.id), plant=plant,
+            title=title, message=message, activity_id=str(row.id), plant=plant,
             month=month, equipment=row.equipment,
             dedupe_key=f"pm-{action}:{row.id}:{stamp}",
         )
@@ -365,9 +387,10 @@ def tracking_month(db: Annotated[Session, Depends(get_db)], user: Annotated[User
         (PlantResponsibility.plant_id == Plant.id) & (PlantResponsibility.area == "pm"))
         .outerjoin(User, (User.id == PlantResponsibility.assigned_user_id) & User.is_active.is_(True)
                    & (User.role == "Assignee"))
-        .add_columns(User.display_name)).all()
-    plants = [plant for plant, _ in plant_rows]
-    pm_owners = {plant.id: owner or "" for plant, owner in plant_rows}
+        .add_columns(User.display_name, User.id)).all()
+    plants = [plant for plant, _, _ in plant_rows]
+    pm_owners = {plant.id: owner or "" for plant, owner, _ in plant_rows}
+    pm_owner_ids = {plant.id: owner_id for plant, _, owner_id in plant_rows}
     if site_code and not plants:
         raise HTTPException(404, "Plant not available in your scope")
     ids = [p.id for p in plants]
@@ -471,7 +494,9 @@ def tracking_month(db: Annotated[Session, Depends(get_db)], user: Annotated[User
         daily_ids = {row.plant_id for row in rows}
         daily_codes = {entry.get("plantSiteCode") for entry in legacy}
         portfolio_plants = [plant for plant in portfolio_plants if plant.id in daily_ids or plant.site_code in daily_codes]
-    activities = [_out(r, _blocker(r, first_open.get(r.plant_id)), user, today, summary=summary) for r in rows]
+    raised = raised_tickets(db, rows) if not summary else {}
+    activities = [_out(r, _blocker(r, first_open.get(r.plant_id)), user, today, summary=summary,
+                       raised=raised.get(str(r.id)), pm_owner_id=pm_owner_ids.get(r.plant_id)) for r in rows]
     templates = {}
     # Opt-in only for a single plant. Older clients retain the full row format.
     # Unstarted rows of the same equipment share one list of task descriptions.
@@ -505,12 +530,6 @@ def tracking_action(activity_id: uuid.UUID, payload: TrackingAction,
     target_plant = db.scalar(select(PMTrackingActivity.plant_id).where(PMTrackingActivity.id == activity_id))
     if target_plant is None or (scope is not None and target_plant not in scope):
         raise HTTPException(404, "PM activity not available in your scope")
-    # Take the existing issue-routing lock BEFORE the plant lock to match
-    # normal issue creation (which can acquire a plant FK lock on insert).
-    if payload.action == "submit" and user.role in {"Site Engineer", "Assignee"} and any(
-            c.result in {"Not OK", "Abnormality"} for c in payload.checks):
-        from app.issues.service import _lock_issue_ticket_numbers
-        _lock_issue_ticket_numbers(db)
     plant = db.scalar(select(Plant).where(Plant.id == target_plant).with_for_update())
     if plant is None or (plant.status or "").casefold() == "inactive":
         raise HTTPException(404, "Plant not available")
@@ -539,7 +558,7 @@ def tracking_action(activity_id: uuid.UUID, payload: TrackingAction,
         if not payload.inspected_on or not row.scheduled_on <= payload.inspected_on <= today:
             raise HTTPException(422, "Inspection date must be on or after the scheduled date and not in the future")
         if any(c.result != "OK" and not c.note.strip() for c in payload.checks):
-            raise HTTPException(422, "An observation or justification is required for every Not OK / Abnormality / N/A result")
+            raise HTTPException(422, "An observation or justification is required for every Not OK / N/A result")
         if all(c.result == "N/A" for c in payload.checks):
             raise HTTPException(422, "At least one applicable check is required; contact the O&M Head for an entirely inapplicable activity")
         # Optional item IDs protect new clients against reordered/stale templates.
@@ -560,9 +579,8 @@ def tracking_action(activity_id: uuid.UUID, payload: TrackingAction,
         row.submitted_by, row.submitted_name, row.submitted_at = user.id, user.display_name, now
         row.status = "Pending approval"
         row.reviewed_by = row.reviewed_name = row.reviewed_at = row.review_note = None
-        if any(c.result in {"Not OK", "Abnormality"} for c in payload.checks):
-            from app.pmplan.issue_bridge import create_corrective_issues
-            corrective_issues = create_corrective_issues(db, row, plant, user, now)
+        # Not OK items no longer become site issues here: the plant's PM Assignee is notified
+        # and raises the ones they confirm from the record (POST /{id}/raise-issues).
     elif action in {"approve", "return"}:
         row.status = "Approved" if action == "approve" else "Returned"
         row.reviewed_by, row.reviewed_name, row.reviewed_at, row.review_note = user.id, user.display_name, now, reason
@@ -583,3 +601,49 @@ def tracking_action(activity_id: uuid.UUID, payload: TrackingAction,
     db.commit()
     _notify_action(db, row, plant, action, user)
     return {"id": str(row.id), "status": row.status, "permission": row.permission, "corrective_issues": corrective_issues}
+
+
+class RaiseIssues(BaseModel):
+    item_ids: list[str] = Field(min_length=1, max_length=64)
+
+
+@router.post("/{activity_id}/raise-issues", dependencies=[Depends(require_csrf)])
+def raise_corrective_issues(activity_id: uuid.UUID, payload: RaiseIssues,
+                            db: Annotated[Session, Depends(get_db)], user: Annotated[User, Depends(get_current_user)]):
+    """Raise one site issue per chosen Not OK item of a submitted checklist, in one transaction.
+
+    Only the plant's PM Assignee or an O&M Head. An item already raised returns its existing
+    ticket instead of a duplicate, so a double click or a second reviewer is harmless.
+    """
+    scope = _role_scope(db, user)
+    if user.role not in {"O&M Head", "Assignee"}:
+        raise HTTPException(403, "Only the plant's PM Assignee or an O&M Head can raise site issues from a checklist")
+    target_plant = db.scalar(select(PMTrackingActivity.plant_id).where(PMTrackingActivity.id == activity_id))
+    if target_plant is None or (scope is not None and target_plant not in scope):
+        raise HTTPException(404, "PM activity not available in your scope")
+    owner_id = db.scalar(select(PlantResponsibility.assigned_user_id).where(
+        PlantResponsibility.plant_id == target_plant, PlantResponsibility.area == "pm"))
+    if not _may_raise_issues(user, owner_id):
+        raise HTTPException(403, "Only the plant's PM Assignee or an O&M Head can raise site issues from this checklist")
+    # Same lock order as ticket creation: ticket numbers, then the plant, then the activity.
+    from app.issues.service import _lock_issue_ticket_numbers
+    _lock_issue_ticket_numbers(db)
+    plant = db.scalar(select(Plant).where(Plant.id == target_plant).with_for_update())
+    if plant is None or (plant.status or "").casefold() == "inactive":
+        raise HTTPException(404, "Plant not available")
+    row = db.scalar(select(PMTrackingActivity).where(PMTrackingActivity.id == activity_id,
+        PMTrackingActivity.plant_id == target_plant).with_for_update().execution_options(populate_existing=True))
+    if row is None or row.status not in RAISABLE_STATUSES:
+        raise HTTPException(409, "Site issues can be raised only from a submitted or approved checklist. Refresh the page.")
+    wanted = list(dict.fromkeys(payload.item_ids))
+    available = {c["id"] for c in findings(row)}
+    if any(item not in available for item in wanted):
+        raise HTTPException(422, "Only Not OK items of this checklist can be raised as site issues. Refresh the page.")
+    now = datetime.now(timezone.utc)
+    created = create_corrective_issues(db, row, plant, user, now, item_ids=set(wanted))
+    db.add(AuditLog(user_id=user.id, actor_name=user.display_name, action="PM tracking: raise site issues",
+        module="Preventive Maintenance", entity_type="pm_tracking_activity", entity_id=str(row.id),
+        before_state=None, after_state=None, metadata_json={"plant_id": str(row.plant_id),
+            "equipment_id": row.equipment_id, "item_ids": wanted, "corrective_issues": created}))
+    db.commit()
+    return {"id": str(row.id), "corrective_issues": created}

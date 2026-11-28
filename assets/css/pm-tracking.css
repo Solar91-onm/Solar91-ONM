@@ -139,6 +139,19 @@
   .s91pm-head-actions{gap:5px}.s91pm-head-actions .s91pm-btn{flex:1 1 auto;white-space:normal}.s91pm-cal-scroll{overflow-x:auto}.s91pm-cal-grid{min-width:560px}.s91pm-editor{max-width:calc(100% - 12px);max-height:calc(100dvh - 12px)}.s91pm-editor input,.s91pm-editor select{font-size:16px;min-height:44px}.s91pm-editor button{min-height:44px}
 }
 
+/* Not OK review: the plant's PM Assignee raises the ticked findings as site issues in one go. */
+.s91pm-raise{display:flex;flex-direction:column;gap:7px;padding:11px;border:1px solid #f2c7c2;border-left:4px solid #d4493d;border-radius:8px;background:#fff8f7}
+.s91pm-raise>b{font-size:13px;color:#9e2c24}
+.s91pm-raise>p{margin:0;font-size:12px;color:#5b6761}
+.s91pm-raise-item{display:flex!important;flex-direction:row!important;align-items:flex-start;gap:8px!important;padding:7px 8px;border:1px solid #f2c7c2;border-radius:6px;background:#fff;cursor:pointer;font-weight:400!important;color:var(--ep-text,#101915)!important}
+.s91pm-raise-item input{width:18px;height:18px;min-height:0!important;flex:0 0 18px;margin:1px 0 0;padding:0;accent-color:#b42318}
+.s91pm-raise-item span{display:flex;flex-direction:column;gap:2px;min-width:0;overflow-wrap:anywhere}
+.s91pm-raise-item b{font-size:12px}.s91pm-raise-item small{font-size:11px}
+.s91pm-raise .s91pm-btn{align-self:flex-start}
+.s91pm-ticket{display:inline-flex;align-items:center;min-height:22px;padding:0 8px;border:1px solid var(--ep-accent-strong,#007a0d);border-radius:999px;background:#fff;color:var(--ep-accent-strong,#007a0d);font:inherit;font-size:11px;font-weight:700;cursor:pointer}
+.s91pm-ticket:hover{background:var(--ep-accent-soft,#E6F4E7)}
+@media(max-width:760px){.s91pm-raise-item{min-height:44px}.s91pm-ticket{min-height:32px}}
+
 /* PM v2: guidance and measurements stay collapsed until needed. */
 .s91pm-guidance,.s91pm-measurements{margin:8px 0;border:1px solid #d7e4db;border-radius:8px;background:#f4f8f5;overflow-wrap:anywhere;min-width:0}
 .s91pm-guidance summary,.s91pm-measurements summary{cursor:pointer;padding:9px 11px;font-weight:600;color:#24563f;min-height:40px;box-sizing:border-box}

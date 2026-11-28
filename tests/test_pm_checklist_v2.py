@@ -60,6 +60,10 @@ def test_optional_measurements_are_saved_audited_and_in_corrective_ticket(client
     resp=submit(client,row,checks);assert resp.status_code==200,resp.text
     saved=state(client)[row.equipment_id]['checklist'][0]
     assert saved['measurements']==checks[0]['measurements']
+    assert db.scalar(select(Issue)) is None  # nothing is raised until the reviewer chooses
+    login_user(client,db,role='O&M Head',email='measure-raise@test.example')
+    raised=client.post(f"{BASE}/{row.id}/raise-issues",json={'item_ids':[checks[0]['item_id']]})
+    assert raised.status_code==200,raised.text
     issue=db.scalar(select(Issue));assert '0.0 V' in issue.description and '1.25 Ω' in issue.description
     assert issue.legacy_payload['pm_source']['measurements']==checks[0]['measurements']
     login_user(client,db,role='O&M Head',email='measure-review@test.example')

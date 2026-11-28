@@ -159,6 +159,14 @@
     assigneesLoaded: false,
     assigneesLoading: false,
     assigneesError: "",
+    // The Edit drawer's action log: what this ticket's Assignee has recorded so far.
+    actionsFor: "",
+    actions: [],
+    actionsLoading: false,
+    actionsError: "",
+    actionSaving: false,
+    actionError: "",
+    actionDraft: null,
     isAssignee: false,
     issueOwnerView: "mine",
     currentUserId: "",
@@ -850,6 +858,7 @@
       '</div>' +
       '<label class="ep-issues__wizard-field">Issue details' +
         (state.isHead ? '<textarea name="problem" rows="3" maxlength="4000">' + escape(value("problem", issue.problem)) + '</textarea><small>Clear the text to remove the remark. Original text is retained in history.</small>' : '<span class="ep-issues__readonly">' + escape(issue.problem || 'No remark recorded.') + '</span>') + '</label>' +
+      renderActionLog(issue) +
       // Shown only when Resolved is chosen; date and closing remark are optional.
       '<fieldset class="ep-issues__wizard-field ep-issues__edit-resolution" data-issue-resolution' +
         (status === "Resolved" ? "" : " hidden") + '>' +
@@ -872,6 +881,98 @@
           (state.submitting ? " disabled" : "") + '>' +
           (state.submitting ? "Saving…" : "Save changes") + '</button>' +
       '</div></form>';
+  }
+
+  // The server accepts an action entry on these; from Open / Assigned the ticket is started
+  // first (the same stage walk Resolve already uses), because writing down work IS starting it.
+  var ACTION_READY = ["Acknowledged", "In Progress"];
+  var STEPS_BEFORE_ACTION = { "Open": ["Acknowledged", "In Progress"], "Assigned": ["Acknowledged", "In Progress"] };
+  var DAY_STATUSES = ["Worked", "Waiting for parts", "Waiting for vendor",
+    "Waiting for shutdown or access", "Weather or site condition", "No work today"];
+
+  function canAddAction(issue) {
+    if (!issue || !canCloseIssue(issue)) return false;   // the ticket's Assignee, or an O&M Head
+    return ACTION_READY.indexOf(issue.status) !== -1 || !!STEPS_BEFORE_ACTION[issue.status];
+  }
+
+  /** "28 Nov 2026, 14:32" in plant time, from the entry's stored UTC timestamp. */
+  function formatActionStamp(value) {
+    if (!value) return "—";
+    var when = new Date(value);
+    if (isNaN(when.getTime())) return value;
+    try {
+      return new Intl.DateTimeFormat("en-IN", {
+        timeZone: "Asia/Kolkata", day: "numeric", month: "short", year: "numeric",
+        hour: "2-digit", minute: "2-digit", hour12: false
+      }).format(when).replace(" at ", ", ");
+    } catch (error) {
+      return when.toISOString().slice(0, 16).replace("T", ", ");
+    }
+  }
+
+  /** The ticket's recorded actions, and the box the Assignee adds the next one in. */
+  function renderActionLog(issue) {
+    var mayAdd = canAddAction(issue);
+    var done = ["Resolved", "Closed"].indexOf(issue.status) !== -1;
+    var draft = state.actionDraft && state.actionDraft.id === issue.dbId ? state.actionDraft : {};
+    var entries = state.actionsFor === issue.dbId ? state.actions : [];
+    var list = state.actionsLoading && state.actionsFor === issue.dbId
+      ? '<p class="ep-issues__action-empty" role="status">Loading the action log…</p>'
+      : state.actionsError
+        ? '<p class="ep-issues__action-empty" role="alert">' + escape(state.actionsError) +
+          ' <button type="button" class="ep-issues__button ep-issues__button--small" data-issue-action="retry-actions">Retry</button></p>'
+        : entries.length
+          ? '<ol class="ep-issues__action-list">' + entries.map(function (entry) {
+              var hours = Number((entry.metadata || {}).hours || 0);
+              var status = entry.day_status || "Worked";
+              return '<li class="ep-issues__action-entry"><div class="ep-issues__action-meta">' +
+                '<strong>' + escape(entry.actor || "Unknown") + '</strong>' +
+                '<time datetime="' + escape(entry.at || "") + '">' + escape(formatActionStamp(entry.at)) + '</time></div>' +
+                '<div class="ep-issues__action-tags"><span class="ep-issues__action-tag' +
+                  (status === "Worked" ? '' : ' is-waiting') + '">' + escape(status) + '</span>' +
+                  (hours ? '<span class="ep-issues__action-tag">' + escape(String(hours)) + ' hrs</span>' : '') +
+                  (entry.work_date && entry.work_date !== String(entry.at || "").slice(0, 10)
+                    ? '<span class="ep-issues__action-tag">for ' + escape(formatIssueDate(entry.work_date)) + '</span>' : '') +
+                '</div>' +
+                (entry.note ? '<p>' + escape(entry.note) + '</p>' : '') +
+                (entry.next_step ? '<small>Next: ' + escape(entry.next_step) + '</small>' : '') + '</li>';
+            }).join("") + '</ol>'
+          : '<p class="ep-issues__action-empty">No action recorded yet.</p>';
+    var adder = mayAdd
+      ? '<div class="ep-issues__action-add">' +
+          '<label class="ep-issues__wizard-field">Add an action' +
+            '<textarea name="actionNote" rows="2" maxlength="4000" placeholder="What did you do?"' +
+              (state.actionSaving ? ' disabled' : '') + '>' + escape(draft.note || "") + '</textarea></label>' +
+          '<div class="ep-issues__wizard-fields ep-issues__wizard-fields--three">' +
+            '<label class="ep-issues__wizard-field">Date' +
+              '<input name="actionDate" type="date" value="' + escape(draft.date || todayISO()) +
+              '" max="' + escape(todayISO()) + '"' + (state.actionSaving ? ' disabled' : '') + ' /></label>' +
+            '<label class="ep-issues__wizard-field">Status' +
+              '<select name="actionStatus"' + (state.actionSaving ? ' disabled' : '') + '>' +
+                DAY_STATUSES.map(function (choice) {
+                  return '<option value="' + escape(choice) + '"' +
+                    ((draft.dayStatus || "Worked") === choice ? ' selected' : '') + '>' + escape(choice) + '</option>';
+                }).join("") + '</select></label>' +
+            '<label class="ep-issues__wizard-field">Hours' +
+              '<input name="actionHours" type="number" min="0" max="24" step="0.5" value="' +
+              escape(draft.hours || "") + '"' + (state.actionSaving ? ' disabled' : '') + ' /></label>' +
+          '</div>' +
+          (STEPS_BEFORE_ACTION[issue.status]
+            ? '<small>Recording the first action starts this ticket, moving it to In Progress.</small>' : '') +
+          (state.actionError ? '<p class="ep-issues__wizard-error" role="alert">' + escape(state.actionError) + '</p>' : '') +
+          '<button type="button" class="ep-issues__button ep-issues__button--primary ep-issues__action-save"' +
+            ' data-issue-action="add-action"' + (state.actionSaving ? ' disabled' : '') + '>' +
+            (state.actionSaving ? "Recording…" : "Record action") + '</button>' +
+        '</div>'
+      : '<p class="ep-issues__action-empty">' + (done
+          ? 'This ticket is ' + escape(issue.status.toLowerCase()) + '; its action log is now a record.'
+          : canCloseIssue(issue)
+            ? 'Move this ticket back to In Progress above to record further actions.'
+            : 'Only the ticket’s Assignee or an O&M Head can record actions.') + '</p>';
+    return '<fieldset class="ep-issues__wizard-field ep-issues__action-log">' +
+      '<legend>Action log' + (entries.length ? ' · ' + entries.length : '') + '</legend>' +
+      '<small>Every action is stamped with who recorded it and when, and stays on the ticket.</small>' +
+      list + adder + '</fieldset>';
   }
 
   function formatIssueDate(value) {
@@ -1540,6 +1641,28 @@
     });
   }
 
+  /** This ticket's recorded actions, newest first. One fetch per ticket per drawer opening. */
+  function loadActionsForDrawer(host, issue) {
+    if (state.actionsFor === issue.dbId || state.actionsLoading) return;
+    state.actionsFor = issue.dbId;
+    state.actions = [];
+    state.actionsLoading = true;
+    state.actionsError = "";
+    renderDrawerOnly();
+    global.Solar91PortalAPI.request("/api/issues/" + encodeURIComponent(issue.dbId) + "/activity").then(function (rows) {
+      if (!active || active.host !== host || state.actionsFor !== issue.dbId) return;
+      state.actions = (Array.isArray(rows) ? rows : []).filter(function (row) { return row.action === "issue.progress"; }).reverse();
+    }).catch(function (error) {
+      if (!active || active.host !== host || state.actionsFor !== issue.dbId) return;
+      state.actionsFor = "";  // a failed read must not look like "no actions yet"
+      state.actionsError = (error && error.message) || "The action log could not be loaded.";
+    }).then(function () {
+      if (!active || active.host !== host) return;
+      state.actionsLoading = false;
+      if (state.modalMode) renderDrawerOnly();
+    });
+  }
+
   function loadCategoriesForEdit(host, issueId) {
     if (state.categoryLoading) return;
     state.categoryLoading = true;
@@ -2035,6 +2158,7 @@
         state.categoryError = "";
         state.categoryLoading = false;
         renderDrawerOnly();
+        loadActionsForDrawer(host, selectedIssue);
         if (state.isHead) {
           loadCategoriesForEdit(host, state.modalId);
           loadAssigneesForDrawer(host);
@@ -2112,6 +2236,15 @@
         if (state.modalMode === "edit") loadCategoriesForEdit(host, state.modalId);
         return;
       }
+      if (action === "add-action") {
+        addIssueAction(host);
+        return;
+      }
+      if (action === "retry-actions") {
+        var retryIssue = state.rows.find(function (row) { return row.id === state.modalId; });
+        if (retryIssue) { state.actionsFor = ""; state.actionsError = ""; loadActionsForDrawer(host, retryIssue); }
+        return;
+      }
       if (action === "retry-assignees") {
         if (state.modalMode === "create" || state.modalMode === "edit") loadAssigneesForDrawer(host);
         return;
@@ -2174,6 +2307,12 @@
         state.wizardStep = 1;
         state.categoryLoading = false;
         state.categoryError = "";
+        // The log is re-read next time: someone else may have recorded an action meanwhile.
+        state.actionsFor = "";
+        state.actions = [];
+        state.actionError = "";
+        state.actionsError = "";
+        state.actionDraft = null;
         if (wasCreating) {
           renderDrawerOnly();
           return;
@@ -2188,6 +2327,7 @@
         state.modalMode = "edit";
         state.editDraft = null;
         renderDrawerOnly();
+        loadActionsForDrawer(host, currentIssue);
         if (state.isHead) {
           loadCategoriesForEdit(host, state.modalId);
           loadAssigneesForDrawer(host);
@@ -2270,12 +2410,17 @@
     });
     host.addEventListener("keydown", function (event) {
       if (event.key === "Escape" && active && active.host === host && state.modalMode) {
-        if (state.submitting) return;
+        if (state.submitting || state.actionSaving) return;
         state.modalMode = "";
         state.modalId = "";
         state.draft = null;
         state.editDraft = null;
         state.wizardStep = 1;
+        state.actionsFor = "";
+        state.actions = [];
+        state.actionError = "";
+        state.actionsError = "";
+        state.actionDraft = null;
         renderDrawerOnly();
       }
     });
@@ -2737,6 +2882,74 @@
       });
   }
 
+  /** Record one action against a ticket, starting it first when work has not begun. */
+  function addIssueAction(host) {
+    var api = global.Solar91PortalAPI;
+    var issue = state.rows.find(function (row) { return row.id === state.modalId; });
+    var drawer = host.querySelector("[data-issue-overlay]");
+    if (!issue || !drawer || state.actionSaving) return;
+    if (!state.liveMode) {
+      state.actionError = "This preview cannot save changes. Open the signed-in Solar91 O&M app.";
+      renderDrawerOnly();
+      return;
+    }
+    var note = String((drawer.querySelector('[name="actionNote"]') || {}).value || "").trim();
+    var workDate = String((drawer.querySelector('[name="actionDate"]') || {}).value || "");
+    var dayStatus = String((drawer.querySelector('[name="actionStatus"]') || {}).value || "Worked");
+    var hours = String((drawer.querySelector('[name="actionHours"]') || {}).value || "").trim();
+    // Keep what was typed, so a failure never loses it.
+    state.actionDraft = { id: issue.dbId, note: note, date: workDate, dayStatus: dayStatus, hours: hours };
+    if (!note) {
+      state.actionError = "Write what was done before recording the action.";
+      renderDrawerOnly();
+      return;
+    }
+    if (!canAddAction(issue)) {
+      state.actionError = "This ticket is not open for new actions. Reopen the drawer.";
+      renderDrawerOnly();
+      return;
+    }
+    var base = "/api/issues/" + encodeURIComponent(issue.dbId);
+    var steps = (STEPS_BEFORE_ACTION[issue.status] || []).map(function (stage) {
+      return function () { return api.request(base + "/status", { method: "POST", body: { status: stage } }); };
+    });
+    steps.push(function () {
+      return api.request(base + "/progress", { method: "POST", body: {
+        note: note, work_date: workDate || null, day_status: dayStatus,
+        hours: hours === "" ? null : Number(hours)
+      } });
+    });
+    state.actionSaving = true;
+    state.actionError = "";
+    renderDrawerOnly();
+    steps.reduce(function (chain, step) {
+      return chain.then(function (previous) {
+        return step().then(function (result) { return result || previous; });
+      });
+    }, Promise.resolve(null)).then(function (updated) {
+      if (!active || active.host !== host) return;
+      if (updated) {
+        var plantsById = {};
+        state.plants.forEach(function (item) { plantsById[item.dbId] = item; });
+        var saved = mapApiIssue(updated, plantsById);
+        var index = state.rows.findIndex(function (row) { return row.dbId === saved.dbId; });
+        if (index !== -1) state.rows.splice(index, 1, saved);
+        state.modalId = saved.id;
+      }
+      state.actionSaving = false;
+      state.actionDraft = null;
+      state.actionsFor = "";              // refetch so the new entry carries the server's timestamp
+      renderView();
+      loadActionsForDrawer(host, issue);
+      invalidateOverviewData();
+    }).catch(function (error) {
+      if (!active || active.host !== host) return;
+      state.actionSaving = false;
+      state.actionError = (error && error.message) || "The action could not be recorded.";
+      renderDrawerOnly();
+    });
+  }
+
   function submitLiveIssue(form) {
     var api = global.Solar91PortalAPI;
     var draft = state.draft;
@@ -2853,9 +3066,12 @@
       state.categoryError = "";
       state.categoryLoading = false;
       renderView();
-      if (state.modalMode === "edit" && state.isHead) {
-        loadCategoriesForEdit(active.host, state.modalId);
-        loadAssigneesForDrawer(active.host);
+      if (state.modalMode === "edit") {
+        loadActionsForDrawer(active.host, mapped);
+        if (state.isHead) {
+          loadCategoriesForEdit(active.host, state.modalId);
+          loadAssigneesForDrawer(active.host);
+        }
       }
     }).catch(function (error) {
       if (active !== opened) return;

@@ -705,6 +705,26 @@
 .ep-issues__edit-icon:hover { border-color: #17643f; background: #f2f8f3; }
 .ep-issues__edit-icon:focus-visible { outline: 2px solid #17643f; outline-offset: 1px; }
 
+/* Action log: what the Assignee recorded on this ticket, newest first, each one stamped. */
+.ep-issues__action-log { display: grid; gap: 8px; min-width: 0; margin: 0; padding: 12px; border: 1px solid #dfe6e1; border-radius: 9px; background: #fafcfb; }
+.ep-issues__action-log > legend { padding: 0 6px; font-size: 12px; font-weight: 700; color: #17643f; }
+.ep-issues__action-log > small { margin: 0; color: #5e6d63; font-size: 11px; }
+.ep-issues__action-list { display: grid; gap: 7px; margin: 0; padding: 0; list-style: none; max-height: 260px; overflow-y: auto; overscroll-behavior: contain; }
+.ep-issues__action-entry { min-width: 0; padding: 8px 10px; border: 1px solid #e3e9e5; border-left: 3px solid #17643f; border-radius: 7px; background: #fff; }
+.ep-issues__action-meta { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 10px; font-size: 11.5px; }
+.ep-issues__action-meta strong { color: #26352c; font-weight: 650; }
+.ep-issues__action-meta time { color: #5e6d63; font-variant-numeric: tabular-nums; }
+.ep-issues__action-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }
+.ep-issues__action-tag { display: inline-flex; align-items: center; padding: 1px 7px; border-radius: 999px; background: #e8f4ec; color: #0b5b39; font-size: 10px; font-weight: 700; }
+.ep-issues__action-tag.is-waiting { background: #fcebd1; color: #835007; }
+.ep-issues__action-entry p { margin: 6px 0 0; font-size: 12.5px; line-height: 1.5; color: #26352c; overflow-wrap: anywhere; }
+.ep-issues__action-entry small { display: block; margin-top: 4px; color: #5e6d63; font-size: 11px; }
+.ep-issues__action-empty { margin: 0; padding: 9px 10px; border: 1px dashed #d5ded8; border-radius: 7px; color: #5e6d63; font-size: 12px; background: #fff; }
+.ep-issues__action-add { display: grid; gap: 8px; padding-top: 8px; border-top: 1px solid #e3e9e5; min-width: 0; }
+.ep-issues__action-add > small { color: #5e6d63; font-size: 11px; }
+.ep-issues__action-save { justify-self: start; }
+@media (max-width: 720px) { .ep-issues__action-list { max-height: none; } .ep-issues__action-save { width: 100%; justify-self: stretch; } }
+
 .ep-issues__th-filtered { padding: 4px 3px !important; }
 .ep-issues__th-content {
   display: flex;
