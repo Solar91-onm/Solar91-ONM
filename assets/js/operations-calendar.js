@@ -2023,6 +2023,21 @@
     return !!user && ["O&M Head", "Administration"].indexOf(user.role) !== -1;
   }
 
+  /** Why a cycle's figure can exceed the days on its own sheet.
+   *
+   *  Cycles 1 and 2 count up to the plant's table count and hand the surplus to the next cycle
+   *  (`_cycle_ledger` in app/scheduled/washing_cycles.py), so a cycle's total legitimately
+   *  includes tables cleaned on days that belong to the cycle before it — days this sheet does
+   *  not list. Left unsaid, the header simply read higher than the rows add up to.
+   */
+  function carriedInNote(state, cycle) {
+    var carried = Number(cycle && cycle.carried_in_confirmed) || 0;
+    if (!cycle || carried <= 0) return "";
+    var own = Math.max(0, Number(cycle.confirmed || 0) - carried);
+    return " (" + escape(own) + " on this sheet + " + escape(carried) +
+      " carried over from Cycle " + escape(Number(cycle.cycle_no) - 1) + ")";
+  }
+
   function renderRecordModal(state) {
     if (!state.recordOpen || !state.washingPlant) return "";
     var cycles = state.washingPlant.cycles || [];
@@ -2112,7 +2127,8 @@
           '</div></header>' +
         '<div class="ep-calendar__record-progress"><strong>Cycle ' + Number(state.recordCycle) + '</strong>' +
           '<span>' + escape(cycle ? cycle.confirmed : 0) + " of " + escape(state.washingPlant.table_count) +
-          " tables · due " + (cycle && cycle.due_date ? escape(displayDate(cycle.due_date)) : "—") +
+          " tables" + carriedInNote(state, cycle) +
+          " · due " + (cycle && cycle.due_date ? escape(displayDate(cycle.due_date)) : "—") +
           (extraTables ? " · " + escape(extraTables) + " extra table" + (extraTables === 1 ? "" : "s") +
             " cleaned this month" : "") + '</span>' +
           '<i><span style="width:' + (cycle && state.washingPlant.table_count

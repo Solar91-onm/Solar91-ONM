@@ -196,6 +196,43 @@ def test_tables_above_the_count_carry_over_to_the_next_cycle(client, db):
     assert [(c["confirmed"], c["carried_out"]) for c in cycles] == [(4, 0), (4, 1), (1, 0)]
 
 
+def test_a_cycle_says_how_much_of_its_total_was_carried_in(client, db):
+    """The cycle sheet lists a cycle's own days, but the figure above them also counts the tables
+    the previous cycle handed over. `carried_in_confirmed` is the part of `confirmed` that came
+    from those earlier days, so the sheet can say so instead of simply reading higher than its rows.
+
+    It is NOT `carried_in`, which counts work still awaiting confirmation and therefore explains
+    `confirmed + pending`, not `confirmed`.
+    """
+    plant = _plant(db)                                   # 4 tables per cycle
+    head, _assignee = _setup_cycle_users(client, db, plant)
+    _engineer(client, db, plant)
+    d1, d2, d3 = _days(3)
+    # d1 fills cycle 1; d2 overfills cycle 2 by 2, which carry into cycle 3; d3 adds 1 more there.
+    assert _sheet(client, plant, [_done(d1, 4), _done(d2, 6), _done(d3, 1)]).status_code == 200
+    month = d1.strftime("%Y-%m")
+    conftest._CURRENT_USER = head
+    keep_pending = [str(r.id) for r in db.query(WashingDailyReport).filter_by(plant_id=plant.id, report_date=d2)]
+    others = [str(r.id) for r in db.query(WashingDailyReport).filter_by(plant_id=plant.id)
+              if str(r.id) not in keep_pending]
+    assert client.post(f"{BASE}/daily-reports/confirm",
+                       json={"plant_id": str(plant.id), "report_ids": others}).status_code == 200
+
+    cycles = client.get(f"{BASE}/plants/{plant.id}/cycles", params={"month": month}).json()["cycles"]
+    third = cycles[2]
+    # d2 is still pending, so none of its surplus has been confirmed into cycle 3 yet: the cycle's
+    # confirmed total is its own day alone, and the sheet must not claim two carried tables.
+    assert third["carried_in"] == 2, third
+    assert third["carried_in_confirmed"] == 0, third
+    assert third["confirmed"] == 1, third
+
+    assert client.post(f"{BASE}/daily-reports/confirm",
+                       json={"plant_id": str(plant.id), "report_ids": keep_pending}).status_code == 200
+    third = client.get(f"{BASE}/plants/{plant.id}/cycles", params={"month": month}).json()["cycles"][2]
+    # Once confirmed, cycle 3 reads 3 — and says 2 of them were carried over, not recorded here.
+    assert (third["confirmed"], third["carried_in_confirmed"]) == (3, 2), third
+
+
 def test_overview_counts_the_carried_tables_in_the_open_cycle(client, db):
     plant = _plant(db)
     head, _assignee = _setup_cycle_users(client, db, plant)

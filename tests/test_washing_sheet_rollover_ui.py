@@ -25,7 +25,7 @@ CALENDAR = ROOT / "assets" / "js" / "operations-calendar.js"
 # sheet's behaviour lives in. If any of them is renamed, node fails loudly here rather than silently
 # testing nothing.
 EXPORTS = ("recordRows", "planDay", "rollOverNote", "rowTableCount", "nextCycleNo",
-           "sameDayNextCycleCandidate",
+           "sameDayNextCycleCandidate", "carriedInNote",
            "parseTableList", "formatTableList")
 EXPORT_LINE = "  global.Solar91PortalCalendar = { render: render };"
 
@@ -473,3 +473,35 @@ def test_every_day_tile_opens_its_drawer():
 
     assert 'data-calendar-action="open-date" data-date="' in grid
     assert 'plainDay ? "" :' not in grid, "no view may drop the day's open action"
+
+
+def test_the_cycle_header_says_how_many_tables_were_carried_over():
+    """Reported from the portal: a plant of 207 tables read "514 of 207 tables" on the Cycle 3
+    sheet while the days listed on that sheet added up to 414. The missing 100 were cycle 2's
+    surplus, which the ledger hands to cycle 3 but the sheet never listed - so the header read
+    higher than its own rows with nothing to explain it.
+    """
+    out = _run("""
+      const results = one.map(c => I.carriedInNote({}, c));
+      process.stdout.write(JSON.stringify(results));
+    """, [
+        {"cycle_no": 3, "confirmed": 514, "carried_in_confirmed": 100},
+        {"cycle_no": 3, "confirmed": 414, "carried_in_confirmed": 0},
+        {"cycle_no": 2, "confirmed": 10, "carried_in_confirmed": 4},
+    ])
+
+    assert out[0] == " (414 on this sheet + 100 carried over from Cycle 2)"
+    assert out[1] == "", "a cycle that carried nothing in says nothing"
+    assert out[2] == " (6 on this sheet + 4 carried over from Cycle 1)"
+
+
+def test_the_cycle_header_reads_the_carried_figure_the_server_sends():
+    """`carried_in` counts work still awaiting confirmation, so it does not explain the confirmed
+    total the header shows. The sheet must read `carried_in_confirmed` (app/scheduled/washing_cycles.py)."""
+    calendar = CALENDAR.read_text(encoding="utf-8")
+    note = calendar[calendar.index("function carriedInNote("):]
+    note = note[:note.index("\n  }\n")]
+
+    assert "carried_in_confirmed" in note
+    assert "cycle.carried_in " not in note and "cycle.carried_in)" not in note
+    assert "carriedInNote(state, cycle)" in calendar, "the sheet header must call it"

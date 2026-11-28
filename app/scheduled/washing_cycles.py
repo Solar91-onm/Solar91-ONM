@@ -1811,8 +1811,12 @@ def _cycle_ledger(reports, total_tables: int) -> dict[int, dict]:
             carry = over
         return out
     recorded, confirmed = walk(("Pending", "Confirmed")), walk(("Confirmed",))
+    # `carried_in` counts pending work too, so it does not explain `confirmed` on its own;
+    # `carried_in_confirmed` is the part of `confirmed` that came from the previous cycle rather
+    # than from this cycle's own days, which is what the cycle sheet has to say out loud.
     return {n: {"confirmed": confirmed[n][1], "pending": max(0, recorded[n][1] - confirmed[n][1]),
-                "carried_in": recorded[n][0], "carried_out": recorded[n][2]} for n in recorded}
+                "carried_in": recorded[n][0], "carried_out": recorded[n][2],
+                "carried_in_confirmed": confirmed[n][0]} for n in recorded}
 
 
 def _closed_incomplete(reports, total_tables: int) -> set[int]:
@@ -2653,6 +2657,7 @@ def month_cycles(db: Session, user: User, plant_id: UUID, month: str) -> dict:
             "start_set_for_month": f"s{n}" in specific, "due_set_for_month": str(n) in specific,
             "state": state, "confirmed": confirmed, "pending": pending, "reports": len(rows),
             "carried_in": ledger[n]["carried_in"], "carried_out": ledger[n]["carried_out"],
+            "carried_in_confirmed": ledger[n]["carried_in_confirmed"],
             # the first day with tables washed (not-done days before it are listed in the cycle but do not start it)
             "started_on": next((r.report_date for r in rows if r.tables_cleaned), rows[0].report_date).isoformat() if rows else None,
             "completed_on": done_on.isoformat() if done_on else None,
