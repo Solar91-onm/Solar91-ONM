@@ -32,7 +32,7 @@
     loading: false, loaded: false, error: "", message: "",
     categories: [], holders: [], byUser: {}, search: "", saving: "",
     history: [], historyOpen: false, historyLoading: false,
-    routing: {}, plants: [], routeOpen: false, routeLoading: false, routeLoaded: false, routeSaving: false, routeError: "", routeMessage: "", routeDraft: {plant: "", key: "*", primary: "", backup: "", extraPlants: [], applyExisting: false}
+    routing: {}, plants: [], routeOpen: false, routeLoading: false, routeLoaded: false, routeSaving: false, routeError: "", routeMessage: "", routeDraft: {plants: [], keys: ["*"], primary: "", backup: "", ownersTouched: false, applyExisting: false}, routeSearch: {plant: "", key: ""}
   };
 
   function escape(value) {
@@ -519,8 +519,69 @@
     }).join("") + (selected && !equipment.holders.some(function (h) { return h.id === selected && h.role === "Assignee"; }) ? '<option value="' + escape(selected) + '" selected>Inactive / ineligible owner</option>' : '');
   }
 
-  function routeOption(value, label, selected) {
-    return '<option value="' + escape(value) + '"' + (value === selected ? ' selected' : '') + '>' + escape(label) + '</option>';
+  /** The rule identities a draft writes: every selected plant × every selected equipment, or the default. */
+  function routeCombos(d) {
+    if (d.plants[0] === "*") return ["*:*"];
+    var out = [];
+    d.plants.forEach(function (plant) { d.keys.forEach(function (key) { out.push(plant + ":" + key); }); });
+    return out;
+  }
+
+  /** The owners shared by every selected rule; blank (and mixed) when they disagree. */
+  function routeOwners(combos) {
+    var first = null, mixed = false;
+    combos.forEach(function (identity) {
+      var rule = equipment.routing[identity] || {};
+      var owners = (rule.primary_user_id || "") + "|" + (rule.backup_user_id || "");
+      if (first === null) first = owners; else if (owners !== first) mixed = true;
+    });
+    var parts = mixed || first === null ? ["", ""] : first.split("|");
+    return {primary: parts[0], backup: parts[1], mixed: mixed};
+  }
+
+  function routePlantLabel(id) {
+    if (id === "*") return "Portfolio default (unmatched issues)";
+    var plant = equipment.plants.find(function (p) { return p.id === id; });
+    return plant ? plant.site_code + " · " + plant.plant_name + (plant.active ? "" : " (inactive)") : "Removed plant";
+  }
+
+  function routePlantCode(id) {
+    var plant = equipment.plants.find(function (p) { return p.id === id; });
+    return plant ? plant.site_code : "Removed plant";
+  }
+
+  function routeEquipmentLabel(key) {
+    if (key === "*") return "All equipment";
+    var match = equipment.categories.find(function (c) { return c.key === key; });
+    return match ? match.label : "Removed equipment: " + key;
+  }
+
+  function routePickedSummary(values, label, short, noun, none) {
+    if (!values.length) return none;
+    if (values.length === 1) return label(values[0]);
+    return values.length + " " + noun + ": " + values.slice(0, 3).map(short).join(", ") +
+      (values.length > 3 ? " +" + (values.length - 3) : "");
+  }
+
+  function routeMatches(text, term) { return !term || text.toLowerCase().indexOf(term) !== -1; }
+
+  // A dropdown-shaped checklist. The first option ("default" / "All equipment") excludes the rest.
+  function routingPicker(name, label, summary, options) {
+    var term = equipment.routeSearch[name].trim().toLowerCase();
+    return '<div class="ep-issue-routing__field"><span class="ep-issue-routing__label">' + escape(label) + '</span>' +
+      '<details class="ep-issue-routing__picker" data-routing-picker="' + name + '">' +
+      '<summary class="ep-issue-routing__picker-button">' + escape(summary) + '</summary>' +
+      '<div class="ep-issue-routing__picker-panel" role="group" aria-label="' + escape(label) + '">' +
+      '<input type="search" class="ep-issue-routing__picker-search" data-routing-search="' + name + '" value="' +
+        escape(equipment.routeSearch[name]) + '" placeholder="Search" aria-label="Search ' + escape(label.toLowerCase()) + '" autocomplete="off">' +
+      '<div class="ep-issue-routing__picker-actions">' +
+        '<button type="button" class="ep-settings__button ep-settings__button--small" data-settings-action="routing-select-all" data-picker="' + name + '">Select all</button>' +
+        '<button type="button" class="ep-settings__button ep-settings__button--small" data-settings-action="routing-clear" data-picker="' + name + '">Clear</button></div>' +
+      '<div class="ep-issue-routing__picker-list">' + options.map(function (o) {
+        return '<label class="ep-issue-routing__option' + (o.lead ? ' is-lead' : '') + '" data-routing-option="' + escape(o.text.toLowerCase()) + '"' +
+          (!o.lead && !routeMatches(o.text, term) ? ' hidden' : '') + '><input type="checkbox" data-routing-' + name + '="' + escape(o.value) + '"' +
+          (o.checked ? ' checked' : '') + '> ' + escape(o.text) + '</label>';
+      }).join("") + '</div></div></details></div>';
   }
 
   function renderIssueRouting() {
@@ -528,37 +589,54 @@
     if (!equipment.loaded || !equipment.routeLoaded) return '<div class="ep-issue-routing"><p role="alert">' + escape(equipment.error || equipment.routeError || 'Assignment rules not loaded.') + '</p><button type="button" class="ep-settings__button" data-settings-action="reload-issue-routing">Retry</button></div>';
     var d = equipment.routeDraft;
     var plants = equipment.plants;
+    var isDefault = d.plants[0] === "*";
+    var ready = d.plants.length > 0 && (isDefault || d.keys.length > 0);
+    var combos = ready ? routeCombos(d) : [];
+    var existing = combos.filter(function (identity) { return !!equipment.routing[identity]; }).length;
     var allKeys = Object.keys(equipment.routing).sort();
-    var keys = d.plant ? allKeys.filter(function (identity) { return identity.split(":")[0] === d.plant; }) : allKeys.slice(0, 50);
-    var categoryLabel = function (key) {
-      var match = equipment.categories.find(function (c) { return c.key === key; });
-      return key === "*" ? "All equipment" : (match ? match.label : key);
-    };
+    var keys = d.plants.length ? allKeys.filter(function (identity) { return d.plants.indexOf(identity.split(":")[0]) !== -1; }) : allKeys.slice(0, 50);
     var ownerLabel = function (id) {
       var match = equipment.holders.find(function (h) { return h.id === id; });
       return match ? match.name : (id ? "Inactive / ineligible" : "Not configured");
     };
-    var morePlants = d.plant && d.plant !== "*" ? '<details class="ep-issue-routing__bulk"><summary>Apply same rule to additional plants (' + d.extraPlants.length + ' selected)</summary><div class="ep-issue-routing__plant-list">' + plants.filter(function (p) { return p.active && p.id !== d.plant; }).map(function (p) {
-      return '<label><input type="checkbox" data-routing-extra="' + escape(p.id) + '"' + (d.extraPlants.indexOf(p.id) !== -1 ? ' checked' : '') + '> ' + escape(p.site_code + " · " + p.plant_name) + '</label>';
-    }).join("") + '</div></details>' : '';
+    var plantOptions = [{value: "*", text: routePlantLabel("*"), checked: isDefault, lead: true}]
+      .concat(plants.filter(function (p) { return p.active || d.plants.indexOf(p.id) !== -1; })
+        .map(function (p) { return {value: p.id, text: routePlantLabel(p.id), checked: d.plants.indexOf(p.id) !== -1}; }))
+      .concat(d.plants.filter(function (id) { return id !== "*" && !plants.some(function (p) { return p.id === id; }); })
+        .map(function (id) { return {value: id, text: "Removed plant", checked: true}; }));
+    var keyOptions = [{value: "*", text: "All equipment (plant-wide rule)", checked: d.keys[0] === "*", lead: true}]
+      .concat(equipment.categories.map(function (c) { return {value: c.key, text: c.label, checked: d.keys.indexOf(c.key) !== -1}; }))
+      .concat(d.keys.filter(function (k) { return k !== "*" && !equipment.categories.some(function (c) { return c.key === k; }); })
+        .map(function (k) { return {value: k, text: routeEquipmentLabel(k), checked: true}; }));
+    var plantPicker = routingPicker("plant", "Plant or default",
+      isDefault ? routePlantLabel("*") : routePickedSummary(d.plants, routePlantLabel, routePlantCode, "plants", "Choose scope"), plantOptions);
+    var keyPicker = isDefault
+      ? '<div class="ep-issue-routing__field"><span class="ep-issue-routing__label">Equipment</span><div class="ep-issue-routing__picker-button is-disabled" aria-disabled="true">All equipment</div></div>'
+      : routingPicker("key", "Equipment", routePickedSummary(d.keys, routeEquipmentLabel, routeEquipmentLabel, "equipment", "Choose equipment"), keyOptions);
+    var scope = "";
+    if (combos.length > 1) {
+      scope = combos.length + " rules will be saved (" + d.plants.length + " plant" + (d.plants.length === 1 ? "" : "s") + " × " +
+        d.keys.length + " equipment)" + (existing ? "; " + existing + " already exist and will be replaced" : "") + ".";
+    }
+    if (combos.length && !d.ownersTouched && routeOwners(combos).mixed) scope += (scope ? " " : "") + "The selected rules have different owners; choose the owners to apply to all of them.";
     return '<div class="ep-issue-routing"><h3>Plant exceptions and portfolio default</h3>' +
       '<p>Plant + equipment overrides take priority, then plant-wide rules, then portfolio equipment owners, then the default. Each rule tries its eligible primary before backup. PM responsibility is separate.</p>' +
       '<fieldset class="ep-issue-routing__editor"' + (equipment.routeSaving ? ' disabled' : '') + '><div class="ep-issue-routing__fields">' +
-      '<label>Plant or default<select data-routing-field="plant">' + routeOption("", "Choose scope", d.plant) + routeOption("*", "Portfolio default (unmatched issues)", d.plant) + plants.filter(function (p) { return p.active || p.id === d.plant; }).map(function (p) { return routeOption(p.id, p.site_code + " · " + p.plant_name + (p.active ? "" : " (inactive)"), d.plant); }).join("") + (d.plant && d.plant !== "*" && !plants.some(function (p) { return p.id === d.plant; }) ? routeOption(d.plant, "Removed plant", d.plant) : "") + '</select></label>' +
-      '<label>Equipment<select data-routing-field="key"' + (d.plant === "*" ? ' disabled' : '') + '>' + routeOption("*", "All equipment", d.key) + equipment.categories.map(function (c) { return routeOption(c.key, c.label, d.key); }).join("") + (d.key !== "*" && !equipment.categories.some(function (c) { return c.key === d.key; }) ? routeOption(d.key, "Removed equipment: " + d.key, d.key) : "") + '</select></label>' +
+      plantPicker + keyPicker +
       '<label>Primary Assignee<select data-routing-field="primary">' + routingOwnerOptions(d.primary) + '</select></label>' +
-      '<label>Backup Assignee<select data-routing-field="backup">' + routingOwnerOptions(d.backup) + '</select></label></div>' + morePlants +
+      '<label>Backup Assignee<select data-routing-field="backup">' + routingOwnerOptions(d.backup) + '</select></label></div>' +
+      (scope ? '<p class="ep-issue-routing__scope" role="status">' + escape(scope) + '</p>' : "") +
       (equipment.routeError ? '<p class="ep-settings__form-error" role="alert">' + escape(equipment.routeError) + '</p>' : "") +
       (equipment.routeMessage ? '<p class="ep-settings__message" role="status">' + escape(equipment.routeMessage) + '</p>' : "") +
       '<div class="ep-issue-routing__actions"><label><input type="checkbox" data-routing-field="applyExisting"' + (d.applyExisting ? ' checked' : '') + '> Also assign matching open, unassigned issues</label>' +
-      '<button type="button" class="ep-settings__button ep-settings__button--primary" data-settings-action="save-issue-routing"' + (equipment.routeSaving || !d.plant ? ' disabled' : '') + '>' + (equipment.routeSaving ? 'Saving…' : 'Save rule') + '</button>' +
-      '<button type="button" class="ep-settings__button" data-settings-action="remove-issue-routing"' + (equipment.routeSaving || !equipment.routing[d.plant + ":" + d.key] ? ' disabled' : '') + '>Remove rule</button></div></fieldset>' +
+      '<button type="button" class="ep-settings__button ep-settings__button--primary" data-settings-action="save-issue-routing"' + (equipment.routeSaving || !ready ? ' disabled' : '') + '>' + (equipment.routeSaving ? 'Saving…' : combos.length > 1 ? 'Save ' + combos.length + ' rules' : 'Save rule') + '</button>' +
+      '<button type="button" class="ep-settings__button" data-settings-action="remove-issue-routing"' + (equipment.routeSaving || !existing ? ' disabled' : '') + '>' + (existing > 1 ? 'Remove ' + existing + ' rules' : 'Remove rule') + '</button></div></fieldset>' +
       '<p class="ep-settings__footnote">Existing assigned issues are never transferred by these rules. If no eligible owner is configured, the existing unassigned escalation / Assignee self-assignment remains in place.</p>' +
-      '<p class="ep-settings__footnote">' + keys.length + ' rule(s) shown of ' + allKeys.length + ' saved. Choose a plant or default to see its rules.' + '</p>' +
+      '<p class="ep-settings__footnote">' + keys.length + ' rule(s) shown of ' + allKeys.length + ' saved. Choose plants or the default to see their rules.' + '</p>' +
       (keys.length ? '<div class="ep-issue-routing__list">' + keys.map(function (identity) {
         var parts = identity.split(":"), rule = equipment.routing[identity];
         var plant = plants.find(function (p) { return p.id === parts[0]; });
-        return '<div class="ep-issue-routing__item"><div><strong>' + escape(plant ? plant.site_code : (parts[0] === "*" ? "Portfolio default" : "Removed plant")) + ' · ' + escape(categoryLabel(parts[1])) + '</strong><small>Primary: ' + escape(ownerLabel(rule.primary_user_id)) + ' · Backup: ' + escape(ownerLabel(rule.backup_user_id)) + '</small></div><button type="button" class="ep-settings__button" data-settings-action="edit-issue-routing" data-rule-key="' + escape(identity) + '">Edit</button></div>';
+        return '<div class="ep-issue-routing__item' + (combos.indexOf(identity) !== -1 ? ' is-selected' : '') + '"><div><strong>' + escape(plant ? plant.site_code : (parts[0] === "*" ? "Portfolio default" : "Removed plant")) + ' · ' + escape(routeEquipmentLabel(parts[1])) + '</strong><small>Primary: ' + escape(ownerLabel(rule.primary_user_id)) + ' · Backup: ' + escape(ownerLabel(rule.backup_user_id)) + '</small></div><button type="button" class="ep-settings__button" data-settings-action="edit-issue-routing" data-rule-key="' + escape(identity) + '">Edit</button></div>';
       }).join("") + '</div>' : '<p class="ep-settings__empty">No plant exceptions or default configured.</p>') + '</div>';
   }
 
@@ -572,7 +650,13 @@
       dialog.setAttribute("aria-labelledby", "settings-routing-title");
       dialog.innerHTML = '<header class="ep-settings__routing-head"><div><h2 id="settings-routing-title">Site Issue Responsibility</h2><p>Automatic assignment · Primary and backup owners</p></div><button type="button" class="ep-settings__icon-close" data-settings-action="close-issue-routing" aria-label="Close site issue responsibility">×</button></header>' +
         '<div class="ep-settings__routing-body"><div class="ep-settings__routing-links"><button type="button" class="ep-settings__button" data-settings-action="view-portfolio-equipment">Portfolio equipment responsibility</button><span>Plant exceptions &amp; default</span></div><div data-routing-content></div></div>';
-      dialog.addEventListener("cancel", function (event) { event.preventDefault(); closeIssueRouting(); });
+      dialog.addEventListener("cancel", function (event) {
+        event.preventDefault();
+        // Escape closes an open checklist first, then the dialog.
+        var picker = dialog.querySelector("[data-routing-picker][open]");
+        if (picker) { picker.open = false; picker.querySelector("summary").focus(); return; }
+        closeIssueRouting();
+      });
       activeHost.appendChild(dialog);
     }
     var body = dialog.querySelector(".ep-settings__routing-body");
@@ -581,15 +665,27 @@
     if (content._routingHTML !== html) {
       var scroll = body.scrollTop;
       var focused = document.activeElement;
-      var field = content.contains(focused) && focused.getAttribute("data-routing-field");
-      var bulk = content.querySelector(".ep-issue-routing__bulk");
-      var bulkOpen = bulk && bulk.open;
+      var focusAttr = null, focusValue = null;
+      if (content.contains(focused)) {
+        ["data-routing-field", "data-routing-plant", "data-routing-key", "data-routing-search"].some(function (attr) {
+          if (!focused.hasAttribute(attr)) return false;
+          focusAttr = attr; focusValue = focused.getAttribute(attr);
+          return true;
+        });
+      }
+      var openPicker = content.querySelector("[data-routing-picker][open]");
+      var openName = openPicker && openPicker.getAttribute("data-routing-picker");
+      var listScroll = openPicker ? openPicker.querySelector(".ep-issue-routing__picker-list").scrollTop : 0;
       content.innerHTML = html;
       content._routingHTML = html;
-      bulk = content.querySelector(".ep-issue-routing__bulk");
-      if (bulk && bulkOpen) bulk.open = true;
-      if (field) {
-        var next = content.querySelector('[data-routing-field="' + field + '"]');
+      var reopened = openName && content.querySelector('[data-routing-picker="' + openName + '"]');
+      if (reopened) {
+        reopened.open = true;
+        reopened.querySelector(".ep-issue-routing__picker-list").scrollTop = listScroll;
+      }
+      if (focusAttr) {
+        var quoted = global.CSS && global.CSS.escape ? global.CSS.escape(focusValue) : focusValue;
+        var next = content.querySelector("[" + focusAttr + '="' + quoted + '"]');
         if (next && !next.disabled) next.focus({preventScroll: true});
       }
       body.scrollTop = scroll;
@@ -616,31 +712,57 @@
     if (launch) launch.focus({preventScroll: true});
   }
 
-  function selectIssueRouting(plant, key) {
+  /** A fresh draft for these plants/equipment. Owners the user has already picked survive a
+   *  scope change; otherwise they are read from the saved rules (blank when those disagree). */
+  function routeDraftFor(plants, keys, keepOwners) {
+    var d = equipment.routeDraft;
+    var next = {plants: plants, keys: plants[0] === "*" ? ["*"] : keys, primary: d.primary, backup: d.backup,
+                ownersTouched: !!keepOwners && d.ownersTouched, applyExisting: !!keepOwners && d.applyExisting};
+    if (!next.ownersTouched) {
+      var owners = routeOwners(next.plants.length && next.keys.length ? routeCombos(next) : []);
+      next.primary = owners.primary; next.backup = owners.backup;
+    }
+    return next;
+  }
+
+  function selectIssueRouting(plants, keys, keepOwners) {
     if (equipment.routeSaving) return;
-    var rule = equipment.routing[plant + ":" + key] || {};
-    equipment.routeDraft = {plant: plant, key: key, primary: rule.primary_user_id || "", backup: rule.backup_user_id || "", extraPlants: [], applyExisting: false};
+    equipment.routeDraft = routeDraftFor(plants, keys, keepOwners);
     renderRoutingDialog();
+  }
+
+  /** Checking the lead option ("*") clears the others; checking any other clears the lead. */
+  function toggleRoutePick(list, value, on) {
+    if (!on) return list.filter(function (item) { return item !== value; });
+    if (value === "*") return ["*"];
+    return list.filter(function (item) { return item !== "*" && item !== value; }).concat([value]);
   }
 
   function saveIssueRouting(remove) {
     var d = equipment.routeDraft;
-    if (!d.plant || equipment.routeSaving) return;
+    var isDefault = d.plants[0] === "*";
+    if (!d.plants.length || (!isDefault && !d.keys.length) || equipment.routeSaving) return;
+    var combos = routeCombos(d);
+    var existing = combos.filter(function (identity) { return !!equipment.routing[identity]; }).length;
+    if (remove && !existing) return;
     if (!remove && !d.primary && !d.backup) { equipment.routeError = "Choose at least one Assignee, or remove the rule."; renderRoutingDialog(); return; }
     if (!remove && d.primary && d.primary === d.backup) { equipment.routeError = "Primary and backup must be different people."; renderRoutingDialog(); return; }
-    if (remove && !global.confirm("Remove this responsibility rule? Existing assigned issues will not change.")) return;
-    var plantIds = d.plant === "*" ? [] : [d.plant].concat(remove ? [] : d.extraPlants);
-    if (plantIds.length > 1 && !global.confirm("Save this rule for " + plantIds.length + " plants? Existing rules for that plant/equipment combination will be replaced.")) return;
+    if (remove && !global.confirm(existing > 1
+        ? "Remove these " + existing + " responsibility rules? Existing assigned issues will not change."
+        : "Remove this responsibility rule? Existing assigned issues will not change.")) return;
+    if (!remove && combos.length > 1 && !global.confirm("Save this rule for " + combos.length + " plant/equipment combinations? Existing rules for those combinations will be replaced.")) return;
     if (!remove && d.applyExisting && !global.confirm("Assign matching open issues that currently have no owner?")) return;
     equipment.routeSaving = true; equipment.routeError = ""; equipment.routeMessage = ""; renderRoutingDialog();
     api().request("/api/equipment-responsibilities/issue-routing", {method: "PUT", body: {
-      plant_ids: plantIds, equipment_key: d.key,
+      plant_ids: isDefault ? [] : d.plants, equipment_keys: isDefault ? ["*"] : d.keys,
       primary_user_id: remove ? null : d.primary || null, backup_user_id: remove ? null : d.backup || null,
       apply_existing: !remove && d.applyExisting
     }}).then(function (result) {
       equipment.routeSaving = false; equipment.routing = result.rules || {};
-      equipment.routeMessage = (remove ? "Rule removed. " : "Rule saved. ") + (result.issues_auto_assigned || 0) + " existing issues assigned.";
-      selectIssueRouting(d.plant, d.key);
+      var count = remove ? existing : combos.length;
+      equipment.routeMessage = (count > 1 ? count + (remove ? " rules removed. " : " rules saved. ") : remove ? "Rule removed. " : "Rule saved. ") +
+        (result.issues_auto_assigned || 0) + " existing issues assigned.";
+      selectIssueRouting(d.plants, d.keys);
     }).catch(function (error) { equipment.routeSaving = false; equipment.routeError = error.message || "Could not save the rule."; renderRoutingDialog(); });
   }
 
@@ -724,9 +846,7 @@
       equipment.plants = Array.isArray(body.plants) ? body.plants : [];
       equipment.routeLoaded = true;
       // Refresh the selected rule as well, so reopening cannot resave an old owner.
-      var draft = equipment.routeDraft;
-      var rule = equipment.routing[draft.plant + ":" + draft.key] || {};
-      equipment.routeDraft = {plant: draft.plant, key: draft.key, primary: rule.primary_user_id || "", backup: rule.backup_user_id || "", extraPlants: [], applyExisting: false};
+      equipment.routeDraft = routeDraftFor(equipment.routeDraft.plants, equipment.routeDraft.keys, false);
     }).catch(function (error) {
       equipment.routeLoaded = false;
       equipment.routeError = error.message || "Assignment rules could not be loaded.";
@@ -924,6 +1044,17 @@
         if (box) { box.focus(); try { box.setSelectionRange(where, where); } catch (_) {} }
         return;
       }
+      var routingSearch = event.target.getAttribute("data-routing-search");
+      if (routingSearch) {
+        // Filters in place: re-rendering would steal the caret and close the checklist.
+        equipment.routeSearch[routingSearch] = event.target.value;
+        var needle = event.target.value.trim().toLowerCase();
+        var picker = event.target.closest("[data-routing-picker]");
+        Array.prototype.forEach.call(picker.querySelectorAll("[data-routing-option]"), function (item) {
+          item.hidden = !item.classList.contains("is-lead") && !routeMatches(item.getAttribute("data-routing-option"), needle);
+        });
+        return;
+      }
       if (event.target.hasAttribute("data-eqr-search")) {
         var term = event.target.value.trim().toLowerCase();
         Array.prototype.forEach.call(host.querySelectorAll("[data-eqr-pick]"), function (item) {
@@ -942,21 +1073,24 @@
       }
     });
     host.addEventListener("change", function (event) {
-      var extraPlant = event.target.dataset.routingExtra;
-      if (extraPlant) {
-        var extra = equipment.routeDraft.extraPlants;
-        if (event.target.checked && extra.indexOf(extraPlant) === -1) extra.push(extraPlant);
-        else if (!event.target.checked) equipment.routeDraft.extraPlants = extra.filter(function (id) { return id !== extraPlant; });
-        var summary = host.querySelector('.ep-issue-routing__bulk summary');
-        if (summary) summary.textContent = "Apply same rule to additional plants (" + equipment.routeDraft.extraPlants.length + " selected)";
+      var pickedPlant = event.target.getAttribute("data-routing-plant");
+      var pickedKey = event.target.getAttribute("data-routing-key");
+      if (pickedPlant !== null || pickedKey !== null) {
+        var current = equipment.routeDraft;
+        selectIssueRouting(
+          pickedPlant !== null ? toggleRoutePick(current.plants, pickedPlant, event.target.checked) : current.plants,
+          pickedKey !== null ? toggleRoutePick(current.keys, pickedKey, event.target.checked) : current.keys,
+          true);
         return;
       }
       var routingField = event.target.dataset.routingField;
       if (routingField) {
         var draft = equipment.routeDraft;
-        if (routingField === "plant") selectIssueRouting(event.target.value, event.target.value === "*" ? "*" : draft.key);
-        else if (routingField === "key") selectIssueRouting(draft.plant, event.target.value);
-        else draft[routingField] = routingField === "applyExisting" ? event.target.checked : event.target.value;
+        draft[routingField] = routingField === "applyExisting" ? event.target.checked : event.target.value;
+        if (routingField === "primary" || routingField === "backup") {
+          draft.ownersTouched = true;
+          renderRoutingDialog();
+        }
         return;
       }
       if (event.target.hasAttribute("data-settings-retention-days")) retention.days = event.target.value;
@@ -982,6 +1116,10 @@
       }
     });
     host.addEventListener("click", function (event) {
+      // A checklist closes when anything outside it is clicked, including the other checklist.
+      Array.prototype.forEach.call(host.querySelectorAll("[data-routing-picker][open]"), function (picker) {
+        if (!picker.contains(event.target)) picker.open = false;
+      });
       var button = event.target.closest("[data-settings-action]");
       if (!button) return;
       var action = button.dataset.settingsAction;
@@ -1033,10 +1171,17 @@
         saveIssueRouting(false);
       } else if (action === "remove-issue-routing") {
         saveIssueRouting(true);
+      } else if (action === "routing-select-all" || action === "routing-clear") {
+        var which = button.dataset.picker, chosen = equipment.routeDraft;
+        var term = equipment.routeSearch[which].trim().toLowerCase();
+        var all = action === "routing-clear" ? [] : which === "plant"
+          ? equipment.plants.filter(function (p) { return p.active && routeMatches(routePlantLabel(p.id), term); }).map(function (p) { return p.id; })
+          : equipment.categories.filter(function (c) { return routeMatches(c.label, term); }).map(function (c) { return c.key; });
+        selectIssueRouting(which === "plant" ? all : chosen.plants, which === "key" ? all : chosen.keys, true);
       } else if (action === "edit-issue-routing") {
         var identity = button.dataset.ruleKey.split(":");
-        selectIssueRouting(identity[0], identity[1]);
-        var field = host.querySelector('[data-routing-field="plant"]');
+        selectIssueRouting([identity[0]], [identity[1]]);
+        var field = host.querySelector('[data-routing-picker="plant"] summary');
         if (field) field.focus();
       } else if (action === "save-equipment") {
         saveCategory(button.dataset.equipmentKey, host);

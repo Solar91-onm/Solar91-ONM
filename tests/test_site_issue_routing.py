@@ -13,7 +13,7 @@ BASE = "/api/equipment-responsibilities"
 
 def set_rule(client, plants, key, primary=None, backup=None, apply_existing=False):
     return client.put(BASE + "/issue-routing", json={
-        "plant_ids": [str(p.id) for p in plants], "equipment_key": key,
+        "plant_ids": [str(p.id) for p in plants], "equipment_keys": [key] if isinstance(key, str) else key,
         "primary_user_id": str(primary.id) if primary else None,
         "backup_user_id": str(backup.id) if backup else None,
         "apply_existing": apply_existing,
@@ -148,11 +148,59 @@ def test_write_validation_and_permission(client, db):
     assert set_rule(client, [plant], "not_a_category", a).status_code == 422
     assert set_rule(client, [plant], "inverter", head).status_code == 422
     assert set_rule(client, [], "inverter", a).status_code == 422
-    assert client.put(BASE + "/issue-routing", json={"plant_ids":[str(uuid4())],"equipment_key":"inverter","primary_user_id":str(a.id)}).status_code == 422
+    assert client.put(BASE + "/issue-routing", json={"plant_ids":[str(uuid4())],"equipment_keys":["inverter"],"primary_user_id":str(a.id)}).status_code == 422
+    assert set_rule(client, [plant], ["*", "inverter"], a).status_code == 422
+    assert set_rule(client, [plant], [], a).status_code == 422
     _act_as(db, a)
     assert set_rule(client, [plant], "inverter", a).status_code == 403
+    assert set_rule(client, [plant], ["inverter", "la"], a).status_code == 403
     assert client.get(BASE).status_code == 403
     assert db.get(AppSetting, SETTING_KEY) is None
+
+
+def test_multiple_plants_and_equipment_save_and_remove_together(client, db):
+    north, south, east = _plants(db, "MS01", "MS02", "MS03")
+    head = login_user(client, db, role="O&M Head")
+    seed_work_categories(db, "Inverter", "LA", "Water Pump")
+    owner = _assignee(db, "Multi", "multi@test.example")
+    backup = _assignee(db, "Multi backup", "multi-backup@test.example")
+    _act_as(db, head)
+    keys = [canonical_key("Inverter"), canonical_key("LA")]
+    saved = set_rule(client, [north, south], keys + [keys[0]], owner, backup)
+    assert saved.status_code == 200, saved.text
+    expected = {f"{p.id}:{k}" for p in (north, south) for k in keys}
+    assert set(saved.json()["rules"]) == expected
+    assert db.query(AuditLog).filter(AuditLog.entity_type == "site_issue_routing",
+                                     AuditLog.action == "Site issue routing set").count() == 4
+    for plant, equipment, expected_owner in [(north, "Inverter", owner), (south, "LA", owner),
+                                             (east, "Inverter", None), (north, "Water Pump", None)]:
+        _act_as(db, head)
+        response = _raise_issue(client, plant, equipment, f"Multi {plant.site_code} {equipment}")
+        assert response.status_code == 201, response.text
+        assert response.json()["assigned_to"] == (str(expected_owner.id) if expected_owner else None)
+
+    removed = set_rule(client, [north, south], keys)
+    assert removed.status_code == 200, removed.text
+    assert removed.json()["rules"] == {}
+    assert db.query(AuditLog).filter(AuditLog.entity_type == "site_issue_routing",
+                                     AuditLog.action == "Site issue routing removed").count() == 4
+
+
+def test_multi_equipment_backfill_routes_only_the_chosen_categories(client, db):
+    plant, = _plants(db, "MS04")
+    head = login_user(client, db, role="O&M Head")
+    seed_work_categories(db, "Inverter", "LA", "Water Pump")
+    owner = _assignee(db, "Backfill", "multi-backfill@test.example")
+    _act_as(db, head)
+    rows = [Issue(ticket_no=f"MS-0{i}", plant_id=plant.id, vertical=vertical, description="old issue",
+                  severity="Medium", status="Open") for i, vertical in enumerate(["Inverter", "LA", "Water Pump"])]
+    db.add_all(rows); db.commit()
+    ids = [row.id for row in rows]
+    response = set_rule(client, [plant], [canonical_key("Inverter"), canonical_key("LA")], owner, apply_existing=True)
+    assert response.status_code == 200, response.text
+    assert response.json()["issues_auto_assigned"] == 2
+    db.expire_all()
+    assert [db.get(Issue, i).assigned_to for i in ids] == [owner.id, owner.id, None]
 
 
 def test_other_is_independently_assignable_without_changing_miscellaneous_pm(client, db):

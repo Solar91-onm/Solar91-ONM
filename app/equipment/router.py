@@ -69,22 +69,34 @@ class CategoryResponsibility(BaseModel):
 
 class IssueRoutingChange(BaseModel):
     plant_ids: list[UUID] = Field(default_factory=list, max_length=100)
-    equipment_key: str = Field(default=ALL, max_length=60)
+    equipment_keys: list[str] = Field(default_factory=lambda: [ALL], min_length=1, max_length=64)
     primary_user_id: UUID | None = None
     backup_user_id: UUID | None = None
     apply_existing: bool = False
 
+    @field_validator("equipment_keys")
+    @classmethod
+    def _keys(cls, value: list[str]) -> list[str]:
+        keys = list(dict.fromkeys(value))
+        if any(not key or len(key) > 60 for key in keys):
+            raise ValueError("equipment keys must be 1-60 characters")
+        # A plant-wide rule and a per-equipment rule are different tiers; one save is one tier.
+        if ALL in keys and len(keys) > 1:
+            raise ValueError("All equipment cannot be combined with specific equipment")
+        return keys
+
 
 @router.put("/issue-routing", dependencies=[Depends(require_csrf)])
 def set_issue_routing(payload: IssueRoutingChange, db: DB, user: Manager):
-    """Upsert/delete a batch of plant exceptions or the single portfolio default."""
+    """Upsert/delete every plant × equipment rule in the batch, or the single portfolio default."""
     from app.issues.service import _lock_issue_ticket_numbers
     _lock_issue_ticket_numbers(db)
     plants = set(payload.plant_ids)
-    key = payload.equipment_key
+    keys = payload.equipment_keys
+    plant_wide = keys == [ALL]
     deleting = not (payload.primary_user_id or payload.backup_user_id)
-    if key != ALL and (not plants or (not deleting and key not in _known_keys(db))):
-        raise HTTPException(422, "Choose valid plants and an equipment category")
+    if not plant_wide and (not plants or (not deleting and not set(keys) <= _known_keys(db).keys())):
+        raise HTTPException(422, "Choose valid plants and equipment categories")
     if plants and not deleting:
         found = set(db.scalars(select(Plant.id).where(Plant.id.in_(plants), func.lower(Plant.status) == "active")))
         if plants != found:
@@ -97,21 +109,22 @@ def set_issue_routing(payload: IssueRoutingChange, db: DB, user: Manager):
     rules = read_rules(db)
     value = {"primary_user_id": str(payload.primary_user_id) if payload.primary_user_id else None,
              "backup_user_id": str(payload.backup_user_id) if payload.backup_user_id else None}
+    after = value if any(value.values()) else None
     for plant_id in sorted(plants) if plants else [None]:
-        identity = rule_key(plant_id, key)
-        before = rules.get(identity)
-        after = value if any(value.values()) else None
-        if before == after:
-            continue
-        if after:
-            rules[identity] = after
-        else:
-            rules.pop(identity, None)
-        db.add(AuditLog(user_id=user.id, actor_name=user.display_name,
-            action="Site issue routing set" if after else "Site issue routing removed",
-            module="Login access", entity_type="site_issue_routing", entity_id=identity,
-            before_state=before, after_state=after,
-            metadata_json={"plant_id": str(plant_id) if plant_id else None, "equipment_key": key}))
+        for key in keys:
+            identity = rule_key(plant_id, key)
+            before = rules.get(identity)
+            if before == after:
+                continue
+            if after:
+                rules[identity] = after
+            else:
+                rules.pop(identity, None)
+            db.add(AuditLog(user_id=user.id, actor_name=user.display_name,
+                action="Site issue routing set" if after else "Site issue routing removed",
+                module="Login access", entity_type="site_issue_routing", entity_id=identity,
+                before_state=before, after_state=after,
+                metadata_json={"plant_id": str(plant_id) if plant_id else None, "equipment_key": key}))
     if len(rules) > MAX_RULES:
         raise HTTPException(422, "Site issue routing rule limit reached")
     setting = db.get(AppSetting, SETTING_KEY)
@@ -121,7 +134,7 @@ def set_issue_routing(payload: IssueRoutingChange, db: DB, user: Manager):
         setting.setting_value = rules
         setting.updated_by = user.id
     db.flush()
-    count = _route_open_issues(db, user, None if key == ALL else {key}, plants or None) if payload.apply_existing and not deleting else 0
+    count = _route_open_issues(db, user, None if plant_wide else set(keys), plants or None) if payload.apply_existing and not deleting else 0
     _commit(db)
     return {"issues_auto_assigned": count, "rules": rules}
 

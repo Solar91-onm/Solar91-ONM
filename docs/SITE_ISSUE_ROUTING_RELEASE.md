@@ -13,7 +13,7 @@ No new schema migration is needed for routing. The existing `app_settings` table
 Login Access → Equipment responsibility → Site issue plant exceptions and default.
 
 1. Configure portfolio equipment primary and backup owners in the existing matrix.
-2. Configure exceptions for one or multiple selected plants, either one equipment category or all equipment. Batch updates require confirmation. The rule is specific to Site Issues and does not grant any additional permissions.
+2. Configure exceptions for one or more plants and one or more equipment categories, or all equipment (a plant-wide rule; it cannot be combined with specific categories in one save). Both fields are searchable multi-select checklists with Select all / Clear; one save writes a rule for every selected plant × equipment combination, and Remove deletes every saved rule in the selection. Batch updates require confirmation. The PUT body is `{"plant_ids": [...], "equipment_keys": [...], "primary_user_id", "backup_user_id", "apply_existing"}`; each rule written or removed gets its own audit entry. Only the O&M Head (`users.manage`) can open the editor or call the endpoint. The rule is specific to Site Issues and does not grant any additional permissions.
 3. Configure the portfolio default primary and backup for unmatched issues. This is important if all new site issues must receive an Assignee automatically.
 4. If desired, select “Also assign matching open, unassigned issues”. Only open tickets without either an assigned user or a legacy assignee name will be backfilled. Already assigned and closed tickets stay unchanged. The existing global equipment save retains its established automatic backfill behavior, now using the same priority resolver.
 
