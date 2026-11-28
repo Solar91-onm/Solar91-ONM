@@ -1,5 +1,11 @@
-.ep-security__open { margin-left: auto; }
+.ep-security__filter-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+}
+.ep-security__open { flex-shrink: 0; }
 .ep-security__register-filter {
+  flex: 1;
   display: flex;
   justify-content: flex-end;
 }

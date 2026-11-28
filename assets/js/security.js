@@ -435,13 +435,14 @@
     var counts = registerCounts();
     container.innerHTML = "" +
       '<div class="ep-pt">' +
-        '<div class="ep-pt__head"><h1 class="ep-pt__title">Site Engineer and Security</h1>' +
+        '<div class="ep-pt__head"><h1 class="ep-pt__title">Site Engineer and Security</h1></div>' +
+        '<div class="ep-security__filter-row">' +
+          '<div class="ep-security__register-filter"><label><span>Search by plant code, site engineer, or security name</span>' +
+            '<input type="search" data-security-register-search value="' + fmt.escape(registerSearch) +
+            '" placeholder="Plant code, site engineer, security name..." autocomplete="off"></label></div>' +
           (editable || canMove() ? '<button type="button" class="ep-pt__edit ep-security__open" data-security-open-edit' +
             '>Edit register</button>' : "") +
-        "</div>" +
-        '<div class="ep-security__register-filter"><label><span>Search by plant code, site engineer, or security name</span>' +
-          '<input type="search" data-security-register-search value="' + fmt.escape(registerSearch) +
-          '" placeholder="Plant code, site engineer, security name..." autocomplete="off"></label></div>' +
+        '</div>' +
         '<div class="ep-pt__card">' +
           '<div class="ep-security__notice' + (noticeIsError ? " is-error" : "") +
             '" role="' + (noticeIsError ? "alert" : "status") + '"' +

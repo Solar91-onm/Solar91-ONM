@@ -738,7 +738,7 @@
         figure: inv.total
           ? {
             value: fmt.formatNumber(inv.running) + "/" + fmt.formatNumber(inv.total),
-            unit: "", caption: "inverters running out of total"
+            unit: "", caption: ""
           }
           : (inv.tickets ? { value: fmt.formatNumber(inv.tickets), unit: "", caption: "open inverter issues" } : null),
         meter: inv.total ? [{ width: clamp(inv.runningPercent), tone: "accent" }] : [],
@@ -764,7 +764,7 @@
           : "No string units configured"),
         figure: str.total
           ? { value: fmt.formatNumber(str.running) + "/" + fmt.formatNumber(str.total),
-              unit: "", caption: "strings working out of total" }
+              unit: "", caption: "" }
           : (str.down ? { value: fmt.formatNumber(str.down), unit: "", caption: "strings not working" }
             : (str.tickets ? { value: fmt.formatNumber(str.tickets), unit: "", caption: "open string issues" } : null)),
         meter: str.total ? [{ width: clamp(str.runningPercent), tone: "accent" }] : [],

@@ -109,9 +109,9 @@ button { font: inherit; cursor: pointer; }
   font-size: var(--ep-fs-md);
   width: 100%;
   text-align: left;
-  transition: background 120ms ease;
+  transition: background 120ms ease, color 120ms ease;
 }
-.ep-nav-item:hover { background: var(--ep-bg-muted); }
+.ep-nav-item:hover { background: var(--ep-bg-muted); color: var(--ep-accent-strong); }
 .ep-nav-item.is-active {
   background: #0E1512;
   color: #FFFFFF;

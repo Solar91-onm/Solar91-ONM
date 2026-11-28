@@ -164,18 +164,20 @@
 .ep-wb__view-toggle:hover { border-color: var(--ep-accent); }
 .ep-wb__view-toggle:focus-visible { outline: 2px solid var(--ep-accent); outline-offset: 1px; }
 .ep-wb__export-btn {
-  min-height: 32px;
-  padding: 4px 11px;
-  border: 1px solid var(--ep-border);
+  min-height: 36px;
+  padding: 6px 15px;
+  border: 1px solid var(--ep-border-strong);
   border-radius: 8px;
-  background: var(--ep-bg);
-  color: inherit;
+  background: var(--ep-bg-elev);
+  color: var(--ep-text-strong);
   font: inherit;
-  font-size: 12px;
-  font-weight: 600;
+  font-size: 13px;
+  font-weight: 650;
   cursor: pointer;
+  box-shadow: 0 1px 2px rgba(14,24,20,.06);
+  transition: background .15s ease, border-color .15s ease, box-shadow .15s ease;
 }
-.ep-wb__export-btn:hover { border-color: var(--ep-accent); }
+.ep-wb__export-btn:hover { border-color: var(--ep-accent); background: var(--ep-accent-soft); color: var(--ep-accent-strong); box-shadow: 0 1px 4px rgba(0,120,20,.1); }
 .ep-wb__export-btn:focus-visible { outline: 2px solid var(--ep-accent); outline-offset: 1px; }
 .ep-wb__table-wrap { overflow-x: auto; }
 .ep-wb__table { min-width: 760px; }
