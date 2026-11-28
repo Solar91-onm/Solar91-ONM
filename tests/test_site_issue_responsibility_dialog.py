@@ -59,7 +59,7 @@ def setup_page(browser, width, permitted, users=(), extra_plants=0, rules=None):
         if(path==='/api/equipment-responsibilities/issue-routing' && (!options || options.method!=='PUT'))return Promise.resolve({issue_routing:rules,plants});
         if(path==='/api/equipment-responsibilities/issue-routing/apply') {
           applies.push(options.body);
-          return Promise.resolve({issues_auto_assigned:3,rules_covered:1});
+          return Promise.resolve({issues_auto_assigned:3,issues_reassigned:1,issues_left_active:2,rules_covered:1});
         }
         if(path==='/api/equipment-responsibilities/issue-routing') {
           const d=options.body; saves.push(d);
@@ -136,13 +136,19 @@ def test_plants_and_equipment_are_multi_select(chromium):
         assert remove.is_disabled()
         assert remove.evaluate("e=>getComputedStyle(e).opacity") == "0.5"
 
-        # Owner chosen, scope forgotten: Save says why, marks the field and points at the tick box.
+        # "Also assign" starts ticked, so a rule change also moves matching open tickets.
+        backfill = page.locator('[data-routing-field="applyExisting"]')
+        assert backfill.is_checked()
+        assert "moves tickets not yet in progress" in page.locator(".ep-issue-routing__actions label").inner_text()
+
+        # Owner chosen, scope forgotten, box unticked: Save says why, marks the field, points at the box.
         page.locator('[data-routing-field="primary"]').select_option("a")
+        backfill.uncheck()
         assert save.is_enabled() and save.inner_text() == "Save rule"
         save.click()
         error = page.get_by_text("Choose at least one plant, or the portfolio default, in Plant or default before saving.")
         error.wait_for()
-        assert 'tick "Also assign matching open, unassigned issues" instead' in error.inner_text()
+        assert 'tick "Also assign matching open issues" instead' in error.inner_text()
         assert page.locator(PLANT_PICKER + "[open]").count() == 0  # nothing covers the message
         flagged = page.locator(PLANT_PICKER + " summary.is-invalid")
         assert flagged.count() == 1 and flagged.evaluate("e=>document.activeElement===e")
@@ -153,7 +159,8 @@ def test_plants_and_equipment_are_multi_select(chromium):
         assert error.count() == 0
         assert save.inner_text() == "Assign open issues"
         save.click()
-        page.get_by_text("3 open issues assigned from Primary's saved rules. No rule was changed.").wait_for()
+        page.get_by_text("3 open issues assigned from Primary's saved rules (1 moved from another owner). "
+                         "2 in-progress tickets were left with the current owner. No rule was changed.").wait_for()
         assert page.evaluate("applies") == [{"user_ids": ["a"]}]
         assert page.evaluate("saves.length") == 0
         assert page.evaluate("window.invalidated") == 1
@@ -203,7 +210,7 @@ def test_plants_and_equipment_are_multi_select(chromium):
         page.get_by_text("4 rules saved. 0 existing issues assigned.").wait_for()
         assert page.evaluate("saves[0]") == {
             "plant_ids": ["p1", "p2"], "equipment_keys": ["inverter", "la"], "primary_user_id": "a",
-            "backup_user_id": None, "apply_existing": False,
+            "backup_user_id": None, "apply_existing": True,  # ticked again by default after the last save
         }
         assert page.locator(".ep-issue-routing__item.is-selected").count() == 4
         assert remove.inner_text() == "Remove 4 rules"

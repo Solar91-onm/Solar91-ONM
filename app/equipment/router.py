@@ -15,7 +15,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, field_validator
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -134,9 +134,12 @@ def set_issue_routing(payload: IssueRoutingChange, db: DB, user: Manager):
         setting.setting_value = rules
         setting.updated_by = user.id
     db.flush()
-    count = _route_open_issues(db, user, None if plant_wide else set(keys), plants or None) if payload.apply_existing and not deleting else 0
+    report: dict = {"reassigned": 0, "left_active": 0}
+    count = (_route_open_issues(db, user, None if plant_wide else set(keys), plants or None, reassign=True, report=report)
+             if payload.apply_existing and not deleting else 0)
     _commit(db)
-    return {"issues_auto_assigned": count, "rules": rules}
+    return {"issues_auto_assigned": count, "issues_reassigned": report["reassigned"],
+            "issues_left_active": report["left_active"], "rules": rules}
 
 
 class IssueRoutingApply(BaseModel):
@@ -145,11 +148,12 @@ class IssueRoutingApply(BaseModel):
 
 @router.post("/issue-routing/apply", dependencies=[Depends(require_csrf)])
 def apply_issue_routing(payload: IssueRoutingApply, db: DB, user: Manager):
-    """Assign open, unassigned issues covered by these people's saved rules. No rule changes.
+    """Re-apply these people's saved rules to existing open issues. No rule changes.
 
     Coverage is each person's plant + equipment rules, plant-wide rules, the portfolio default
-    and their all-plant equipment. Every candidate still goes through the normal resolver, so
-    where a person is only the backup, the eligible primary receives the issue.
+    and their all-plant equipment. Unassigned, Assigned and Acknowledged tickets go to the
+    owner the normal resolver picks (so where a person is only the backup, the eligible primary
+    receives it); In Progress and later stay with their current owner.
     """
     from app.issues.service import _lock_issue_ticket_numbers
     _lock_issue_ticket_numbers(db)
@@ -165,14 +169,17 @@ def apply_issue_routing(payload: IssueRoutingApply, db: DB, user: Manager):
         return (everywhere or key in portfolio_keys or str(plant_id) in plant_wide
                 or rule_key(plant_id, key) in mine)
 
-    count = _route_open_issues(db, user, None, None, covered) if mine or portfolio_keys else 0
+    report: dict = {"reassigned": 0, "left_active": 0}
+    count = _route_open_issues(db, user, None, None, covered, reassign=True, report=report) if mine or portfolio_keys else 0
     db.add(AuditLog(user_id=user.id, actor_name=user.display_name, action="Site issue routing applied",
         module="Login access", entity_type="site_issue_routing", entity_id="apply:" + ",".join(sorted(people)),
         before_state=None, after_state=None,
         metadata_json={"user_ids": sorted(people), "rules": len(mine), "portfolio_keys": sorted(portfolio_keys),
-                       "issues_auto_assigned": count}))
+                       "issues_auto_assigned": count, "issues_reassigned": report["reassigned"],
+                       "issues_left_active": report["left_active"]}))
     _commit(db)
-    return {"issues_auto_assigned": count, "rules_covered": len(mine)}
+    return {"issues_auto_assigned": count, "issues_reassigned": report["reassigned"],
+            "issues_left_active": report["left_active"], "rules_covered": len(mine)}
 
 
 def _row_dto(row: EquipmentResponsibility, names: dict[UUID, User]) -> dict:
@@ -426,12 +433,21 @@ def set_category_responsibility(equipment_key: str, payload: CategoryResponsibil
     return {"equipment_key": equipment_key, "active": payload.active, "issues_auto_assigned": routed}
 
 
-def _route_open_issues(db: Session, actor: User, keys: set[str] | None, plants: set[UUID] | None = None,
-                       only: Callable[[UUID, str], bool] | None = None) -> int:
-    """Route only previously unassigned open tickets; never overwrite an existing owner.
+# The tickets an O&M Head may reassign by hand (IssueService.assign); a rule change moves no others.
+REASSIGNABLE = ("Open", "Assigned", "Acknowledged")
+ACTIVE_WORK = ("In Progress", "Pending Vendor", "Pending Parts/Vendor", "Pending Closure")
 
-    Same transaction as responsibility configuration and audit. A bounded projection finds
-    candidates by canonical alias; row locks then recheck eligibility before changing them.
+
+def _route_open_issues(db: Session, actor: User, keys: set[str] | None, plants: set[UUID] | None = None,
+                       only: Callable[[UUID, str], bool] | None = None, *, reassign: bool = False,
+                       report: dict | None = None) -> int:
+    """Give matching tickets to the owner the rules resolve to. Returns how many changed.
+
+    By default only unassigned Open tickets are routed and an existing owner is never
+    overwritten. ``reassign=True`` (a site-issue rule saved with "Also assign") also moves
+    Assigned/Acknowledged tickets held by someone else, the same tickets the O&M Head can
+    reassign by hand; In Progress and later stay, and ``report["left_active"]`` counts them.
+    Same transaction as configuration and audit; row locks recheck eligibility.
     ``only(plant_id, key)`` narrows candidates further (one person's rules).
     """
     if keys is not None and not keys:
@@ -441,36 +457,69 @@ def _route_open_issues(db: Session, actor: User, keys: set[str] | None, plants: 
     from datetime import datetime, timezone
     from app.issues.service import IssueService
     from app.notifications.service import create_notification
-    eligible = (Issue.status == "Open", Issue.deleted_at.is_(None), Issue.plant_id.is_not(None),
-                Issue.assigned_to.is_(None), func.trim(func.coalesce(Issue.assignee_text, "")) == "")
-    if plants:
-        eligible += (Issue.plant_id.in_(plants),)
+    scope = (Issue.deleted_at.is_(None), Issue.plant_id.is_not(None)) + ((Issue.plant_id.in_(plants),) if plants else ())
+    unassigned = and_(Issue.assigned_to.is_(None), func.trim(func.coalesce(Issue.assignee_text, "")) == "")
+    eligible = scope + ((Issue.status.in_(REASSIGNABLE),) if reassign else (Issue.status == "Open", unassigned))
+
+    def in_scope(plant_id, vertical) -> bool:
+        key = canonical_key(vertical)
+        return (keys is None or key in keys) and (only is None or only(plant_id, key))
+
     candidates = [i for i, plant_id, vertical in db.execute(select(Issue.id, Issue.plant_id, Issue.vertical).where(*eligible))
-                  if (keys is None or canonical_key(vertical) in keys)
-                  and (only is None or only(plant_id, canonical_key(vertical)))]
+                  if in_scope(plant_id, vertical)]
     service = IssueService(db)
     counts: dict[UUID, int] = {}
+    moved_from: dict[UUID, int] = {}
+    moved = 0
     for offset in range(0, len(candidates), 250):
         rows = db.scalars(select(Issue).where(*eligible, Issue.id.in_(candidates[offset:offset+250]))
                           .order_by(Issue.id).with_for_update()).all()
         for row in rows:
             key = canonical_key(row.vertical)
             target, source = routing.resolve(row.plant_id, row.vertical)
-            if target is None:
+            if target is None or row.assigned_to == target.id:
                 continue
+            had_owner = row.assigned_to is not None or bool((row.assignee_text or "").strip())
+            before, previous, previous_id = row.status, row.assignee_text, row.assigned_to
             row.assigned_to = target.id
             row.assignee_text = target.display_name
-            row.status = "Assigned"
+            row.status = "Assigned"  # as in a manual reassign, the new owner acknowledges it themselves
             row.updated_at = datetime.now(timezone.utc)
-            service._history(row, "issue.auto_assigned", actor, status_from="Open", status_to="Assigned",
-                note=f"Automatically assigned when responsibility was configured ({source}).",
-                metadata={"rule": source, "equipment": key, "assigned_to": str(target.id)})
+            if had_owner:
+                moved += 1
+                if previous_id:
+                    moved_from[previous_id] = moved_from.get(previous_id, 0) + 1
+                service._history(row, "issue.reassigned", actor, status_from=before, status_to="Assigned",
+                    note=f"Reassigned when the site issue responsibility rule changed ({source}).",
+                    metadata={"rule": source, "equipment": key, "from_assignee": previous,
+                              "to_assignee": target.display_name, "assigned_to": str(target.id), "automatic": True})
+            else:
+                service._history(row, "issue.auto_assigned", actor, status_from=before, status_to="Assigned",
+                    note=f"Automatically assigned when responsibility was configured ({source}).",
+                    metadata={"rule": source, "equipment": key, "assigned_to": str(target.id)})
             counts[target.id] = counts.get(target.id, 0) + 1
     for uid, count in counts.items():
         create_notification(db, user_id=uid, event_type="ticket_assigned",
             title=f"{count} open site issue(s) assigned to you",
-            message="Existing unassigned issues matching your equipment responsibility.",
+            message="Existing issues matching your site issue responsibility.",
             target_type="issue", payload={"page": "site-issues"})
+    for uid, count in moved_from.items():
+        if uid not in counts:
+            create_notification(db, user_id=uid, event_type="ticket_reassigned",
+                title=f"{count} site issue(s) moved to another owner",
+                message="A site issue responsibility rule changed; those tickets now belong to its owner.",
+                target_type="issue", payload={"page": "site-issues"})
+    if report is not None:
+        report["reassigned"] = moved
+        report["left_active"] = 0
+        if reassign:
+            # Active work the rule would now give to someone else, left with its current owner.
+            for plant_id, vertical, owner in db.execute(select(Issue.plant_id, Issue.vertical, Issue.assigned_to)
+                                                        .where(*scope, Issue.status.in_(ACTIVE_WORK))):
+                if in_scope(plant_id, vertical):
+                    target, _ = routing.resolve(plant_id, vertical)
+                    if target is not None and target.id != owner:
+                        report["left_active"] += 1
     return sum(counts.values())
 
 

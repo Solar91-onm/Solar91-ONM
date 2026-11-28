@@ -32,7 +32,7 @@
     loading: false, loaded: false, error: "", message: "",
     categories: [], holders: [], byUser: {}, search: "", saving: "",
     history: [], historyOpen: false, historyLoading: false,
-    routing: {}, plants: [], routeOpen: false, routeLoading: false, routeLoaded: false, routeSaving: false, routeError: "", routeMessage: "", routeDraft: {plants: [], keys: ["*"], primary: "", backup: "", ownersTouched: false, applyExisting: false}, routeSearch: {plant: "", key: ""}, routeMissing: "", routeLoadedAt: 0, routePromise: null
+    routing: {}, plants: [], routeOpen: false, routeLoading: false, routeLoaded: false, routeSaving: false, routeError: "", routeMessage: "", routeDraft: {plants: [], keys: ["*"], primary: "", backup: "", ownersTouched: false, applyExisting: true}, routeSearch: {plant: "", key: ""}, routeMissing: "", routeLoadedAt: 0, routePromise: null
   };
 
   function escape(value) {
@@ -689,10 +689,10 @@
       (scope ?'<p class="ep-issue-routing__scope" role="status">' + escape(scope) + '</p>' : "") +
       (equipment.routeError ? '<p class="ep-settings__form-error" role="alert">' + escape(equipment.routeError) + '</p>' : "") +
       (equipment.routeMessage ? '<p class="ep-settings__message" role="status">' + escape(equipment.routeMessage) + '</p>' : "") +
-      '<div class="ep-issue-routing__actions"><label><input type="checkbox" data-routing-field="applyExisting"' + (d.applyExisting ? ' checked' : '') + '> Also assign matching open, unassigned issues</label>' +
+      '<div class="ep-issue-routing__actions"><label><input type="checkbox" data-routing-field="applyExisting"' + (d.applyExisting ? ' checked' : '') + '> Also assign matching open issues (moves tickets not yet in progress)</label>' +
       '<button type="button" class="ep-settings__button ep-settings__button--primary" data-settings-action="save-issue-routing"' + (equipment.routeSaving ? ' disabled' : '') + '>' + (equipment.routeSaving ? 'Saving…' : routeApplyOnly(d) ? 'Assign open issues' : combos.length > 1 ? 'Save ' + combos.length + ' rules' : 'Save rule') + '</button>' +
       '<button type="button" class="ep-settings__button" data-settings-action="remove-issue-routing"' + (equipment.routeSaving || !existing ? ' disabled' : '') + '>' + (existing > 1 ? 'Remove ' + existing + ' rules' : 'Remove rule') + '</button></div></fieldset>' +
-      '<p class="ep-settings__footnote">Existing assigned issues are never transferred by these rules. If no eligible owner is configured, the existing unassigned escalation / Assignee self-assignment remains in place.</p>' +
+      '<p class="ep-settings__footnote">With "Also assign" ticked, matching Open, Assigned and Acknowledged tickets go to the rule\'s owner, the same tickets you can reassign by hand; tickets In Progress or later stay with their current owner. Unticked, only new issues follow the rule. If no eligible owner is configured, the existing unassigned escalation / Assignee self-assignment remains in place.</p>' +
       '<p class="ep-settings__footnote">' + keys.length + ' rule(s) shown of ' + allKeys.length + ' saved. Choose plants or the default to see their rules.' + '</p>' +
       (keys.length ? '<div class="ep-issue-routing__list">' + keys.map(function (identity) {
         var parts = identity.split(":"), rule = equipment.routing[identity];
@@ -778,7 +778,8 @@
   function routeDraftFor(plants, keys, keepOwners) {
     var d = equipment.routeDraft;
     var next = {plants: plants, keys: plants[0] === "*" ? ["*"] : keys, primary: d.primary, backup: d.backup,
-                ownersTouched: !!keepOwners && d.ownersTouched, applyExisting: !!keepOwners && d.applyExisting};
+                // A fresh selection starts with "Also assign" ticked so the backfill is not forgotten.
+                ownersTouched: !!keepOwners && d.ownersTouched, applyExisting: keepOwners ? d.applyExisting : true};
     if (!next.ownersTouched) {
       var owners = routeOwners(next.plants.length && next.keys.length ? routeCombos(next) : []);
       next.primary = owners.primary; next.backup = owners.backup;
@@ -809,6 +810,13 @@
     if (global.Solar91PortalData && global.Solar91PortalData.invalidate) global.Solar91PortalData.invalidate(true);
   }
 
+  /** " (2 moved from another owner). 1 in-progress ticket left with its current owner." */
+  function routeMovedNote(result) {
+    var moved = result.issues_reassigned || 0, left = result.issues_left_active || 0;
+    return (moved ? " (" + moved + " moved from another owner)" : "") + "." +
+      (left ? " " + left + " in-progress ticket" + (left === 1 ? " was" : "s were") + " left with the current owner." : "");
+  }
+
   function applyIssueRouting() {
     var d = equipment.routeDraft;
     var ids = [d.primary, d.backup].filter(function (id, index, all) { return id && all.indexOf(id) === index; });
@@ -816,15 +824,15 @@
       var holder = equipment.holders.find(function (h) { return h.id === id; });
       return holder ? holder.name || "Unnamed" : "this person";
     }).join(" and ");
-    if (!global.confirm("No plant or equipment is selected, so no rule will change. Assign open, unassigned issues covered by " + names + "'s saved rules?")) return;
+    if (!global.confirm("No plant or equipment is selected, so no rule will change. Assign open issues covered by " + names + "'s saved rules? Unassigned, Assigned and Acknowledged tickets move to the rule's owner; tickets already in progress stay.")) return;
     equipment.routeSaving = true; equipment.routeError = ""; equipment.routeMessage = ""; renderRoutingDialog();
     api().request("/api/equipment-responsibilities/issue-routing/apply", {method: "POST", body: {user_ids: ids}}).then(function (result) {
       var count = result.issues_auto_assigned || 0;
       equipment.routeSaving = false;
       equipment.routeDraft.applyExisting = false;
       equipment.routeMessage = (count
-        ? count + " open issue" + (count === 1 ? "" : "s") + " assigned from " + names + "'s saved rules."
-        : "No open, unassigned issues are covered by " + names + "'s saved rules.") + " No rule was changed.";
+        ? count + " open issue" + (count === 1 ? "" : "s") + " assigned from " + names + "'s saved rules" + routeMovedNote(result)
+        : "No open issue needed a new owner under " + names + "'s saved rules" + routeMovedNote(result)) + " No rule was changed.";
       if (count) refreshIssueViews();
       renderRoutingDialog();
     }).catch(function (error) {
@@ -845,7 +853,7 @@
       equipment.routeMissing = !d.plants.length ? "plant" : "key";
       equipment.routeError = equipment.routeMissing === "plant"
         ? "Choose at least one plant, or the portfolio default, in Plant or default before saving." +
-          (d.primary || d.backup ? " To only assign open issues from the chosen person's saved rules, tick \"Also assign matching open, unassigned issues\" instead." : "")
+          (d.primary || d.backup ? " To only assign open issues from the chosen person's saved rules, tick \"Also assign matching open issues\" instead." : "")
         : "Choose at least one equipment, or All equipment, before saving.";
       renderRoutingDialog();
       var summary = activeHost && activeHost.querySelector('[data-routing-picker="' + equipment.routeMissing + '"] summary');
@@ -861,7 +869,7 @@
         ? "Remove these " + existing + " responsibility rules? Existing assigned issues will not change."
         : "Remove this responsibility rule? Existing assigned issues will not change.")) return;
     if (!remove && combos.length > 1 && !global.confirm("Save this rule for " + combos.length + " plant/equipment combinations? Existing rules for those combinations will be replaced.")) return;
-    if (!remove && d.applyExisting && !global.confirm("Assign matching open issues that currently have no owner?")) return;
+    if (!remove && d.applyExisting && !global.confirm("Also assign matching open issues to these owners? Unassigned, Assigned and Acknowledged tickets move to the rule's owner; tickets already in progress stay.")) return;
     equipment.routeSaving = true; equipment.routeError = ""; equipment.routeMessage = ""; renderRoutingDialog();
     api().request("/api/equipment-responsibilities/issue-routing", {method: "PUT", body: {
       plant_ids: isDefault ? [] : d.plants, equipment_keys: isDefault ? ["*"] : d.keys,
@@ -871,7 +879,7 @@
       equipment.routeSaving = false; equipment.routing = result.rules || {}; equipment.routeLoadedAt = Date.now();
       var count = remove ? existing : combos.length;
       equipment.routeMessage = (count > 1 ? count + (remove ? " rules removed. " : " rules saved. ") : remove ? "Rule removed. " : "Rule saved. ") +
-        (result.issues_auto_assigned || 0) + " existing issues assigned.";
+        (result.issues_auto_assigned || 0) + " existing issues assigned" + routeMovedNote(result);
       if (result.issues_auto_assigned) refreshIssueViews();
       selectIssueRouting(d.plants, d.keys);
     }).catch(function (error) { equipment.routeSaving = false; equipment.routeError = error.message || "Could not save the rule."; renderRoutingDialog(); });

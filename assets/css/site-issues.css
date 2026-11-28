@@ -689,7 +689,7 @@
 /* Action: just the tick, so it takes the icon's width and no more. */
 .ep-issues__table th:nth-child(11),
 .ep-issues__table td:nth-child(11) { width: 44px; text-align: center; }
-.ep-issues__edit-tick {
+.ep-issues__edit-icon {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -702,8 +702,8 @@
   color: #17643f;
   cursor: pointer;
 }
-.ep-issues__edit-tick:hover { border-color: #17643f; background: #f2f8f3; }
-.ep-issues__edit-tick:focus-visible { outline: 2px solid #17643f; outline-offset: 1px; }
+.ep-issues__edit-icon:hover { border-color: #17643f; background: #f2f8f3; }
+.ep-issues__edit-icon:focus-visible { outline: 2px solid #17643f; outline-offset: 1px; }
 
 .ep-issues__th-filtered { padding: 4px 3px !important; }
 .ep-issues__th-content {

@@ -2,7 +2,7 @@
 from uuid import uuid4
 
 from sqlalchemy import select
-from app.core.models import AppSetting, AuditLog, Issue, User
+from app.core.models import AppSetting, AuditLog, Issue, Notification, User
 from app.equipment.issue_routing import SETTING_KEY
 from app.equipment.service import canonical_key
 from tests.conftest import login_user, seed_work_categories
@@ -130,7 +130,12 @@ def test_backfill_scope_preserves_existing_owners_and_uses_new_resolver(client, 
     db.expire_all()
     assert [db.get(Issue, i).assigned_to for i in ids] == [a.id,b.id,None,b.id,None]
     assert set_rule(client, [north], "*", a, apply_existing=False).json()["issues_auto_assigned"] == 0
-    assert set_rule(client, [north], "*", a, apply_existing=True).json()["issues_auto_assigned"] == 1
+    # "Also assign" re-applies the rules: north LA (unassigned) goes to a, and north Inverter,
+    # Assigned to b but not started, moves to a's plant + equipment rule.
+    saved = set_rule(client, [north], "*", a, apply_existing=True).json()
+    assert (saved["issues_auto_assigned"], saved["issues_reassigned"]) == (2, 1)
+    db.expire_all()
+    assert db.get(Issue, ids[3]).assigned_to == a.id
     assert set_rule(client, [north], "inverter").status_code == 200
     assert set_rule(client, [north], "*" ).status_code == 200
     response = _raise_issue(client, north, "Inverter", "After removal")
@@ -202,7 +207,9 @@ def test_apply_assigns_open_issues_from_one_persons_saved_rules_only(client, db)
     rules_before = dict(db.get(AppSetting, SETTING_KEY).setting_value)
     cases = [(p1, "Inverter", "Open", None), (p1, "LA", "Open", None), (p2, "LA", "Open", None),
              (p3, "Inverter", "Open", None), (p4, "Inverter", "Open", None),
-             (p1, "Inverter", "Assigned", other.id), (p1, "Inverter", "Closed", None)]
+             (p1, "Inverter", "Assigned", other.id), (p2, "Inverter", "Acknowledged", other.id),
+             (p1, "Inverter", "In Progress", other.id), (p1, "Inverter", "Closed", None),
+             (p3, "Inverter", "Assigned", primary.id)]
     rows = [Issue(ticket_no=f"AP-0{i}", plant_id=p.id, vertical=v, description="older issue", severity="Medium",
                   status=status, assigned_to=owner, assignee_text="Existing" if owner else None)
             for i, (p, v, status, owner) in enumerate(cases)]
@@ -211,23 +218,63 @@ def test_apply_assigns_open_issues_from_one_persons_saved_rules_only(client, db)
 
     response = client.post(BASE + "/issue-routing/apply", json={"user_ids": [str(kush.id)]})
     assert response.status_code == 200, response.text
-    assert response.json() == {"issues_auto_assigned": 3, "rules_covered": 3}
+    assert response.json() == {"issues_auto_assigned": 5, "issues_reassigned": 2,
+                               "issues_left_active": 1, "rules_covered": 3}
     db.expire_all()
-    assert [db.get(Issue, i).assigned_to for i in ids] == [
-        kush.id,      # his plant + equipment rule
-        None,         # LA at AP01 is not his
-        kush.id,      # his plant-wide rule at AP02
-        None,         # someone else's rule
-        primary.id,   # he is only backup at AP04; the eligible primary receives it
-        other.id,     # already assigned: never moved
-        None,         # closed: never touched
+    assert [(db.get(Issue, i).assigned_to, db.get(Issue, i).status) for i in ids] == [
+        (kush.id, "Assigned"),       # his plant + equipment rule
+        (None, "Open"),              # LA at AP01 is not his
+        (kush.id, "Assigned"),       # his plant-wide rule at AP02
+        (None, "Open"),              # someone else's rule
+        (primary.id, "Assigned"),    # he is only backup at AP04; the eligible primary receives it
+        (kush.id, "Assigned"),       # assigned to someone else, not started: moves to the rule owner
+        (kush.id, "Assigned"),       # acknowledged: moves, and the new owner acknowledges it again
+        (other.id, "In Progress"),   # work started: stays, and is counted as left
+        (None, "Closed"),            # closed: never touched
+        (primary.id, "Assigned"),    # outside his coverage: untouched
     ]
+    moved = db.query(AuditLog).filter(AuditLog.entity_id == "AP-05", AuditLog.action == "issue.reassigned").one()
+    assert moved.metadata_json["automatic"] is True and moved.metadata_json["to_assignee"] == kush.display_name
     assert db.get(AppSetting, SETTING_KEY).setting_value == rules_before
     assert db.query(AuditLog).filter(AuditLog.action == "Site issue routing applied").count() == 1
 
     assert client.post(BASE + "/issue-routing/apply", json={"user_ids": []}).status_code == 422
     _act_as(db, kush)
     assert client.post(BASE + "/issue-routing/apply", json={"user_ids": [str(kush.id)]}).status_code == 403
+
+
+def test_changing_a_rules_owner_moves_tickets_not_yet_in_progress(client, db):
+    plant, = _plants(db, "GUL01")
+    head = login_user(client, db, role="O&M Head")
+    seed_work_categories(db, "IDT Transformer")
+    old = _assignee(db, "Old owner", "old-owner@test.example")
+    vikash = _assignee(db, "Vikash", "vikash@test.example")
+    _act_as(db, head)
+    idt = canonical_key("IDT Transformer")
+    rows = [Issue(ticket_no=f"GUL-0{i}", plant_id=plant.id, vertical="IDT Transformer", description="IDT fault",
+                  severity="Medium", status="Open") for i in range(3)]
+    db.add_all(rows); db.commit()
+    ids = [row.id for row in rows]
+    assert set_rule(client, [plant], idt, old, apply_existing=True).json()["issues_auto_assigned"] == 3
+    db.expire_all()
+    db.get(Issue, ids[1]).status = "Acknowledged"
+    db.get(Issue, ids[2]).status = "In Progress"
+    db.commit()
+
+    # Re-edit the rule: Vikash replaces the old owner, with "Also assign" ticked.
+    response = set_rule(client, [plant], idt, vikash, apply_existing=True)
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert (body["issues_auto_assigned"], body["issues_reassigned"], body["issues_left_active"]) == (2, 2, 1)
+    db.expire_all()
+    assert [(db.get(Issue, i).assigned_to, db.get(Issue, i).status) for i in ids] == [
+        (vikash.id, "Assigned"), (vikash.id, "Assigned"), (old.id, "In Progress")]
+    assert db.query(Notification).filter(Notification.user_id == old.id,
+                                         Notification.event_type == "ticket_reassigned").count() == 1
+    # Unticked, a rule change affects only new issues.
+    assert set_rule(client, [plant], idt, old).json()["issues_auto_assigned"] == 0
+    db.expire_all()
+    assert db.get(Issue, ids[0]).assigned_to == vikash.id
 
 
 def test_multi_equipment_backfill_routes_only_the_chosen_categories(client, db):
