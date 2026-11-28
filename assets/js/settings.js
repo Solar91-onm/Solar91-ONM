@@ -690,7 +690,7 @@
       (equipment.routeError ? '<p class="ep-settings__form-error" role="alert">' + escape(equipment.routeError) + '</p>' : "") +
       (equipment.routeMessage ? '<p class="ep-settings__message" role="status">' + escape(equipment.routeMessage) + '</p>' : "") +
       '<div class="ep-issue-routing__actions"><label><input type="checkbox" data-routing-field="applyExisting"' + (d.applyExisting ? ' checked' : '') + '> Also assign matching open, unassigned issues</label>' +
-      '<button type="button" class="ep-settings__button ep-settings__button--primary" data-settings-action="save-issue-routing"' + (equipment.routeSaving ? ' disabled' : '') + '>' + (equipment.routeSaving ? 'Saving…' : combos.length > 1 ? 'Save ' + combos.length + ' rules' : 'Save rule') + '</button>' +
+      '<button type="button" class="ep-settings__button ep-settings__button--primary" data-settings-action="save-issue-routing"' + (equipment.routeSaving ? ' disabled' : '') + '>' + (equipment.routeSaving ? 'Saving…' : routeApplyOnly(d) ? 'Assign open issues' : combos.length > 1 ? 'Save ' + combos.length + ' rules' : 'Save rule') + '</button>' +
       '<button type="button" class="ep-settings__button" data-settings-action="remove-issue-routing"' + (equipment.routeSaving || !existing ? ' disabled' : '') + '>' + (existing > 1 ? 'Remove ' + existing + ' rules' : 'Remove rule') + '</button></div></fieldset>' +
       '<p class="ep-settings__footnote">Existing assigned issues are never transferred by these rules. If no eligible owner is configured, the existing unassigned escalation / Assignee self-assignment remains in place.</p>' +
       '<p class="ep-settings__footnote">' + keys.length + ' rule(s) shown of ' + allKeys.length + ' saved. Choose plants or the default to see their rules.' + '</p>' +
@@ -800,16 +800,52 @@
     return list.filter(function (item) { return item !== "*" && item !== value; }).concat([value]);
   }
 
+  /** With no scope, a ticked backfill and an owner chosen, Save only applies saved rules. */
+  function routeApplyOnly(d) { return !d.plants.length && d.applyExisting && !!(d.primary || d.backup); }
+
+  // Assignments changed issues: let the register and dashboards refetch on their next view.
+  function refreshIssueViews() {
+    if (global.Solar91PortalIssues && global.Solar91PortalIssues.invalidate) global.Solar91PortalIssues.invalidate();
+    if (global.Solar91PortalData && global.Solar91PortalData.invalidate) global.Solar91PortalData.invalidate(true);
+  }
+
+  function applyIssueRouting() {
+    var d = equipment.routeDraft;
+    var ids = [d.primary, d.backup].filter(function (id, index, all) { return id && all.indexOf(id) === index; });
+    var names = ids.map(function (id) {
+      var holder = equipment.holders.find(function (h) { return h.id === id; });
+      return holder ? holder.name || "Unnamed" : "this person";
+    }).join(" and ");
+    if (!global.confirm("No plant or equipment is selected, so no rule will change. Assign open, unassigned issues covered by " + names + "'s saved rules?")) return;
+    equipment.routeSaving = true; equipment.routeError = ""; equipment.routeMessage = ""; renderRoutingDialog();
+    api().request("/api/equipment-responsibilities/issue-routing/apply", {method: "POST", body: {user_ids: ids}}).then(function (result) {
+      var count = result.issues_auto_assigned || 0;
+      equipment.routeSaving = false;
+      equipment.routeDraft.applyExisting = false;
+      equipment.routeMessage = (count
+        ? count + " open issue" + (count === 1 ? "" : "s") + " assigned from " + names + "'s saved rules."
+        : "No open, unassigned issues are covered by " + names + "'s saved rules.") + " No rule was changed.";
+      if (count) refreshIssueViews();
+      renderRoutingDialog();
+    }).catch(function (error) {
+      equipment.routeSaving = false;
+      equipment.routeError = error.message || "Open issues could not be assigned.";
+      renderRoutingDialog();
+    });
+  }
+
   function saveIssueRouting(remove) {
     var d = equipment.routeDraft;
     var isDefault = d.plants[0] === "*";
     if (equipment.routeSaving) return;
+    if (!remove && routeApplyOnly(d)) { applyIssueRouting(); return; }
     if (!d.plants.length || (!isDefault && !d.keys.length)) {
       // Say what is missing and mark that field; a silent no-op reads as a broken Save. The
       // checklist stays closed so it cannot cover the message.
       equipment.routeMissing = !d.plants.length ? "plant" : "key";
       equipment.routeError = equipment.routeMissing === "plant"
-        ? "Choose at least one plant, or the portfolio default, in Plant or default before saving."
+        ? "Choose at least one plant, or the portfolio default, in Plant or default before saving." +
+          (d.primary || d.backup ? " To only assign open issues from the chosen person's saved rules, tick \"Also assign matching open, unassigned issues\" instead." : "")
         : "Choose at least one equipment, or All equipment, before saving.";
       renderRoutingDialog();
       var summary = activeHost && activeHost.querySelector('[data-routing-picker="' + equipment.routeMissing + '"] summary');
@@ -836,6 +872,7 @@
       var count = remove ? existing : combos.length;
       equipment.routeMessage = (count > 1 ? count + (remove ? " rules removed. " : " rules saved. ") : remove ? "Rule removed. " : "Rule saved. ") +
         (result.issues_auto_assigned || 0) + " existing issues assigned.";
+      if (result.issues_auto_assigned) refreshIssueViews();
       selectIssueRouting(d.plants, d.keys);
     }).catch(function (error) { equipment.routeSaving = false; equipment.routeError = error.message || "Could not save the rule."; renderRoutingDialog(); });
   }
@@ -1181,11 +1218,11 @@
       var routingField = event.target.dataset.routingField;
       if (routingField) {
         var draft = equipment.routeDraft;
+        equipment.routeError = ""; equipment.routeMissing = "";
         draft[routingField] = routingField === "applyExisting" ? event.target.checked : event.target.value;
-        if (routingField === "primary" || routingField === "backup") {
-          draft.ownersTouched = true;
-          renderRoutingDialog();
-        }
+        if (routingField === "primary" || routingField === "backup") draft.ownersTouched = true;
+        // Every field can change the Save button's meaning ("Assign open issues"), so redraw.
+        renderRoutingDialog();
         return;
       }
       if (event.target.hasAttribute("data-settings-retention-days")) retention.days = event.target.value;

@@ -186,6 +186,50 @@ def test_multiple_plants_and_equipment_save_and_remove_together(client, db):
                                      AuditLog.action == "Site issue routing removed").count() == 4
 
 
+def test_apply_assigns_open_issues_from_one_persons_saved_rules_only(client, db):
+    p1, p2, p3, p4 = _plants(db, "AP01", "AP02", "AP03", "AP04")
+    head = login_user(client, db, role="O&M Head")
+    seed_work_categories(db, "Inverter", "LA")
+    kush = _assignee(db, "Kush", "kush-apply@test.example")
+    other = _assignee(db, "Other", "other-apply@test.example")
+    primary = _assignee(db, "Primary elsewhere", "primary-apply@test.example")
+    _act_as(db, head)
+    inverter, la = canonical_key("Inverter"), canonical_key("LA")
+    assert set_rule(client, [p1], inverter, kush).status_code == 200
+    assert set_rule(client, [p2], "*", kush).status_code == 200
+    assert set_rule(client, [p3], inverter, other).status_code == 200
+    assert set_rule(client, [p4], inverter, primary, kush).status_code == 200
+    rules_before = dict(db.get(AppSetting, SETTING_KEY).setting_value)
+    cases = [(p1, "Inverter", "Open", None), (p1, "LA", "Open", None), (p2, "LA", "Open", None),
+             (p3, "Inverter", "Open", None), (p4, "Inverter", "Open", None),
+             (p1, "Inverter", "Assigned", other.id), (p1, "Inverter", "Closed", None)]
+    rows = [Issue(ticket_no=f"AP-0{i}", plant_id=p.id, vertical=v, description="older issue", severity="Medium",
+                  status=status, assigned_to=owner, assignee_text="Existing" if owner else None)
+            for i, (p, v, status, owner) in enumerate(cases)]
+    db.add_all(rows); db.commit()
+    ids = [row.id for row in rows]
+
+    response = client.post(BASE + "/issue-routing/apply", json={"user_ids": [str(kush.id)]})
+    assert response.status_code == 200, response.text
+    assert response.json() == {"issues_auto_assigned": 3, "rules_covered": 3}
+    db.expire_all()
+    assert [db.get(Issue, i).assigned_to for i in ids] == [
+        kush.id,      # his plant + equipment rule
+        None,         # LA at AP01 is not his
+        kush.id,      # his plant-wide rule at AP02
+        None,         # someone else's rule
+        primary.id,   # he is only backup at AP04; the eligible primary receives it
+        other.id,     # already assigned: never moved
+        None,         # closed: never touched
+    ]
+    assert db.get(AppSetting, SETTING_KEY).setting_value == rules_before
+    assert db.query(AuditLog).filter(AuditLog.action == "Site issue routing applied").count() == 1
+
+    assert client.post(BASE + "/issue-routing/apply", json={"user_ids": []}).status_code == 422
+    _act_as(db, kush)
+    assert client.post(BASE + "/issue-routing/apply", json={"user_ids": [str(kush.id)]}).status_code == 403
+
+
 def test_multi_equipment_backfill_routes_only_the_chosen_categories(client, db):
     plant, = _plants(db, "MS04")
     head = login_user(client, db, role="O&M Head")

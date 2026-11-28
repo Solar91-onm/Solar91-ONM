@@ -44,6 +44,9 @@ def setup_page(browser, width, permitted, users=(), extra_plants=0, rules=None):
       window.confirm=()=>true;
       window.requests=[];
       window.saves=[];
+      window.applies=[];
+      window.invalidated=0;
+      window.Solar91PortalIssues={invalidate(){window.invalidated+=1;}};
       let rules=seeded||{};
       const plants=[{id:'p1',site_code:'LKT01',plant_name:'First Plant',active:true},{id:'p2',site_code:'CRI01',plant_name:'Second Plant',active:true}];
       for(let i=3;i<3+extraPlants;i++)plants.push({id:'p'+i,site_code:'XP0'+i,plant_name:'Extra '+i,active:true});
@@ -54,6 +57,10 @@ def setup_page(browser, width, permitted, users=(), extra_plants=0, rules=None):
         if(path==='/api/photos/retention')return Promise.resolve({days:30,min_days:1,max_days:365,min_purge_days:1,plants:[]});
         if(path==='/api/equipment-responsibilities?include_routing=false')return Promise.resolve({categories:[{key:'inverter',label:'Inverter',area:'Plant side',entries:[],primary:null,backup:null,status:'Not configured'},{key:'la',label:'LA',area:'Plant side',entries:[{user_id:'a',position:'backup',active:true}],primary:null,backup:null,status:'Not configured'}],holders:[{id:'a',name:'Primary',role:'Assignee'},{id:'b',name:'Backup',role:'Assignee'}]});
         if(path==='/api/equipment-responsibilities/issue-routing' && (!options || options.method!=='PUT'))return Promise.resolve({issue_routing:rules,plants});
+        if(path==='/api/equipment-responsibilities/issue-routing/apply') {
+          applies.push(options.body);
+          return Promise.resolve({issues_auto_assigned:3,rules_covered:1});
+        }
         if(path==='/api/equipment-responsibilities/issue-routing') {
           const d=options.body; saves.push(d);
           for(const plant of (d.plant_ids.length?d.plant_ids:['*'])) for(const equipment of d.equipment_keys) {
@@ -129,24 +136,36 @@ def test_plants_and_equipment_are_multi_select(chromium):
         assert remove.is_disabled()
         assert remove.evaluate("e=>getComputedStyle(e).opacity") == "0.5"
 
-        # Owner and backfill chosen, scope forgotten: Save says why and opens the plant list.
+        # Owner chosen, scope forgotten: Save says why, marks the field and points at the tick box.
         page.locator('[data-routing-field="primary"]').select_option("a")
-        page.locator('[data-routing-field="applyExisting"]').check()
-        assert save.is_enabled()
+        assert save.is_enabled() and save.inner_text() == "Save rule"
         save.click()
         error = page.get_by_text("Choose at least one plant, or the portfolio default, in Plant or default before saving.")
         error.wait_for()
-        assert error.is_visible()
+        assert 'tick "Also assign matching open, unassigned issues" instead' in error.inner_text()
         assert page.locator(PLANT_PICKER + "[open]").count() == 0  # nothing covers the message
         flagged = page.locator(PLANT_PICKER + " summary.is-invalid")
         assert flagged.count() == 1 and flagged.evaluate("e=>document.activeElement===e")
         assert page.evaluate("saves.length") == 0
+
+        # Ticking the backfill with no scope: Save assigns from the person's saved rules only.
+        page.locator('[data-routing-field="applyExisting"]').check()
+        assert error.count() == 0
+        assert save.inner_text() == "Assign open issues"
+        save.click()
+        page.get_by_text("3 open issues assigned from Primary's saved rules. No rule was changed.").wait_for()
+        assert page.evaluate("applies") == [{"user_ids": ["a"]}]
+        assert page.evaluate("saves.length") == 0
+        assert page.evaluate("window.invalidated") == 1
+        assert not page.locator('[data-routing-field="applyExisting"]').is_checked()
+        assert save.inner_text() == "Save rule"
+
+        # With a scope, the same tick saves the rule and backfills, as before.
         page.locator(PLANT_PICKER + " summary").click()
         page.locator('[data-routing-plant="p1"]').check()
-        assert error.count() == 0
-        assert page.locator(PLANT_PICKER + " summary.is-invalid").count() == 0
         page.locator("#settings-routing-title").click()
-        assert page.locator('[data-routing-field="applyExisting"]').is_checked()
+        page.locator('[data-routing-field="applyExisting"]').check()
+        assert save.inner_text() == "Save rule"
         save.click()
         page.get_by_text("Rule saved. 0 existing issues assigned.").wait_for()
         assert page.evaluate("saves[0]") == {

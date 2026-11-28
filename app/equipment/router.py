@@ -10,7 +10,7 @@ only tells that user what they themselves are responsible for.
 """
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Callable
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -137,6 +137,42 @@ def set_issue_routing(payload: IssueRoutingChange, db: DB, user: Manager):
     count = _route_open_issues(db, user, None if plant_wide else set(keys), plants or None) if payload.apply_existing and not deleting else 0
     _commit(db)
     return {"issues_auto_assigned": count, "rules": rules}
+
+
+class IssueRoutingApply(BaseModel):
+    user_ids: list[UUID] = Field(min_length=1, max_length=2)
+
+
+@router.post("/issue-routing/apply", dependencies=[Depends(require_csrf)])
+def apply_issue_routing(payload: IssueRoutingApply, db: DB, user: Manager):
+    """Assign open, unassigned issues covered by these people's saved rules. No rule changes.
+
+    Coverage is each person's plant + equipment rules, plant-wide rules, the portfolio default
+    and their all-plant equipment. Every candidate still goes through the normal resolver, so
+    where a person is only the backup, the eligible primary receives the issue.
+    """
+    from app.issues.service import _lock_issue_ticket_numbers
+    _lock_issue_ticket_numbers(db)
+    people = {str(uid) for uid in payload.user_ids}
+    mine = {identity for identity, rule in read_rules(db).items()
+            if people & {rule.get("primary_user_id"), rule.get("backup_user_id")}}
+    portfolio_keys = set(db.scalars(select(EquipmentResponsibility.equipment_key).where(
+        EquipmentResponsibility.user_id.in_(payload.user_ids), EquipmentResponsibility.active.is_(True))))
+    everywhere = rule_key(None, ALL) in mine
+    plant_wide = {identity.split(":", 1)[0] for identity in mine if identity.endswith(":" + ALL)}
+
+    def covered(plant_id: UUID, key: str) -> bool:
+        return (everywhere or key in portfolio_keys or str(plant_id) in plant_wide
+                or rule_key(plant_id, key) in mine)
+
+    count = _route_open_issues(db, user, None, None, covered) if mine or portfolio_keys else 0
+    db.add(AuditLog(user_id=user.id, actor_name=user.display_name, action="Site issue routing applied",
+        module="Login access", entity_type="site_issue_routing", entity_id="apply:" + ",".join(sorted(people)),
+        before_state=None, after_state=None,
+        metadata_json={"user_ids": sorted(people), "rules": len(mine), "portfolio_keys": sorted(portfolio_keys),
+                       "issues_auto_assigned": count}))
+    _commit(db)
+    return {"issues_auto_assigned": count, "rules_covered": len(mine)}
 
 
 def _row_dto(row: EquipmentResponsibility, names: dict[UUID, User]) -> dict:
@@ -390,11 +426,13 @@ def set_category_responsibility(equipment_key: str, payload: CategoryResponsibil
     return {"equipment_key": equipment_key, "active": payload.active, "issues_auto_assigned": routed}
 
 
-def _route_open_issues(db: Session, actor: User, keys: set[str] | None, plants: set[UUID] | None = None) -> int:
+def _route_open_issues(db: Session, actor: User, keys: set[str] | None, plants: set[UUID] | None = None,
+                       only: Callable[[UUID, str], bool] | None = None) -> int:
     """Route only previously unassigned open tickets; never overwrite an existing owner.
 
     Same transaction as responsibility configuration and audit. A bounded projection finds
     candidates by canonical alias; row locks then recheck eligibility before changing them.
+    ``only(plant_id, key)`` narrows candidates further (one person's rules).
     """
     if keys is not None and not keys:
         return 0
@@ -407,8 +445,9 @@ def _route_open_issues(db: Session, actor: User, keys: set[str] | None, plants: 
                 Issue.assigned_to.is_(None), func.trim(func.coalesce(Issue.assignee_text, "")) == "")
     if plants:
         eligible += (Issue.plant_id.in_(plants),)
-    candidates = [i for i, vertical in db.execute(select(Issue.id, Issue.vertical).where(*eligible))
-                  if keys is None or canonical_key(vertical) in keys]
+    candidates = [i for i, plant_id, vertical in db.execute(select(Issue.id, Issue.plant_id, Issue.vertical).where(*eligible))
+                  if (keys is None or canonical_key(vertical) in keys)
+                  and (only is None or only(plant_id, canonical_key(vertical)))]
     service = IssueService(db)
     counts: dict[UUID, int] = {}
     for offset in range(0, len(candidates), 250):
