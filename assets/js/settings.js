@@ -32,7 +32,7 @@
     loading: false, loaded: false, error: "", message: "",
     categories: [], holders: [], byUser: {}, search: "", saving: "",
     history: [], historyOpen: false, historyLoading: false,
-    routing: {}, plants: [], routeOpen: false, routeLoading: false, routeLoaded: false, routeSaving: false, routeError: "", routeMessage: "", routeDraft: {plants: [], keys: ["*"], primary: "", backup: "", ownersTouched: false, applyExisting: false}, routeSearch: {plant: "", key: ""}
+    routing: {}, plants: [], routeOpen: false, routeLoading: false, routeLoaded: false, routeSaving: false, routeError: "", routeMessage: "", routeDraft: {plants: [], keys: ["*"], primary: "", backup: "", ownersTouched: false, applyExisting: false}, routeSearch: {plant: "", key: ""}, routeLoadedAt: 0, routePromise: null
   };
 
   function escape(value) {
@@ -565,6 +565,66 @@
 
   function routeMatches(text, term) { return !term || text.toLowerCase().indexOf(term) !== -1; }
 
+  /** Everything one person answers for, read from the saved rules: portfolio categories,
+   *  plant + equipment rules, plant-wide rules and the portfolio default. */
+  function routeCoverage(userId) {
+    var cover = {portfolio: [], byKey: {}, plantWide: [], isDefault: "", rules: 0};
+    if (!userId) return cover;
+    equipment.categories.forEach(function (c) {
+      var entry = (c.entries || []).find(function (e) { return e.user_id === userId && e.active !== false; });
+      if (entry) cover.portfolio.push({label: c.label, position: entry.position});
+    });
+    Object.keys(equipment.routing).forEach(function (identity) {
+      var rule = equipment.routing[identity];
+      var position = rule.primary_user_id === userId ? "primary" : rule.backup_user_id === userId ? "backup" : "";
+      if (!position) return;
+      cover.rules += 1;
+      var parts = identity.split(":");
+      if (parts[0] === "*") { cover.isDefault = position; return; }
+      var item = {plant: parts[0], position: position};
+      if (parts[1] === "*") cover.plantWide.push(item);
+      else (cover.byKey[parts[1]] = cover.byKey[parts[1]] || []).push(item);
+    });
+    var byCode = function (a, b) { return routePlantCode(a.plant).localeCompare(routePlantCode(b.plant)); };
+    cover.plantWide.sort(byCode);
+    Object.keys(cover.byKey).forEach(function (key) { cover.byKey[key].sort(byCode); });
+    return cover;
+  }
+
+  function coverBackup(position) { return position === "backup" ? ' <small class="ep-cover__backup">(backup)</small>' : ""; }
+  function coverPlant(item) { return escape(routePlantCode(item.plant)) + coverBackup(item.position); }
+
+  /** The first `limit` items; "+N more" reveals the rest on hover (mouse) or click (touch, keyboard). */
+  function coverList(items, limit, separator) {
+    var rest = items.slice(limit);
+    return '<span class="ep-cover__list" data-cover-list>' + items.slice(0, limit).join(separator) +
+      (rest.length ? '<span class="ep-cover__rest" hidden>' + separator + rest.join(separator) + '</span>' +
+        '<button type="button" class="ep-cover__more" data-cover-more data-cover-count="' + rest.length +
+        '" aria-expanded="false">+' + rest.length + ' more</button>' : "") + "</span>";
+  }
+
+  function coverLine(label, value) {
+    return '<span class="ep-cover__line"><b>' + escape(label) + ':</b> ' + value + "</span>";
+  }
+
+  /** The routing dialog's read-out for the person picked as primary or backup. */
+  function coverageHTML(userId, slot) {
+    if (!userId) return '<div class="ep-cover ep-cover--empty"></div>';
+    var person = equipment.holders.find(function (h) { return h.id === userId; });
+    var name = person ? person.name || "Unnamed" : "This person";
+    var c = routeCoverage(userId);
+    var lines = [];
+    if (c.isDefault) lines.push(coverLine("Portfolio default", "unmatched issues" + coverBackup(c.isDefault)));
+    if (c.portfolio.length) lines.push(coverLine("All plants", coverList(c.portfolio.map(function (p) { return escape(p.label) + coverBackup(p.position); }), 3, ", ")));
+    if (c.plantWide.length) lines.push(coverLine("All equipment at", coverList(c.plantWide.map(coverPlant), 4, ", ")));
+    Object.keys(c.byKey).sort(function (a, b) { return routeEquipmentLabel(a).localeCompare(routeEquipmentLabel(b)); }).forEach(function (key) {
+      lines.push(coverLine(routeEquipmentLabel(key), coverList(c.byKey[key].map(coverPlant), 4, ", ")));
+    });
+    return '<div class="ep-cover" data-cover="' + slot + '"><p class="ep-cover__title"><strong>' + escape(name) + "</strong> " +
+      (lines.length ? "already covers" + (c.rules ? " · " + c.rules + " routing rule" + (c.rules === 1 ? "" : "s") : "") : "has no site issue responsibility yet") + "</p>" +
+      (lines.length ? coverList(lines, 4, "") : "") + "</div>";
+  }
+
   // A dropdown-shaped checklist. The first option ("default" / "All equipment") excludes the rest.
   function routingPicker(name, label, summary, options) {
     var term = equipment.routeSearch[name].trim().toLowerCase();
@@ -624,8 +684,9 @@
       '<fieldset class="ep-issue-routing__editor"' + (equipment.routeSaving ? ' disabled' : '') + '><div class="ep-issue-routing__fields">' +
       plantPicker + keyPicker +
       '<label>Primary Assignee<select data-routing-field="primary">' + routingOwnerOptions(d.primary) + '</select></label>' +
-      '<label>Backup Assignee<select data-routing-field="backup">' + routingOwnerOptions(d.backup) + '</select></label></div>' +
-      (scope ? '<p class="ep-issue-routing__scope" role="status">' + escape(scope) + '</p>' : "") +
+      '<label>Backup Assignee<select data-routing-field="backup">' + routingOwnerOptions(d.backup) + '</select></label>' +
+      (d.primary || d.backup ? coverageHTML(d.primary, "primary") + coverageHTML(d.backup, "backup") : "") + '</div>' +
+      (scope ?'<p class="ep-issue-routing__scope" role="status">' + escape(scope) + '</p>' : "") +
       (equipment.routeError ? '<p class="ep-settings__form-error" role="alert">' + escape(equipment.routeError) + '</p>' : "") +
       (equipment.routeMessage ? '<p class="ep-settings__message" role="status">' + escape(equipment.routeMessage) + '</p>' : "") +
       '<div class="ep-issue-routing__actions"><label><input type="checkbox" data-routing-field="applyExisting"' + (d.applyExisting ? ' checked' : '') + '> Also assign matching open, unassigned issues</label>' +
@@ -758,7 +819,7 @@
       primary_user_id: remove ? null : d.primary || null, backup_user_id: remove ? null : d.backup || null,
       apply_existing: !remove && d.applyExisting
     }}).then(function (result) {
-      equipment.routeSaving = false; equipment.routing = result.rules || {};
+      equipment.routeSaving = false; equipment.routing = result.rules || {}; equipment.routeLoadedAt = Date.now();
       var count = remove ? existing : combos.length;
       equipment.routeMessage = (count > 1 ? count + (remove ? " rules removed. " : " rules saved. ") : remove ? "Rule removed. " : "Rule saved. ") +
         (result.issues_auto_assigned || 0) + " existing issues assigned.";
@@ -837,20 +898,24 @@
   }
 
   function loadIssueRouting(force) {
-    if (!api().can("users.manage") || equipment.routeLoading || equipment.routeSaving) return Promise.resolve();
+    if (!api().can("users.manage") || equipment.routeSaving) return Promise.resolve();
+    // A caller arriving mid-load waits for that load instead of seeing the rules missing.
+    if (equipment.routeLoading) return equipment.routePromise || Promise.resolve();
     if (equipment.routeLoaded && !force) return Promise.resolve();
     equipment.routeLoading = true; equipment.routeError = "";
     renderRoutingDialog();
-    return api().request("/api/equipment-responsibilities/issue-routing").then(function (body) {
+    equipment.routePromise = api().request("/api/equipment-responsibilities/issue-routing").then(function (body) {
       equipment.routing = body.issue_routing || {};
       equipment.plants = Array.isArray(body.plants) ? body.plants : [];
       equipment.routeLoaded = true;
+      equipment.routeLoadedAt = Date.now();
       // Refresh the selected rule as well, so reopening cannot resave an old owner.
       equipment.routeDraft = routeDraftFor(equipment.routeDraft.plants, equipment.routeDraft.keys, false);
     }).catch(function (error) {
       equipment.routeLoaded = false;
       equipment.routeError = error.message || "Assignment rules could not be loaded.";
     }).finally(function () { equipment.routeLoading = false; renderRoutingDialog(); });
+    return equipment.routePromise;
   }
 
   function loadEquipmentHistory() {
@@ -901,24 +966,41 @@
 
   function equipmentModalHTML(person) {
     var mine = equipment.byUser[person.id] || [];
+    var cover = equipment.routeLoaded ? routeCoverage(person.id) : null;
     var rows = equipment.categories.map(function (category) {
       var entry = (category.entries || []).find(function (item) { return item.user_id === person.id; });
       var value = entry && entry.active ? entry.position : "";
-      return '<li class="ep-eqr__pick" data-eqr-pick="' + escape(category.label.toLowerCase()) + '">' +
+      var plantRules = cover ? cover.byKey[category.key] || [] : [];
+      // Plant codes are searchable too, so "PDA01" finds every equipment held there.
+      var searchText = [category.label].concat(plantRules.map(function (item) { return routePlantCode(item.plant); })).join(" ").toLowerCase();
+      return '<li class="ep-eqr__pick" data-eqr-pick="' + escape(searchText) + '">' +
         "<span><strong>" + escape(category.label) + "</strong><small>" +
           escape(category.area || "Plant side") +
           (category.primary && category.primary.user_id !== person.id
-            ? " · primary: " + escape(category.primary.user_name || "") : "") + "</small></span>" +
+            ? " · primary: " + escape(category.primary.user_name || "") : "") + "</small>" +
+          (plantRules.length ? '<small class="ep-cover__row">Plants: ' + coverList(plantRules.map(coverPlant), 3, ", ") + "</small>" : "") +
+        "</span>" +
         '<select name="eqr:' + escape(category.key) + '" aria-label="' + escape(category.label) + '">' +
           '<option value=""' + (value ? "" : " selected") + ">None</option>" +
           '<option value="primary"' + (value === "primary" ? " selected" : "") + ">Primary</option>" +
           '<option value="backup"' + (value === "backup" ? " selected" : "") + ">Backup</option>" +
         "</select></li>";
     }).join("");
+    var summary = "";
+    if (!cover) {
+      summary = '<p class="ep-cover ep-cover--modal ep-cover--note" role="status">Plant rules could not be loaded; only all-plant responsibility is shown.</p>';
+    } else if (cover.rules) {
+      var lines = [];
+      if (cover.isDefault) lines.push(coverLine("Portfolio default", "unmatched issues" + coverBackup(cover.isDefault)));
+      if (cover.plantWide.length) lines.push(coverLine("All equipment at", coverList(cover.plantWide.map(coverPlant), 4, ", ")));
+      summary = '<div class="ep-cover ep-cover--modal"><p class="ep-cover__title">Named in <strong>' + cover.rules +
+        " site issue routing rule" + (cover.rules === 1 ? "" : "s") + "</strong>; plant rules are listed under each equipment below. Edit them in Site Issue Responsibility.</p>" +
+        (lines.length ? coverList(lines, 2, "") : "") + "</div>";
+    }
     return '<p class="ep-eqr__modal-intro">' + escape(person.name || person.email) +
         " answers for the equipment selected here on <strong>every plant</strong>. This routes new tickets" +
         " and notifications; it grants no approval or override authority, and currently holds " + mine.length +
-        " categor" + (mine.length === 1 ? "y" : "ies") + ".</p>" +
+        " categor" + (mine.length === 1 ? "y" : "ies") + ".</p>" + summary +
       '<div class="ep-eqr__modal-tools">' +
         '<input type="search" placeholder="Search equipment" data-eqr-search aria-label="Search equipment categories" />' +
         '<button type="button" class="ep-settings__button ep-settings__button--small" data-eqr-bulk="primary">Select all as primary</button>' +
@@ -1115,11 +1197,46 @@
         updatePlantField(event.target.form);
       }
     });
+    // "+N more" opens on hover and stays open while the pointer is inside that list (the revealed
+    // items push the button away). Mouse only: a tap's synthetic hover would open then shut it.
+    var coverHover = new Set();
+    function setCover(list, open) {
+      var rest = list.querySelector(":scope > .ep-cover__rest"), more = list.querySelector(":scope > .ep-cover__more");
+      if (!open) { list.removeAttribute("data-cover-hover"); coverHover.delete(list); }
+      if (!rest || !more) return;
+      rest.hidden = !open;
+      more.setAttribute("aria-expanded", String(open));
+      more.textContent = open ? "Less" : "+" + more.getAttribute("data-cover-count") + " more";
+    }
+    host.addEventListener("pointerover", function (event) {
+      if (event.pointerType !== "mouse") return;
+      var more = event.target.closest("[data-cover-more]");
+      if (!more || more.getAttribute("aria-expanded") === "true") return;
+      var list = more.closest("[data-cover-list]");
+      list.setAttribute("data-cover-hover", "");
+      coverHover.add(list);
+      setCover(list, true);
+    });
+    host.addEventListener("pointerout", function (event) {
+      if (event.pointerType !== "mouse" || !coverHover.size) return;
+      coverHover.forEach(function (list) {
+        if (!event.relatedTarget || !list.contains(event.relatedTarget)) setCover(list, false);
+      });
+    });
     host.addEventListener("click", function (event) {
       // A checklist closes when anything outside it is clicked, including the other checklist.
       Array.prototype.forEach.call(host.querySelectorAll("[data-routing-picker][open]"), function (picker) {
         if (!picker.contains(event.target)) picker.open = false;
       });
+      var coverMore = event.target.closest("[data-cover-more]");
+      if (coverMore) {
+        // A click is deliberate: it toggles and no longer closes when the pointer leaves.
+        var coverListEl = coverMore.closest("[data-cover-list]");
+        var opening = coverMore.getAttribute("aria-expanded") !== "true";
+        setCover(coverListEl, false);
+        if (opening) setCover(coverListEl, true);
+        return;
+      }
       var button = event.target.closest("[data-settings-action]");
       if (!button) return;
       var action = button.dataset.settingsAction;
@@ -1186,7 +1303,9 @@
       } else if (action === "save-equipment") {
         saveCategory(button.dataset.equipmentKey, host);
       } else if (action === "edit-equipment" && person) {
-        loadEquipment(false).then(function () { openModal("equipment", person); });
+        // Plant rules are only fetched on this explicit open, and reused for a minute.
+        var routesStale = !equipment.routeLoaded || Date.now() - (equipment.routeLoadedAt || 0) > 60000;
+        Promise.all([loadEquipment(false), loadIssueRouting(routesStale)]).then(function () { openModal("equipment", person); });
       } else if (action === "edit-pm-responsibility" && person && person.active && person.role === "Assignee") {
         openModal("pm-responsibility", person);
       } else if (action === "invite") {

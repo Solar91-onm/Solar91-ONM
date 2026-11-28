@@ -34,24 +34,25 @@ def chromium():
         browser.close()
 
 
-def setup_page(browser, width, permitted):
+def setup_page(browser, width, permitted, users=(), extra_plants=0, rules=None):
     page = browser.new_page(viewport={"width": width, "height": 900})
     page.set_content('<main id="host"></main>')
     for css in ("tokens.css", "settings.css", "mobile-density.css"):
         page.add_style_tag(path=str(ROOT / "assets/css" / css))
-    page.evaluate("""(permitted) => {
+    page.evaluate("""([permitted, users, extraPlants, seeded]) => {
       window.Solar91PortalFormat={escape(v){return String(v == null ? '' : v).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;')}};
       window.confirm=()=>true;
       window.requests=[];
       window.saves=[];
-      let rules={};
+      let rules=seeded||{};
       const plants=[{id:'p1',site_code:'LKT01',plant_name:'First Plant',active:true},{id:'p2',site_code:'CRI01',plant_name:'Second Plant',active:true}];
-      window.Solar91PortalAPI={can:()=>permitted,request:(path,options)=>{
+      for(let i=3;i<3+extraPlants;i++)plants.push({id:'p'+i,site_code:'XP0'+i,plant_name:'Extra '+i,active:true});
+      window.Solar91PortalAPI={can:()=>permitted,plants:()=>Promise.resolve([]),request:(path,options)=>{
         requests.push(path);
-        if(path==='/api/users')return Promise.resolve([]);
+        if(path==='/api/users')return Promise.resolve(users);
         if(path==='/api/photos/storage-usage')return Promise.resolve({configured:false});
         if(path==='/api/photos/retention')return Promise.resolve({days:30,min_days:1,max_days:365,min_purge_days:1,plants:[]});
-        if(path==='/api/equipment-responsibilities?include_routing=false')return Promise.resolve({categories:[{key:'inverter',label:'Inverter',area:'Plant side',entries:[],primary:null,backup:null,status:'Not configured'},{key:'la',label:'LA',area:'Plant side',entries:[],primary:null,backup:null,status:'Not configured'}],holders:[{id:'a',name:'Primary',role:'Assignee'},{id:'b',name:'Backup',role:'Assignee'}]});
+        if(path==='/api/equipment-responsibilities?include_routing=false')return Promise.resolve({categories:[{key:'inverter',label:'Inverter',area:'Plant side',entries:[],primary:null,backup:null,status:'Not configured'},{key:'la',label:'LA',area:'Plant side',entries:[{user_id:'a',position:'backup',active:true}],primary:null,backup:null,status:'Not configured'}],holders:[{id:'a',name:'Primary',role:'Assignee'},{id:'b',name:'Backup',role:'Assignee'}]});
         if(path==='/api/equipment-responsibilities/issue-routing' && (!options || options.method!=='PUT'))return Promise.resolve({issue_routing:rules,plants});
         if(path==='/api/equipment-responsibilities/issue-routing') {
           const d=options.body; saves.push(d);
@@ -63,7 +64,7 @@ def setup_page(browser, width, permitted):
         }
         return Promise.reject(new Error(path));
       }};
-    }""", permitted)
+    }""", [permitted, list(users), extra_plants, rules])
     page.add_script_tag(path=str(ROOT / "assets/js/settings.js"))
     page.evaluate("Solar91PortalSettings.render(document.getElementById('host'))")
     return page
@@ -182,6 +183,89 @@ def test_plants_and_equipment_are_multi_select(chromium):
         page.get_by_text("Rule saved. 0 existing issues assigned.").wait_for()
         assert page.evaluate("saves[2]")["plant_ids"] == []
         assert page.evaluate("saves[2]")["equipment_keys"] == ["*"]
+        assert not errors
+    finally:
+        page.close()
+
+
+SEEDED = {
+    **{f"p{i}:inverter": {"primary_user_id": "a", "backup_user_id": None} for i in range(1, 7)},
+    "p2:la": {"primary_user_id": "b", "backup_user_id": "a"},
+    "p3:*": {"primary_user_id": "a", "backup_user_id": None},
+    "*:*": {"primary_user_id": "b", "backup_user_id": "a"},
+}
+PERSON = {"id": "a", "name": "Primary", "email": "a@test.example", "role": "Assignee", "active": True,
+          "plants": [], "pm_plant_ids": []}
+
+
+def test_choosing_an_owner_shows_what_they_already_cover(chromium):
+    page = setup_page(chromium, 1280, True, extra_plants=4, rules=SEEDED)
+    errors = []
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    try:
+        page.locator(LAUNCH).click()
+        page.locator(PLANT_PICKER + " summary").wait_for()
+        assert page.locator(".ep-cover").count() == 0
+        page.locator('[data-routing-field="primary"]').select_option("a")
+        cover = page.locator('[data-cover="primary"]')
+        assert "Primary already covers · 9 routing rules" in cover.inner_text()
+        text = cover.inner_text()
+        assert "Portfolio default: unmatched issues (backup)" in text
+        assert "All plants: LA (backup)" in text
+        assert "All equipment at: XP03" in text
+        assert "Inverter: CRI01, LKT01, XP03, XP04" in text
+        # Space saving: plants past four and lines past four wait behind "+N more".
+        inverter = cover.locator(".ep-cover__line", has_text="Inverter")
+        assert not inverter.get_by_text("XP05").is_visible()
+        inverter.locator("[data-cover-more]").hover()
+        assert inverter.get_by_text("XP05, XP06").is_visible()
+        page.locator("#settings-routing-title").hover()
+        assert not inverter.get_by_text("XP05, XP06").is_visible()
+        outer = cover.locator(":scope > .ep-cover__list > [data-cover-more]")
+        assert outer.inner_text() == "+1 more"
+        # Touch and keyboard: a press toggles and stays open after the pointer moves away.
+        outer.focus()
+        page.keyboard.press("Enter")
+        assert cover.get_by_text("LA: CRI01 (backup)").is_visible()
+        page.locator("#settings-routing-title").hover()
+        assert cover.get_by_text("LA: CRI01 (backup)").is_visible()
+        # Choosing an owner only informs; the selected scope is not changed.
+        assert page.locator(PLANT_PICKER + " summary").inner_text() == "Choose scope"
+        page.locator('[data-routing-field="backup"]').select_option("b")
+        backup = page.locator('[data-cover="backup"]').inner_text()
+        assert "Backup already covers · 2 routing rules" in backup and "Portfolio default: unmatched issues" in backup
+        assert not errors
+    finally:
+        page.close()
+
+
+def test_person_overlay_names_the_plants_for_each_equipment(chromium):
+    page = setup_page(chromium, 1280, True, users=[PERSON], extra_plants=4, rules=SEEDED)
+    errors = []
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    try:
+        open_overlay = page.locator('[data-settings-action="edit-equipment"][data-user-id="a"]')
+        open_overlay.click()
+        page.locator(".ep-eqr__picks").wait_for()
+        assert page.evaluate("requests.filter(p=>p.endsWith('/issue-routing')).length") == 1
+        assert "Named in 9 site issue routing rules" in page.locator(".ep-cover--modal").inner_text()
+        inverter = page.locator('.ep-eqr__pick[data-eqr-pick^="inverter"]')
+        assert "Plants: CRI01, LKT01, XP03" in inverter.inner_text()
+        assert inverter.locator("[data-cover-more]").inner_text() == "+3 more"
+        assert not inverter.get_by_text("XP04, XP05, XP06").is_visible()
+        inverter.locator("[data-cover-more]").hover()
+        assert inverter.get_by_text("XP04, XP05, XP06").is_visible()
+        la = page.locator('.ep-eqr__pick[data-eqr-pick^="la"]')
+        assert "Plants: CRI01 (backup)" in la.inner_text()
+        assert la.locator("select").input_value() == "backup"
+        # A plant code finds the equipment held there.
+        page.locator("[data-eqr-search]").fill("xp05")
+        assert inverter.is_visible() and la.is_hidden()
+        # Reopening within a minute reuses the rules instead of fetching them again.
+        page.locator('.ep-settings__dialog [data-settings-action="close"]').first.click()
+        open_overlay.click()
+        page.locator(".ep-eqr__picks").wait_for()
+        assert page.evaluate("requests.filter(p=>p.endsWith('/issue-routing')).length") == 1
         assert not errors
     finally:
         page.close()
