@@ -126,7 +126,37 @@ def test_plants_and_equipment_are_multi_select(chromium):
         page.locator(PLANT_PICKER + " summary").wait_for()
         save = page.locator('[data-settings-action="save-issue-routing"]')
         remove = page.locator('[data-settings-action="remove-issue-routing"]')
-        assert save.is_disabled()
+        assert remove.is_disabled()
+        assert remove.evaluate("e=>getComputedStyle(e).opacity") == "0.5"
+
+        # Owner and backfill chosen, scope forgotten: Save says why and opens the plant list.
+        page.locator('[data-routing-field="primary"]').select_option("a")
+        page.locator('[data-routing-field="applyExisting"]').check()
+        assert save.is_enabled()
+        save.click()
+        error = page.get_by_text("Choose at least one plant, or the portfolio default, in Plant or default before saving.")
+        error.wait_for()
+        assert error.is_visible()
+        assert page.locator(PLANT_PICKER + "[open]").count() == 0  # nothing covers the message
+        flagged = page.locator(PLANT_PICKER + " summary.is-invalid")
+        assert flagged.count() == 1 and flagged.evaluate("e=>document.activeElement===e")
+        assert page.evaluate("saves.length") == 0
+        page.locator(PLANT_PICKER + " summary").click()
+        page.locator('[data-routing-plant="p1"]').check()
+        assert error.count() == 0
+        assert page.locator(PLANT_PICKER + " summary.is-invalid").count() == 0
+        page.locator("#settings-routing-title").click()
+        assert page.locator('[data-routing-field="applyExisting"]').is_checked()
+        save.click()
+        page.get_by_text("Rule saved. 0 existing issues assigned.").wait_for()
+        assert page.evaluate("saves[0]") == {
+            "plant_ids": ["p1"], "equipment_keys": ["*"], "primary_user_id": "a",
+            "backup_user_id": None, "apply_existing": True,
+        }
+        page.evaluate("saves.length = 0")
+        page.locator(PLANT_PICKER + " summary").click()
+        page.locator('[data-routing-plant="p1"]').uncheck()  # back to no scope
+        page.locator("#settings-routing-title").click()
 
         # Search filters in place; the checklist stays open and keeps the typed text.
         page.locator(PLANT_PICKER + " summary").click()

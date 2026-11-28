@@ -32,7 +32,7 @@
     loading: false, loaded: false, error: "", message: "",
     categories: [], holders: [], byUser: {}, search: "", saving: "",
     history: [], historyOpen: false, historyLoading: false,
-    routing: {}, plants: [], routeOpen: false, routeLoading: false, routeLoaded: false, routeSaving: false, routeError: "", routeMessage: "", routeDraft: {plants: [], keys: ["*"], primary: "", backup: "", ownersTouched: false, applyExisting: false}, routeSearch: {plant: "", key: ""}, routeLoadedAt: 0, routePromise: null
+    routing: {}, plants: [], routeOpen: false, routeLoading: false, routeLoaded: false, routeSaving: false, routeError: "", routeMessage: "", routeDraft: {plants: [], keys: ["*"], primary: "", backup: "", ownersTouched: false, applyExisting: false}, routeSearch: {plant: "", key: ""}, routeMissing: "", routeLoadedAt: 0, routePromise: null
   };
 
   function escape(value) {
@@ -630,7 +630,7 @@
     var term = equipment.routeSearch[name].trim().toLowerCase();
     return '<div class="ep-issue-routing__field"><span class="ep-issue-routing__label">' + escape(label) + '</span>' +
       '<details class="ep-issue-routing__picker" data-routing-picker="' + name + '">' +
-      '<summary class="ep-issue-routing__picker-button">' + escape(summary) + '</summary>' +
+      '<summary class="ep-issue-routing__picker-button' + (equipment.routeMissing === name ? ' is-invalid" aria-invalid="true' : '') + '">' + escape(summary) + '</summary>' +
       '<div class="ep-issue-routing__picker-panel" role="group" aria-label="' + escape(label) + '">' +
       '<input type="search" class="ep-issue-routing__picker-search" data-routing-search="' + name + '" value="' +
         escape(equipment.routeSearch[name]) + '" placeholder="Search" aria-label="Search ' + escape(label.toLowerCase()) + '" autocomplete="off">' +
@@ -690,7 +690,7 @@
       (equipment.routeError ? '<p class="ep-settings__form-error" role="alert">' + escape(equipment.routeError) + '</p>' : "") +
       (equipment.routeMessage ? '<p class="ep-settings__message" role="status">' + escape(equipment.routeMessage) + '</p>' : "") +
       '<div class="ep-issue-routing__actions"><label><input type="checkbox" data-routing-field="applyExisting"' + (d.applyExisting ? ' checked' : '') + '> Also assign matching open, unassigned issues</label>' +
-      '<button type="button" class="ep-settings__button ep-settings__button--primary" data-settings-action="save-issue-routing"' + (equipment.routeSaving || !ready ? ' disabled' : '') + '>' + (equipment.routeSaving ? 'Saving…' : combos.length > 1 ? 'Save ' + combos.length + ' rules' : 'Save rule') + '</button>' +
+      '<button type="button" class="ep-settings__button ep-settings__button--primary" data-settings-action="save-issue-routing"' + (equipment.routeSaving ? ' disabled' : '') + '>' + (equipment.routeSaving ? 'Saving…' : combos.length > 1 ? 'Save ' + combos.length + ' rules' : 'Save rule') + '</button>' +
       '<button type="button" class="ep-settings__button" data-settings-action="remove-issue-routing"' + (equipment.routeSaving || !existing ? ' disabled' : '') + '>' + (existing > 1 ? 'Remove ' + existing + ' rules' : 'Remove rule') + '</button></div></fieldset>' +
       '<p class="ep-settings__footnote">Existing assigned issues are never transferred by these rules. If no eligible owner is configured, the existing unassigned escalation / Assignee self-assignment remains in place.</p>' +
       '<p class="ep-settings__footnote">' + keys.length + ' rule(s) shown of ' + allKeys.length + ' saved. Choose plants or the default to see their rules.' + '</p>' +
@@ -788,6 +788,7 @@
 
   function selectIssueRouting(plants, keys, keepOwners) {
     if (equipment.routeSaving) return;
+    equipment.routeError = ""; equipment.routeMissing = "";
     equipment.routeDraft = routeDraftFor(plants, keys, keepOwners);
     renderRoutingDialog();
   }
@@ -802,7 +803,19 @@
   function saveIssueRouting(remove) {
     var d = equipment.routeDraft;
     var isDefault = d.plants[0] === "*";
-    if (!d.plants.length || (!isDefault && !d.keys.length) || equipment.routeSaving) return;
+    if (equipment.routeSaving) return;
+    if (!d.plants.length || (!isDefault && !d.keys.length)) {
+      // Say what is missing and mark that field; a silent no-op reads as a broken Save. The
+      // checklist stays closed so it cannot cover the message.
+      equipment.routeMissing = !d.plants.length ? "plant" : "key";
+      equipment.routeError = equipment.routeMissing === "plant"
+        ? "Choose at least one plant, or the portfolio default, in Plant or default before saving."
+        : "Choose at least one equipment, or All equipment, before saving.";
+      renderRoutingDialog();
+      var summary = activeHost && activeHost.querySelector('[data-routing-picker="' + equipment.routeMissing + '"] summary');
+      if (summary) { summary.focus({preventScroll: true}); summary.scrollIntoView({block: "nearest"}); }
+      return;
+    }
     var combos = routeCombos(d);
     var existing = combos.filter(function (identity) { return !!equipment.routing[identity]; }).length;
     if (remove && !existing) return;

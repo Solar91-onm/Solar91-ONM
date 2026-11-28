@@ -153,6 +153,9 @@
   color: var(--ep-accent-strong);
 }
 
+/* A disabled button must not look pressable: without this, Save/Remove looked live while inert. */
+.ep-settings__button:disabled,
+.ep-settings__button:disabled:hover { opacity: .5; cursor: not-allowed; box-shadow: none; }
 .ep-settings__button--primary {
   border-color: #08733A;
   background: #08733A;
@@ -787,6 +790,7 @@
 }
 .ep-issue-routing__picker[open] > .ep-issue-routing__picker-button { border-color: #17231b; box-shadow: 0 0 0 1px #17231b; }
 .ep-issue-routing__picker[open] > .ep-issue-routing__picker-button::after { transform: rotate(225deg); margin-top: -1px; }
+.ep-issue-routing__picker-button.is-invalid { border-color: #b42318; box-shadow: 0 0 0 1px #b42318; background: #fff8f7; }
 .ep-issue-routing__picker-button.is-disabled { cursor: not-allowed; background: var(--ep-bg-muted, #f4f6f4); color: var(--ep-text-muted, #5b6761); }
 .ep-issue-routing__picker-button.is-disabled::after { border-color: var(--ep-text-faint, #9aa59e); }
 .ep-issue-routing__picker-panel {
